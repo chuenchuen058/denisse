@@ -1,0 +1,7 @@
+anthropic>=0.40.0
+python-dotenv>=1.0.1
+
+# Voice mode
+SpeechRecognition>=3.10.4
+pyttsx3>=2.90
+PyAudio>=0.2.14
