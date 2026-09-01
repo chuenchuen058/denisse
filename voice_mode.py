@@ -20,11 +20,16 @@ from brain import Brain
 import memory_store
 
 
-def speak(engine: "pyttsx3.Engine", text: str) -> None:
-    if not text:
+def speak(engine, text: str) -> None:
+    """Speak text out loud. Never lets a TTS hiccup take down the session --
+    worst case, Denisse just goes text-only for that reply."""
+    if not text or engine is None:
         return
-    engine.say(text)
-    engine.runAndWait()
+    try:
+        engine.say(text)
+        engine.runAndWait()
+    except Exception as e:
+        print(f"(couldn't speak the reply out loud: {e})")
 
 
 def listen(recognizer: sr.Recognizer, mic: sr.Microphone) -> str:
@@ -63,7 +68,11 @@ def main() -> None:
         print(f"No microphone found: {e}")
         sys.exit(1)
 
-    tts_engine = pyttsx3.init()
+    try:
+        tts_engine = pyttsx3.init()
+    except Exception as e:
+        print(f"(text-to-speech unavailable, continuing text-only: {e})")
+        tts_engine = None
 
     messages = memory_store.load_history()
     print("Denisse is online. Press Enter, then speak. Ctrl+C to quit.\n")
