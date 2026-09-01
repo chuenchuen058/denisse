@@ -11,6 +11,7 @@ Run:
 Say 'exit' or 'quit' (typed or spoken) to stop. Ctrl+C also works.
 """
 
+import os
 import sys
 
 import speech_recognition as sr
@@ -18,6 +19,36 @@ import pyttsx3
 
 from brain import Brain
 import memory_store
+
+# Override with a substring of a specific voice name (e.g. "Zira") via the
+# DENISSE_VOICE env var / .env. Defaults to picking a female-sounding voice.
+VOICE_PREFERENCE = os.environ.get("DENISSE_VOICE", "female")
+
+
+def _select_voice(engine) -> None:
+    """Point the TTS engine at a voice matching VOICE_PREFERENCE. Matches
+    against the voice's reported gender first, then falls back to matching
+    the preference as a substring of the voice's name/id (e.g. 'Zira')."""
+    try:
+        voices = engine.getProperty("voices") or []
+    except Exception:
+        return
+
+    target = VOICE_PREFERENCE.strip().lower()
+    if not voices or not target:
+        return
+
+    def matches(v) -> bool:
+        gender = str(getattr(v, "gender", "") or "").lower()
+        name = str(getattr(v, "name", "") or "").lower()
+        vid = str(getattr(v, "id", "") or "").lower()
+        return target in gender or target in name or target in vid
+
+    for v in voices:
+        if matches(v):
+            engine.setProperty("voice", v.id)
+            return
+    # No match -- leave the engine's default voice in place.
 
 
 def speak(engine, text: str) -> None:
@@ -70,6 +101,7 @@ def main() -> None:
 
     try:
         tts_engine = pyttsx3.init()
+        _select_voice(tts_engine)
     except Exception as e:
         print(f"(text-to-speech unavailable, continuing text-only: {e})")
         tts_engine = None
