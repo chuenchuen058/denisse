@@ -8,9 +8,14 @@ to run unattended.
 """
 
 import datetime
+import json
 import os
 import subprocess
 import platform
+
+FACTS_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "memory", "facts.json"
+)
 
 
 def run_shell_command(command: str) -> str:
@@ -81,6 +86,44 @@ def get_current_time() -> str:
     return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _load_facts() -> dict:
+    if not os.path.exists(FACTS_FILE):
+        return {}
+    try:
+        with open(FACTS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_facts(facts: dict) -> None:
+    os.makedirs(os.path.dirname(FACTS_FILE), exist_ok=True)
+    with open(FACTS_FILE, "w", encoding="utf-8") as f:
+        json.dump(facts, f, indent=2)
+
+
+def remember(key: str, value: str) -> str:
+    """Save a fact about the user for later recall (e.g. key='favorite_coffee', value='flat white')."""
+    facts = _load_facts()
+    facts[key] = value
+    _save_facts(facts)
+    return f"Got it, I'll remember that {key} = {value}."
+
+
+def recall(key: str) -> str:
+    """Recall a previously remembered fact by its key."""
+    facts = _load_facts()
+    return facts.get(key, f"I don't have anything remembered for '{key}'.")
+
+
+def list_known_facts() -> str:
+    """List every fact currently remembered about the user."""
+    facts = _load_facts()
+    if not facts:
+        return "I don't have anything remembered yet."
+    return "\n".join(f"{k}: {v}" for k, v in facts.items())
+
+
 # Registry mapping tool name -> callable, used by brain.py's tool-use loop.
 TOOL_FUNCTIONS = {
     "run_shell_command": run_shell_command,
@@ -89,4 +132,7 @@ TOOL_FUNCTIONS = {
     "read_file": read_file,
     "write_file": write_file,
     "get_current_time": get_current_time,
+    "remember": remember,
+    "recall": recall,
+    "list_known_facts": list_known_facts,
 }
