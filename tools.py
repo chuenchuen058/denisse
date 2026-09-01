@@ -36,19 +36,57 @@ def run_shell_command(command: str) -> str:
         return f"Error: {e}"
 
 
+def _open_windows_store_app(app_name: str) -> bool:
+    """Fuzzy-match app_name against installed Start Menu apps and launch it.
+    Handles Microsoft Store-packaged apps (like the new Outlook) that don't
+    have a plain .exe to launch via os.startfile."""
+    safe_name = app_name.replace("'", "")
+    ps_script = (
+        f"(Get-StartApps | Where-Object {{ $_.Name -like '*{safe_name}*' }} "
+        "| Select-Object -First 1 -ExpandProperty AppID)"
+    )
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", ps_script],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    app_id = result.stdout.strip()
+    if not app_id:
+        return False
+    subprocess.run(["explorer.exe", f"shell:AppsFolder\\{app_id}"], check=False)
+    return True
+
+
 def open_application(app_name: str) -> str:
     """Open a local application by name (best-effort, OS-dependent)."""
     system = platform.system()
+    if system != "Windows":
+        try:
+            if system == "Darwin":
+                subprocess.run(["open", "-a", app_name], check=True)
+            else:
+                subprocess.run([app_name], check=True)
+            return f"Opened {app_name}"
+        except Exception as e:
+            return f"Error opening {app_name}: {e}"
+
+    # Windows: try a direct launch first (classic .exe apps, or anything
+    # with an "App Paths" registry entry).
     try:
-        if system == "Windows":
-            os.startfile(app_name)  # type: ignore[attr-defined]
-        elif system == "Darwin":
-            subprocess.run(["open", "-a", app_name], check=True)
-        else:
-            subprocess.run([app_name], check=True)
+        os.startfile(app_name)  # type: ignore[attr-defined]
         return f"Opened {app_name}"
+    except OSError:
+        pass
+
+    # Fall back to a Start Menu app search (handles Store-packaged apps).
+    try:
+        if _open_windows_store_app(app_name):
+            return f"Opened {app_name}"
     except Exception as e:
         return f"Error opening {app_name}: {e}"
+
+    return f"Couldn't find an app matching '{app_name}' (tried a direct launch and a Start Menu search)."
 
 
 def list_directory(path: str = ".") -> str:
