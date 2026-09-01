@@ -5,3 +5,5 @@ __pycache__/
 venv/
 memory/*.json
 !memory/.gitkeep
+
+*.log
