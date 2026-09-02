@@ -27,7 +27,12 @@ SYSTEM_PROMPT = (
     "to answer or act -- don't narrate your intentions, just do it and "
     "report the result. When you learn something worth remembering about "
     "the user (their name, preferences, ongoing projects), use the "
-    "'remember' tool to save it without being asked."
+    "'remember' tool to save it without being asked. You also have a "
+    "skills library -- specific how-to guides for particular kinds of "
+    "tasks. Call 'list_skills' to see what's available, and 'read_skill' "
+    "to load one BEFORE attempting a task it covers (e.g. organizing "
+    "files, giving a daily briefing, taking notes) -- follow its "
+    "instructions rather than improvising."
 )
 
 TOOL_DEFINITIONS = [
@@ -137,6 +142,26 @@ TOOL_DEFINITIONS = [
             "name": "list_known_facts",
             "description": "List every fact currently remembered about the user.",
             "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_skills",
+            "description": "List available skills (how-to guides for specific kinds of tasks).",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_skill",
+            "description": "Read the full instructions for one skill by name (see list_skills).",
+            "parameters": {
+                "type": "object",
+                "properties": {"name": {"type": "string", "description": "Skill name, e.g. 'organize_files'."}},
+                "required": ["name"],
+            },
         },
     },
 ]

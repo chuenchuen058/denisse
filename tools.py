@@ -16,6 +16,9 @@ import platform
 FACTS_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "memory", "facts.json"
 )
+SKILLS_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "skills"
+)
 
 
 def run_shell_command(command: str) -> str:
@@ -162,6 +165,45 @@ def list_known_facts() -> str:
     return "\n".join(f"{k}: {v}" for k, v in facts.items())
 
 
+def _skill_description(path: str) -> str:
+    """Pull the 'description:' line out of a skill file's frontmatter."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("description:"):
+                    return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return ""
+
+
+def list_skills() -> str:
+    """List available skills -- specific how-to guides for tasks Denisse
+    has been taught a procedure for. Read one with read_skill before
+    attempting a task it covers."""
+    if not os.path.isdir(SKILLS_DIR):
+        return "No skills installed yet."
+    names = sorted(f[:-3] for f in os.listdir(SKILLS_DIR) if f.endswith(".md"))
+    if not names:
+        return "No skills installed yet."
+    lines = []
+    for name in names:
+        desc = _skill_description(os.path.join(SKILLS_DIR, f"{name}.md"))
+        lines.append(f"{name}: {desc}" if desc else name)
+    return "\n".join(lines)
+
+
+def read_skill(name: str) -> str:
+    """Read the full instructions for one skill by name (see list_skills)."""
+    safe_name = os.path.basename(name).removesuffix(".md")
+    path = os.path.join(SKILLS_DIR, f"{safe_name}.md")
+    if not os.path.isfile(path):
+        return f"No skill named '{name}'. Use list_skills to see what's available."
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
+
+
 # Registry mapping tool name -> callable, used by brain.py's tool-use loop.
 TOOL_FUNCTIONS = {
     "run_shell_command": run_shell_command,
@@ -173,4 +215,6 @@ TOOL_FUNCTIONS = {
     "remember": remember,
     "recall": recall,
     "list_known_facts": list_known_facts,
+    "list_skills": list_skills,
+    "read_skill": read_skill,
 }
