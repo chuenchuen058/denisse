@@ -32,6 +32,12 @@ and there's nothing to pay for per message.
 - `memory/facts.json` — the growing set of things Denisse has learned about
   you via the `remember` tool. This is Denisse's personalization today —
   see Roadmap for where this goes next.
+- `skills/` — a small skills library: markdown how-to guides (with a name +
+  description in frontmatter) for specific tasks, e.g. taking notes,
+  organizing files, giving a daily briefing. Denisse calls `list_skills` /
+  `read_skill` to consult one before attempting a task it covers, instead
+  of improvising.
+- `mission_control.py` — a local web dashboard (see below).
 
 ## Setup
 
@@ -79,12 +85,37 @@ a plain right-click on a shortcut):
 
 (Alternatively, drag the Desktop icon down onto the taskbar.)
 
+## Mission Control (dashboard)
+
+```
+python mission_control.py
+```
+
+Opens a local web dashboard at `http://localhost:8765` (nothing leaves
+your machine — it just reads local files and your local Ollama server).
+It shows:
+
+- **Status** — whether Ollama is reachable and your model is pulled.
+- **Quick Launch** — a sidebar of one-click shortcuts (→ Talk to Denisse,
+  → Outlook, → File Explorer, → project/skills folders by default). Click
+  **+ Add shortcut** to pin your own — an app to open, a folder to open,
+  or another "Talk to Denisse" launcher — the same idea as pinning a
+  shortcut anywhere else, just inside Denisse's own page. Shortcuts are
+  saved to `memory/shortcuts.json`.
+- **Overview / Memory / Skills / Tools tabs** — recent conversation, every
+  fact Denisse has remembered about you, the installed skills, and the
+  full tool list, all live.
+
+A **Denisse Mission Control** shortcut is also on your Desktop.
+
 ## Status
 
 v1: fully local text chat + voice mode + local system/task tools +
-persistent memory + growing personal fact store, with a desktop shortcut
-for quick launch. Verified end-to-end: tool calls (time, remember/recall)
-actually execute and persist to disk.
+persistent memory + growing personal fact store + a skills library +
+a Mission Control dashboard, with desktop shortcuts for quick launch.
+Verified end-to-end: tool calls (time, remember/recall) actually execute
+and persist to disk, and the dashboard's API was checked live against a
+running Ollama instance.
 
 ## Roadmap
 
