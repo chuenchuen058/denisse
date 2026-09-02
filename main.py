@@ -12,6 +12,7 @@ import sys
 
 from brain import Brain
 import memory_store
+from safety import confirm_risky_tool
 
 
 def main():
@@ -46,7 +47,7 @@ def main():
         messages.append({"role": "user", "content": user_input})
 
         try:
-            reply, messages = brain.respond(messages)
+            reply, messages = brain.respond(messages, confirm=confirm_risky_tool)
         except Exception as e:
             print(f"Error: {e}")
             continue

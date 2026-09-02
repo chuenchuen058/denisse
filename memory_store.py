@@ -27,6 +27,11 @@ def load_history() -> list:
 def save_history(messages: list) -> None:
     os.makedirs(MEMORY_DIR, exist_ok=True)
     trimmed = messages[-MAX_STORED_MESSAGES:]
+    # A raw slice can start mid tool-call sequence: a "tool" message whose
+    # answering assistant message got cut off. Drop any such orphans so the
+    # history stays valid to replay.
+    while trimmed and trimmed[0].get("role") == "tool":
+        trimmed = trimmed[1:]
     with open(MEMORY_FILE, "w", encoding="utf-8") as f:
         json.dump(trimmed, f, indent=2)
 

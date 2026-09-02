@@ -19,6 +19,7 @@ import pyttsx3
 
 from brain import Brain
 import memory_store
+from safety import confirm_risky_tool
 
 # Override with a substring of a specific voice name (e.g. "Zira") via the
 # DENISSE_VOICE env var / .env. Defaults to picking a female-sounding voice.
@@ -128,7 +129,7 @@ def main() -> None:
 
         messages.append({"role": "user", "content": transcript})
         try:
-            reply, messages = brain.respond(messages)
+            reply, messages = brain.respond(messages, confirm=confirm_risky_tool)
         except Exception as e:
             print(f"Error: {e}\n")
             continue

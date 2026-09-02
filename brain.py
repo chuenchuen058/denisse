@@ -20,19 +20,30 @@ MODEL = os.environ.get("DENISSE_MODEL", "llama3.1:8b")
 
 SYSTEM_PROMPT = (
     "You are Denisse, a personal AI assistant running locally on the user's "
-    "own computer. You can hold a conversation and, when it genuinely helps, "
-    "use your tools to check the time, run shell commands, open "
-    "applications, read/write files, and remember/recall facts about the "
-    "user. Be direct and concise. Only use a tool when it's actually needed "
-    "to answer or act -- don't narrate your intentions, just do it and "
-    "report the result. When you learn something worth remembering about "
+    "own computer, in the spirit of Jarvis from Iron Man. Personality: "
+    "witty and dry, a little sarcastic, unflappable -- you call things as "
+    "you see them, you're allowed a quip or a raised eyebrow, and you don't "
+    "gush or pepper replies with exclamation points. Personality is "
+    "seasoning, not the meal: stay concise, and never let wit get in the "
+    "way of being clear, honest, or useful. You can hold a conversation "
+    "and, when it genuinely helps, use your tools to check the time, run "
+    "shell commands, open applications, read/write files, and "
+    "remember/recall facts about the user. Be direct. Only use a tool "
+    "when it's actually needed to answer or act -- don't narrate your "
+    "intentions, just do it and report the result. When you learn "
+    "something worth remembering about "
     "the user (their name, preferences, ongoing projects), use the "
     "'remember' tool to save it without being asked. You also have a "
     "skills library -- specific how-to guides for particular kinds of "
     "tasks. Call 'list_skills' to see what's available, and 'read_skill' "
     "to load one BEFORE attempting a task it covers (e.g. organizing "
     "files, giving a daily briefing, taking notes) -- follow its "
-    "instructions rather than improvising."
+    "instructions rather than improvising. A tool result is ground truth: "
+    "report exactly what it says, including errors and 'User declined' "
+    "messages. Never invent or guess at a command's output, a file's "
+    "contents, or any other tool result -- if a tool failed or was "
+    "declined, say so plainly instead of describing what it would have "
+    "returned."
 )
 
 TOOL_DEFINITIONS = [
@@ -175,6 +186,19 @@ def _get(obj, key, default=None):
     return getattr(obj, key, default)
 
 
+def _tool_call_to_dict(call) -> dict:
+    """ollama hands back ToolCall objects, not plain dicts -- flatten one to
+    a plain dict so it's JSON-serializable for memory_store and safe to
+    replay back into ollama.chat()."""
+    func_info = _get(call, "function")
+    return {
+        "function": {
+            "name": _get(func_info, "name"),
+            "arguments": dict(_get(func_info, "arguments") or {}),
+        }
+    }
+
+
 class Brain:
     def __init__(self):
         try:
@@ -190,11 +214,15 @@ class Brain:
                 f"Model '{MODEL}' isn't downloaded yet. Run: ollama pull {MODEL}"
             )
 
-    def respond(self, messages: list) -> tuple[str, list]:
+    def respond(self, messages: list, confirm=None) -> tuple[str, list]:
         """
         Run one turn of the tool-use loop against `messages` (role/content
         dicts, not including the system prompt). Returns
         (final_text, updated_messages).
+
+        `confirm`, if given, is called as confirm(tool_name, args) -> bool
+        before each tool call and can veto it (see safety.py). With no
+        confirm callback, every tool call runs unchecked.
         """
         full_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
 
@@ -208,8 +236,15 @@ class Brain:
                 messages.append({"role": "assistant", "content": final_text})
                 return final_text, messages
 
-            # Model wants to use one or more tools.
-            assistant_msg = {"role": "assistant", "content": _get(msg, "content", "") or ""}
+            # Model wants to use one or more tools. Keep the tool_calls on the
+            # stored assistant message -- without it, the "tool" messages that
+            # follow have nothing to answer when this history is replayed
+            # (e.g. after a restart), which confuses the model.
+            assistant_msg = {
+                "role": "assistant",
+                "content": _get(msg, "content", "") or "",
+                "tool_calls": [_tool_call_to_dict(c) for c in tool_calls],
+            }
             messages.append(assistant_msg)
             full_messages.append(assistant_msg)
 
@@ -221,6 +256,8 @@ class Brain:
                 func = tools.TOOL_FUNCTIONS.get(name)
                 if func is None:
                     result = f"Error: unknown tool '{name}'"
+                elif confirm is not None and not confirm(name, args):
+                    result = f"User declined to run '{name}'."
                 else:
                     try:
                         result = func(**args)
