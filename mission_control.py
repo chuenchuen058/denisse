@@ -137,49 +137,104 @@ HTML_PAGE = '''<!DOCTYPE html>
 <title>Denisse -- Mission Control</title>
 <style>
   :root {
-    --bg: #0b0f14; --panel: #121822; --panel2: #0e141d; --border: #223044;
-    --text: #d8e2ee; --muted: #7f92a8; --accent: #4fd1c5; --danger: #e2555a;
+    --bg: #060608; --panel: #0e0b14; --panel2: #0a0710; --border: #3a2a5c;
+    --border-soft: #2a1f42; --text: #ffffff; --muted: #a99bc4; --muted-dim: #6b5c85;
+    --accent: #a855f7; --accent-dim: #7c3aed; --danger: #e2555a;
+    --shadow: 0 8px 24px -8px rgba(0,0,0,0.5);
   }
   * { box-sizing: border-box; }
-  body { margin:0; font-family: -apple-system, Segoe UI, sans-serif; background: var(--bg); color: var(--text); }
-  header { display:flex; align-items:center; justify-content:space-between; padding: 14px 20px; border-bottom: 1px solid var(--border); }
-  header h1 { font-size: 18px; margin:0; letter-spacing: .5px; }
-  header h1 span { color: var(--accent); }
-  .status { display:flex; align-items:center; gap:8px; font-size: 13px; color: var(--muted); }
-  .dot { width:9px; height:9px; border-radius:50%; background:#555; }
-  .dot.ok { background:#3ddc84; }
+  ::selection { background: var(--accent-dim); color: #fff; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; border: 2px solid var(--bg); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted-dim); }
+  body {
+    margin:0; font-family: "Segoe UI", -apple-system, system-ui, sans-serif;
+    background:
+      radial-gradient(1200px 500px at 15% -10%, rgba(168,85,247,0.08), transparent 60%),
+      var(--bg);
+    color: var(--text); -webkit-font-smoothing: antialiased;
+  }
+  header {
+    display:flex; align-items:center; justify-content:space-between;
+    padding: 16px 24px; border-bottom: 1px solid var(--border);
+    background: rgba(6,6,10,0.7); backdrop-filter: blur(8px);
+    position: sticky; top: 0; z-index: 10;
+  }
+  header h1 { font-size: 17px; margin:0; letter-spacing: .3px; font-weight: 600; }
+  header h1 span { color: var(--accent); font-weight: 500; }
+  .status { display:flex; align-items:center; gap:9px; font-size: 12.5px; color: var(--muted); }
+  .dot { width:8px; height:8px; border-radius:50%; background:#555; transition: background .25s ease; position: relative; }
+  .dot.ok { background:#3ddc84; box-shadow: 0 0 0 0 rgba(61,220,132,0.5); animation: pulse-ok 2.2s ease-out infinite; }
   .dot.warn { background:#e8b93b; }
   .dot.bad { background:var(--danger); }
-  .layout { display:flex; min-height: calc(100vh - 53px); }
-  aside { width: 260px; border-right: 1px solid var(--border); padding: 16px; background: var(--panel2); }
-  aside h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 0 0 10px; }
-  .shortcut { display:flex; align-items:center; justify-content:space-between; padding: 9px 10px; margin-bottom:6px; background: var(--panel); border:1px solid var(--border); border-radius:8px; cursor:pointer; }
-  .shortcut:hover { border-color: var(--accent); }
-  .shortcut .label { display:flex; align-items:center; gap:8px; font-size:13px; }
-  .shortcut .arrow { color: var(--accent); }
-  .shortcut .remove { color: var(--muted); font-size:12px; opacity:0; }
+  @keyframes pulse-ok {
+    0% { box-shadow: 0 0 0 0 rgba(61,220,132,0.45); }
+    70% { box-shadow: 0 0 0 6px rgba(61,220,132,0); }
+    100% { box-shadow: 0 0 0 0 rgba(61,220,132,0); }
+  }
+  .layout { display:flex; min-height: calc(100vh - 57px); }
+  aside { width: 264px; border-right: 1px solid var(--border); padding: 18px; background: var(--panel2); }
+  aside h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--muted-dim); margin: 0 0 12px; font-weight: 600; }
+  .shortcut {
+    display:flex; align-items:center; justify-content:space-between;
+    padding: 10px 12px; margin-bottom:6px; background: var(--panel);
+    border:1px solid var(--border-soft); border-radius:9px; cursor:pointer;
+    transition: border-color .15s ease, transform .15s ease, background .15s ease;
+  }
+  .shortcut:hover { border-color: var(--accent-dim); background: #1c1428; transform: translateX(1px); }
+  .shortcut:active { transform: translateX(1px) scale(.98); }
+  .shortcut .label { display:flex; align-items:center; gap:9px; font-size:13px; }
+  .shortcut .arrow { color: var(--accent); transition: transform .15s ease; }
+  .shortcut:hover .arrow { transform: translateX(2px); }
+  .shortcut .remove { color: var(--muted-dim); font-size:12px; opacity:0; transition: opacity .15s ease, color .15s ease; padding: 2px 4px; }
   .shortcut:hover .remove { opacity:1; }
   .shortcut .remove:hover { color: var(--danger); }
-  #addForm { margin-top: 14px; display:none; flex-direction:column; gap:6px; }
-  #addForm.open { display:flex; }
-  #addForm input, #addForm select { background: var(--panel); border:1px solid var(--border); color: var(--text); border-radius:6px; padding:6px 8px; font-size:12px; }
-  .btn { background: var(--accent); color:#04211d; border:none; border-radius:6px; padding:7px 10px; font-size:12px; cursor:pointer; font-weight:600; }
+  #addForm { margin-top: 14px; display:none; flex-direction:column; gap:7px; }
+  #addForm.open { display:flex; animation: fade-in .15s ease; }
+  #addForm input, #addForm select {
+    background: var(--panel); border:1px solid var(--border); color: var(--text);
+    border-radius:7px; padding:7px 9px; font-size:12.5px; outline: none;
+    transition: border-color .15s ease;
+  }
+  #addForm input:focus, #addForm select:focus { border-color: var(--accent-dim); }
+  .btn {
+    background: var(--accent); color:#1a0a2e; border:none; border-radius:7px;
+    padding:8px 12px; font-size:12.5px; cursor:pointer; font-weight:600;
+    transition: filter .15s ease, transform .1s ease;
+  }
+  .btn:hover { filter: brightness(1.08); }
+  .btn:active { transform: scale(.97); }
   .btn.ghost { background: transparent; border:1px solid var(--border); color: var(--muted); width:100%; }
-  main { flex:1; padding: 20px; overflow-y:auto; }
-  nav.tabs { display:flex; gap:6px; margin-bottom: 16px; }
-  nav.tabs button { background: var(--panel2); border:1px solid var(--border); color: var(--muted); padding:7px 14px; border-radius:7px; font-size:13px; cursor:pointer; }
-  nav.tabs button.active { color: var(--bg); background: var(--accent); border-color: var(--accent); font-weight:600; }
-  .card { background: var(--panel); border:1px solid var(--border); border-radius:10px; padding:14px 16px; margin-bottom:10px; }
-  .msg { margin-bottom:10px; }
-  .msg .who { font-size:11px; text-transform:uppercase; letter-spacing:.5px; color: var(--muted); margin-bottom:3px; }
+  .btn.ghost:hover { border-color: var(--muted-dim); color: var(--text); filter: none; }
+  main { flex:1; padding: 22px 24px; overflow-y:auto; }
+  nav.tabs { display:flex; gap:6px; margin-bottom: 18px; }
+  nav.tabs button {
+    background: var(--panel2); border:1px solid var(--border); color: var(--muted);
+    padding:7px 15px; border-radius:8px; font-size:13px; cursor:pointer;
+    transition: color .15s ease, border-color .15s ease, background .15s ease;
+  }
+  nav.tabs button:hover:not(.active) { color: var(--text); border-color: var(--border-soft); }
+  nav.tabs button.active { color: #04211d; background: var(--accent); border-color: var(--accent); font-weight:600; }
+  .card {
+    background: var(--panel); border:1px solid var(--border-soft); border-radius:12px;
+    padding:16px 18px; margin-bottom:10px; box-shadow: var(--shadow);
+    animation: fade-in .2s ease;
+  }
+  @keyframes fade-in { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+  .msg { margin-bottom:12px; padding-bottom: 12px; border-bottom: 1px solid var(--border-soft); }
+  .msg:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+  .msg .who { font-size:10.5px; text-transform:uppercase; letter-spacing:.6px; color: var(--muted-dim); margin-bottom:4px; font-weight: 600; }
   .msg.user .who { color: var(--accent); }
-  .msg .body { font-size:13px; white-space:pre-wrap; }
+  .msg .body { font-size:13.5px; line-height: 1.5; white-space:pre-wrap; }
   table { width:100%; border-collapse: collapse; font-size:13px; }
-  td, th { text-align:left; padding:6px 8px; border-bottom:1px solid var(--border); }
-  th { color: var(--muted); font-weight:500; }
-  .name { color: var(--accent); font-family: Consolas, monospace; }
-  .desc { color: var(--muted); font-size:12px; }
-  .empty { color: var(--muted); font-size:13px; padding: 10px 0; }
+  td, th { text-align:left; padding:8px 10px; border-bottom:1px solid var(--border-soft); }
+  th { color: var(--muted-dim); font-weight:600; font-size: 11.5px; text-transform: uppercase; letter-spacing: .5px; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(168,85,247,0.05); }
+  .name { color: var(--accent); font-family: "Cascadia Code", Consolas, monospace; font-size: 12.5px; }
+  .desc { color: var(--muted); font-size:12.5px; line-height: 1.4; }
+  .empty { color: var(--muted-dim); font-size:13px; padding: 16px 0; text-align: center; }
   #toast { position:fixed; bottom:18px; right:18px; background: var(--panel); border:1px solid var(--accent); padding:10px 16px; border-radius:8px; font-size:13px; display:none; }
 </style>
 </head>
@@ -234,9 +289,9 @@ async function refreshStatus() {
   const s = await j('/api/status');
   const dot = document.getElementById('statusDot');
   const text = document.getElementById('statusText');
-  if (!s.connected) { dot.className = 'dot bad'; text.textContent = 'Ollama unreachable'; }
-  else if (!s.model_ready) { dot.className = 'dot warn'; text.textContent = s.model + ' not pulled yet'; }
-  else { dot.className = 'dot ok'; text.textContent = s.model + ' ready'; }
+  if (!s.connected) { dot.className = 'dot bad'; text.textContent = 'Offline'; }
+  else if (!s.model_ready) { dot.className = 'dot warn'; text.textContent = 'Online'; }
+  else { dot.className = 'dot ok'; text.textContent = 'Online'; }
 }
 
 async function refreshShortcuts() {
