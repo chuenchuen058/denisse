@@ -6,14 +6,18 @@ real UI — it runs headless under `pythonw.exe` with no persistent window.
 
 ## Read first
 
-The durable memory lives in the Obsidian vault:
+The durable memory lives in Chuen's Obsidian vault — Claude's memory bank,
+in which Denisse is one section:
 
-`C:\Users\Xichu\OneDrive - King's College London\Denisse\Memory\MEMORY.md`
+`C:\Users\Xichu\OneDrive - King's College London\Denisse\`
 
-Read that index, then the notes relevant to the task. In particular read
-`denisse_conversation_memory.md` before touching conversation history,
-`replay()`, or the noise gate — it records a bug that took three hypotheses
-to pin down, and the two that were disproved.
+- `Memory\MEMORY.md` — general index (who Chuen is, how he works, machine)
+- `Denisse\Denisse.md` — this project's index
+
+Read both, then what's relevant. In particular read
+`Denisse\denisse_conversation_memory.md` before touching conversation
+history, `replay()`, or the noise gate — it records a bug that took three
+hypotheses to pin down, and the two that were disproved.
 
 ## Ground rules for this repo
 

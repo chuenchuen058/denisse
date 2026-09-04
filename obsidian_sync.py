@@ -1,7 +1,11 @@
 """
 Mirrors Denisse's own memory (conversation history + remembered facts) into
-the shared Obsidian vault used by Claude Code and Claude Desktop, and reads
-back whatever they've written there so Denisse can fold it into context.
+the Denisse section of Chuen's Obsidian vault, and reads back whatever
+Claude has written there so Denisse could fold it into context.
+
+The vault is Claude's memory bank; Denisse writes into one section of it
+(`Denisse/Brain`, `Denisse/News`). The read-back half is currently disabled
+in brain.py -- see read_claude_memory() below.
 
 Best-effort only: if the vault (e.g. an unsynced OneDrive path) isn't
 there, every function here is a silent no-op -- this must never be why a
@@ -13,10 +17,14 @@ import json
 import os
 import re
 
+# The vault is Claude's memory bank, not Denisse's -- Denisse is one section
+# inside it (restructured 2026-09-04). The folder is still named "Denisse"
+# because it's the registered Obsidian vault path; only the layout moved.
 VAULT_DIR = r"C:\Users\Xichu\OneDrive - King's College London\Denisse"
-BRAIN_DIR = os.path.join(VAULT_DIR, "Denisse Brain")
+DENISSE_DIR = os.path.join(VAULT_DIR, "Denisse")
+BRAIN_DIR = os.path.join(DENISSE_DIR, "Brain")
 CLAUDE_MEMORY_DIR = os.path.join(VAULT_DIR, "Memory")
-NEWS_DIR = os.path.join(VAULT_DIR, "News")
+NEWS_DIR = os.path.join(DENISSE_DIR, "News")
 
 # The full, unfiltered contents of Memory/ (4KB+ of notes, including YAML
 # frontmatter and meta-commentary about another AI session's own past
@@ -25,7 +33,7 @@ NEWS_DIR = os.path.join(VAULT_DIR, "News")
 # wrong 3/3 times with it in the system prompt (even at low sampling
 # temperature) and correct 4/4 times with it removed. Trimmed rather than
 # dropped entirely, since the cross-tool memory sharing is a deliberate
-# feature (see denisse_vault.md in the vault) -- just capped hard and with
+# feature (see claude_vault.md in the vault) -- just capped hard and with
 # the noisiest part (frontmatter) stripped, so a little context still
 # comes through without dominating/confusing her.
 _FRONTMATTER_RE = re.compile(r"^---\n.*?\n---\n", re.DOTALL)
