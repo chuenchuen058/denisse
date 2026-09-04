@@ -345,7 +345,11 @@ def run(stop_event=None, on_exchange=None, on_heard=None, is_offline=None, on_mo
         return
 
     try:
-        stt = stt_vosk.StreamingSTT()
+        # Pinned to the light model regardless of MODEL_PATH -- this runs
+        # continuously for as long as wake-word listening is on, so it
+        # stays cheap even if MODEL_PATH has been swapped to something
+        # bigger for one-shot transcription accuracy (see WAKE_MODEL_PATH).
+        stt = stt_vosk.StreamingSTT(model_path=stt_vosk.WAKE_MODEL_PATH)
         stt.start()
     except stt_vosk.ModelUnavailable as e:
         print(f"(wake word: {e})", flush=True)

@@ -103,27 +103,36 @@ WAKE_GRAMMAR = json.dumps([
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 _DEFAULT_MODEL_PATH = os.path.join(_ROOT, "models", "vosk-model-en-us-0.22-lgraph")
 MODEL_PATH = os.environ.get("DENISSE_VOSK_MODEL_PATH", _DEFAULT_MODEL_PATH)
+# Wake-word listening runs this model continuously in the background for as
+# long as it's on, unlike one-shot transcription -- so it deliberately
+# stays pinned to the light -lgraph model by default (fast enough to not
+# noticeably load the CPU while idle-listening) rather than following
+# MODEL_PATH, which is free to be swapped to something bigger/slower for
+# one-shot accuracy without that cost applying the whole time Denisse is
+# just listening for her name. Override with DENISSE_WAKE_MODEL_PATH if
+# you want them to match again.
+WAKE_MODEL_PATH = os.environ.get("DENISSE_WAKE_MODEL_PATH", _DEFAULT_MODEL_PATH)
 
 
 class ModelUnavailable(RuntimeError):
     pass
 
 
-_model = None
+_models: dict = {}
 _model_lock = threading.Lock()
 
 
-def _get_model() -> "vosk.Model":
-    global _model
+def _get_model(path: str = None) -> "vosk.Model":
+    path = path or MODEL_PATH
     with _model_lock:
-        if _model is None:
-            if not os.path.isdir(MODEL_PATH):
+        if path not in _models:
+            if not os.path.isdir(path):
                 raise ModelUnavailable(
-                    f"Vosk model not found at {MODEL_PATH!r} -- run "
+                    f"Vosk model not found at {path!r} -- run "
                     f"'python scripts/download_vosk_model.py' once to fetch it."
                 )
-            _model = vosk.Model(MODEL_PATH)
-        return _model
+            _models[path] = vosk.Model(path)
+        return _models[path]
 
 
 def _pick_input_device(pa: "pyaudio.PyAudio") -> tuple[int, int, int]:
@@ -173,15 +182,16 @@ class StreamingSTT:
     Runs capture on its own daemon thread -- call start() once, stop() when
     done to release the microphone."""
 
-    def __init__(self):
+    def __init__(self, model_path: str = None):
         self.events: "queue.Queue[tuple]" = queue.Queue()
         self._stop_event = threading.Event()
         self._threads: list[threading.Thread] = []
         self._pa = None
         self._stream = None
+        self._model_path = model_path
 
     def start(self) -> None:
-        model = _get_model()  # raises ModelUnavailable before touching any audio device
+        model = _get_model(self._model_path)  # raises ModelUnavailable before touching any audio device
         recognizer = vosk.KaldiRecognizer(model, SAMPLE_RATE)
         recognizer.SetMaxAlternatives(MAX_ALTERNATIVES)
         spotter = vosk.KaldiRecognizer(model, SAMPLE_RATE, WAKE_GRAMMAR)
