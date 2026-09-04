@@ -14,15 +14,19 @@ Say 'exit' or 'quit' (typed or spoken) to stop. Ctrl+C also works.
 import os
 import sys
 
-import speech_recognition as sr
 import pyttsx3
 
+import stt_vosk
 from brain import Brain
 import memory_store
 from safety import confirm_risky_tool
+from voice_output import speak_inworld
 
-# Override with a substring of a specific voice name (e.g. "Zira") via the
-# DENISSE_VOICE env var / .env. Defaults to picking a female-sounding voice.
+# Local pyttsx3 fallback voice, used if the Inworld voice (see
+# voice_output.py) is unset or fails -- no API key, offline, package
+# missing, service hiccup. Override with a substring of a specific voice
+# name (e.g. "Zira") via the DENISSE_VOICE env var / .env. Defaults to
+# picking a female-sounding voice.
 VOICE_PREFERENCE = os.environ.get("DENISSE_VOICE", "female")
 
 
@@ -55,7 +59,11 @@ def _select_voice(engine) -> None:
 def speak(engine, text: str) -> None:
     """Speak text out loud. Never lets a TTS hiccup take down the session --
     worst case, Denisse just goes text-only for that reply."""
-    if not text or engine is None:
+    if not text:
+        return
+    if speak_inworld(text):
+        return
+    if engine is None:
         return
     try:
         engine.say(text)
@@ -64,23 +72,15 @@ def speak(engine, text: str) -> None:
         print(f"(couldn't speak the reply out loud: {e})")
 
 
-def listen(recognizer: sr.Recognizer, mic: sr.Microphone) -> str:
-    """Records until a pause, then transcribes with Google's free Web
-    Speech API (no key needed). Returns '' if nothing understandable
-    was heard."""
-    with mic as source:
-        recognizer.adjust_for_ambient_noise(source, duration=0.4)
-        print("listening...")
-        audio = recognizer.listen(source, timeout=8, phrase_time_limit=15)
-
+def listen() -> str:
+    """Records until a pause, transcribing live via the offline Vosk model
+    (stt_vosk.py) -- no audio leaves the machine, no account needed.
+    Returns '' if nothing understandable was heard within the timeout."""
+    print("listening...")
     try:
-        return recognizer.recognize_google(audio).strip()
-    except sr.UnknownValueError:
-        return ""
-    except sr.RequestError as e:
-        print(f"(speech recognition service error: {e})")
-        return ""
-    except sr.WaitTimeoutError:
+        return stt_vosk.transcribe_once(timeout=8, phrase_time_limit=15).strip()
+    except stt_vosk.ModelUnavailable as e:
+        print(f"({e})")
         return ""
 
 
@@ -91,13 +91,6 @@ def main() -> None:
         brain = Brain()
     except RuntimeError as e:
         print(f"Startup error: {e}")
-        sys.exit(1)
-
-    recognizer = sr.Recognizer()
-    try:
-        mic = sr.Microphone()
-    except OSError as e:
-        print(f"No microphone found: {e}")
         sys.exit(1)
 
     try:
@@ -117,7 +110,7 @@ def main() -> None:
             print("\nGoodbye.")
             break
 
-        transcript = listen(recognizer, mic)
+        transcript = listen()
         if not transcript:
             print("(didn't catch that)\n")
             continue
