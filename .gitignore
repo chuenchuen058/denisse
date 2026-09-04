@@ -11,3 +11,7 @@ memory/.spotify_cache
 
 # Vosk offline speech model (~200MB, downloaded by scripts/download_vosk_model.py)
 models/
+
+# eval harness runtime output
+eval/harness.log
+eval/__pycache__/
