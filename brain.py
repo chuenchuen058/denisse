@@ -23,6 +23,23 @@ load_dotenv()
 
 MODEL = os.environ.get("DENISSE_MODEL", "llama3.1:8b")
 
+# Ollama defaults this model to a 4096-token context, which is small enough
+# that what goes into the prompt is a real constraint (see conversation.py
+# and the 2026-09-04 history-poisoning bug). Raised to 8192 on 2026-09-05
+# after measuring it on this machine with eval/run_eval.py:
+#
+#   4096  clean 8/8, live 7/8 (twice)   median 2.1s
+#   8192  clean 8/8, live 8/8           median 2.0s
+#
+# The extra KV cache costs ~0.5GB: 5.8GB of the 8151MB laptop GPU, still
+# 100% on GPU with ~2GB free, no CPU spill and no measured slowdown. The
+# remaining live failure at 4096 ("hey" answered with a get_current_time
+# call) stopped reproducing at 8192.
+#
+# Don't raise this further without re-running that eval -- the headroom is
+# small, and if it ever spills to CPU every reply gets dramatically slower.
+NUM_CTX = int(os.environ.get("DENISSE_NUM_CTX", "8192"))
+
 # Without this the model guesses POSIX paths for file tools on a Windows
 # box -- observed calling list_directory("/home/chuen") and read_file(
 # "/home/user/setup.txt") in reply to "what do you think of my setup?".
@@ -546,7 +563,7 @@ class Brain:
             # loss of personality on casual chat).
             response = ollama.chat(
                 model=MODEL, messages=full_messages, tools=TOOL_DEFINITIONS, keep_alive=-1,
-                options={"temperature": 0.2},
+                options={"temperature": 0.2, "num_ctx": NUM_CTX},
             )
             msg = _get(response, "message")
             tool_calls = _get(msg, "tool_calls") or []
