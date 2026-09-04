@@ -8,6 +8,8 @@ context across restarts, without needing a database for v1.
 import json
 import os
 
+import obsidian_sync
+
 MEMORY_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "memory")
 MEMORY_FILE = os.path.join(MEMORY_DIR, "conversation.json")
 
@@ -34,6 +36,7 @@ def save_history(messages: list) -> None:
         trimmed = trimmed[1:]
     with open(MEMORY_FILE, "w", encoding="utf-8") as f:
         json.dump(trimmed, f, indent=2)
+    obsidian_sync.sync_conversation(trimmed)
 
 
 def clear_history() -> None:

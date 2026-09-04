@@ -5,5 +5,9 @@ __pycache__/
 venv/
 memory/*.json
 !memory/.gitkeep
+memory/.spotify_cache
 
 *.log
+
+# Vosk offline speech model (~200MB, downloaded by scripts/download_vosk_model.py)
+models/

@@ -1,7 +1,25 @@
 ollama>=0.4.0
 python-dotenv>=1.0.1
+tzdata>=2024.1  # offline IANA timezone database (Windows has none built in)
 
 # Voice mode
-SpeechRecognition>=3.10.4
+# vosk pulls in `srt` as a dependency, whose latest release fails to build
+# a wheel on Python 3.12 (setuptools_scm produces an invalid "unknown-0.0.0"
+# version) -- pin srt to the last version that builds cleanly. If this ever
+# breaks again, `pip install --no-deps vosk` then install srt separately.
+srt==3.5.3
+vosk>=0.3.45  # offline speech-to-text -- see stt_vosk.py, scripts/download_vosk_model.py
 pyttsx3>=2.90
 PyAudio>=0.2.14
+inworld-tts>=1.2.1
+playsound==1.2.2
+
+# System tray icon
+pystray>=0.19.5
+Pillow>=10.0.0
+
+# Background optimization (temp cleanup, resource monitoring)
+psutil>=6.0.0
+
+# Spotify playback control -- see spotify_control.py
+spotipy>=2.24.0

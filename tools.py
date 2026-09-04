@@ -7,11 +7,18 @@ but the actual side effects should stay easy to reason about and safe
 to run unattended.
 """
 
+import ast
 import datetime
 import json
+import math
 import os
 import subprocess
 import platform
+
+import news
+import obsidian_sync
+import optimize
+import spotify_control
 
 FACTS_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "memory", "facts.json"
@@ -29,6 +36,8 @@ def run_shell_command(command: str) -> str:
             shell=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=30,
         )
         output = (result.stdout or "") + (result.stderr or "")
@@ -52,6 +61,8 @@ def _open_windows_store_app(app_name: str) -> bool:
         ["powershell", "-NoProfile", "-Command", ps_script],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=15,
     )
     app_id = result.stdout.strip()
@@ -101,6 +112,147 @@ def list_directory(path: str = ".") -> str:
         return f"Error: {e}"
 
 
+# Folders searched by find_files when no specific location is given --
+# the places a person actually keeps things, not the whole disk.
+def _default_search_dirs() -> dict:
+    home = os.path.expanduser("~")
+    dirs = {
+        "desktop": os.path.join(home, "Desktop"),
+        "documents": os.path.join(home, "Documents"),
+        "downloads": os.path.join(home, "Downloads"),
+        "pictures": os.path.join(home, "Pictures"),
+        "videos": os.path.join(home, "Videos"),
+        "music": os.path.join(home, "Music"),
+        "github": os.path.join(home, "GitHub"),
+    }
+    # OneDrive is where a lot of real work actually lives on this machine
+    # (the Obsidian vault included) -- fold in its top-level folders too,
+    # under their own names, if it's there.
+    for entry in os.listdir(home) if os.path.isdir(home) else []:
+        if entry.lower().startswith("onedrive"):
+            onedrive = os.path.join(home, entry)
+            if os.path.isdir(onedrive):
+                try:
+                    for sub in os.listdir(onedrive):
+                        sub_path = os.path.join(onedrive, sub)
+                        if os.path.isdir(sub_path) and not sub.startswith("."):
+                            dirs.setdefault(sub.lower(), sub_path)
+                except OSError:
+                    pass
+    return {name: path for name, path in dirs.items() if os.path.isdir(path)}
+
+
+# Directory names to never descend into -- noisy, huge, or not where a
+# person keeps things they'd ask Denisse to find.
+_SKIP_DIR_NAMES = {
+    ".git", ".venv", "venv", "__pycache__", "node_modules", ".cache",
+    "$recycle.bin", "system volume information", ".mcp-auth",
+    ".claude-server-commander",
+}
+_MAX_FILES_SCANNED = 40000
+_MAX_RESULTS = 25
+
+
+def find_files(query: str, location: str = "") -> str:
+    """Search for a file by name -- use this whenever asked to find,
+    locate, or search for something instead of guessing a path or
+    blindly listing directories one at a time. Matches filenames
+    containing `query` (case-insensitive, or a wildcard pattern like
+    '*.pdf'), searched recursively through the user's common folders
+    (Desktop, Documents, Downloads, Pictures, Videos, Music, GitHub, and
+    any OneDrive folders present). Returns up to 25 matches with full
+    paths, newest-modified first.
+
+    location: optional, narrows the search to one folder by name (e.g.
+    'downloads', 'desktop') instead of all of them -- also accepts a
+    full path directly. Leave empty to search everywhere Denisse knows
+    to look.
+    """
+    import fnmatch
+
+    query = (query or "").strip()
+    if not query:
+        return "Error: give me something to search for."
+
+    search_dirs = _default_search_dirs()
+    if location:
+        loc_key = location.strip().lower()
+        if loc_key in search_dirs:
+            roots = {loc_key: search_dirs[loc_key]}
+        elif os.path.isdir(location):
+            roots = {location: location}
+        else:
+            known = ", ".join(sorted(search_dirs)) if search_dirs else "none found"
+            return f"Don't know a location called '{location}'. Known folders: {known}."
+    else:
+        roots = search_dirs
+
+    if not roots:
+        return "Error: couldn't find any of the usual folders to search."
+
+    is_pattern = any(ch in query for ch in "*?[")
+    query_lower = query.lower()
+
+    # Natural-language queries (the model tends to pass whatever the user
+    # said, like "my japan flight pdf") won't literally appear as one
+    # contiguous substring in a real filename like "Japan_flight.pdf" --
+    # normalize both sides (split on anything that isn't a letter/digit)
+    # and require every meaningful query word to show up, in any order,
+    # rather than an exact phrase match.
+    _STOPWORDS = {
+        "my", "the", "a", "an", "for", "me", "please", "file", "files",
+        "find", "locate", "search", "of", "that", "this",
+    }
+    import re
+
+    def _tokens(s: str) -> list:
+        return [w for w in re.split(r"[^a-z0-9]+", s.lower()) if w]
+
+    query_tokens = [t for t in _tokens(query) if t not in _STOPWORDS] or _tokens(query)
+
+    matches = []
+    scanned = 0
+    for root_name, root_path in roots.items():
+        for dirpath, dirnames, filenames in os.walk(root_path):
+            dirnames[:] = [
+                d for d in dirnames
+                if not d.startswith(".") and d.lower() not in _SKIP_DIR_NAMES
+            ]
+            for fname in filenames:
+                scanned += 1
+                if scanned > _MAX_FILES_SCANNED:
+                    break
+                if is_pattern:
+                    name_matches = fnmatch.fnmatch(fname.lower(), query_lower)
+                else:
+                    fname_normalized = " ".join(_tokens(fname))
+                    name_matches = query_lower in fname.lower() or all(
+                        tok in fname_normalized for tok in query_tokens
+                    )
+                if name_matches:
+                    full_path = os.path.join(dirpath, fname)
+                    try:
+                        mtime = os.path.getmtime(full_path)
+                    except OSError:
+                        mtime = 0
+                    matches.append((mtime, full_path))
+            if scanned > _MAX_FILES_SCANNED:
+                break
+        if scanned > _MAX_FILES_SCANNED:
+            break
+
+    if not matches:
+        return f"No files matching '{query}' found in {', '.join(roots)}."
+
+    matches.sort(reverse=True)
+    shown = matches[:_MAX_RESULTS]
+    lines = [f"Found {len(matches)} match(es), showing {len(shown)} (newest first):"]
+    lines += [path for _, path in shown]
+    if len(matches) > _MAX_RESULTS:
+        lines.append(f"...and {len(matches) - _MAX_RESULTS} more, narrow the query to see them.")
+    return "\n".join(lines)
+
+
 def read_file(path: str, max_chars: int = 4000) -> str:
     """Read a text file's contents (truncated)."""
     try:
@@ -122,9 +274,200 @@ def write_file(path: str, content: str) -> str:
         return f"Error: {e}"
 
 
-def get_current_time() -> str:
-    """Return the current local date and time."""
-    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+_MATH_FUNCS = {
+    "sqrt": math.sqrt, "abs": abs, "round": round,
+    "sin": math.sin, "cos": math.cos, "tan": math.tan,
+    "log": math.log, "log10": math.log10, "log2": math.log2,
+    "exp": math.exp, "floor": math.floor, "ceil": math.ceil,
+    "factorial": math.factorial, "pow": pow, "min": min, "max": max,
+}
+_MATH_NAMES = {"pi": math.pi, "e": math.e, "tau": math.tau}
+
+# Small local models are unreliable at exact arithmetic done "in their head"
+# (get multi-digit multiplication, percentages, and order of operations
+# wrong with real confidence) -- this evaluates the actual expression in
+# code instead, the same fix already applied to time/weather rather than
+# trusting the model to compute or fetch those itself. Uses ast, not
+# eval(), so it can only ever be arithmetic -- no arbitrary code execution
+# even if a prompt injection tried to smuggle something through here.
+def _safe_eval(node):
+    if isinstance(node, ast.Expression):
+        return _safe_eval(node.body)
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, (int, float)):
+            return node.value
+        raise ValueError(f"unsupported constant: {node.value!r}")
+    if isinstance(node, ast.BinOp):
+        left, right = _safe_eval(node.left), _safe_eval(node.right)
+        ops = {
+            ast.Add: lambda a, b: a + b, ast.Sub: lambda a, b: a - b,
+            ast.Mult: lambda a, b: a * b, ast.Div: lambda a, b: a / b,
+            ast.FloorDiv: lambda a, b: a // b, ast.Mod: lambda a, b: a % b,
+            ast.Pow: lambda a, b: a ** b,
+        }
+        if type(node.op) not in ops:
+            raise ValueError(f"unsupported operator: {type(node.op).__name__}")
+        return ops[type(node.op)](left, right)
+    if isinstance(node, ast.UnaryOp):
+        val = _safe_eval(node.operand)
+        if isinstance(node.op, ast.USub):
+            return -val
+        if isinstance(node.op, ast.UAdd):
+            return val
+        raise ValueError(f"unsupported unary operator: {type(node.op).__name__}")
+    if isinstance(node, ast.Name):
+        if node.id in _MATH_NAMES:
+            return _MATH_NAMES[node.id]
+        raise ValueError(f"unknown name: {node.id}")
+    if isinstance(node, ast.Call):
+        if not isinstance(node.func, ast.Name) or node.func.id not in _MATH_FUNCS:
+            raise ValueError("unsupported function call")
+        args = [_safe_eval(a) for a in node.args]
+        return _MATH_FUNCS[node.func.id](*args)
+    raise ValueError(f"unsupported expression: {type(node).__name__}")
+
+
+def calculate(expression: str) -> str:
+    """Evaluate a math expression exactly and return the result. Supports
+    + - * / // % ** parentheses, unary minus, constants pi/e, and
+    functions sqrt/abs/round/sin/cos/tan/log/log10/log2/exp/floor/ceil/
+    factorial/pow/min/max (angles in radians). Always use this for any
+    arithmetic rather than computing it yourself, no matter how simple it
+    looks -- multi-digit multiplication and percentages are exactly where
+    doing it "in your head" goes wrong."""
+    try:
+        tree = ast.parse(expression, mode="eval")
+        result = _safe_eval(tree.body if hasattr(tree, "body") else tree)
+    except ZeroDivisionError:
+        return "Error: division by zero."
+    except Exception as e:
+        return f"Error: couldn't evaluate '{expression}' ({e})."
+    if isinstance(result, float):
+        # Binary floating point can't represent most decimals exactly
+        # (9.9 - 9.11 comes out 0.7900000000000009), and replies get read
+        # aloud verbatim -- round off the representation noise before it
+        # ever reaches the model or the user, while keeping real precision.
+        result = round(result, 10)
+        if result.is_integer():
+            result = int(result)
+    return f"{expression} = {result}"
+
+
+def get_current_time(timezone: str = "") -> str:
+    """Return the current date and time. With no timezone, this machine's
+    own local time. With an IANA timezone name (e.g. 'Asia/Tokyo'), the
+    current time there instead -- entirely offline (the 'tzdata' package
+    ships the timezone database; no lookup service involved).
+
+    Includes a ready-made 12-hour ('7:25 PM') string alongside the 24-hour
+    one -- caught the model mis-converting 24-hour time by hand when
+    speaking it naturally (said "7:00 PM" for 19:25, i.e. got both the
+    minutes and the wording wrong), so this does the conversion in code
+    instead of leaving arithmetic to the model."""
+    if not timezone:
+        now = datetime.datetime.now()
+        tz_suffix = ""
+    else:
+        try:
+            from zoneinfo import ZoneInfo
+            now = datetime.datetime.now(ZoneInfo(timezone))
+            tz_suffix = " " + now.strftime("%Z")
+        except Exception as e:
+            return f"Error: unknown timezone '{timezone}' ({e})"
+    twelve_hour = now.strftime("%I:%M %p").lstrip("0")
+    return f"{now.strftime('%Y-%m-%d %H:%M:%S')}{tz_suffix} ({twelve_hour})"
+
+
+def get_weather(location: str) -> str:
+    """Get a short current-weather summary for a place, via wttr.in's free
+    API (no key needed). A single clean line -- not the ANSI-art terminal
+    report `curl wttr.in` gives, which isn't useful as text and has
+    previously caused confused/hallucinated replies when used via
+    run_shell_command."""
+    import urllib.parse
+    import urllib.request
+
+    try:
+        fmt = "%l:+%C,+%t+(feels+like+%f),+%h+humidity,+%w+wind"
+        url = f"https://wttr.in/{urllib.parse.quote(location)}?format={fmt}&m"
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            return resp.read().decode("utf-8", errors="replace").strip()
+    except Exception as e:
+        return f"Error: couldn't get weather for '{location}' ({e})"
+
+
+def get_news(topic: str = "") -> str:
+    """Get the latest real headlines from CNA (Channel NewsAsia), via
+    their own public RSS feed -- no API key. Give an optional topic (e.g.
+    'business', 'singapore', 'world') to filter; omit for general
+    top headlines. Summarize these in your own words when replying --
+    don't just read the list back verbatim.
+
+    Returns one flowing sentence, not a bulleted list -- a multi-line
+    bulleted result here was empirically much less reliable (the model
+    would sometimes claim it found no news, or answer something
+    unrelated, despite real headlines being right there in the tool
+    result) than plain prose, which every other tool here already uses."""
+    try:
+        headlines = news.fetch_headlines(topic=topic, count=6)
+    except Exception as e:
+        return f"Error: couldn't fetch CNA news ({e})"
+    if not headlines:
+        return f"No current CNA headlines found{f' for {topic!r}' if topic else ''}."
+    return "Today's CNA headlines: " + "; ".join(headlines) + "."
+
+
+def get_voice_settings() -> str:
+    """Check what actually speaks your replies out loud right now -- the
+    text-only model has no built-in knowledge of this, so if asked about
+    your own voice, call this instead of guessing."""
+    import voice_output
+
+    if not os.environ.get("INWORLD_API_KEY"):
+        return (
+            "No Inworld API key is configured, so replies fall back to the "
+            "local Windows voice (pyttsx3), not a neural voice."
+        )
+    return (
+        f"Neural voice: '{voice_output.INWORLD_VOICE}' via Inworld's "
+        f"'{voice_output.INWORLD_MODEL}' model. Falls back to the local "
+        "Windows voice only if that fails."
+    )
+
+
+def get_brain_location() -> str:
+    """Report the real filesystem path(s) where your own code, memory, and
+    Obsidian-synced state actually live -- call this instead of guessing a
+    path yourself (paths with spaces/apostrophes, like the vault's, are
+    easy to mangle when typed out by hand)."""
+    import obsidian_sync
+
+    code_dir = os.path.dirname(os.path.abspath(__file__))
+    lines = [
+        f"My real code and memory -- the actual, authoritative copy -- live at "
+        f"{code_dir} (code + {os.path.dirname(FACTS_FILE)} for conversation/facts)."
+    ]
+    if obsidian_sync._vault_available():
+        lines.append(
+            f"That memory also gets mirrored (read-only, one-way) into the "
+            f"Obsidian vault at {obsidian_sync.BRAIN_DIR}, just so it's "
+            f"browsable as notes -- not a second real copy, and not where I "
+            f"actually read from."
+        )
+    else:
+        lines.append("The Obsidian vault isn't currently reachable, so nothing is mirrored there right now.")
+    return "\n".join(lines)
+
+
+def clean_temp_files() -> str:
+    """Delete old (24h+ untouched) files from the user's Temp folder to
+    free disk space. Already runs automatically in the background every
+    hour (see optimize.py) -- this lets it be triggered on demand too."""
+    removed = optimize.clean_temp_files()
+    if not removed:
+        return "Nothing to clean -- no temp files old enough to remove."
+    freed_mb = sum(f["size"] for f in removed) / 1024**2
+    return f"Removed {len(removed)} temp file(s), freeing {freed_mb:.1f} MB."
 
 
 def _load_facts() -> dict:
@@ -141,6 +484,7 @@ def _save_facts(facts: dict) -> None:
     os.makedirs(os.path.dirname(FACTS_FILE), exist_ok=True)
     with open(FACTS_FILE, "w", encoding="utf-8") as f:
         json.dump(facts, f, indent=2)
+    obsidian_sync.sync_facts(facts)
 
 
 def remember(key: str, value: str) -> str:
@@ -209,12 +553,29 @@ TOOL_FUNCTIONS = {
     "run_shell_command": run_shell_command,
     "open_application": open_application,
     "list_directory": list_directory,
+    "find_files": find_files,
     "read_file": read_file,
     "write_file": write_file,
     "get_current_time": get_current_time,
+    "calculate": calculate,
+    "get_weather": get_weather,
+    "get_news": get_news,
+    "get_voice_settings": get_voice_settings,
+    "get_brain_location": get_brain_location,
+    "get_system_status": optimize.get_system_status,
+    "clean_temp_files": clean_temp_files,
+    "list_startup_programs": optimize.list_startup_programs,
+    "disable_startup_program": optimize.disable_startup_program,
+    "restore_startup_program": optimize.restore_startup_program,
     "remember": remember,
     "recall": recall,
     "list_known_facts": list_known_facts,
     "list_skills": list_skills,
     "read_skill": read_skill,
+    "play_song": spotify_control.play_song,
+    "pause_music": spotify_control.pause_music,
+    "resume_music": spotify_control.resume_music,
+    "skip_song": spotify_control.skip_song,
+    "previous_song": spotify_control.previous_song,
+    "current_track": spotify_control.current_track,
 }
