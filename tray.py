@@ -52,6 +52,7 @@ except Exception:
         pass
 
 import auto_organize
+import conversation
 import memory_store
 import news
 import obsidian_sync
@@ -521,11 +522,12 @@ def _news_briefing_loop():
     while not _news_stop_event.is_set():
         if news.is_daily_briefing_due():
             try:
-                brain = Brain()
-                messages = memory_store.load_history()
+                brain = conversation.get_brain()
+                messages = conversation.replay()
+                turn_start = len(messages)
                 messages.append({"role": "user", "content": "Give me a short summary of today's news."})
                 reply, messages = brain.respond(messages, confirm=_decline_risky_unattended)
-                memory_store.save_history(messages)
+                conversation.record(messages[turn_start:])
                 news.mark_daily_briefing_done()
 
                 # Best-effort -- fetched independently of whatever the
@@ -730,9 +732,14 @@ class ChatPopup:
         self._glow_anim_job = None
         self._animate_side_glow(h)
 
-        self.messages = memory_store.load_history()
+        # Recent prose only, not the whole stored history -- see
+        # conversation.py for why replaying raw tool traffic flattened
+        # Denisse's replies.
+        self.messages = conversation.replay()
         self.brain = None
         self.busy = False
+        self._turn_start = len(self.messages)
+        self._turn_tail = []
         self._heard_clear_job = None
         self.refresh_status()
         self._render_history()
@@ -745,7 +752,9 @@ class ChatPopup:
 
     def _init_brain(self):
         try:
-            brain, err = Brain(), None
+            # Shared with the wake-word listener and the news briefing --
+            # one Brain per process, not one per face.
+            brain, err = conversation.get_brain(), None
         except RuntimeError as e:
             brain, err = None, str(e)
         root.after(0, lambda: self._brain_ready(brain, err))
@@ -915,6 +924,8 @@ class ChatPopup:
 
         self.entry.delete(0, "end")
         self._add_bubble("you", text)
+        self._turn_start = len(self.messages)
+        self._turn_tail = []
         self.messages.append({"role": "user", "content": text})
 
         self.busy = True
@@ -927,7 +938,11 @@ class ChatPopup:
 
     def _respond_worker(self):
         try:
+            # Everything from the user message on is this turn's tail, which
+            # is what gets appended to the stored history in _respond_done.
+            turn_start = self._turn_start
             reply, self.messages = self.brain.respond(self.messages, confirm=self._confirm)
+            self._turn_tail = self.messages[turn_start:]
             err = None
         except Exception as e:
             reply, err = None, str(e)
@@ -965,7 +980,10 @@ class ChatPopup:
         except tk.TclError:
             return  # popup closed out from under this async callback -- fine
 
-        memory_store.save_history(self.messages)
+        # Append just this turn, re-reading the file first, so a reply here
+        # can't erase what the wake-word listener recorded while the popup
+        # sat open (see conversation.record).
+        conversation.record(self._turn_tail)
         # Synthesizing (network, ~1-2s) AND opening the audio file for
         # playback (real MCI overhead -- see voice_output.py) both happen
         # silently in the background; the text bubble is revealed and

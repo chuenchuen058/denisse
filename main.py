@@ -10,8 +10,7 @@ Conversation history persists to memory/conversation.json between runs.
 
 import sys
 
-from brain import Brain
-import memory_store
+import conversation
 from safety import confirm_risky_tool
 
 
@@ -19,12 +18,12 @@ def main():
     print("Denisse is online. Type 'exit' to quit.\n")
 
     try:
-        brain = Brain()
+        brain = conversation.get_brain()
     except RuntimeError as e:
         print(f"Startup error: {e}")
         sys.exit(1)
 
-    messages = memory_store.load_history()
+    messages = conversation.replay()
 
     while True:
         try:
@@ -40,10 +39,11 @@ def main():
             break
         if user_input.lower() == "/clear":
             messages = []
-            memory_store.clear_history()
-            print("(memory cleared)")
+            archived = conversation.reset()
+            print(f"(memory cleared, archived to {archived})" if archived else "(memory cleared)")
             continue
 
+        turn_start = len(messages)
         messages.append({"role": "user", "content": user_input})
 
         try:
@@ -53,7 +53,7 @@ def main():
             continue
 
         print(f"denisse> {reply}\n")
-        memory_store.save_history(messages)
+        conversation.record(messages[turn_start:])
 
 
 if __name__ == "__main__":

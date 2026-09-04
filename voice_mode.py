@@ -16,9 +16,8 @@ import sys
 
 import pyttsx3
 
+import conversation
 import stt_vosk
-from brain import Brain
-import memory_store
 from safety import confirm_risky_tool
 from voice_output import speak_inworld
 
@@ -88,7 +87,7 @@ def main() -> None:
     print("Denisse (voice mode) is starting up...")
 
     try:
-        brain = Brain()
+        brain = conversation.get_brain()
     except RuntimeError as e:
         print(f"Startup error: {e}")
         sys.exit(1)
@@ -100,7 +99,7 @@ def main() -> None:
         print(f"(text-to-speech unavailable, continuing text-only: {e})")
         tts_engine = None
 
-    messages = memory_store.load_history()
+    messages = conversation.replay()
     print("Denisse is online. Press Enter, then speak. Ctrl+C to quit.\n")
 
     while True:
@@ -120,6 +119,7 @@ def main() -> None:
             print("Goodbye.")
             break
 
+        turn_start = len(messages)
         messages.append({"role": "user", "content": transcript})
         try:
             reply, messages = brain.respond(messages, confirm=confirm_risky_tool)
@@ -128,7 +128,9 @@ def main() -> None:
             continue
 
         print(f"denisse> {reply}\n")
-        memory_store.save_history(messages)
+        # Spoken input, so the same mishearing gate the wake word uses.
+        conversation.record(messages[turn_start:], source="voice")
+        messages = conversation.replay()
         speak(tts_engine, reply)
 
 

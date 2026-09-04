@@ -56,7 +56,7 @@ from collections import deque
 
 import pyttsx3
 
-import memory_store
+import conversation
 import stt_vosk
 import voice_mode
 from brain import Brain
@@ -268,10 +268,13 @@ def _process_command(command: str, gen: int, brain: Brain, tts_engine, on_exchan
         f'"{recent}"'
     ) if recent else ""
 
-    messages = memory_store.load_history()
+    messages = conversation.replay()
+    turn_start = len(messages)
+    turn_tail = []
     messages.append({"role": "user", "content": command})
     try:
         reply, messages = brain.respond(messages, confirm=confirm_risky_tool, extra_context=extra_context)
+        turn_tail = messages[turn_start:]
     except Exception as e:
         reply = f"Something went wrong: {e}"
 
@@ -280,7 +283,12 @@ def _process_command(command: str, gen: int, brain: Brain, tts_engine, on_exchan
         return
 
     print(f"denisse> {reply}\n", flush=True)
-    memory_store.save_history(messages)
+    # source="voice": Vosk mishearings ("the is not playing anything the")
+    # are answered but not written down. Persisting them is what taught the
+    # model to answer everything with a reflexive tool call and a flat "It
+    # seems like you're trying to say something..." -- see conversation.py.
+    if not conversation.record(turn_tail, source="voice"):
+        print("(not recorded: transcript looks like a mishearing)", flush=True)
 
     path = synthesize_inworld(reply)
     if not _is_current(gen):
@@ -339,7 +347,7 @@ def run(stop_event=None, on_exchange=None, on_heard=None, is_offline=None, on_mo
     any other sentence)."""
     is_offline = is_offline or (lambda: False)
     try:
-        brain = Brain()
+        brain = conversation.get_brain()
     except RuntimeError as e:
         print(f"(wake word: brain unavailable, not starting: {e})", flush=True)
         return

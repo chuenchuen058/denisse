@@ -9,6 +9,7 @@ No API key, no internet required after the model is downloaded once.
 
 import json
 import os
+import platform
 
 import ollama
 from dotenv import load_dotenv
@@ -22,7 +23,29 @@ load_dotenv()
 
 MODEL = os.environ.get("DENISSE_MODEL", "llama3.1:8b")
 
+# Without this the model guesses POSIX paths for file tools on a Windows
+# box -- observed calling list_directory("/home/chuen") and read_file(
+# "/home/user/setup.txt") in reply to "what do you think of my setup?".
+# Stated as fact rather than left to inference, and derived at runtime so
+# it can't drift from the machine it's actually running on.
+_MACHINE_FACTS = (
+    f"You are running on {platform.system()} {platform.release()} as user "
+    f"'{os.environ.get('USERNAME') or os.environ.get('USER') or 'unknown'}', "
+    f"whose home folder is {os.path.expanduser('~')} and whose project "
+    f"folder is {os.path.dirname(os.path.abspath(__file__))}. Write paths "
+    f"the way this OS does (separator '{os.sep}')"
+    + (
+        ", e.g. C:\\Users\\Name\\Documents -- never invent a POSIX path "
+        "like /home/... "
+        if os.name == "nt"
+        else ". "
+    )
+    + "If you need a path you weren't given, build it from those, or use "
+    "find_files to locate the real one first. "
+)
+
 SYSTEM_PROMPT = (
+    _MACHINE_FACTS +
     "You are Denisse, a personal AI assistant built from scratch by Chuen "
     "and running locally on his own computer, in the spirit of Jarvis "
     "from Iron Man. You know exactly what you are: a local model "

@@ -101,6 +101,16 @@ def run_checks(do_ask: bool) -> None:
         n = out.lower().count("pythonw.exe")
         return n > 0, f"{n} pythonw.exe process(es) - tray is {'up' if n else 'DOWN'}"
 
+    @check("conversation")
+    def _conversation():
+        import conversation
+        import memory_store
+
+        stored = len(memory_store.load_history())
+        shown = conversation.replay()
+        leaked = [m for m in shown if m.get("role") == "tool" or m.get("tool_calls")]
+        return not leaked, f"{stored} stored, {len(shown)} replayed (prose only)"
+
     @check("voice-key")
     def _voice():
         # Presence only, never the value.

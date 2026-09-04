@@ -23,8 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from brain import Brain  # noqa: E402
-import memory_store  # noqa: E402
+import conversation  # noqa: E402
 import safety  # noqa: E402
 
 
@@ -58,12 +57,13 @@ def main() -> int:
             pass
 
     try:
-        brain = Brain()
+        brain = conversation.get_brain()
     except RuntimeError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
 
-    messages = memory_store.load_history() if args.history else []
+    messages = conversation.replay() if args.history else []
+    turn_start = len(messages)
     messages.append({"role": "user", "content": " ".join(args.prompt)})
 
     try:
@@ -77,7 +77,7 @@ def main() -> int:
         return 1
 
     if args.history:
-        memory_store.save_history(messages)
+        conversation.record(messages[turn_start:])
 
     print(reply)
     return 0
