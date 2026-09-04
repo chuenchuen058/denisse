@@ -36,7 +36,7 @@ from datetime import datetime
 from tkinter import messagebox
 
 import pystray
-from PIL import Image, ImageDraw, ImageFont, ImageTk
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageTk
 
 # Tk apps aren't DPI-aware by default, so on a scaled display (125%/150%/
 # 200%...) Windows bitmap-stretches the whole window to compensate -- which
@@ -57,6 +57,7 @@ import news
 import obsidian_sync
 import optimize
 import wake_word
+from floating_orb import FloatingOrb
 from brain import Brain
 from mission_control import get_status
 from safety import RISKY_TOOLS
@@ -78,35 +79,45 @@ if not os.path.exists(PYTHON_EXE):
 DASHBOARD_URL = "http://127.0.0.1:8765"
 
 ACCENT = (168, 85, 247)  # matches Mission Control's purple accent
-BG = (6, 6, 8)  # matches Mission Control's black background
+BG = (10, 7, 16)  # matches Mission Control's black background
 
-# Popup palette -- same colors as Mission Control's dashboard, as hex
-# strings since tkinter wants those rather than RGB tuples.
-POPUP_BG = "#060608"
-POPUP_BORDER = "#3a2a5c"
+# Popup palette -- Tron-Legacy-inspired: pure black void, thin glowing
+# purple line-work on angular (chamfered, not rounded) panels, rather than
+# filled color blocks -- as hex strings since tkinter wants those rather
+# than RGB tuples.
+POPUP_BG = "#050308"  # near-pure black -- the "Grid" void
+POPUP_BORDER = "#4c3575"  # dim glow-line purple, used for resting/inactive outlines
 POPUP_TEXT = "#ffffff"
 POPUP_MUTED = "#a99bc4"
 STATUS_OK = "#3ddc84"
 STATUS_WARN = "#e8b93b"
 STATUS_BAD = "#e2555a"
 ACCENT_HEX = "#%02x%02x%02x" % ACCENT
+ACCENT_BRIGHT = "#c9a3ff"  # brightest glow-line purple, for active/outgoing outlines
 
-# WhatsApp-style chat bubbles (dark-mode inspired: purple outgoing, near-black
-# incoming), drawn as anti-aliased PIL images (Tk Canvas polygons have no
-# anti-aliasing on Windows -- curved edges come out visibly jagged) rather
-# than raw Canvas polygons/rectangles.
-HEADER_BG = POPUP_BORDER
-BUBBLE_OUT_BG = "#6d28d9"  # your messages -- deeper accent purple
+# No filled header bar or filled chat bubbles -- Tron panels are dark glass
+# with a thin glowing outline, not solid color blocks. HEADER_BG matches the
+# body background so the header blends in and reads as one continuous black
+# panel, separated only by a thin glow line (see ChatPopup.__init__).
+HEADER_BG = POPUP_BG
+BUBBLE_OUT_OUTLINE = ACCENT_BRIGHT  # your messages -- bright glowing outline
+BUBBLE_OUT_FILL = (*ACCENT, 40)  # faint purple tint over black, not a filled block
 BUBBLE_OUT_FG = "#ffffff"
-BUBBLE_IN_BG = "#17141c"  # Denisse's messages -- near-black slate
+BUBBLE_IN_OUTLINE = "#4c3575"  # Denisse's messages -- dim outline, no glow (visual hierarchy vs. yours)
+BUBBLE_IN_FILL = (58, 42, 92, 26)  # barely-there tint, mostly just the void showing through
 BUBBLE_IN_FG = POPUP_TEXT
-BUBBLE_RADIUS = 15  # generous radius -- soft pill-ish bubbles, not boxy
+BUBBLE_CHAMFER = 9  # corner cut size (px) -- angular sci-fi panel, not a rounded pill
+
+# Solid fill colors, for the few widgets that can't do PIL alpha compositing
+# (plain tk.Entry can't render a polygon outline+glow like the bubbles).
+PANEL_BG = "#0d0916"  # slightly lighter than POPUP_BG so it still reads as a distinct surface
+DISC_FILL = "#6d28d9"  # send button's solid glowing disc -- identity-disc purple
 BUBBLE_MAX_TEXT_W = 165  # px of wrapped text before a bubble wraps a line --
 # wider than a typical phone chat bubble on purpose: at the old 124px, most
 # replies wrapped into many short lines, which read as a wall of text for
 # something this narrow overall (see CHAT_WIDTH).
-BUBBLE_PAD_X, BUBBLE_PAD_Y = 10, 7
-BUBBLE_GAP = 6
+BUBBLE_PAD_X, BUBBLE_PAD_Y = 9, 6
+BUBBLE_GAP = 5
 SEND_BTN_SIZE = 30
 
 # Preferred font stack, most modern-looking first -- resolved to whichever
@@ -151,25 +162,95 @@ def _hex_to_rgb(h: str) -> tuple:
     return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
 
 
-def _rounded_image(w: int, h: int, radius: int, rgb: tuple) -> ImageTk.PhotoImage:
-    """Anti-aliased rounded rectangle: draw at 4x scale, then downsample --
-    Tk Canvas shapes alone come out pixelated, PIL's resize filter smooths
-    the edges the way a real chat app's bubbles look."""
+def _chamfered_points(w: int, h: int, c: int) -> list:
+    """Corner points for an octagon -- a rectangle with its four corners cut
+    at 45 degrees -- the angular sci-fi-panel shape Tron Legacy's UI uses in
+    place of rounded corners."""
+    c = min(c, w // 2, h // 2)
+    return [
+        (c, 0), (w - c, 0), (w, c), (w, h - c),
+        (w - c, h), (c, h), (0, h - c), (0, c),
+    ]
+
+
+def _panel_image(
+    w: int, h: int, chamfer: int, fill_rgba: tuple, outline_rgb: tuple, outline_w: int = 1, glow: bool = False
+) -> ImageTk.PhotoImage:
+    """A dark-glass Tron-style panel: chamfered (not rounded) corners, a
+    barely-there tinted fill so the black void still shows through, and a
+    crisp outline -- optionally with a soft glow bled out from behind it.
+    Drawn at 4x scale then downsampled for anti-aliasing, same reasoning as
+    the old rounded-rect helper this replaces."""
     scale = 4
     w, h = max(w, 1), max(h, 1)
+    pts = _chamfered_points(w * scale, h * scale, chamfer * scale)
+
     img = Image.new("RGBA", (w * scale, h * scale), (0, 0, 0, 0))
-    ImageDraw.Draw(img).rounded_rectangle(
-        (0, 0, w * scale - 1, h * scale - 1), radius=radius * scale, fill=(*rgb, 255)
-    )
+    if glow:
+        glow_layer = Image.new("RGBA", (w * scale, h * scale), (0, 0, 0, 0))
+        ImageDraw.Draw(glow_layer).polygon(pts, outline=(*outline_rgb, 200), width=outline_w * scale * 3)
+        glow_layer = glow_layer.filter(ImageFilter.GaussianBlur(radius=outline_w * scale * 1.5))
+        img = Image.alpha_composite(img, glow_layer)
+
+    draw = ImageDraw.Draw(img)
+    draw.polygon(pts, fill=fill_rgba)
+    draw.polygon(pts, outline=(*outline_rgb, 255), width=outline_w * scale)
+
     img = img.resize((w, h), Image.LANCZOS)
     return ImageTk.PhotoImage(img)
 
 
-def _circle_image(d: int, rgb: tuple) -> ImageTk.PhotoImage:
+def _glow_line_image(w: int, rgb: tuple, thickness: int = 1, glow_pad: int = 3) -> ImageTk.PhotoImage:
+    """A thin horizontal glowing line -- stands in for a filled bar as a
+    boundary marker (e.g. under the chat popup's header)."""
     scale = 4
-    img = Image.new("RGBA", (d * scale, d * scale), (0, 0, 0, 0))
-    ImageDraw.Draw(img).ellipse((0, 0, d * scale - 1, d * scale - 1), fill=(*rgb, 255))
-    img = img.resize((d, d), Image.LANCZOS)
+    h = thickness + glow_pad * 2
+    img = Image.new("RGBA", (w * scale, h * scale), (0, 0, 0, 0))
+    cy = h * scale // 2
+    glow_layer = Image.new("RGBA", (w * scale, h * scale), (0, 0, 0, 0))
+    ImageDraw.Draw(glow_layer).line([(0, cy), (w * scale, cy)], fill=(*rgb, 200), width=thickness * scale * 3)
+    glow_layer = glow_layer.filter(ImageFilter.GaussianBlur(radius=glow_pad * scale * 0.6))
+    img = Image.alpha_composite(img, glow_layer)
+    ImageDraw.Draw(img).line([(0, cy), (w * scale, cy)], fill=(*rgb, 255), width=thickness * scale)
+    img = img.resize((w, h), Image.LANCZOS)
+    return ImageTk.PhotoImage(img)
+
+
+def _circle_image(d: int, rgb: tuple, glow: bool = False) -> tuple:
+    """A filled circle, optionally with a soft blurred glow halo behind it
+    (a restrained neon touch -- used for the send button's active state)."""
+    scale = 4
+    pad = max(3, d // 4) if glow else 0  # modest room for the blur to bleed into -- kept small deliberately, restrained not neon-billboard
+    size = d + pad * 2
+    img = Image.new("RGBA", (size * scale, size * scale), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    if glow:
+        glow_layer = Image.new("RGBA", (size * scale, size * scale), (0, 0, 0, 0))
+        ImageDraw.Draw(glow_layer).ellipse(
+            (pad * scale, pad * scale, (pad + d) * scale, (pad + d) * scale), fill=(*rgb, 130)
+        )
+        glow_layer = glow_layer.filter(ImageFilter.GaussianBlur(radius=d * scale * 0.12))
+        img = Image.alpha_composite(img, glow_layer)
+        draw = ImageDraw.Draw(img)
+    draw.ellipse((pad * scale, pad * scale, (pad + d) * scale, (pad + d) * scale), fill=(*rgb, 255))
+    img = img.resize((size, size), Image.LANCZOS)
+    return ImageTk.PhotoImage(img), pad
+
+
+def _side_glow_image(w: int, h: int, rgb: tuple) -> ImageTk.PhotoImage:
+    """A soft vertical glow blob, bright in the middle and fading at both
+    ends -- the traveling 'light worm' segment run up/down the chat popup's
+    left/right edges."""
+    scale = 4
+    img = Image.new("RGBA", (w * scale, h * scale), (0, 0, 0, 0))
+    cx = w * scale // 2
+    glow_layer = Image.new("RGBA", (w * scale, h * scale), (0, 0, 0, 0))
+    ImageDraw.Draw(glow_layer).line(
+        [(cx, h * scale * 0.2), (cx, h * scale * 0.8)], fill=(*rgb, 220), width=w * scale
+    )
+    glow_layer = glow_layer.filter(ImageFilter.GaussianBlur(radius=h * scale * 0.1))
+    img = Image.alpha_composite(img, glow_layer)
+    img = img.resize((w, h), Image.LANCZOS)
     return ImageTk.PhotoImage(img)
 
 
@@ -224,6 +305,7 @@ def _open_project_folder(icon, item):
 
 _tray_icon = None  # set in main() once the pystray Icon exists -- lets
 # the optimize loop below show notifications via _tray_icon.notify(...)
+_floating_orb = None  # set in main() once the FloatingOrb exists
 
 _organize_thread = None
 _organize_stop_event = threading.Event()
@@ -323,11 +405,16 @@ def _on_wake_word_exchange(command: str, reply: str):
 
 def _on_wake_word_heard(text: str):
     # Called from wake_word.py's background thread -- hop to the main
-    # thread before touching any Tk widget. Only does anything if the
-    # chat popup happens to be open (that's the "in chat" this was asked
-    # for); otherwise this is just a no-op, nothing extra recorded either way.
-    if _chat_popup is not None:
-        root.after(0, lambda: _chat_popup.show_heard(text))
+    # thread before touching any Tk widget. Shows in whichever of the chat
+    # popup / floating orb happen to be around; a no-op if neither is
+    # (nothing extra recorded either way -- same transcript data either path).
+    def _do():
+        if _chat_popup is not None:
+            _chat_popup.show_heard(text)
+        if _floating_orb is not None:
+            _floating_orb.say(text)
+
+    root.after(0, _do)
 
 
 def _on_wake_word_mode_command(mode: str):
@@ -533,13 +620,15 @@ class ChatPopup:
         self.win.geometry(f"{w}x{h}+{x}+{y}")
         self.win.bind("<Escape>", lambda e: self.close())
 
-        # -- header bar: name + online/offline status, WhatsApp-style --
+        # -- header: name + online/offline status. No filled bar (Tron panels
+        # are dark glass, not color blocks) -- just a glowing hairline
+        # separator below (added after this block) marks the boundary. --
         header = tk.Frame(self.win, bg=HEADER_BG)
         header.pack(side="top", fill="x")
         name_col = tk.Frame(header, bg=HEADER_BG)
-        name_col.pack(side="left", padx=_px(12), pady=_px(7), fill="x", expand=True)
+        name_col.pack(side="left", padx=_px(10), pady=_px(5), fill="x", expand=True)
         tk.Label(
-            name_col, text="Denisse", bg=HEADER_BG, fg=POPUP_TEXT, font=(FONT_FAMILY, 11, "bold")
+            name_col, text="D E N I S S E", bg=HEADER_BG, fg=POPUP_TEXT, font=(FONT_FAMILY, 11, "bold")
         ).pack(anchor="w")
         # Status dot + text -- toggled by saying or typing "offline mode" /
         # "online mode" (see _match_mode_command), not by clicking anything.
@@ -560,21 +649,30 @@ class ChatPopup:
             font=(FONT_FAMILY, 10), cursor="hand2",
         ).pack(side="right", padx=_px(10))
 
+        # Thin glowing line standing in for the header's old filled bar --
+        # the one place a Tron panel actually earns a solid glow, since it
+        # marks a real boundary (header vs. chat body) rather than filling
+        # a whole surface.
+        self._header_sep_img = _glow_line_image(_px(CHAT_WIDTH), _hex_to_rgb(ACCENT_HEX))
+        tk.Label(self.win, image=self._header_sep_img, bg=POPUP_BG, bd=0).pack(side="top")
+
         # -- bottom-anchored input row, packed BEFORE the chat canvas so it
         # always keeps its space regardless of how tall the message list gets --
         input_row = tk.Frame(self.win, bg=POPUP_BG)
-        input_row.pack(side="bottom", fill="x", padx=_px(10), pady=(_px(4), _px(10)))
+        input_row.pack(side="bottom", fill="x", padx=_px(8), pady=(_px(3), _px(7)))
         self.entry = tk.Entry(
-            input_row, bg=BUBBLE_IN_BG, fg=POPUP_TEXT, insertbackground=POPUP_TEXT,
+            input_row, bg=PANEL_BG, fg=POPUP_TEXT, insertbackground=POPUP_TEXT,
             relief="flat", font=(FONT_FAMILY, 9), state="disabled",
-            highlightthickness=1, highlightbackground=BUBBLE_IN_BG, highlightcolor=ACCENT_HEX,
+            # Dim glow-line purple at rest, brightens to the full accent on
+            # focus -- same outline language as the chat panels.
+            highlightthickness=1, highlightbackground=POPUP_BORDER, highlightcolor=ACCENT_HEX,
             # Tk's default disabled-state colors are a light system grey/white,
             # unrelated to bg/fg above -- set these too or the box flashes
             # white every time it's disabled (sending, before Denisse connects).
-            disabledbackground=BUBBLE_IN_BG, disabledforeground=POPUP_MUTED,
+            disabledbackground=PANEL_BG, disabledforeground=POPUP_MUTED,
         )
         self.entry.pack(
-            side="left", fill="x", expand=True, ipady=_px(6), ipadx=_px(8), padx=(0, _px(6))
+            side="left", fill="x", expand=True, ipady=_px(3), ipadx=_px(8), padx=(0, _px(6))
         )
         self.entry.bind("<Return>", self._send)
 
@@ -582,17 +680,18 @@ class ChatPopup:
         # arrow glyph, swapped between an accent and a muted variant instead
         # of using a plain (square) tk.Button.
         btn_size = _px(SEND_BTN_SIZE)
-        self._send_circle_on = _circle_image(btn_size, _hex_to_rgb(BUBBLE_OUT_BG))
-        self._send_circle_off = _circle_image(btn_size, _hex_to_rgb(POPUP_BORDER))
+        self._send_circle_on, glow_pad = _circle_image(btn_size, _hex_to_rgb(DISC_FILL), glow=True)
+        self._send_circle_off, _ = _circle_image(btn_size, _hex_to_rgb(POPUP_BORDER))
+        canvas_size = btn_size + glow_pad * 2
         self.send_btn = tk.Canvas(
-            input_row, width=btn_size, height=btn_size, bg=POPUP_BG,
+            input_row, width=canvas_size, height=canvas_size, bg=POPUP_BG,
             highlightthickness=0, bd=0,
         )
         self.send_btn.pack(side="right")
-        half = btn_size // 2
-        self._send_circle_id = self.send_btn.create_image(half, half, image=self._send_circle_off)
+        center = canvas_size // 2
+        self._send_circle_id = self.send_btn.create_image(center, center, image=self._send_circle_off)
         self._send_arrow_id = self.send_btn.create_text(
-            half, half, text="➤", fill=POPUP_MUTED, font=(FONT_FAMILY, 11)
+            center, center, text="➤", fill=POPUP_MUTED, font=(FONT_FAMILY, 11)
         )
         self.send_btn.tag_bind(self._send_circle_id, "<Button-1>", self._send)
         self.send_btn.tag_bind(self._send_arrow_id, "<Button-1>", self._send)
@@ -612,6 +711,24 @@ class ChatPopup:
         self._time_font = tkfont.Font(family=FONT_FAMILY, size=7)
         self._y = _px(6)
         self._bubble_images = []  # keep PhotoImage refs alive (Tk won't otherwise)
+
+        # -- side glow: a soft purple "light worm" traveling up the left
+        # edge and down the right edge, on a loop -- placed (not packed) so
+        # it overlays the existing layout as a thin strip rather than
+        # taking up its own space. --
+        strip_w = _px(3)
+        self._glow_strip_h = _px(70)
+        self._side_glow_img = _side_glow_image(strip_w, self._glow_strip_h, _hex_to_rgb(ACCENT_HEX))
+        self._glow_left = tk.Canvas(self.win, width=strip_w, bg=POPUP_BG, highlightthickness=0, bd=0)
+        self._glow_left.place(x=0, y=0, width=strip_w, height=h)
+        self._glow_left_id = self._glow_left.create_image(strip_w // 2, -self._glow_strip_h, image=self._side_glow_img)
+        self._glow_right = tk.Canvas(self.win, width=strip_w, bg=POPUP_BG, highlightthickness=0, bd=0)
+        self._glow_right.place(x=w - strip_w, y=0, width=strip_w, height=h)
+        self._glow_right_id = self._glow_right.create_image(
+            strip_w // 2, h + self._glow_strip_h, image=self._side_glow_img
+        )
+        self._glow_anim_job = None
+        self._animate_side_glow(h)
 
         self.messages = memory_store.load_history()
         self.brain = None
@@ -713,9 +830,17 @@ class ChatPopup:
             x1, x2 = margin, margin + bw
         y1 = self._y
 
-        rgb = _hex_to_rgb(BUBBLE_OUT_BG if is_out else BUBBLE_IN_BG)
         fg = BUBBLE_OUT_FG if is_out else BUBBLE_IN_FG
-        bubble_img = _rounded_image(round(bw), bh, _px(BUBBLE_RADIUS), rgb)
+        # Outgoing panels glow (bright outline, visible tint); incoming ones
+        # stay dim and glow-free -- a deliberate hierarchy so the whole
+        # popup doesn't read as one uniform neon wall.
+        bubble_img = _panel_image(
+            round(bw), bh, BUBBLE_CHAMFER,
+            fill_rgba=(BUBBLE_OUT_FILL if is_out else BUBBLE_IN_FILL),
+            outline_rgb=_hex_to_rgb(BUBBLE_OUT_OUTLINE if is_out else BUBBLE_IN_OUTLINE),
+            outline_w=max(1, _px(1)),
+            glow=is_out,
+        )
         self._bubble_images.append(bubble_img)  # avoid GC-ing the PhotoImage
         self.canvas.create_image(x1, y1, anchor="nw", image=bubble_img)
 
@@ -917,8 +1042,31 @@ class ChatPopup:
 
     # -- lifecycle --
 
+    def _animate_side_glow(self, win_h: int):
+        step = _px(4)
+        try:
+            x, y = self._glow_left.coords(self._glow_left_id)
+            y += step
+            if y > win_h + self._glow_strip_h:
+                y = -self._glow_strip_h
+            self._glow_left.coords(self._glow_left_id, x, y)
+
+            x2, y2 = self._glow_right.coords(self._glow_right_id)
+            y2 -= step
+            if y2 < -self._glow_strip_h:
+                y2 = win_h + self._glow_strip_h
+            self._glow_right.coords(self._glow_right_id, x2, y2)
+        except tk.TclError:
+            return  # popup closed out from under this timer -- just stop
+        self._glow_anim_job = self.win.after(40, lambda: self._animate_side_glow(win_h))
+
     def close(self):
         global _chat_popup
+        if self._glow_anim_job is not None:
+            try:
+                self.win.after_cancel(self._glow_anim_job)
+            except Exception:
+                pass
         try:
             self.win.destroy()
         except tk.TclError:
@@ -943,6 +1091,8 @@ def _open_chat(icon=None, item=None):
             _chat_popup = ChatPopup()
 
     root.after(0, _do)
+
+
 
 
 def main():
@@ -980,6 +1130,10 @@ def main():
     _start_organizing()
     _start_optimizing()
     _start_news_briefing()
+
+    global _floating_orb
+    _floating_orb = FloatingOrb(root, on_activate=_open_chat)
+
     _tray_icon.run_detached()  # icon runs on its own thread; tkinter owns the main thread
     root.mainloop()
 

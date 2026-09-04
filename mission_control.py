@@ -137,10 +137,20 @@ HTML_PAGE = '''<!DOCTYPE html>
 <title>Denisse -- Mission Control</title>
 <style>
   :root {
-    --bg: #060608; --panel: #0e0b14; --panel2: #0a0710; --border: #3a2a5c;
-    --border-soft: #2a1f42; --text: #ffffff; --muted: #a99bc4; --muted-dim: #6b5c85;
+    /* Tron-Legacy-inspired: near-pure-black void, dark-glass panels (barely
+       tinted, not solid color blocks) defined by glowing purple edges
+       rather than fill contrast, and chamfered (cut-corner) shapes instead
+       of rounded ones. */
+    --bg: #050308; --panel: rgba(168,85,247,0.045); --panel2: rgba(255,255,255,0.02);
+    --border: #4c3575; --border-soft: #2a1f42; --text: #ffffff; --muted: #a99bc4; --muted-dim: #6b5c85;
     --accent: #a855f7; --accent-dim: #7c3aed; --danger: #e2555a;
-    --shadow: 0 8px 24px -8px rgba(0,0,0,0.5);
+    --shadow: 0 8px 24px -8px rgba(0,0,0,0.6);
+    --chamfer: 10px;
+    --cut: polygon(
+      var(--chamfer) 0, calc(100% - var(--chamfer)) 0, 100% var(--chamfer),
+      100% calc(100% - var(--chamfer)), calc(100% - var(--chamfer)) 100%, var(--chamfer) 100%,
+      0 calc(100% - var(--chamfer)), 0 var(--chamfer)
+    );
   }
   * { box-sizing: border-box; }
   ::selection { background: var(--accent-dim); color: #fff; }
@@ -151,38 +161,85 @@ HTML_PAGE = '''<!DOCTYPE html>
   body {
     margin:0; font-family: "Segoe UI", -apple-system, system-ui, sans-serif;
     background:
-      radial-gradient(1200px 500px at 15% -10%, rgba(168,85,247,0.08), transparent 60%),
+      radial-gradient(1000px 460px at 15% -10%, rgba(168,85,247,0.09), transparent 60%),
+      radial-gradient(900px 500px at 100% 100%, rgba(124,58,237,0.07), transparent 55%),
       var(--bg);
     color: var(--text); -webkit-font-smoothing: antialiased;
   }
+  /* Purple "light worm" -- a soft glow segment traveling up and down each
+     edge of the window on a loop, like Tron's grid boundary lines. Pure
+     CSS via body::before/::after so no markup changes are needed. */
+  @keyframes worm-travel {
+    0% { transform: translateY(-160px); }
+    100% { transform: translateY(100vh); }
+  }
+  body::before, body::after {
+    content: ""; position: fixed; top: 0; width: 2px; height: 160px; z-index: 40; pointer-events: none;
+    background: linear-gradient(to bottom, transparent, rgba(168,85,247,0.9), transparent);
+    box-shadow: 0 0 12px 2px rgba(168,85,247,0.55);
+    animation: worm-travel 3.6s ease-in-out infinite;
+  }
+  body::before { left: 0; }
+  body::after { right: 0; animation-delay: 1.8s; }
   header {
     display:flex; align-items:center; justify-content:space-between;
-    padding: 16px 24px; border-bottom: 1px solid var(--border);
-    background: rgba(6,6,10,0.7); backdrop-filter: blur(8px);
+    padding: 13px 20px; border-bottom: 1px solid var(--accent);
+    background: rgba(5,3,8,0.75); backdrop-filter: blur(8px);
+    box-shadow: 0 4px 18px -6px rgba(168,85,247,0.5);
     position: sticky; top: 0; z-index: 10;
   }
-  header h1 { font-size: 17px; margin:0; letter-spacing: .3px; font-weight: 600; }
-  header h1 span { color: var(--accent); font-weight: 500; }
-  .status { display:flex; align-items:center; gap:9px; font-size: 12.5px; color: var(--muted); }
-  .dot { width:8px; height:8px; border-radius:50%; background:#555; transition: background .25s ease; position: relative; }
-  .dot.ok { background:#3ddc84; box-shadow: 0 0 0 0 rgba(61,220,132,0.5); animation: pulse-ok 2.2s ease-out infinite; }
-  .dot.warn { background:#e8b93b; }
-  .dot.bad { background:var(--danger); }
-  @keyframes pulse-ok {
-    0% { box-shadow: 0 0 0 0 rgba(61,220,132,0.45); }
-    70% { box-shadow: 0 0 0 6px rgba(61,220,132,0); }
-    100% { box-shadow: 0 0 0 0 rgba(61,220,132,0); }
+  header h1 { font-size: 17px; margin:0; letter-spacing: 2px; font-weight: 600; text-transform: uppercase; }
+  header h1 span { color: var(--accent); font-weight: 500; text-shadow: 0 0 12px rgba(168,85,247,0.45); }
+  .status { display:flex; align-items:center; gap:10px; font-size: 12.5px; color: var(--muted); }
+
+  /* Presence orb -- Siri's soft glowing sphere crossed with a JARVIS
+     targeting ring, standing in for the old flat status dot. Color and
+     animation state follow .ok/.warn/.bad, same as the dot did. */
+  .orb { position:relative; display:inline-block; width:18px; height:18px; flex:none; }
+  .orb-ring {
+    position:absolute; inset:-4px; border-radius:50%; border:1px solid transparent;
+    border-top-color: rgba(168,85,247,0.85); border-right-color: rgba(168,85,247,0.22);
+    animation: orb-spin 2.6s linear infinite;
   }
-  .layout { display:flex; min-height: calc(100vh - 57px); }
-  aside { width: 264px; border-right: 1px solid var(--border); padding: 18px; background: var(--panel2); }
-  aside h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--muted-dim); margin: 0 0 12px; font-weight: 600; }
+  .orb-core {
+    position:absolute; inset:3px; border-radius:50%;
+    background: radial-gradient(circle at 35% 30%, #f3e8ff, var(--accent) 45%, #4c1d95 100%);
+    box-shadow: 0 0 8px 2px rgba(168,85,247,0.75), 0 0 18px 5px rgba(168,85,247,0.32);
+    animation: orb-breathe 2.3s ease-in-out infinite;
+  }
+  .orb.warn .orb-ring { border-top-color: rgba(232,185,59,0.85); border-right-color: rgba(232,185,59,0.22); }
+  .orb.warn .orb-core {
+    background: radial-gradient(circle at 35% 30%, #fff3d6, #e8b93b 45%, #8a6212 100%);
+    box-shadow: 0 0 8px 2px rgba(232,185,59,0.75), 0 0 18px 5px rgba(232,185,59,0.32);
+  }
+  .orb.bad .orb-ring { border-top-color: rgba(226,85,90,0.85); border-right-color: rgba(226,85,90,0.22); animation-play-state: paused; }
+  .orb.bad .orb-core {
+    background: radial-gradient(circle at 35% 30%, #ffd9d9, var(--danger) 45%, #6b1a1c 100%);
+    box-shadow: 0 0 8px 2px rgba(226,85,90,0.75), 0 0 18px 5px rgba(226,85,90,0.32);
+    animation-play-state: paused;
+  }
+  @keyframes orb-spin { to { transform: rotate(360deg); } }
+  @keyframes orb-breathe { 0%, 100% { transform: scale(0.88); filter: brightness(1); } 50% { transform: scale(1.08); filter: brightness(1.2); } }
+
+  /* JARVIS-style corner brackets framing the whole window. */
+  .hud-frame span {
+    position: fixed; width: 20px; height: 20px; pointer-events: none; z-index: 45;
+    border: 1.5px solid rgba(168,85,247,0.5);
+  }
+  .hud-frame .tl { top: 7px; left: 7px; border-right: none; border-bottom: none; }
+  .hud-frame .tr { top: 7px; right: 7px; border-left: none; border-bottom: none; }
+  .hud-frame .bl { bottom: 7px; left: 7px; border-right: none; border-top: none; }
+  .hud-frame .br { bottom: 7px; right: 7px; border-left: none; border-top: none; }
+  .layout { display:flex; min-height: calc(100vh - 51px); }
+  aside { width: 226px; border-right: 1px solid var(--border); padding: 15px; background: var(--panel2); }
+  aside h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--muted-dim); margin: 0 0 9px; font-weight: 600; }
   .shortcut {
     display:flex; align-items:center; justify-content:space-between;
-    padding: 10px 12px; margin-bottom:6px; background: var(--panel);
-    border:1px solid var(--border-soft); border-radius:9px; cursor:pointer;
+    padding: 8px 10px; margin-bottom:5px; background: var(--panel);
+    border:1px solid var(--border-soft); clip-path: var(--cut); cursor:pointer;
     transition: border-color .15s ease, transform .15s ease, background .15s ease;
   }
-  .shortcut:hover { border-color: var(--accent-dim); background: #1c1428; transform: translateX(1px); }
+  .shortcut:hover { border-color: var(--accent); background: rgba(168,85,247,0.09); transform: translateX(1px); box-shadow: 0 0 0 1px rgba(168,85,247,0.15), 0 0 16px rgba(168,85,247,0.12); }
   .shortcut:active { transform: translateX(1px) scale(.98); }
   .shortcut .label { display:flex; align-items:center; gap:9px; font-size:13px; }
   .shortcut .arrow { color: var(--accent); transition: transform .15s ease; }
@@ -194,35 +251,36 @@ HTML_PAGE = '''<!DOCTYPE html>
   #addForm.open { display:flex; animation: fade-in .15s ease; }
   #addForm input, #addForm select {
     background: var(--panel); border:1px solid var(--border); color: var(--text);
-    border-radius:7px; padding:7px 9px; font-size:12.5px; outline: none;
+    clip-path: var(--cut); padding:7px 9px; font-size:12.5px; outline: none;
     transition: border-color .15s ease;
   }
-  #addForm input:focus, #addForm select:focus { border-color: var(--accent-dim); }
+  #addForm input:focus, #addForm select:focus { border-color: var(--accent-dim); box-shadow: 0 0 0 1px var(--accent-dim), 0 0 12px rgba(168,85,247,0.25); }
   .btn {
-    background: var(--accent); color:#1a0a2e; border:none; border-radius:7px;
+    background: var(--accent); color:#1a0a2e; border:none; clip-path: var(--cut);
     padding:8px 12px; font-size:12.5px; cursor:pointer; font-weight:600;
-    transition: filter .15s ease, transform .1s ease;
+    transition: filter .15s ease, transform .1s ease, box-shadow .15s ease;
+    box-shadow: 0 0 0 rgba(168,85,247,0);
   }
-  .btn:hover { filter: brightness(1.08); }
+  .btn:hover { filter: brightness(1.08); box-shadow: 0 0 18px rgba(168,85,247,0.4); }
   .btn:active { transform: scale(.97); }
   .btn.ghost { background: transparent; border:1px solid var(--border); color: var(--muted); width:100%; }
   .btn.ghost:hover { border-color: var(--muted-dim); color: var(--text); filter: none; }
-  main { flex:1; padding: 22px 24px; overflow-y:auto; }
-  nav.tabs { display:flex; gap:6px; margin-bottom: 18px; }
+  main { flex:1; padding: 16px 20px; overflow-y:auto; }
+  nav.tabs { display:flex; gap:5px; margin-bottom: 14px; }
   nav.tabs button {
     background: var(--panel2); border:1px solid var(--border); color: var(--muted);
-    padding:7px 15px; border-radius:8px; font-size:13px; cursor:pointer;
+    padding:6px 13px; clip-path: var(--cut); font-size:13px; cursor:pointer;
     transition: color .15s ease, border-color .15s ease, background .15s ease;
   }
   nav.tabs button:hover:not(.active) { color: var(--text); border-color: var(--border-soft); }
-  nav.tabs button.active { color: #04211d; background: var(--accent); border-color: var(--accent); font-weight:600; }
+  nav.tabs button.active { color: #1a0a2e; background: var(--accent); border-color: var(--accent); font-weight:600; box-shadow: 0 0 14px rgba(168,85,247,0.35); }
   .card {
-    background: var(--panel); border:1px solid var(--border-soft); border-radius:12px;
-    padding:16px 18px; margin-bottom:10px; box-shadow: var(--shadow);
+    background: var(--panel); border:1px solid var(--border-soft); clip-path: var(--cut);
+    padding:13px 15px; margin-bottom:8px; box-shadow: var(--shadow);
     animation: fade-in .2s ease;
   }
   @keyframes fade-in { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
-  .msg { margin-bottom:12px; padding-bottom: 12px; border-bottom: 1px solid var(--border-soft); }
+  .msg { margin-bottom:10px; padding-bottom: 10px; border-bottom: 1px solid var(--border-soft); }
   .msg:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
   .msg .who { font-size:10.5px; text-transform:uppercase; letter-spacing:.6px; color: var(--muted-dim); margin-bottom:4px; font-weight: 600; }
   .msg.user .who { color: var(--accent); }
@@ -235,13 +293,17 @@ HTML_PAGE = '''<!DOCTYPE html>
   .name { color: var(--accent); font-family: "Cascadia Code", Consolas, monospace; font-size: 12.5px; }
   .desc { color: var(--muted); font-size:12.5px; line-height: 1.4; }
   .empty { color: var(--muted-dim); font-size:13px; padding: 16px 0; text-align: center; }
-  #toast { position:fixed; bottom:18px; right:18px; background: var(--panel); border:1px solid var(--accent); padding:10px 16px; border-radius:8px; font-size:13px; display:none; }
+  #toast { position:fixed; bottom:18px; right:18px; background: #0a0710; border:1px solid var(--accent); padding:10px 16px; clip-path: var(--cut); font-size:13px; display:none; box-shadow: 0 0 20px rgba(168,85,247,0.3); }
 </style>
 </head>
 <body>
+<div class="hud-frame"><span class="tl"></span><span class="tr"></span><span class="bl"></span><span class="br"></span></div>
 <header>
   <h1>Denisse <span>// Mission Control</span></h1>
-  <div class="status"><span class="dot" id="statusDot"></span><span id="statusText">checking...</span></div>
+  <div class="status">
+    <span class="orb" id="statusDot"><span class="orb-ring"></span><span class="orb-core"></span></span>
+    <span id="statusText">checking...</span>
+  </div>
 </header>
 <div class="layout">
   <aside>
@@ -289,9 +351,9 @@ async function refreshStatus() {
   const s = await j('/api/status');
   const dot = document.getElementById('statusDot');
   const text = document.getElementById('statusText');
-  if (!s.connected) { dot.className = 'dot bad'; text.textContent = 'Offline'; }
-  else if (!s.model_ready) { dot.className = 'dot warn'; text.textContent = 'Online'; }
-  else { dot.className = 'dot ok'; text.textContent = 'Online'; }
+  if (!s.connected) { dot.className = 'orb bad'; text.textContent = 'Offline'; }
+  else if (!s.model_ready) { dot.className = 'orb warn'; text.textContent = 'Online'; }
+  else { dot.className = 'orb ok'; text.textContent = 'Online'; }
 }
 
 async function refreshShortcuts() {
