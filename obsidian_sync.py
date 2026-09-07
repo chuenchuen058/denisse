@@ -24,7 +24,6 @@ VAULT_DIR = r"C:\Users\Xichu\OneDrive - King's College London\Denisse"
 DENISSE_DIR = os.path.join(VAULT_DIR, "Denisse")
 BRAIN_DIR = os.path.join(DENISSE_DIR, "Brain")
 CLAUDE_MEMORY_DIR = os.path.join(VAULT_DIR, "Memory")
-NEWS_DIR = os.path.join(DENISSE_DIR, "News")
 
 # The full, unfiltered contents of Memory/ (4KB+ of notes, including YAML
 # frontmatter and meta-commentary about another AI session's own past
@@ -33,7 +32,7 @@ NEWS_DIR = os.path.join(DENISSE_DIR, "News")
 # wrong 3/3 times with it in the system prompt (even at low sampling
 # temperature) and correct 4/4 times with it removed. Trimmed rather than
 # dropped entirely, since the cross-tool memory sharing is a deliberate
-# feature (see claude_vault.md in the vault) -- just capped hard and with
+# feature (see README.md in the vault) -- just capped hard and with
 # the noisiest part (frontmatter) stripped, so a little context still
 # comes through without dominating/confusing her.
 _FRONTMATTER_RE = re.compile(r"^---\n.*?\n---\n", re.DOTALL)
@@ -114,33 +113,12 @@ def read_claude_memory() -> str:
     return combined
 
 
-def save_daily_news(summary: str, headlines: list) -> bool:
-    """Save the day's CNA news summary (see tray.py's daily briefing loop
-    and news.py) as a dated note under News/ in the vault -- one file per
-    calendar day, overwritten if called again the same day. Returns True
-    on an actual write, False on anything that stopped it (no vault, no
-    summary) so the caller can decide whether to log/notify -- best-effort
-    like everything else here, never raises."""
-    if not _vault_available() or not summary:
-        return False
-    try:
-        os.makedirs(NEWS_DIR, exist_ok=True)
-        today = datetime.date.today().isoformat()
-        lines = [
-            "---",
-            "tags: [denisse, news]",
-            f"date: {today}",
-            "---",
-            "",
-            f"# CNA News — {today}",
-            "",
-            summary.strip(),
-        ]
-        if headlines:
-            lines += ["", "## Headlines", ""]
-            lines += [f"- {h}" for h in headlines]
-        with open(os.path.join(NEWS_DIR, f"{today}.md"), "w", encoding="utf-8") as f:
-            f.write("\n".join(lines) + "\n")
-        return True
-    except OSError:
-        return False
+# save_daily_news() lived here until 2026-09-06. It wrote the daily CNA
+# briefing into the vault as a dated note under News/. Removed at Chuen's
+# request -- he never re-read them, and one new file per day was quietly
+# accumulating: 4 notes in 4 days, each an unlinked node cluttering
+# Obsidian's graph view, growing forever. The briefing itself still runs
+# and still notifies from the tray; it just doesn't leave a file behind.
+#
+# The 4 existing notes were deleted in the same change. They're in the
+# vault's git history if they're ever wanted back.

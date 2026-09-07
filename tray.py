@@ -425,11 +425,25 @@ def _on_wake_word_mode_command(mode: str):
         _go_online()
 
 
+def _on_wake_word_thinking(thinking: bool):
+    # Called from wake_word.py's background thread -- hop to the main
+    # thread before touching the orb's Tk widgets.
+    def _do():
+        if _floating_orb is not None:
+            if thinking:
+                _floating_orb.start_thinking()
+            else:
+                _floating_orb.stop_thinking()
+
+    root.after(0, _do)
+
+
 def _wake_word_loop():
     wake_word.run(
         stop_event=_wake_word_stop_event,
         on_exchange=_on_wake_word_exchange,
         on_heard=_on_wake_word_heard,
+        on_thinking=_on_wake_word_thinking,
         is_offline=_is_manually_offline,
         on_mode_command=_on_wake_word_mode_command,
     )
@@ -530,18 +544,12 @@ def _news_briefing_loop():
                 conversation.record(messages[turn_start:])
                 news.mark_daily_briefing_done()
 
-                # Best-effort -- fetched independently of whatever the
-                # brain's own get_news tool call did internally (its
-                # result isn't visible to this loop), so the vault note
-                # always has a real headline list regardless of how the
-                # brain composed its reply. Never lets a vault problem
-                # (unsynced OneDrive path, etc.) affect the spoken/notified
-                # briefing above, which already succeeded by this point.
-                try:
-                    headlines = news.fetch_headlines(count=8)
-                except Exception:
-                    headlines = []
-                obsidian_sync.save_daily_news(reply, headlines)
+                # The briefing used to also write a dated note into the
+                # vault's News/ folder. Removed 2026-09-06 at Chuen's
+                # request: he never went back and read them, and a new
+                # file every day was quietly accumulating clutter (each
+                # one an unlinked node in Obsidian's graph). The briefing
+                # itself still runs and still notifies.
 
                 if _tray_icon is not None:
                     try:
@@ -932,6 +940,8 @@ class ChatPopup:
         self.entry.config(state="disabled")
         self._set_send_enabled(False)
         self.typing_label.config(text="Denisse is typing...")
+        if _floating_orb is not None:
+            _floating_orb.start_thinking()
 
         threading.Thread(target=self._respond_worker, daemon=True).start()
         return "break"
@@ -974,6 +984,8 @@ class ChatPopup:
         try:
             if err:
                 self.typing_label.config(text="")
+                if _floating_orb is not None:
+                    _floating_orb.stop_thinking()
                 self._add_system(f"Error: {err}")
                 self._finish_turn()
                 return
@@ -1012,6 +1024,8 @@ class ChatPopup:
     def _reveal_reply(self, reply: str, audio, play_now):
         try:
             self.typing_label.config(text="")
+            if _floating_orb is not None:
+                _floating_orb.stop_thinking()
             if play_now is not None:
                 play_now.set()  # let the waiting synth thread proceed to .play()
             self._add_bubble("denisse", reply)
