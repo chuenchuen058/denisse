@@ -40,6 +40,20 @@ MODEL = os.environ.get("DENISSE_MODEL", "llama3.1:8b")
 # small, and if it ever spills to CPU every reply gets dramatically slower.
 NUM_CTX = int(os.environ.get("DENISSE_NUM_CTX", "8192"))
 
+# How many times one turn may go round the tool-use loop before Denisse has
+# to answer in words. The loop used to be `while True` -- a model that keeps
+# asking for tools never terminated, and every round appends the call and
+# its result to the request, so the prompt grows until it fills NUM_CTX and
+# Ollama starts truncating it.
+#
+# That is not hypothetical: the 2026-09-12 eval run started and never
+# finished, and the 2026-09-19 run was still going after ten minutes, with
+# Ollama logging ~8200-token requests at ~6s each (vs ~2s when the prompt
+# was small). Bounded at 6 -- deep enough for a genuine multi-step answer,
+# shallow enough that a stuck turn costs seconds rather than forever. On
+# the final round tools are withheld entirely, which forces a text reply.
+MAX_TOOL_ROUNDS = int(os.environ.get("DENISSE_MAX_TOOL_ROUNDS", "6"))
+
 # Without this the model guesses POSIX paths for file tools on a Windows
 # box -- observed calling list_directory("/home/chuen") and read_file(
 # "/home/user/setup.txt") in reply to "what do you think of my setup?".
@@ -549,7 +563,13 @@ class Brain:
         #     )
         full_messages = [{"role": "system", "content": system_content}] + messages
 
-        while True:
+        for _round in range(MAX_TOOL_ROUNDS + 1):
+            # Last round: stop offering tools, so the model has to answer in
+            # words instead of asking for another call it won't get. See
+            # MAX_TOOL_ROUNDS for why this is bounded at all.
+            last_round = _round == MAX_TOOL_ROUNDS
+            round_tools = None if last_round else TOOL_DEFINITIONS
+
             # keep_alive=-1: keep the model loaded in memory indefinitely.
             # Ollama's default unloads it after 5 minutes idle -- measured a
             # cold reload at ~4-6s vs ~0.5s warm, a real hit for something
@@ -562,7 +582,7 @@ class Brain:
             # at default temperature, 4/4 clean and on-topic at 0.2, no
             # loss of personality on casual chat).
             response = ollama.chat(
-                model=MODEL, messages=full_messages, tools=TOOL_DEFINITIONS, keep_alive=-1,
+                model=MODEL, messages=full_messages, tools=round_tools, keep_alive=-1,
                 options={"temperature": 0.2, "num_ctx": NUM_CTX},
             )
             msg = _get(response, "message")
@@ -609,3 +629,10 @@ class Brain:
                 messages.append(tool_msg)
                 full_messages.append(tool_msg)
             # loop again so the model can use the tool results
+
+        # Only reachable if the final round still produced nothing usable.
+        # Say so plainly rather than returning an empty string, which the
+        # popup would render as a blank bubble.
+        give_up = "I got stuck working that one out -- could you rephrase it?"
+        messages.append({"role": "assistant", "content": give_up})
+        return give_up, messages
