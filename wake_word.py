@@ -234,10 +234,18 @@ def _match_wake_word(alternatives: list[str], trust_fallback: bool = False):
     spotter has independently confirmed her name was said in this same
     utterance (see run()'s handling of the "wake_detected" event). Then,
     if the name genuinely isn't findable in any alternative by the normal
-    pattern, this tries the known-mishearing pattern too, and if even that
-    comes up empty, falls back to the top alternative as-is rather than
-    silently dropping a confirmed wake word just because the general
-    recognizer's own guess doesn't contain recognizable wording for it."""
+    pattern, this also tries the known-mishearing pattern.
+
+    Deliberately does NOT fall further than that (removed 2026-09-05):
+    treating the raw top alternative as a command whenever the spotter
+    alone fired -- even with no recognizable trace of her name in any
+    alternative from the general recognizer -- meant a false-positive
+    from the spotter's own narrow grammar (it only ever chooses among a
+    handful of wake phrases or "[unk]", so ambient noise/unrelated speech
+    can still get misclassified as one of them) was enough to make
+    Denisse respond to something nobody said to her. Silently dropping a
+    genuinely mangled-beyond-recognition wake word is the right tradeoff
+    over responding to things that were never addressed to her."""
     for alt in alternatives:
         command = _strip_wake_word(alt)
         if command is not None:
@@ -248,10 +256,10 @@ def _match_wake_word(alternatives: list[str], trust_fallback: bool = False):
         command = _strip_wake_word(alt, pattern=_MISHEARD_NAME_RE, false_positives=frozenset())
         if command is not None:
             return command
-    return alternatives[0] if alternatives else ""
+    return None
 
 
-def _process_command(command: str, gen: int, brain: Brain, tts_engine, on_exchange) -> None:
+def _process_command(command: str, gen: int, brain: Brain, tts_engine, on_exchange, on_thinking) -> None:
     """Runs in its own thread: compose + speak a reply, dropping out
     quietly at any point if a newer mention of her name has since
     superseded this request (see _start_new_request/_is_current)."""
@@ -272,11 +280,22 @@ def _process_command(command: str, gen: int, brain: Brain, tts_engine, on_exchan
     turn_start = len(messages)
     turn_tail = []
     messages.append({"role": "user", "content": command})
+    if on_thinking:
+        try:
+            on_thinking(True)
+        except Exception:
+            pass
     try:
         reply, messages = brain.respond(messages, confirm=confirm_risky_tool, extra_context=extra_context)
         turn_tail = messages[turn_start:]
     except Exception as e:
         reply = f"Something went wrong: {e}"
+    finally:
+        if on_thinking:
+            try:
+                on_thinking(False)
+            except Exception:
+                pass
 
     if not _is_current(gen):
         print(f"(superseded by a newer request while composing -- not speaking: {reply[:60]!r})", flush=True)
@@ -327,14 +346,18 @@ def _process_command(command: str, gen: int, brain: Brain, tts_engine, on_exchan
             pass
 
 
-def run(stop_event=None, on_exchange=None, on_heard=None, is_offline=None, on_mode_command=None) -> None:
+def run(stop_event=None, on_exchange=None, on_heard=None, is_offline=None, on_mode_command=None, on_thinking=None) -> None:
     """Listen forever (or until stop_event is set) for "hey Denisse".
     `on_exchange(command, reply)`, if given, is called after each handled
     exchange -- e.g. so a caller can show a tray notification without this
     module needing to know anything about tray.py. `on_heard(text)`, if
     given, is called for *every* transcript heard, matched or not -- live
     "the mic is picking you up" feedback, not a new recording (same data
-    already used for wake-word matching, just surfaced).
+    already used for wake-word matching, just surfaced). `on_thinking(bool)`,
+    if given, is called with True right before composing a reply
+    (brain.respond()) and False right after -- e.g. so a caller can show a
+    "composing" indicator without this module needing to know anything
+    about tray.py's floating orb.
 
     `is_offline()`, if given, is polled after a command is matched: while
     it returns True, every command is silently discarded *except* "online
@@ -353,10 +376,14 @@ def run(stop_event=None, on_exchange=None, on_heard=None, is_offline=None, on_mo
         return
 
     try:
-        # Pinned to the light model regardless of MODEL_PATH -- this runs
-        # continuously for as long as wake-word listening is on, so it
-        # stays cheap even if MODEL_PATH has been swapped to something
-        # bigger for one-shot transcription accuracy (see WAKE_MODEL_PATH).
+        # WAKE_MODEL_PATH now follows MODEL_PATH by default (changed
+        # 2026-09-05 -- see stt_vosk.py's comment on it): better accuracy
+        # for hands-free commands, at the cost of stt.start() below
+        # blocking for the model's full load time the first time listening
+        # is turned on (this whole function runs on its own background
+        # thread -- see tray.py's _start_wake_word_listening -- so that
+        # delay doesn't freeze the tray icon itself, just how long it
+        # takes for "Listening for Denisse..." to actually appear/be true).
         stt = stt_vosk.StreamingSTT(model_path=stt_vosk.WAKE_MODEL_PATH)
         stt.start()
     except stt_vosk.ModelUnavailable as e:
@@ -512,7 +539,7 @@ def run(stop_event=None, on_exchange=None, on_heard=None, is_offline=None, on_mo
             # straight back to listening, never blocked by a reply in
             # progress (see the module docstring and _process_command).
             threading.Thread(
-                target=_process_command, args=(command, gen, brain, tts_engine, on_exchange), daemon=True
+                target=_process_command, args=(command, gen, brain, tts_engine, on_exchange, on_thinking), daemon=True
             ).start()
     finally:
         stt.stop()

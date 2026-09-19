@@ -30,6 +30,7 @@ POSITION_FILE = os.path.join(BASE_DIR, "memory", "orb_position.json")
 ACCENT = (168, 85, 247)
 ACCENT_BRIGHT = (201, 163, 255)
 ACCENT_DEEP = (76, 29, 149)
+ACCENT_HEX = "#c9a3ff"  # ACCENT_BRIGHT as a Tk color string, for plain (non-PIL) Canvas items
 
 # An arbitrary color that's vanishingly unlikely to appear in the orb's own
 # art -- Tk's -transparentcolor makes pixels this exact color both
@@ -44,6 +45,46 @@ RING_GAP = 5  # gap between the orb's edge and the rotating ring
 TICK_MS = 50  # animation timer interval -- 20Hz, smooth without being wasteful
 BREATH_FRAMES = 24  # precomputed frames for one full pulse cycle (24 * 50ms = 1.2s/breath)
 RING_DEG_PER_TICK = 3  # 360 / 3 * 50ms = 6s per full rotation
+RING_FRAMES = 360 // RING_DEG_PER_TICK  # precomputed frames for one full ring rotation
+
+SUPERSAMPLE = 4  # render the orb core/glow at this multiple then
+# LANCZOS-downsize, same as it always was -- the core's concentric-circle
+# gradient fill already applies this twice (once for its own pixel size,
+# once again inside _make_orb_core), so pushing this higher blows up
+# startup time fast (measured: 6x here -> 8+s to precompute 24 frames,
+# vs a fraction of a second at 4x) for a part that wasn't the complaint.
+RING_SUPERSAMPLE = 6  # the ring is just two arc strokes (no per-pixel
+# gradient loop), so it can afford a higher supersample cheaply -- this is
+# the part that was actually visibly jagged (raw, non-anti-aliased Canvas
+# arcs), so it gets the bigger quality bump.
+
+# Windows' -transparentcolor is a colorkey, not real per-pixel alpha: only a
+# pixel that's an EXACT match for TRANSPARENT_KEY is dropped/click-through.
+# A softly blurred glow's edge fades through a long tail of low-but-nonzero
+# alpha, and every one of those pixels blends to a faint solid smudge
+# against the key instead of vanishing -- that smudge is what read as
+# visible "gaps"/fringing around the orb and ring. Snapping anything below
+# this threshold straight to fully transparent finishes the fade cleanly.
+ALPHA_SNAP_THRESHOLD = 14
+
+# "Thinking" indicator -- 3 dots below the orb that bob in a traveling wave
+# (like a typing indicator), shown only while a reply is being composed.
+# Plain native Canvas ovals on a solid (non-transparent) background, unlike
+# the orb/ring above -- these are small enough, and moving every tick
+# anyway, that the anti-aliasing effort those needed isn't worth it here.
+THINK_DOT_COUNT = 3
+THINK_DOT_RADIUS = 3  # logical px
+THINK_DOT_GAP = 11  # logical px between dot centers
+THINK_BOB_AMPLITUDE = 4  # logical px of vertical travel, each side of rest
+THINK_BOB_PERIOD_TICKS = 20  # 20 * TICK_MS = 1s per full bob cycle
+THINK_PHASE_STEP = math.pi / 3  # per-dot phase lag -- what makes it read as
+# a wave traveling through the dots rather than 3 dots bouncing in place
+
+
+def _snap_low_alpha(img: "Image.Image") -> "Image.Image":
+    r, g, b, a = img.split()
+    a = a.point(lambda v: 0 if v < ALPHA_SNAP_THRESHOLD else v)
+    return Image.merge("RGBA", (r, g, b, a))
 
 
 def _breath_curve(i: int, n: int) -> float:
@@ -61,14 +102,19 @@ def _dpi_scale(root: tk.Misc) -> float:
 
 
 def _make_orb_core(size_px: int, breath: float) -> Image.Image:
-    """A glossy sphere with an offset highlight, at 4x scale for
+    """A glossy sphere with an offset highlight, at SUPERSAMPLE scale for
     anti-aliasing. `breath` in [0, 1] sets how 'inhaled' (bigger/brighter)
     this frame is -- alternating two of these is the pulse animation."""
-    scale = 4
+    scale = SUPERSAMPLE
     px = size_px * scale
     img = Image.new("RGBA", (px, px), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    r = px / 2 * (0.86 + 0.14 * breath)
+    # Pulse amplitude is 32% stronger than the original 0.86-1.0 swing --
+    # two bumps requested 2026-09-04 (20%, then another 10% on top:
+    # 1.2*1.1=1.32). Peak stays at 1.0 (fills the core canvas exactly) to
+    # avoid clipping, so the extra swing comes from a deeper dip at rest
+    # instead: 1.0 - 1.32*0.14 = 0.8152.
+    r = px / 2 * (0.8152 + 0.1848 * breath)
     cx = cy = px / 2
     steps = max(1, int(r))
     for i in range(steps, 0, -1):
@@ -87,7 +133,7 @@ def _make_orb_core(size_px: int, breath: float) -> Image.Image:
 def _make_orb_frame(total_px: int, orb_px: int, breath: float) -> ImageTk.PhotoImage:
     """The full frame shown on the canvas: soft outer glow + glossy core,
     centered in a transparent total_px x total_px square."""
-    scale = 4
+    scale = SUPERSAMPLE
     size = total_px * scale
     frame = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     core = _make_orb_core(orb_px * scale, breath)
@@ -95,14 +141,44 @@ def _make_orb_frame(total_px: int, orb_px: int, breath: float) -> ImageTk.PhotoI
     glow = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     gd = ImageDraw.Draw(glow)
     gr = core.size[0] * 0.6
-    gd.ellipse((size / 2 - gr, size / 2 - gr, size / 2 + gr, size / 2 + gr), fill=(*ACCENT, round(150 + 60 * breath)))
+    # Same 32% amplitude bump as the core radius above (60 -> 79.2), floor
+    # unchanged so the glow at rest still looks the same as before.
+    gd.ellipse((size / 2 - gr, size / 2 - gr, size / 2 + gr, size / 2 + gr), fill=(*ACCENT, round(150 + 79.2 * breath)))
     glow = glow.filter(ImageFilter.GaussianBlur(size * 0.05))
     frame = Image.alpha_composite(frame, glow)
 
     cd = core.size[0]
     frame.alpha_composite(core, (round((size - cd) / 2), round((size - cd) / 2)))
     frame = frame.resize((total_px, total_px), Image.LANCZOS)
+    frame = _snap_low_alpha(frame)
     return ImageTk.PhotoImage(frame)
+
+
+def _make_ring_frame(total_px: int, ring_r: float, angle: float) -> ImageTk.PhotoImage:
+    """One frame of the JARVIS-style targeting ring, rendered the same way
+    as the orb core (supersampled + LANCZOS-downsized) instead of raw
+    Canvas arcs -- native Tk arcs aren't anti-aliased on Windows, which is
+    what made the rotating ring look jagged/gappy rather than a clean
+    stroke. `angle` is the rotation offset in degrees for this frame."""
+    scale = RING_SUPERSAMPLE
+    size = total_px * scale
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    r = ring_r * scale
+    c = size / 2
+    bbox = (c - r, c - r, c + r, c + r)
+    # A thin (~1.5px) anti-aliased stroke at this widget's tiny final size
+    # (~58px across) has almost no fully-opaque "core" -- nearly every pixel
+    # along the curve ends up a partial-coverage edge pixel, so downsizing
+    # left the whole ring faint and, where visible, blotchy rather than a
+    # clean line (measured: mean alpha ~81/255 at 1.5px vs ~127/255 here).
+    # A wider stroke gives the curve room for a solid center under the AA.
+    width = max(1, round(3.5 * scale))
+    draw.arc(bbox, start=angle, end=angle + 150, fill=(*ACCENT_BRIGHT, 255), width=width)
+    draw.arc(bbox, start=angle + 180, end=angle + 240, fill=(124, 58, 237, 255), width=width)
+    img = img.resize((total_px, total_px), Image.LANCZOS)
+    img = _snap_low_alpha(img)
+    return ImageTk.PhotoImage(img)
 
 
 class FloatingOrb:
@@ -136,19 +212,18 @@ class FloatingOrb:
         c = self.total_px / 2
         self._orb_img_id = self.canvas.create_image(c, c, image=self._frames[0])
 
-        # JARVIS-style targeting ring -- two native Canvas arcs (cheap to
-        # animate: just nudging their `start` angle each tick, no image
-        # regeneration needed) rather than a PIL image like the orb.
+        # JARVIS-style targeting ring -- precomputed anti-aliased PIL frames
+        # (same supersample-then-downsize technique as the orb), cycled by
+        # index like the breathing frames. Previously two native Canvas
+        # arcs: cheap to animate, but Tk arcs aren't anti-aliased on
+        # Windows, which is what made the rotating ring look jagged/gappy.
         ring_r = self.orb_px / 2 + round(RING_GAP * scale)
-        self._ring_main = self.canvas.create_arc(
-            c - ring_r, c - ring_r, c + ring_r, c + ring_r,
-            start=0, extent=150, style="arc", outline="#c9a3ff", width=max(1, round(1.5 * scale)),
-        )
-        self._ring_echo = self.canvas.create_arc(
-            c - ring_r, c - ring_r, c + ring_r, c + ring_r,
-            start=180, extent=60, style="arc", outline="#7c3aed", width=max(1, round(1.5 * scale)),
-        )
-        self._ring_angle = 0
+        self._ring_frames = [
+            _make_ring_frame(self.total_px, ring_r, i * RING_DEG_PER_TICK)
+            for i in range(RING_FRAMES)
+        ]
+        self._ring_frame_i = 0
+        self._ring_img_id = self.canvas.create_image(c, c, image=self._ring_frames[0])
 
         # Speech bubble -- a separate small Toplevel (a widget can't be
         # placed outside its own parent window's bounds in Tk), shown just
@@ -165,6 +240,43 @@ class FloatingOrb:
         )
         self._bubble_label.pack()
         self._bubble_hide_job = None
+
+        # Thinking indicator -- another small Toplevel, positioned just
+        # below the orb instead of above (keeps clear of the speech bubble,
+        # which is never shown at the same time as this anyway -- one's
+        # "composing", the other's "here's what I just said").
+        dot_span = (THINK_DOT_COUNT - 1) * THINK_DOT_GAP
+        self._think_w = round((dot_span + THINK_DOT_RADIUS * 2 + 16) * scale)
+        self._think_h = round((THINK_DOT_RADIUS * 2 + THINK_BOB_AMPLITUDE * 2 + 12) * scale)
+        self._think_win = tk.Toplevel(root)
+        self._think_win.overrideredirect(True)
+        self._think_win.attributes("-topmost", True)
+        self._think_win.withdraw()
+        think_canvas = tk.Canvas(
+            self._think_win, width=self._think_w, height=self._think_h,
+            bg="#0d0916", highlightbackground="#a855f7", highlightthickness=1, bd=0,
+        )
+        think_canvas.pack()
+        self._think_canvas = think_canvas
+        tcy = self._think_h / 2
+        start_x = (self._think_w - dot_span * scale) / 2
+        think_r = THINK_DOT_RADIUS * scale
+        self._think_dots = []  # [(canvas_id, rest_cx, rest_cy), ...]
+        for i in range(THINK_DOT_COUNT):
+            dcx = start_x + i * THINK_DOT_GAP * scale
+            dot_id = think_canvas.create_oval(
+                dcx - think_r, tcy - think_r, dcx + think_r, tcy + think_r,
+                fill=ACCENT_HEX, outline="",
+            )
+            self._think_dots.append((dot_id, dcx, tcy))
+        self._think_r = think_r
+        self._think_amplitude = THINK_BOB_AMPLITUDE * scale
+        # A count, not a bool -- voice and the chat popup can each
+        # independently start/stop this (e.g. a voice request superseding
+        # one that's still composing), so hide only once every caller that
+        # started it has also stopped it, not on the first stop to arrive.
+        self._thinking_count = 0
+        self._think_tick = 0
 
         self._dragging = False
         self._drag_start = (0, 0)
@@ -247,9 +359,18 @@ class FloatingOrb:
         try:
             self._frame_i = (self._frame_i + 1) % len(self._frames)
             self.canvas.itemconfig(self._orb_img_id, image=self._frames[self._frame_i])
-            self._ring_angle = (self._ring_angle + RING_DEG_PER_TICK) % 360
-            self.canvas.itemconfig(self._ring_main, start=self._ring_angle)
-            self.canvas.itemconfig(self._ring_echo, start=(self._ring_angle + 180) % 360)
+            self._ring_frame_i = (self._ring_frame_i + 1) % len(self._ring_frames)
+            self.canvas.itemconfig(self._ring_img_id, image=self._ring_frames[self._ring_frame_i])
+            if self._thinking_count > 0:
+                self._think_tick += 1
+                base_phase = (self._think_tick / THINK_BOB_PERIOD_TICKS) * 2 * math.pi
+                for i, (dot_id, cx, cy) in enumerate(self._think_dots):
+                    dy = self._think_amplitude * math.sin(base_phase - i * THINK_PHASE_STEP)
+                    self._think_canvas.coords(
+                        dot_id,
+                        cx - self._think_r, cy + dy - self._think_r,
+                        cx + self._think_r, cy + dy + self._think_r,
+                    )
         except tk.TclError:
             return  # window torn down (app quitting) -- just stop
         self.root.after(TICK_MS, self._animate)
@@ -282,5 +403,43 @@ class FloatingOrb:
         self._bubble_hide_job = None
         try:
             self._bubble.withdraw()
+        except tk.TclError:
+            pass
+
+    # -- thinking indicator --
+
+    def start_thinking(self) -> None:
+        """Show the bobbing-dots indicator below the orb -- call right
+        before composing a reply (brain.respond()), regardless of whether
+        the request came in by voice or the chat popup. Reference-counted
+        (see _thinking_count): safe to call while already showing, e.g. a
+        voice request coming in while the popup is also composing one --
+        the indicator stays up until *every* caller that started it has
+        also called stop_thinking()."""
+        self._thinking_count += 1
+        if self._thinking_count > 1:
+            return  # already showing for another in-flight request
+        self._think_tick = 0
+        try:
+            ox, oy = self.win.winfo_x(), self.win.winfo_y()
+            x = ox + self.total_px // 2 - self._think_w // 2
+            y = oy + self.total_px + 8
+            sw, sh = self.win.winfo_screenwidth(), self.win.winfo_screenheight()
+            x = max(4, min(x, sw - self._think_w - 4))
+            y = min(y, sh - self._think_h - 4)
+            self._think_win.geometry(f"{self._think_w}x{self._think_h}+{x}+{y}")
+            self._think_win.deiconify()
+        except tk.TclError:
+            pass
+
+    def stop_thinking(self) -> None:
+        """Balances one start_thinking() call -- hides the indicator only
+        once every caller that started it has also stopped it (whether a
+        given reply succeeded or errored; composing is over either way)."""
+        self._thinking_count = max(0, self._thinking_count - 1)
+        if self._thinking_count > 0:
+            return  # at least one other in-flight request is still composing
+        try:
+            self._think_win.withdraw()
         except tk.TclError:
             pass

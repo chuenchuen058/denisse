@@ -13,6 +13,7 @@ Say 'exit' or 'quit' (typed or spoken) to stop. Ctrl+C also works.
 
 import os
 import sys
+import threading
 
 import pyttsx3
 
@@ -74,10 +75,23 @@ def speak(engine, text: str) -> None:
 def listen() -> str:
     """Records until a pause, transcribing live via the offline Vosk model
     (stt_vosk.py) -- no audio leaves the machine, no account needed.
-    Returns '' if nothing understandable was heard within the timeout."""
-    print("listening...")
+    Returns '' if nothing understandable was heard within the timeout.
+
+    Prints "listening..." only once the mic is actually open (via
+    on_ready), not before -- with a big Vosk model that can take ~17s to
+    load (see stt_vosk.preload()), printing it any earlier would have you
+    talking into a mic that isn't listening yet, and the whole thing gets
+    silently missed rather than just misheard."""
+    if not stt_vosk.is_ready():
+        print("(loading voice model, one moment...)")
+
+    def _announce_ready():
+        print("listening...")
+
     try:
-        return stt_vosk.transcribe_once(timeout=8, phrase_time_limit=15).strip()
+        return stt_vosk.transcribe_once(
+            timeout=8, phrase_time_limit=15, on_ready=_announce_ready
+        ).strip()
     except stt_vosk.ModelUnavailable as e:
         print(f"({e})")
         return ""
@@ -85,6 +99,12 @@ def listen() -> str:
 
 def main() -> None:
     print("Denisse (voice mode) is starting up...")
+
+    # Start warming the Vosk model now, in the background, so it's likely
+    # already loaded by the time you press Enter to talk the first time --
+    # see stt_vosk.preload()'s docstring for why this matters a lot more
+    # than it sounds like it should.
+    threading.Thread(target=stt_vosk.preload, daemon=True).start()
 
     try:
         brain = conversation.get_brain()

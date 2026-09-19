@@ -103,15 +103,21 @@ WAKE_GRAMMAR = json.dumps([
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 _DEFAULT_MODEL_PATH = os.path.join(_ROOT, "models", "vosk-model-en-us-0.22-lgraph")
 MODEL_PATH = os.environ.get("DENISSE_VOSK_MODEL_PATH", _DEFAULT_MODEL_PATH)
-# Wake-word listening runs this model continuously in the background for as
-# long as it's on, unlike one-shot transcription -- so it deliberately
-# stays pinned to the light -lgraph model by default (fast enough to not
-# noticeably load the CPU while idle-listening) rather than following
-# MODEL_PATH, which is free to be swapped to something bigger/slower for
-# one-shot accuracy without that cost applying the whole time Denisse is
-# just listening for her name. Override with DENISSE_WAKE_MODEL_PATH if
-# you want them to match again.
-WAKE_MODEL_PATH = os.environ.get("DENISSE_WAKE_MODEL_PATH", _DEFAULT_MODEL_PATH)
+# Wake-word listening's *general* recognizer (transcribing the actual
+# command, not just spotting her name -- see StreamingSTT.start(), both
+# are built from whichever single model this resolves to) used to be
+# pinned to the light -lgraph model regardless of MODEL_PATH, to keep the
+# always-on listener cheap. Changed 2026-09-05 (accuracy complaints about
+# hands-free commands specifically -- push-to-talk's one-shot transcripts
+# had already been switched to the bigger model, and that didn't help
+# hands-free at all since it doesn't share this code path): defaults to
+# following MODEL_PATH now, same tradeoff as one-shot transcription --
+# better accuracy, but loading it costs ~17s once when wake-word listening
+# is turned on, and it stays resident in RAM (roughly 1-2GB more) for as
+# long as listening stays on. Override with DENISSE_WAKE_MODEL_PATH to
+# pin this back to something lighter than MODEL_PATH again without
+# affecting one-shot transcription.
+WAKE_MODEL_PATH = os.environ.get("DENISSE_WAKE_MODEL_PATH", MODEL_PATH)
 
 
 class ModelUnavailable(RuntimeError):
@@ -133,6 +139,31 @@ def _get_model(path: str = None) -> "vosk.Model":
                 )
             _models[path] = vosk.Model(path)
         return _models[path]
+
+
+def is_ready(path: str = None) -> bool:
+    """Whether _get_model(path) would return instantly from cache right
+    now. Lets a caller show an honest 'loading...' message instead of a
+    'listening...' one that's a lie until the model's actually loaded --
+    see preload() below and voice_mode.py's listen()."""
+    return (path or MODEL_PATH) in _models
+
+
+def preload(path: str = None) -> None:
+    """Warm the model cache in the background, e.g. right at process
+    startup -- so the *first* real transcribe_once()/StreamingSTT.start()
+    call doesn't have to eat the full load cold. Measured directly: ~17s
+    for the full vosk-model-en-us-0.22, vs ~0.7s for -lgraph -- with the
+    big model, a caller that opens the mic synchronously on first use (as
+    voice_mode.py's listen() used to) effectively can't hear anything said
+    in that first ~17s, no matter how clearly it's said. Safe to call from
+    a daemon thread and to call more than once; swallows errors since a
+    real caller will hit and report the same failure properly when it
+    actually needs the model."""
+    try:
+        _get_model(path)
+    except Exception:
+        pass
 
 
 def _pick_input_device(pa: "pyaudio.PyAudio") -> tuple[int, int, int]:
@@ -370,18 +401,30 @@ class StreamingSTT:
                 pass
 
 
-def transcribe_once(timeout: float = 8.0, phrase_time_limit: float = 15.0) -> str:
+def transcribe_once(timeout: float = 8.0, phrase_time_limit: float = 15.0, on_ready=None) -> str:
     """One-shot blocking transcription for push-to-talk callers
     (voice_mode.py): waits up to `timeout` seconds for speech to start,
     then up to `phrase_time_limit` more for it to finish, returning the
     transcript ('' if nothing understandable was heard). Hands-free
     listening (wake_word.py) uses StreamingSTT directly instead, so it can
-    react to live partial results while composing/speaking a reply."""
+    react to live partial results while composing/speaking a reply.
+
+    `on_ready`, if given, is called right after the mic stream actually
+    opens -- i.e. once model load (see preload()) is done and audio is
+    really being captured, not before. Callers should show any "go ahead
+    and talk" message from this callback, not before calling this
+    function -- see the module-level note on why "before" can silently
+    eat the first several seconds of real speech."""
     stt = StreamingSTT()
     try:
         stt.start()
     except ModelUnavailable:
         raise
+    if on_ready:
+        try:
+            on_ready()
+        except Exception:
+            pass
 
     try:
         start_deadline = time.time() + timeout
