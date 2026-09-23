@@ -55,6 +55,7 @@ import auto_organize
 import conversation
 import memory_store
 import news
+import tasks
 import obsidian_sync
 import optimize
 import wake_word
@@ -530,6 +531,30 @@ def _decline_risky_unattended(name, args):
     decline anything RISKY_TOOLS would otherwise ask about, rather than
     either hanging forever waiting for input or running it unsupervised."""
     return name not in RISKY_TOOLS
+
+
+def _remind_due_tasks():
+    """Login nudge: anything overdue or due in the next 48h.
+
+    Deliberately a notification and not a chat turn -- it costs no model
+    time, can't hallucinate, and works even if Ollama hasn't finished
+    starting (which it often hasn't, right after a reboot). Clicking the
+    tray icon opens the chat if he wants to do something about it.
+    """
+    try:
+        overdue, soon = tasks.needs_reminder(hours=48)
+        if not overdue and not soon:
+            return
+        lines = [f"OVERDUE: {tasks.describe(t)}" for t in overdue]
+        lines += [tasks.describe(t) for t in soon]
+        body = "\n".join(lines[:5])
+        if len(lines) > 5:
+            body += f"\n...and {len(lines) - 5} more"
+        if _tray_icon is not None:
+            _tray_icon.notify(body[:220], "Denisse — on your plate")
+        tasks.mark_reminded([t["id"] for t in overdue + soon])
+    except Exception:
+        pass  # a reminder failing must never take the tray down with it
 
 
 def _news_briefing_loop():
@@ -1165,6 +1190,11 @@ def main():
 
     global _floating_orb
     _floating_orb = FloatingOrb(root, on_activate=_open_chat)
+
+    # Nudge about anything due, shortly after login. Delayed so it doesn't
+    # fight the tray icon and orb for the first seconds of startup, and
+    # marked once per day so restarting the tray doesn't re-nag.
+    root.after(20_000, _remind_due_tasks)
 
     _tray_icon.run_detached()  # icon runs on its own thread; tkinter owns the main thread
     root.mainloop()

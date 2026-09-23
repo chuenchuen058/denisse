@@ -81,6 +81,20 @@ CASES = [
                "by stating the machine facts in the system prompt.",
     },
     {
+        "id": "task_add",
+        "prompt": "remind me to call the dentist tomorrow at 3pm",
+        "expect": {"any_tool_of": {"add_task"}, "deny": POSIX_LEAKS},
+        "why": "A 'remind me to X by Y' must become a task, not a reply that "
+               "promises to remember and then doesn't.",
+    },
+    {
+        "id": "task_list",
+        "prompt": "what's on my plate?",
+        "expect": {"any_tool_of": {"list_tasks"}, "deny": POSIX_LEAKS},
+        "why": "Asking what's outstanding must read the real task list "
+               "rather than being answered from context.",
+    },
+    {
         "id": "garbled",
         "prompt": "the do way or take a bite white the way",
         "expect": {"none_of": {"get_news", "play_song", "run_shell_command"},

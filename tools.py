@@ -19,6 +19,7 @@ import news
 import obsidian_sync
 import optimize
 import spotify_control
+import tasks
 
 FACTS_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "memory", "facts.json"
@@ -549,6 +550,50 @@ def read_skill(name: str) -> str:
 
 
 # Registry mapping tool name -> callable, used by brain.py's tool-use loop.
+def add_task(text: str, due: str = "") -> str:
+    """Add something Chuen has to do, with an optional deadline in his own
+    words. Returns confirmation including how the deadline was understood,
+    so a misread date is visible immediately rather than at the deadline."""
+    t = tasks.add_task(text, due)
+    if t["due"]:
+        return f"Added: {tasks.describe(t)}"
+    if t["due_text"]:
+        return (f"Added: {t['text']} -- but I couldn't work out a date from "
+                f"\"{t['due_text']}\", so it has no deadline.")
+    return f"Added: {t['text']} (no deadline)"
+
+
+def list_open_tasks() -> str:
+    open_tasks = tasks.list_tasks()
+    if not open_tasks:
+        return "Nothing on your list."
+    overdue, soon = tasks.due_within(48)
+    over_ids = {t["id"] for t in overdue}
+    lines = []
+    for t in open_tasks:
+        mark = "OVERDUE - " if t["id"] in over_ids else ""
+        lines.append(f"- {mark}{tasks.describe(t)}")
+    return f"{len(open_tasks)} open:\n" + "\n".join(lines)
+
+
+def complete_task(task: str) -> str:
+    """Mark a task done. Matched on words, and refuses when ambiguous."""
+    t = tasks.complete_task(task)
+    if t is None:
+        return (f"I couldn't find a single open task matching \"{task}\" -- "
+                "either it's not there or more than one matched. "
+                "Check the list and be more specific.")
+    return f"Done: {t['text']}"
+
+
+def remove_task(task: str) -> str:
+    """Delete a task outright -- for things added by mistake."""
+    t = tasks.remove_task(task)
+    if t is None:
+        return f"No single open task matched \"{task}\"."
+    return f"Removed: {t['text']}"
+
+
 TOOL_FUNCTIONS = {
     "run_shell_command": run_shell_command,
     "open_application": open_application,
@@ -572,6 +617,10 @@ TOOL_FUNCTIONS = {
     "list_known_facts": list_known_facts,
     "list_skills": list_skills,
     "read_skill": read_skill,
+    "add_task": add_task,
+    "list_tasks": list_open_tasks,
+    "complete_task": complete_task,
+    "remove_task": remove_task,
     "play_song": spotify_control.play_song,
     "pause_music": spotify_control.pause_music,
     "resume_music": spotify_control.resume_music,

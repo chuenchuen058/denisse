@@ -448,6 +448,62 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_task",
+            "description": (
+                "Add something Chuen has to do, optionally with a deadline. Use this "
+                "whenever he says he needs to do something by a time -- 'remind me to "
+                "email Sunway before Friday' is add_task('email Sunway', 'before Friday'). "
+                "Pass his own words for the deadline; don't work out the date yourself."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "What needs doing, e.g. 'email Sunway about the firm visit'."},
+                    "due": {"type": "string", "description": "Deadline in his words, e.g. 'before Friday', 'tomorrow 5pm'. Omit if none."},
+                },
+                "required": ["text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_tasks",
+            "description": "List Chuen's open tasks, soonest deadline first, flagging overdue ones. Use when he asks what he has to do.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "complete_task",
+            "description": (
+                "Mark a task done once Chuen says he's finished it. Describe the task in "
+                "words -- it's matched on those. If more than one matches it refuses "
+                "rather than guessing, so pass enough to be specific."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"task": {"type": "string", "description": "Words identifying the task, e.g. 'the Sunway email'."}},
+                "required": ["task"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "remove_task",
+            "description": "Delete a task that was added by mistake. For tasks he has actually done, use complete_task instead so the record is kept.",
+            "parameters": {
+                "type": "object",
+                "properties": {"task": {"type": "string", "description": "Words identifying the task to delete."}},
+                "required": ["task"],
+            },
+        },
+    },
 ]
 
 def _get(obj, key, default=None):

@@ -23,3 +23,4 @@ psutil>=6.0.0
 
 # Spotify playback control -- see spotify_control.py
 spotipy>=2.24.0
+dateparser==1.4.3
