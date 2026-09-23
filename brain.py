@@ -7,6 +7,7 @@ calls).
 No API key, no internet required after the model is downloaded once.
 """
 
+import inspect
 import json
 import os
 import platform
@@ -102,7 +103,16 @@ SYSTEM_PROMPT = (
     "Spotify playback (play/pause/skip/check what's playing) when it's "
     "set up, and remember/recall facts about the user. Be direct. Only use a tool "
     "when it's actually needed to answer or act -- don't narrate your "
-    "intentions, just do it and report the result. IMPORTANT: for a "
+    "intentions, just do it and report the result. "
+    # Both of these were observed on 2026-09-23 with the new task tools:
+    # "what's on my plate" answered "you have a few tasks lined up" without
+    # naming any, and "tick it off" replied with a raw JSON status object.
+    "RELAYING TOOL RESULTS: when a tool gives you a list, say what is "
+    "actually in it -- name the items and their deadlines. 'You have a few "
+    "tasks lined up' is a useless answer when you are holding the list. "
+    "And never reply with JSON, a status object, or anything that looks "
+    "like code: the tools already return plain English, so say that in "
+    "your own words. IMPORTANT: for a "
     "greeting, small talk, or a short acknowledgment like 'thanks' or "
     "'ok', respond the way a person actually would -- 'doing alright, "
     "you?', 'anytime', 'no worries' -- without calling any tool first "
@@ -506,6 +516,36 @@ TOOL_DEFINITIONS = [
     },
 ]
 
+def _unleak_json(text: str, last_tool_result: str) -> str:
+    """Replace a reply that is really a JSON status object with something a
+    person would say.
+
+    Observed 2026-09-23: asked to tick a task off, the model answered
+    '{"status": "success", "message": "Task completed successfully."}'.
+    The tools already return plain English, so the model invented that. The
+    system prompt now forbids it, but an 8B model will do it anyway
+    sometimes, so this is the net underneath.
+
+    Prefers a human-readable field out of the blob, then the actual tool
+    result, and only then a generic line -- in that order, because the tool
+    result is the one thing here that is definitely true.
+    """
+    stripped = (text or "").strip()
+    if not (stripped.startswith("{") and stripped.endswith("}")):
+        return text
+    try:
+        blob = json.loads(stripped)
+    except (ValueError, TypeError):
+        return text
+    if not isinstance(blob, dict):
+        return text
+    for key in ("message", "output", "result", "response", "text", "content"):
+        value = blob.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return (last_tool_result or "").strip() or "Done."
+
+
 def _get(obj, key, default=None):
     """Works whether ollama hands back a dict or an attribute-style object."""
     if obj is None:
@@ -558,16 +598,61 @@ def _sniff_fake_tool_call(content: str) -> dict | None:
     return {"name": data["name"], "arguments": args}
 
 
-def _run_tool(name: str, args: dict, confirm) -> str:
+def _drop_unexpected_args(func, args: dict) -> dict:
+    """Keep only the keyword arguments `func` actually accepts.
+
+    An 8B model passes junk arguments regularly -- observed 2026-09-23, it
+    called list_tasks(task='the N20 motor') when list_tasks takes none. That
+    raised a TypeError, and rather than reporting the error the model
+    *invented* a plausible-looking task list, including an item that has
+    never existed. A fabricated answer is far worse than a dropped argument,
+    so extras are discarded and the call goes ahead.
+
+    Functions that take **kwargs are left alone.
+    """
+    try:
+        params = inspect.signature(func).parameters
+    except (TypeError, ValueError):
+        return args
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return args
+    allowed = {
+        n for n, p in params.items()
+        if p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                      inspect.Parameter.KEYWORD_ONLY)
+    }
+    return {k: v for k, v in args.items() if k in allowed}
+
+
+# Tools that change something and are almost never wanted twice in one
+# turn. Completing a task is the case that bit: told "I've ordered the N20
+# motor, tick it off", the model closed that task and then closed an
+# unrelated one as well, three runs out of three (2026-09-23). Marking work
+# done that Chuen never mentioned is quiet, plausible-looking data loss --
+# he'd only find out when the thing he thought was tracked didn't happen.
+_ONCE_PER_TURN = {"complete_task", "remove_task"}
+
+
+def _run_tool(name: str, args: dict, confirm, used: set | None = None) -> str:
     func = tools.TOOL_FUNCTIONS.get(name)
     if func is None:
         return f"Error: unknown tool '{name}'"
+    if used is not None and name in _ONCE_PER_TURN:
+        if name in used:
+            return (f"Refused: '{name}' has already run once this turn. "
+                    "Only act on the one thing Chuen actually named. If he "
+                    "meant something else too, ask him.")
+        used.add(name)
     if confirm is not None and not confirm(name, args):
         return f"User declined to run '{name}'."
     try:
-        return func(**args)
+        return func(**_drop_unexpected_args(func, args))
     except Exception as e:
-        return f"Error running '{name}': {e}"
+        # Be explicit that this failed and that nothing may be invented to
+        # cover it -- the model's instinct on a tool error is to make
+        # something up that looks like a plausible result.
+        return (f"Error running '{name}': {e}. Tell the user this failed. "
+                "Do not invent a result.")
 
 
 class Brain:
@@ -618,6 +703,8 @@ class Brain:
         #         "to the shared Obsidian memory vault:\n\n" + claude_context
         #     )
         full_messages = [{"role": "system", "content": system_content}] + messages
+        last_tool_result = ""  # fallback for _unleak_json
+        used_once = set()      # guards _ONCE_PER_TURN tools; per turn, not per round
 
         for _round in range(MAX_TOOL_ROUNDS + 1):
             # Last round: stop offering tools, so the model has to answer in
@@ -645,7 +732,8 @@ class Brain:
             tool_calls = _get(msg, "tool_calls") or []
 
             if not tool_calls:
-                final_text = _get(msg, "content", "") or ""
+                final_text = _unleak_json(_get(msg, "content", "") or "",
+                                          last_tool_result)
                 fake_call = _sniff_fake_tool_call(final_text)
                 if fake_call is None:
                     messages.append({"role": "assistant", "content": final_text})
@@ -658,7 +746,8 @@ class Brain:
                 assistant_msg = {"role": "assistant", "content": "", "tool_calls": [{"function": fake_call}]}
                 messages.append(assistant_msg)
                 full_messages.append(assistant_msg)
-                result = _run_tool(fake_call["name"], fake_call["arguments"], confirm)
+                result = _run_tool(fake_call["name"], fake_call["arguments"], confirm, used_once)
+                last_tool_result = str(result)
                 tool_msg = {"role": "tool", "content": str(result)}
                 messages.append(tool_msg)
                 full_messages.append(tool_msg)
@@ -680,7 +769,8 @@ class Brain:
                 func_info = _get(call, "function")
                 name = _get(func_info, "name")
                 args = dict(_get(func_info, "arguments") or {})
-                result = _run_tool(name, args, confirm)
+                result = _run_tool(name, args, confirm, used_once)
+                last_tool_result = str(result)
                 tool_msg = {"role": "tool", "content": str(result)}
                 messages.append(tool_msg)
                 full_messages.append(tool_msg)

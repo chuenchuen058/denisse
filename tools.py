@@ -577,13 +577,25 @@ def list_open_tasks() -> str:
 
 
 def complete_task(task: str) -> str:
-    """Mark a task done. Matched on words, and refuses when ambiguous."""
+    """Mark a task done. Matched on words, and refuses when ambiguous.
+
+    Says how many are left but deliberately NOT which. An earlier version
+    named them -- "1 still open: finish the ViTrox application" -- and the
+    model read that as an instruction and completed that task too, marking
+    work done that Chuen had never mentioned. Naming a task in the result of
+    a completion hands a small model a target. Measured 2026-09-23: three
+    runs out of three closed both tasks.
+    """
     t = tasks.complete_task(task)
     if t is None:
-        return (f"I couldn't find a single open task matching \"{task}\" -- "
-                "either it's not there or more than one matched. "
-                "Check the list and be more specific.")
-    return f"Done: {t['text']}"
+        return (f"No single open task matched \"{task}\" -- either it isn't "
+                "there or more than one matched. Say the exact task name.")
+    remaining = len(tasks.list_tasks())
+    if not remaining:
+        return f"Marked done: {t['text']}. That was the last one."
+    return (f"Marked done: {t['text']}. {remaining} other "
+            f"task{'s' if remaining != 1 else ''} still open; "
+            "use list_tasks only if he asks what's left.")
 
 
 def remove_task(task: str) -> str:
