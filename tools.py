@@ -564,16 +564,25 @@ def add_task(text: str, due: str = "") -> str:
 
 
 def list_open_tasks() -> str:
+    """The open tasks, and where they're kept.
+
+    The location is included because "where is the task list" is a question
+    Chuen actually asks, and without a true answer in front of it the model
+    invents one -- it confidently reported a nonexistent
+    'C:\\Users\\Xichu\\GitHub\\denisse\\tasks.txt' two times out of three
+    (2026-09-25). Telling it the real path beats telling it not to guess.
+    """
+    where = f"The list is kept in {tasks.TASKS_FILE}."
     open_tasks = tasks.list_tasks()
     if not open_tasks:
-        return "Nothing on your list."
+        return f"Nothing on your list. {where}"
     overdue, soon = tasks.due_within(48)
     over_ids = {t["id"] for t in overdue}
     lines = []
     for t in open_tasks:
         mark = "OVERDUE - " if t["id"] in over_ids else ""
         lines.append(f"- {mark}{tasks.describe(t)}")
-    return f"{len(open_tasks)} open:\n" + "\n".join(lines)
+    return f"{len(open_tasks)} open:\n" + "\n".join(lines) + f"\n{where}"
 
 
 def complete_task(task: str) -> str:

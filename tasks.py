@@ -80,6 +80,49 @@ def parse_due(text: str, now: datetime | None = None) -> datetime | None:
         return None
 
 
+def due_from_text(text: str, now: datetime | None = None) -> datetime | None:
+    """Pull a deadline out of the task text itself.
+
+    People write the date inside the sentence -- "live online meeting on the
+    6th of October 14:00 (Tue 06 Oct 14:00)" -- and the model then passes
+    the whole thing as `text` with no `due` at all, so the task lands with
+    no deadline and never triggers a reminder. Observed 2026-09-25 with two
+    real tasks.
+
+    Parentheses defeat dateparser's search outright (measured: the string
+    above returns None, the same string without the bracketed part parses
+    fine), so they're stripped first. The last future date in the sentence
+    wins -- in "meeting on the 6th (Tue 06 Oct)" both refer to the same
+    thing, and where they differ the later one is the deadline.
+    """
+    if not text:
+        return None
+    now = now or datetime.now()
+    cleaned = re.sub(r"\([^)]*\)", " ", text)
+    try:
+        from dateparser.search import search_dates
+
+        found = search_dates(
+            cleaned,
+            settings={"PREFER_DATES_FROM": "future", "RELATIVE_BASE": now},
+        )
+    except Exception:
+        return None
+    if not found:
+        return None
+    for phrase, when in reversed(found):
+        # A match with no digit and no month/weekday name is almost always
+        # a false positive off an ordinary word ("may", "march", "sat").
+        if not when or when <= now:
+            continue
+        if re.search(r"\d", phrase) or re.search(
+            r"(?i)\b(" + "|".join(_WEEKDAYS) + r"|jan|feb|mar|apr|may|jun|"
+            r"jul|aug|sep|oct|nov|dec|today|tomorrow|tonight)", phrase
+        ):
+            return when
+    return None
+
+
 def _load() -> list:
     if not os.path.exists(TASKS_FILE):
         return []
@@ -101,6 +144,11 @@ def add_task(text: str, due: str = "") -> dict:
     the raw phrase is kept alongside the parsed datetime so nothing is lost
     when parsing fails."""
     when = parse_due(due)
+    inferred = False
+    if when is None:
+        # No usable `due` -- the date is often sitting in the text instead.
+        when = due_from_text(text)
+        inferred = when is not None
     task = {
         "id": uuid.uuid4().hex[:8],
         "text": text.strip(),
@@ -108,6 +156,7 @@ def add_task(text: str, due: str = "") -> dict:
         "due_text": due.strip() or None,
         "created": datetime.now().isoformat(timespec="minutes"),
         "done_at": None,
+        "due_inferred": inferred,  # read out of the text, not given as `due`
         "event_id": None,      # set when it also becomes a calendar event
         "reminded_on": None,   # date we last nagged, so login reminders don't repeat
     }
@@ -236,6 +285,11 @@ def needs_reminder(hours: int = 48) -> tuple:
 
 def describe(t: dict) -> str:
     if not t["due"]:
+        # Keep an unparseable deadline visible -- "as soon as possible"
+        # is a real instruction even though no date comes out of it, and
+        # silently dropping it makes the task look undated.
+        if t.get("due_text"):
+            return f"{t['text']} ({t['due_text']})"
         return t["text"]
     when = datetime.fromisoformat(t["due"])
     now = datetime.now()

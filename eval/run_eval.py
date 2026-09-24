@@ -11,8 +11,9 @@ A gap between the two means the stored history is dragging her down again.
 That's the thing worth watching over a week, and it's why this runs both
 rather than just the easy one.
 
-Never writes to memory/conversation.json -- an eval that pollutes the thing
-it measures is worse than no eval.
+Touches no real state: conversation history is never written, and the task
+store is redirected to a scratch file for the run. An eval that pollutes
+the thing it measures is worse than no eval.
 
     .venv\\Scripts\\python.exe eval\\run_eval.py [--out DIR] [--quiet]
 """
@@ -21,6 +22,7 @@ import argparse
 import datetime
 import json
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -186,6 +188,19 @@ def main() -> int:
         pass
 
     import conversation
+    import tasks
+
+    # The suite drives real tools, and the task cases really do add tasks.
+    # Point the store at a scratch file first: before this, every nightly
+    # run left two "call the dentist" tasks in Chuen's real list (one per
+    # condition) and four had piled up by 2026-09-25. An eval that dirties
+    # the thing it measures is worse than no eval.
+    #
+    # Seeded with one known task so the list case has something to find
+    # regardless of what's really outstanding.
+    scratch = Path(tempfile.mkdtemp(prefix="denisse-eval-")) / "tasks.json"
+    tasks.TASKS_FILE = str(scratch)
+    tasks.add_task("file the Spritzer paperwork", "friday")
 
     now = datetime.datetime.now()
     results = {"stamp": now.strftime("%Y-%m-%d %H:%M"), "date": now.strftime("%Y-%m-%d")}

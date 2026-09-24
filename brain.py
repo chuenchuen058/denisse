@@ -104,15 +104,20 @@ SYSTEM_PROMPT = (
     "set up, and remember/recall facts about the user. Be direct. Only use a tool "
     "when it's actually needed to answer or act -- don't narrate your "
     "intentions, just do it and report the result. "
-    # Both of these were observed on 2026-09-23 with the new task tools:
-    # "what's on my plate" answered "you have a few tasks lined up" without
-    # naming any, and "tick it off" replied with a raw JSON status object.
-    "RELAYING TOOL RESULTS: when a tool gives you a list, say what is "
-    "actually in it -- name the items and their deadlines. 'You have a few "
-    "tasks lined up' is a useless answer when you are holding the list. "
-    "And never reply with JSON, a status object, or anything that looks "
-    "like code: the tools already return plain English, so say that in "
-    "your own words. IMPORTANT: for a "
+    # A "RELAYING TOOL RESULTS" paragraph lived here on 2026-09-23, telling
+    # her to name the items in a list and never answer with JSON. It fixed
+    # those, and broke other things: clean eval went 10/10 -> 8/10, with
+    # greetings picking up a spurious recall() call and "what is 17 times
+    # 23?" answering "I called the 'calculate' tool" instead of 391.
+    # A/B'd twice each way -- 8/10 with it, 10/10 without.
+    #
+    # The lesson is about budget, not wording. This prompt is already ~4000
+    # characters and an 8B model spreads its attention across all of it, so
+    # anything added here is paid for by everything already in it. Guidance
+    # that only matters for one tool belongs in that tool's description,
+    # where it is in context; the JSON ban lives in _unleak_json, where it
+    # costs no attention at all. Think hard before adding to this prompt.
+    "IMPORTANT: for a "
     "greeting, small talk, or a short acknowledgment like 'thanks' or "
     "'ok', respond the way a person actually would -- 'doing alright, "
     "you?', 'anytime', 'no worries' -- without calling any tool first "
@@ -472,7 +477,7 @@ TOOL_DEFINITIONS = [
                 "type": "object",
                 "properties": {
                     "text": {"type": "string", "description": "What needs doing, e.g. 'email Sunway about the firm visit'."},
-                    "due": {"type": "string", "description": "Deadline in his words, e.g. 'before Friday', 'tomorrow 5pm'. Omit if none."},
+                    "due": {"type": "string", "description": "The deadline, copied from his words -- 'before Friday', 'tomorrow 5pm', 'on the 6th of October 14:00'. If the date is part of the sentence, put it here AS WELL as leaving it in the text. Omit only when he gave no time at all."},
                 },
                 "required": ["text"],
             },
@@ -482,7 +487,17 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "list_tasks",
-            "description": "List Chuen's open tasks, soonest deadline first, flagging overdue ones. Use when he asks what he has to do.",
+            "description": (
+                "Read out Chuen's open tasks. Use this for ANY question about what he "
+                "has to do or where his tasks are -- 'what's on my plate', 'what do I "
+                "have to do', 'where is the task list', 'show me my tasks', 'anything "
+                "due'. Then tell him what the result actually says: name each task and "
+                "its deadline. Never answer a question about his tasks from memory, and "
+                "never say the list 'is there' without reading it. If he asks WHERE the "
+                "list is, answer by telling him what is on it -- do not state a file "
+                "path or filename; you do not know where it is stored and will get it "
+                "wrong."
+            ),
             "parameters": {"type": "object", "properties": {}},
         },
     },
