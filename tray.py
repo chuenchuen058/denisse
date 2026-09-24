@@ -67,6 +67,11 @@ from voice_output import synthesize_inworld, prepare_audio, warm_up_audio
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# Task reminders fire on the first check at or after this hour, once per
+# task per day. 8am local.
+REMINDER_HOUR = int(os.environ.get("DENISSE_REMINDER_HOUR", "8"))
+_reminder_stop_event = threading.Event()
+
 # Always launch console children (voice mode, Mission Control) with the real
 # python.exe, never pythonw.exe -- when the tray itself autostarts via
 # pythonw.exe (see README's Autostart section), sys.executable is pythonw,
@@ -533,8 +538,23 @@ def _decline_risky_unattended(name, args):
     return name not in RISKY_TOOLS
 
 
+def _reminder_loop():
+    """Check every 15 minutes, so the nudge arrives daily and not only at
+    login. The machine stays on for days at a time (5+ days uptime is
+    normal here), so a login-only reminder can go a whole week without
+    firing. needs_reminder() already dedupes per task per day, so a
+    frequent poll costs nothing and simply catches the first check after
+    the morning hour.
+    """
+    while not _reminder_stop_event.is_set():
+        now = datetime.now()
+        if now.hour >= REMINDER_HOUR:
+            _remind_due_tasks()
+        _reminder_stop_event.wait(15 * 60)
+
+
 def _remind_due_tasks():
-    """Login nudge: anything overdue or due in the next 48h.
+    """Nudge about anything overdue or due in the next 48h.
 
     Deliberately a notification and not a chat turn -- it costs no model
     time, can't hallucinate, and works even if Ollama hasn't finished
@@ -542,6 +562,7 @@ def _remind_due_tasks():
     tray icon opens the chat if he wants to do something about it.
     """
     try:
+        tasks.pull_vault_ticks()  # respect anything ticked in Obsidian
         overdue, soon = tasks.needs_reminder(hours=48)
         if not overdue and not soon:
             return
@@ -1191,10 +1212,11 @@ def main():
     global _floating_orb
     _floating_orb = FloatingOrb(root, on_activate=_open_chat)
 
-    # Nudge about anything due, shortly after login. Delayed so it doesn't
-    # fight the tray icon and orb for the first seconds of startup, and
-    # marked once per day so restarting the tray doesn't re-nag.
+    # Nudge shortly after login, then keep checking so it also fires on a
+    # machine that just stays on. Delayed so it doesn't fight the tray icon
+    # and orb for the first seconds of startup.
     root.after(20_000, _remind_due_tasks)
+    threading.Thread(target=_reminder_loop, daemon=True).start()
 
     _tray_icon.run_detached()  # icon runs on its own thread; tkinter owns the main thread
     root.mainloop()

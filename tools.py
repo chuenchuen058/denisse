@@ -573,7 +573,13 @@ def list_open_tasks() -> str:
     (2026-09-25). Telling it the real path beats telling it not to guess.
     """
     where = f"The list is kept in {tasks.TASKS_FILE}."
+    # Pick up anything ticked in the Obsidian note before answering, so the
+    # two views never disagree in front of him.
+    ticked = tasks.pull_vault_ticks()
     open_tasks = tasks.list_tasks()
+    if ticked:
+        names = ", ".join(t["text"] for t in ticked)
+        where = f"(Closed {len(ticked)} you ticked in Obsidian: {names}.) " + where
     if not open_tasks:
         return f"Nothing on your list. {where}"
     overdue, soon = tasks.due_within(48)

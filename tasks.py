@@ -137,6 +137,40 @@ def _save(tasks: list) -> None:
     os.makedirs(os.path.dirname(TASKS_FILE), exist_ok=True)
     with open(TASKS_FILE, "w", encoding="utf-8") as f:
         json.dump(tasks, f, indent=2, ensure_ascii=False)
+    _mirror_to_vault()
+
+
+def _mirror_to_vault() -> None:
+    """Keep the Obsidian note in step with every change.
+
+    Imported lazily and swallowed whole: obsidian_tasks imports this module
+    back, and more importantly a vault problem (OneDrive not synced, file
+    open in Obsidian and locked) must never be the reason a task fails to
+    save. The JSON on disk is the source of truth; the note is a mirror.
+    """
+    try:
+        import obsidian_tasks
+        import sys
+
+        obsidian_tasks.sync(sys.modules[__name__])
+    except Exception:
+        pass
+
+
+def pull_vault_ticks() -> list:
+    """Close anything Chuen ticked in the Obsidian note. Returns what closed."""
+    try:
+        import obsidian_tasks
+
+        ids = obsidian_tasks.pull_ticked()
+    except Exception:
+        return []
+    closed = []
+    for task_id in ids:
+        t = complete_task(task_id)
+        if t is not None:
+            closed.append(t)
+    return closed
 
 
 def add_task(text: str, due: str = "") -> dict:
