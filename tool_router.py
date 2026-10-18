@@ -84,6 +84,18 @@ GROUPS = {
         r"|what'?s my|what is my|what are my|my fav|favou?rite|about me"
         r"|my name|who am i",
     ),
+    # search_vault was the one tool still offered on every turn (it was
+    # added before it had a group), and the eval caught a greeting calling
+    # it under replayed history. Keywords follow its own description: his
+    # modules, lectures, deadlines, decisions, setup, societies -- plus
+    # "again" for "what is convolution again".
+    "notes": (
+        {"search_vault"},
+        r"note|obsidian|vault|module|lecture|tutorial|seminar|coursework"
+        r"|\bcw\b|assignment|exam|deadline|due|week \d|semester|term\b"
+        r"|decid|decision|why did we|set ?up|society|societies|msoc|robotics"
+        r"|keats|again|remind me what|explain",
+    ),
     "self": (
         {"get_voice_settings", "get_brain_location"},
         r"voice|sound like|speak|accent|your brain|your code|your memory"

@@ -61,8 +61,21 @@ CASES = [
     ("garbled", [user("the do way or take a bite white the way")],
      set(), {"get_news", "play_song", "run_shell_command"}),
     ("general", [user("what's the boiling point of water in fahrenheit?")],
-     set(), {"run_shell_command", "play_song"}),
+     set(), {"run_shell_command", "play_song", "search_vault"}),
+    ("vault_deadline", [user("when is computational methods coursework 1 due?")],
+     {"search_vault"}, set()),
+    ("vault_lecturer", [user("who lectures electromagnetism?")],
+     {"search_vault"}, set()),
+    ("vault_decision", [user("what did we decide about the reminder card?")],
+     {"search_vault"}, set()),
+    ("vault_again", [user("what is convolution again?")], {"search_vault"}, set()),
+    ("greet_no_vault", [user("hey")], set(), {"search_vault"}),
 ]
+
+# search_vault only exists while DENISSE_VAULT_SEARCH is on; drop its cases
+# otherwise so the control arm still runs clean.
+if "search_vault" not in {d["function"]["name"] for d in brain.TOOL_DEFINITIONS}:
+    CASES = [c for c in CASES if "search_vault" not in c[2]]
 
 
 def names(defs):
