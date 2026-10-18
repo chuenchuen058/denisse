@@ -12,6 +12,7 @@ import datetime
 import json
 import math
 import os
+import re
 import subprocess
 import platform
 
@@ -497,10 +498,63 @@ def remember(key: str, value: str) -> str:
     return f"Got it, I'll remember that {key} = {value}."
 
 
+# recall() used to be an exact dict lookup, so the model had to guess the
+# key it (or an earlier session) chose when saving: "favourite_editor",
+# "code_editor" and "editor" all missed a fact stored as favorite_editor.
+# Facts number in the dozens at most, so a lexical match over keys AND
+# values is enough -- no embedding model to download, nothing to keep in
+# sync. Spelling variants are folded first, then each fact is scored on
+# shared words (a shared 5-letter prefix counts, so editor/editing match).
+_SPELLING = {"favourite": "favorite", "colour": "color", "organisation":
+             "organization", "programme": "program", "centre": "center"}
+_RECALL_STOP = {"my", "the", "a", "an", "what", "whats", "is", "are", "do",
+                "does", "i", "use", "which", "of", "for", "to", "me", "you",
+                "your", "about", "and", "in", "on", "s"}
+
+
+def _fact_words(text: str) -> set:
+    words = re.findall(r"[a-z0-9]+", (text or "").lower())
+    return {_SPELLING.get(w, w) for w in words} - _RECALL_STOP
+
+
+def _word_overlap(query: set, words: set) -> float:
+    score = 0.0
+    for q in query:
+        if q in words:
+            score += 1.0
+        elif len(q) >= 5 and any(w[:5] == q[:5] for w in words if len(w) >= 5):
+            score += 0.6
+    return score
+
+
 def recall(key: str) -> str:
-    """Recall a previously remembered fact by its key."""
+    """Recall a previously remembered fact, tolerating a key that's worded
+    or spelled differently from the one it was saved under."""
     facts = _load_facts()
-    return facts.get(key, f"I don't have anything remembered for '{key}'.")
+    if key in facts:
+        return facts[key]
+    if not facts:
+        return "I don't have anything remembered yet."
+
+    query = _fact_words(key)
+    scored = []
+    for k, v in facts.items():
+        # The key is what the fact is ABOUT, so it counts double; the value
+        # still helps ("python" finds favorite_programming_language).
+        s = 2 * _word_overlap(query, _fact_words(k)) + _word_overlap(query, _fact_words(str(v)))
+        if s > 0:
+            scored.append((s, k, v))
+    scored.sort(key=lambda t: -t[0])
+
+    if scored and (len(scored) == 1 or scored[0][0] > scored[1][0]):
+        _, k, v = scored[0]
+        return f"{k}: {v}"
+    if scored:
+        top = "\n".join(f"{k}: {v}" for _, k, v in scored[:3])
+        return f"Closest matches for '{key}':\n{top}"
+    known = ", ".join(list(facts)[:15])
+    return (f"I don't have anything remembered for '{key}'. "
+            f"Facts I do have are filed under: {known}.")
 
 
 def list_known_facts() -> str:
