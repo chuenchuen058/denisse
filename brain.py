@@ -11,6 +11,7 @@ import inspect
 import json
 import os
 import platform
+import re
 
 import ollama
 from dotenv import load_dotenv
@@ -605,6 +606,25 @@ def _unleak_json(text: str, last_tool_result: str) -> str:
     return (last_tool_result or "").strip() or "Done."
 
 
+# A reply that is nothing but commentary on her own tool use: "No tool call
+# needed for that." Seen 2026-10-18 in the eval's live condition, answering
+# "thanks" -- twice out of two runs once the router had shrunk the tool list.
+# The system prompt already forbids it; like _unleak_json, this is the net
+# underneath. Only a reply made ENTIRELY of such a sentence matches, so a
+# real answer that happens to mention a tool is never touched.
+_TOOL_NARRATION = re.compile(
+    r"^\s*(?:no|none|there(?:'s| is) no|i don'?t need)\b[^.!?\n]*"
+    r"\b(?:tools?|functions?)(?:\s+calls?)?\b[^.!?\n]*[.!]?\s*$",
+    re.IGNORECASE,
+)
+
+_PLAIN_REPLY_NUDGE = (
+    "Your last draft talked about tools instead of answering. Reply to his "
+    "last message the way a person would, in a few words, and don't mention "
+    "tools or functions."
+)
+
+
 def _get(obj, key, default=None):
     """Works whether ollama hands back a dict or an attribute-style object."""
     if obj is None:
@@ -797,6 +817,19 @@ class Brain:
                 final_text = _unleak_json(_get(msg, "content", "") or "",
                                           last_tool_result)
                 fake_call = _sniff_fake_tool_call(final_text)
+                if fake_call is None and _TOOL_NARRATION.match(final_text):
+                    # One retry, no tools, with the nudge as a system note
+                    # for this call only -- never added to `messages`, so it
+                    # is never persisted. Keep the retry if it's usable.
+                    retry = ollama.chat(
+                        model=MODEL,
+                        messages=full_messages + [{"role": "system", "content": _PLAIN_REPLY_NUDGE}],
+                        keep_alive=-1,
+                        options={"temperature": 0.2, "num_ctx": NUM_CTX},
+                    )
+                    retry_text = (_get(_get(retry, "message"), "content", "") or "").strip()
+                    if retry_text and not _TOOL_NARRATION.match(retry_text):
+                        final_text = retry_text
                 if fake_call is None:
                     messages.append({"role": "assistant", "content": final_text})
                     return final_text, messages
