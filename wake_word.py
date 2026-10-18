@@ -259,6 +259,137 @@ def _match_wake_word(alternatives: list[str], trust_fallback: bool = False):
     return None
 
 
+# --- Spoken confirmation ----------------------------------------------------
+# Hands-free mode hears everything in the room, so a misheard phrase can turn
+# into a real shell command. Typed requests in the popup are deliberate and
+# stay un-gated (safety.py: run_shell_command/write_file opened up on
+# 2026-09-02, on request) -- but here, those two plus anything in RISKY_TOOLS
+# are asked about out loud first, and answered by voice, no name needed.
+#
+# It also replaces the old behaviour for RISKY_TOOLS in this mode, which was
+# safety.confirm_risky_tool's input() prompt -- unanswerable with no console.
+#
+# DENISSE_VOICE_CONFIRM=0 turns the extra gating off (RISKY_TOOLS are still
+# asked about, by voice).
+import safety  # noqa: E402
+
+VOICE_CONFIRM_ENABLED = os.environ.get("DENISSE_VOICE_CONFIRM", "1").lower() not in (
+    "0", "false", "off", "no")
+VOICE_CONFIRM_TOOLS = set(safety.RISKY_TOOLS) | {"run_shell_command", "write_file"}
+CONFIRM_TIMEOUT = 12.0  # seconds; silence means no
+
+_YES_RE = re.compile(r"\b(yes|yeah|yep|yup|sure|okay|ok|go ahead|do it|confirm\w*|please do|alright)\b", re.I)
+_NO_RE = re.compile(r"\b(no|nope|nah|don'?t|cancel|stop|never ?mind|forget it)\b", re.I)
+
+
+class _PendingConfirm:
+    def __init__(self, gen: int):
+        self.gen = gen
+        self.answer = None
+        self.event = threading.Event()
+
+    def resolve(self, answer: bool) -> None:
+        if not self.event.is_set():
+            self.answer = answer
+            self.event.set()
+
+
+_pending_lock = threading.Lock()
+_pending_confirm = None
+
+
+def _classify_answer(text: str):
+    """True for a yes, False for a no, None if it isn't a clear answer.
+
+    A long sentence isn't an answer, and one with BOTH a yes-word and a
+    no-word isn't either -- which matters, because the question she has
+    just asked ends "say yes or no", and the mic can pick up her own voice.
+    """
+    t = (text or "").strip()
+    if not t or len(t.split()) > 6:
+        return None
+    yes, no = bool(_YES_RE.search(t)), bool(_NO_RE.search(t))
+    if yes == no:
+        return None
+    return yes
+
+
+def _describe_action(name: str, args: dict) -> str:
+    if name == "run_shell_command":
+        cmd = " ".join(str(args.get("command", "")).split())
+        return f"run the command: {cmd[:80]}" + ("..." if len(cmd) > 80 else "")
+    if name == "write_file":
+        return f"write to the file {os.path.basename(str(args.get('path', ''))) or 'you mentioned'}"
+    if name == "disable_startup_program":
+        return f"stop {args.get('name', 'that program')} from launching at login"
+    return f"run {name}"
+
+
+def _say_local(tts_engine, text: str) -> None:
+    print(f"(asking: {text})", flush=True)
+    if tts_engine is None:
+        return
+    try:
+        tts_engine.say(text)
+        tts_engine.runAndWait()
+    except Exception:
+        pass
+
+
+def _make_voice_confirm(tts_engine, gen: int):
+    """The confirm callback brain.respond() calls before each tool."""
+    gated = VOICE_CONFIRM_TOOLS if VOICE_CONFIRM_ENABLED else set(safety.RISKY_TOOLS)
+
+    def confirm(name: str, args: dict) -> bool:
+        global _pending_confirm
+        if name not in gated:
+            return True
+        if not _is_current(gen):
+            return False
+        _say_local(tts_engine, f"Quick check: should I {_describe_action(name, args)}? Say yes or no.")
+        pending = _PendingConfirm(gen)
+        with _pending_lock:
+            if _pending_confirm is not None:
+                _pending_confirm.resolve(False)
+            _pending_confirm = pending
+        answered = pending.event.wait(CONFIRM_TIMEOUT)
+        with _pending_lock:
+            if _pending_confirm is pending:
+                _pending_confirm = None
+        if not answered:
+            _say_local(tts_engine, "No answer, so I'll leave it.")
+            return False
+        return bool(pending.answer)
+
+    return confirm
+
+
+def _offer_answer(heard: str, alternatives=None) -> bool:
+    """Called by the mic loop with every finalized utterance. Returns True
+    if the utterance was consumed as a yes/no answer (or as noise while a
+    question is open) and must not be treated as anything else."""
+    with _pending_lock:
+        pending = _pending_confirm
+    if pending is None:
+        return False
+    answer = _classify_answer(heard)
+    if answer is not None:
+        pending.resolve(answer)
+        return True
+    # Not a yes/no. A fresh "Denisse, ..." request moves on (and declines
+    # the open question); anything else is ignored while it's open.
+    if _match_wake_word(alternatives or [heard]) is not None:
+        pending.resolve(False)
+        return False
+    return True
+
+
+def _cancel_pending_confirm() -> None:
+    with _pending_lock:
+        if _pending_confirm is not None:
+            _pending_confirm.resolve(False)
+
+
 def _process_command(command: str, gen: int, brain: Brain, tts_engine, on_exchange, on_thinking=None, on_reply=None) -> None:
     """Runs in its own thread: compose + speak a reply, dropping out
     quietly at any point if a newer mention of her name has since
@@ -300,7 +431,7 @@ def _process_command(command: str, gen: int, brain: Brain, tts_engine, on_exchan
     # early return and error on the way there.
     try:
         try:
-            reply, messages = brain.respond(messages, confirm=confirm_risky_tool, extra_context=extra_context)
+            reply, messages = brain.respond(messages, confirm=_make_voice_confirm(tts_engine, gen), extra_context=extra_context)
             turn_tail = messages[turn_start:]
         except Exception as e:
             reply = f"Something went wrong: {e}"
@@ -487,9 +618,15 @@ def run(stop_event=None, on_exchange=None, on_heard=None, is_offline=None, on_mo
                 # pending "just said her name" follow-up wait, if one was
                 # active -- "shush" isn't a command for that flow either.
                 _start_new_request()
+                _cancel_pending_confirm()
                 awaiting_followup = False
                 pending_gen = None
                 followup_deadline = None
+                continue
+
+            # A spoken "should I run that?" is open: this utterance is its
+            # answer (no name needed), unless it's a fresh "Denisse, ...".
+            if _offer_answer(heard, alternatives):
                 continue
 
             if awaiting_followup:
