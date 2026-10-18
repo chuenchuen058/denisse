@@ -15,6 +15,7 @@ import platform
 import ollama
 from dotenv import load_dotenv
 
+import tool_router
 import tools
 # obsidian_sync is intentionally not imported -- its read_claude_memory()
 # is currently disabled below (measurably broke reply quality); re-add
@@ -720,13 +721,16 @@ class Brain:
         full_messages = [{"role": "system", "content": system_content}] + messages
         last_tool_result = ""  # fallback for _unleak_json
         used_once = set()      # guards _ONCE_PER_TURN tools; per turn, not per round
+        # Only the tools this turn could plausibly need -- see tool_router.py
+        # for why sending all of them costs reply quality on an 8B model.
+        turn_tools = tool_router.select(TOOL_DEFINITIONS, messages)
 
         for _round in range(MAX_TOOL_ROUNDS + 1):
             # Last round: stop offering tools, so the model has to answer in
             # words instead of asking for another call it won't get. See
             # MAX_TOOL_ROUNDS for why this is bounded at all.
             last_round = _round == MAX_TOOL_ROUNDS
-            round_tools = None if last_round else TOOL_DEFINITIONS
+            round_tools = None if last_round else turn_tools
 
             # keep_alive=-1: keep the model loaded in memory indefinitely.
             # Ollama's default unloads it after 5 minutes idle -- measured a
