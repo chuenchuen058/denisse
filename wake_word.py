@@ -259,7 +259,7 @@ def _match_wake_word(alternatives: list[str], trust_fallback: bool = False):
     return None
 
 
-def _process_command(command: str, gen: int, brain: Brain, tts_engine, on_exchange, on_thinking) -> None:
+def _process_command(command: str, gen: int, brain: Brain, tts_engine, on_exchange, on_thinking=None, on_reply=None) -> None:
     """Runs in its own thread: compose + speak a reply, dropping out
     quietly at any point if a newer mention of her name has since
     superseded this request (see _start_new_request/_is_current)."""
@@ -285,39 +285,55 @@ def _process_command(command: str, gen: int, brain: Brain, tts_engine, on_exchan
             on_thinking(True)
         except Exception:
             pass
-    try:
-        reply, messages = brain.respond(messages, confirm=confirm_risky_tool, extra_context=extra_context)
-        turn_tail = messages[turn_start:]
-    except Exception as e:
-        reply = f"Something went wrong: {e}"
-    finally:
+
+    def _stop_thinking():
         if on_thinking:
             try:
                 on_thinking(False)
             except Exception:
                 pass
 
-    if not _is_current(gen):
-        print(f"(superseded by a newer request while composing -- not speaking: {reply[:60]!r})", flush=True)
-        return
+    # The thinking indicator now stays up until she starts speaking, not
+    # just until the reply is composed: on_reply (tray.py turns the "• • •"
+    # bubble into the reply text) fires right before playback, so the text
+    # appears as she talks (asked 2026-10-14). The finally covers every
+    # early return and error on the way there.
+    try:
+        try:
+            reply, messages = brain.respond(messages, confirm=confirm_risky_tool, extra_context=extra_context)
+            turn_tail = messages[turn_start:]
+        except Exception as e:
+            reply = f"Something went wrong: {e}"
 
-    print(f"denisse> {reply}\n", flush=True)
-    # source="voice": Vosk mishearings ("the is not playing anything the")
-    # are answered but not written down. Persisting them is what taught the
-    # model to answer everything with a reflexive tool call and a flat "It
-    # seems like you're trying to say something..." -- see conversation.py.
-    if not conversation.record(turn_tail, source="voice"):
-        print("(not recorded: transcript looks like a mishearing)", flush=True)
+        if not _is_current(gen):
+            print(f"(superseded by a newer request while composing -- not speaking: {reply[:60]!r})", flush=True)
+            return
 
-    path = synthesize_inworld(reply)
-    if not _is_current(gen):
-        if path:
+        print(f"denisse> {reply}\n", flush=True)
+        # source="voice": Vosk mishearings ("the is not playing anything the")
+        # are answered but not written down. Persisting them is what taught the
+        # model to answer everything with a reflexive tool call and a flat "It
+        # seems like you're trying to say something..." -- see conversation.py.
+        if not conversation.record(turn_tail, source="voice"):
+            print("(not recorded: transcript looks like a mishearing)", flush=True)
+
+        path = synthesize_inworld(reply)
+        if not _is_current(gen):
+            if path:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+            print("(superseded while synthesizing speech -- not playing)", flush=True)
+            return
+
+        if on_reply:
             try:
-                os.remove(path)
-            except OSError:
+                on_reply(reply)
+            except Exception:
                 pass
-        print("(superseded while synthesizing speech -- not playing)", flush=True)
-        return
+    finally:
+        _stop_thinking()
 
     if path:
         audio = prepare_audio(path)
@@ -346,7 +362,7 @@ def _process_command(command: str, gen: int, brain: Brain, tts_engine, on_exchan
             pass
 
 
-def run(stop_event=None, on_exchange=None, on_heard=None, is_offline=None, on_mode_command=None, on_thinking=None) -> None:
+def run(stop_event=None, on_exchange=None, on_heard=None, is_offline=None, on_mode_command=None, on_thinking=None, on_reply=None) -> None:
     """Listen forever (or until stop_event is set) for "hey Denisse".
     `on_exchange(command, reply)`, if given, is called after each handled
     exchange -- e.g. so a caller can show a tray notification without this
@@ -355,16 +371,18 @@ def run(stop_event=None, on_exchange=None, on_heard=None, is_offline=None, on_mo
     "the mic is picking you up" feedback, not a new recording (same data
     already used for wake-word matching, just surfaced). `on_thinking(bool)`,
     if given, is called with True right before composing a reply
-    (brain.respond()) and False right after -- e.g. so a caller can show a
-    "composing" indicator without this module needing to know anything
-    about tray.py's floating orb.
+    (brain.respond()) and False once she starts speaking -- tray.py uses it
+    for the thinking bubble out of the orb (reminder_card.ThinkingBubble).
+    `on_reply(reply)`, if given, is called just before playback starts, so
+    the reply text can appear while she says it.
 
     `is_offline()`, if given, is polled after a command is matched: while
     it returns True, every command is silently discarded *except* "online
     mode" -- same idea as the exit/quit/stop-listening phrases below, just
     caller-defined so this module doesn't need to know about tray.py's
     manual-offline state itself. `on_mode_command(mode)` is called with
-    "offline" or "online" when the matching phrase is heard, so the caller
+    "offline" or "online" when the matching phrase is heard ("study" /
+    "stop_study" for study mode), so the caller
     can actually flip that state; with neither passed, saying "offline
     mode"/"online mode" here is a no-op (falls through to the brain like
     any other sentence)."""
@@ -523,6 +541,16 @@ def run(stop_event=None, on_exchange=None, on_heard=None, is_offline=None, on_mo
                     on_mode_command("online")
                 voice_mode.speak(tts_engine, "Back online.")
                 continue
+            if normalized in ("study mode", "start study mode"):
+                if on_mode_command:
+                    on_mode_command("study")
+                voice_mode.speak(tts_engine, "Study mode on. Twenty-five minutes, starting now.")
+                continue
+            if normalized in ("stop study mode", "end study mode", "study mode off"):
+                if on_mode_command:
+                    on_mode_command("stop_study")
+                voice_mode.speak(tts_engine, "Study mode off.")
+                continue
             if is_offline():
                 # Manually offline -- discard everything except the two
                 # phrases above, which always get through so you can
@@ -539,7 +567,7 @@ def run(stop_event=None, on_exchange=None, on_heard=None, is_offline=None, on_mo
             # straight back to listening, never blocked by a reply in
             # progress (see the module docstring and _process_command).
             threading.Thread(
-                target=_process_command, args=(command, gen, brain, tts_engine, on_exchange, on_thinking), daemon=True
+                target=_process_command, args=(command, gen, brain, tts_engine, on_exchange, on_thinking, on_reply), daemon=True
             ).start()
     finally:
         stt.stop()

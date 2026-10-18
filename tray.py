@@ -24,6 +24,7 @@ For it to start automatically on login, see README's "Autostart" section.
 
 import ctypes
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -60,6 +61,8 @@ import obsidian_sync
 import optimize
 import wake_word
 from floating_orb import FloatingOrb
+from reminder_card import TYPING_MS, ReminderCard, ThinkingBubble
+from study_mode import StudyBubble, StudyMode
 from brain import Brain
 from mission_control import get_status
 from safety import RISKY_TOOLS
@@ -427,21 +430,12 @@ def _on_wake_word_heard(text: str):
 def _on_wake_word_mode_command(mode: str):
     if mode == "offline":
         _go_offline()
-    else:
+    elif mode == "online":
         _go_online()
-
-
-def _on_wake_word_thinking(thinking: bool):
-    # Called from wake_word.py's background thread -- hop to the main
-    # thread before touching the orb's Tk widgets.
-    def _do():
-        if _floating_orb is not None:
-            if thinking:
-                _floating_orb.start_thinking()
-            else:
-                _floating_orb.stop_thinking()
-
-    root.after(0, _do)
+    elif mode == "study":
+        _start_study_mode()
+    elif mode == "stop_study":
+        _stop_study_mode()
 
 
 def _wake_word_loop():
@@ -449,9 +443,10 @@ def _wake_word_loop():
         stop_event=_wake_word_stop_event,
         on_exchange=_on_wake_word_exchange,
         on_heard=_on_wake_word_heard,
-        on_thinking=_on_wake_word_thinking,
         is_offline=_is_manually_offline,
         on_mode_command=_on_wake_word_mode_command,
+        on_thinking=lambda on: _set_thinking("wake", on),
+        on_reply=_show_reply,
     )
 
 
@@ -499,6 +494,39 @@ def _match_mode_command(text: str):
     "exit"/"quit"/"stop listening" convention: the phrase, and nothing
     else, modulo case/surrounding whitespace/trailing punctuation."""
     return _MODE_COMMAND_RE.get(text.strip().lower().rstrip(".!"))
+
+
+# "show reminder", "show my reminders", "open the task list", or just
+# "reminders" -- typed in the chat, this opens the reminder card instead of
+# asking the model (asked 2026-10-07, in place of right-clicking the orb).
+# Whole-message only, so "remind me to call the dentist" still goes to
+# the model and becomes a task.
+_REMINDER_COMMAND = re.compile(
+    r"^(?:(?:please\s+)?(?:show|open|see|view|display|pull\s+up)\s+(?:me\s+)?(?:my\s+|the\s+)?)?"
+    r"(?:reminders?|tasks?|task\s+list|to-?do(?:\s+list)?)(?:\s+please)?$"
+)
+
+
+def _is_reminder_command(text: str) -> bool:
+    return bool(_REMINDER_COMMAND.match(" ".join(text.lower().rstrip(".!?").split())))
+
+
+# "study mode" / "start study mode" turns the pomodoro on, "stop study
+# mode" / "end study mode" turns it off (asked 2026-10-14). Whole-message
+# only, like the reminder command, so a question about studying still goes
+# to the model.
+_STUDY_COMMAND = re.compile(
+    r"^(?:(?P<off>stop|end|exit|quit|turn\s+off|cancel)\s+|(?:start|begin|turn\s+on|enter)\s+)?"
+    r"(?:the\s+)?study\s+mode(?:\s+(?P<off2>off)|\s+on)?(?:\s+please)?$"
+)
+
+
+def _match_study_command(text: str):
+    """-> 'study', 'stop_study', or None."""
+    m = _STUDY_COMMAND.match(" ".join(text.lower().rstrip(".!?").split()))
+    if not m:
+        return None
+    return "stop_study" if (m.group("off") or m.group("off2")) else "study"
 
 
 def _is_manually_offline() -> bool:
@@ -553,25 +581,283 @@ def _reminder_loop():
         _reminder_stop_event.wait(15 * 60)
 
 
-def _remind_due_tasks():
-    """Nudge about anything overdue or due in the next 48h.
+def _session_locked() -> bool:
+    """True while the lock screen is up: the input desktop is then
+    Winlogon's, which a normal process can't open. Any failure to check
+    reads as unlocked, so the worst case is a missed bubble, not a stuck
+    watcher."""
+    try:
+        user32 = ctypes.windll.user32
+        desk = user32.OpenInputDesktop(0, False, 0x0100)  # DESKTOP_SWITCHDESKTOP
+        if not desk:
+            return True
+        user32.CloseDesktop(desk)
+        return False
+    except Exception:
+        return False
 
-    Deliberately a notification and not a chat turn -- it costs no model
-    time, can't hallucinate, and works even if Ollama hasn't finished
-    starting (which it often hasn't, right after a reboot). Clicking the
-    tray icon opens the chat if he wants to do something about it.
+
+def _unlock_watch_loop():
+    """Show the reminder bubble every time he comes back to the machine,
+    not just at login -- it stays on for days (see _reminder_loop), so
+    "every time I open my computer" (asked 2026-10-07) mostly means
+    unlocking it or waking it from sleep, and the tray doesn't restart for
+    either. Polls rather than hooking WTS session messages because Tk owns
+    the window procedure. Two signals: the lock screen going away, and a
+    jump in wall-clock time (resumed from sleep without a lock screen).
+    """
+    poll = 2
+    was_locked = _session_locked()
+    last_tick = time.time()
+    last_shown = 0.0
+    while not _reminder_stop_event.wait(poll):
+        now = time.time()
+        locked = _session_locked()
+        slept = now - last_tick > poll + 30
+        last_tick = now
+        if locked:
+            was_locked = True
+            continue
+        if (was_locked or slept) and now - last_shown > 60:
+            last_shown = now
+            # A beat after unlocking, so it arrives once the desktop is back.
+            _reminder_stop_event.wait(3)
+            _remind_due_tasks(startup=True)
+        was_locked = False
+
+
+_reminder_card = None
+
+
+def _show_reminder_card():
+    """Pop the reminder card out of the orb (see reminder_card.py), or
+    refresh it if it's already up. Main thread only -- background threads
+    go through root.after(0, ...)."""
+    global _reminder_card
+    if _floating_orb is None:
+        return
+    if _reminder_card is not None:
+        _reminder_card.refresh()
+        return
+
+    def _closed():
+        global _reminder_card
+        _reminder_card = None
+
+    _close_thinking_bubble()  # one bubble beside the orb at a time
+    _close_study_bubble()
+    _close_reply_bubble()
+    _reminder_card = ReminderCard(root, _floating_orb, tasks, font_family=FONT_FAMILY, on_close=_closed)
+
+
+def _open_reminders(icon=None, item=None):
+    root.after(0, _show_reminder_card)
+
+
+# Study mode (study_mode.py): 25 min study / 5 min rest, each switch texted
+# from the orb like the reminder card. The clock lives on the Tk thread.
+_study_mode = None
+_study_bubble = None
+
+
+def _show_study_bubble(phase, ends_at, round_no, status=False):
+    """study_mode's hook for a phase change (or, with status=True, a click
+    on its countdown badge). Main thread only. The alert is time-sensitive,
+    so it takes the orb's spot from whatever is there."""
+    global _study_bubble
+    if _floating_orb is None:
+        if _tray_icon is not None:
+            title = "Study time" if phase == "study" else "Rest time"
+            _tray_icon.notify(f"Until {ends_at:%H:%M}", f"Denisse -- {title}")
+        return
+    _close_study_bubble()
+    _close_thinking_bubble()
+    _close_reply_bubble()
+    if _reminder_card is not None:
+        _reminder_card.close()
+
+    def _closed():
+        global _study_bubble
+        if _study_bubble is bubble:
+            _study_bubble = None
+
+    bubble = StudyBubble(
+        root, _floating_orb, phase, ends_at, round_no, on_stop=_stop_study_mode_main,
+        font_family=FONT_FAMILY, on_close=_closed, status=status,
+    )
+    _study_bubble = bubble
+
+
+def _close_study_bubble():
+    if _study_bubble is not None:
+        _study_bubble.close()  # its on_close clears _study_bubble
+
+
+def _stop_study_mode_main():
+    if _study_mode is not None and _study_mode.active:
+        _study_mode.stop()
+        _close_study_bubble()
+        _show_reply_main("Study mode off. Nice work.")
+    if _tray_icon is not None:
+        _tray_icon.update_menu()
+
+
+def _start_study_mode():
+    def _do():
+        _study_mode.start()
+        if _tray_icon is not None:
+            _tray_icon.update_menu()
+    root.after(0, _do)
+
+
+def _stop_study_mode():
+    root.after(0, _stop_study_mode_main)
+
+
+def _toggle_study_mode(icon=None, item=None):
+    if _study_mode is not None and _study_mode.active:
+        _stop_study_mode()
+    else:
+        _start_study_mode()
+
+
+def _study_menu_text(item):
+    status = _study_mode.status() if _study_mode is not None else ""
+    return f"Study mode ({status})" if status else "Study mode (25 / 5)"
+
+
+# Who is currently composing a reply ("chat", "wake"). A set rather than a
+# flag so a typed reply and a "hey Denisse" one overlapping don't hide the
+# bubble when only the first finishes; idempotent so a double "done" from
+# an error path can't go negative.
+_thinking_sources = set()
+_thinking_bubble = None
+_thinking_timeout_job = None
+THINKING_MAX_MS = 120_000  # never leave it stuck if a "done" gets lost
+
+
+def _set_thinking(source: str, on: bool):
+    """Show the "typing" bubble out of the orb while Denisse composes a
+    reply (see reminder_card.ThinkingBubble). Safe from any thread."""
+    root.after(0, lambda: _set_thinking_main(source, on))
+
+
+def _set_thinking_main(source: str, on: bool):
+    global _thinking_bubble, _thinking_timeout_job
+    if on:
+        _thinking_sources.add(source)
+    else:
+        _thinking_sources.discard(source)
+    if not _thinking_sources:
+        _close_thinking_bubble()
+        return
+    # The reminder card already sits beside the orb; don't stack a second.
+    if _thinking_bubble is None and _reminder_card is None and _study_bubble is None and _floating_orb is not None:
+        _close_reply_bubble()  # the last reply makes way for the next "• • •"
+
+        def _closed():
+            global _thinking_bubble
+            if _thinking_bubble is bubble:
+                _thinking_bubble = None
+
+        try:
+            bubble = ThinkingBubble(root, _floating_orb, font_family=FONT_FAMILY, on_close=_closed)
+            _thinking_bubble = bubble
+        except Exception:
+            _thinking_bubble = None  # cosmetic -- never let it break a reply
+    if _thinking_timeout_job is not None:
+        root.after_cancel(_thinking_timeout_job)
+    _thinking_timeout_job = root.after(THINKING_MAX_MS, _thinking_timed_out)
+
+
+def _thinking_timed_out():
+    global _thinking_timeout_job
+    _thinking_timeout_job = None
+    _thinking_sources.clear()
+    _close_thinking_bubble()
+
+
+def _close_thinking_bubble():
+    if _thinking_bubble is not None:
+        _thinking_bubble.close()  # its on_close clears _thinking_bubble
+
+
+# Her reply, shown in the bubble out of the orb (asked 2026-10-14: "whenever
+# she speaks I want her message to pop up like the ... animation"). If the
+# "• • •" bubble is up it becomes the reply; otherwise a fresh bubble types
+# for a beat and then shows it. See ThinkingBubble.deliver.
+_reply_bubble = None
+
+
+def _show_reply(text: str):
+    """Safe from any thread."""
+    root.after(0, lambda: _show_reply_main(text))
+
+
+def _show_reply_main(text: str):
+    global _thinking_bubble, _reply_bubble
+    if _floating_orb is None or not (text or "").strip():
+        return
+    if _reminder_card is not None and _reminder_card.editing is not None:
+        return  # he's mid-edit in the reminder card -- don't take it away
+    try:
+        def _closed():
+            global _reply_bubble
+            if _reply_bubble is bubble:
+                _reply_bubble = None
+
+        _close_reply_bubble()
+        if _thinking_bubble is not None:
+            bubble = _thinking_bubble
+            _thinking_bubble = None  # it's the reply now; "thinking off" mustn't close it
+            bubble.on_close = _closed
+            bubble.deliver(text)
+        else:
+            _close_study_bubble()
+            if _reminder_card is not None:
+                _reminder_card.close()
+            bubble = ThinkingBubble(root, _floating_orb, font_family=FONT_FAMILY, on_close=_closed)
+            root.after(TYPING_MS, lambda: bubble.deliver(text))
+        _reply_bubble = bubble
+    except Exception:
+        pass  # cosmetic -- the reply itself is already in the chat / spoken
+
+
+def _close_reply_bubble():
+    if _reply_bubble is not None:
+        _reply_bubble.close()  # its on_close clears _reply_bubble
+
+
+def _remind_due_tasks(startup: bool = False):
+    """Show what's on his plate as a chat bubble out of the orb.
+
+    At startup (login) and on every unlock/wake (_unlock_watch_loop) the
+    card shows the whole open list -- the "first thing when the computer
+    opens" view, requested 2026-10-05 -- even when it's empty, so he sees
+    it every time (asked again 2026-10-07; an empty list used to get only
+    the orb's one-line speech bubble, which he read as it not showing).
+    After that, the 15-minute loop only pops it again for
+    something overdue or due within 48h that hasn't been flagged today, so
+    it nags once a day rather than on every check.
+
+    Deliberately no model call -- it costs no model time, can't
+    hallucinate, and works even if Ollama hasn't finished starting (which
+    it often hasn't, right after a reboot). Falls back to a tray
+    notification if the orb isn't up for some reason.
     """
     try:
         tasks.pull_vault_ticks()  # respect anything ticked in Obsidian
         overdue, soon = tasks.needs_reminder(hours=48)
-        if not overdue and not soon:
+        if not startup and not (overdue or soon):
             return
-        lines = [f"OVERDUE: {tasks.describe(t)}" for t in overdue]
-        lines += [tasks.describe(t) for t in soon]
-        body = "\n".join(lines[:5])
-        if len(lines) > 5:
-            body += f"\n...and {len(lines) - 5} more"
-        if _tray_icon is not None:
+        if _floating_orb is not None:
+            root.after(0, _show_reminder_card)
+        elif _tray_icon is not None and (overdue or soon):
+            lines = [f"OVERDUE: {tasks.describe(t)}" for t in overdue]
+            lines += [tasks.describe(t) for t in soon]
+            body = "\n".join(lines[:5])
+            if len(lines) > 5:
+                body += f"\n...and {len(lines) - 5} more"
             _tray_icon.notify(body[:220], "Denisse — on your plate")
         tasks.mark_reminded([t["id"] for t in overdue + soon])
     except Exception:
@@ -589,6 +875,7 @@ def _news_briefing_loop():
                 reply, messages = brain.respond(messages, confirm=_decline_risky_unattended)
                 conversation.record(messages[turn_start:])
                 news.mark_daily_briefing_done()
+                _show_reply(reply)
 
                 # The briefing used to also write a dated note into the
                 # vault's News/ folder. Removed 2026-09-06 at Chuen's
@@ -969,6 +1256,28 @@ class ChatPopup:
             self._add_system("Back online.")
             return "break"
 
+        # Straight off disk, no model call -- works even while a reply is
+        # composing or Ollama is down. The chat steps aside so the card,
+        # which sits beside the orb, isn't hidden behind it -- unless a
+        # reply is still on its way, which closing would throw away.
+        study = _match_study_command(text)
+        if study:
+            self.entry.delete(0, "end")
+            if not self.busy:
+                self.close()
+            if study == "study":
+                _start_study_mode()
+            else:
+                _stop_study_mode()
+            return "break"
+
+        if _is_reminder_command(text):
+            self.entry.delete(0, "end")
+            if not self.busy:
+                self.close()
+            _show_reminder_card()
+            return "break"
+
         if self.busy or self.brain is None:
             return "break"
         if _is_manually_offline():
@@ -986,8 +1295,7 @@ class ChatPopup:
         self.entry.config(state="disabled")
         self._set_send_enabled(False)
         self.typing_label.config(text="Denisse is typing...")
-        if _floating_orb is not None:
-            _floating_orb.start_thinking()
+        _set_thinking("chat", True)
 
         threading.Thread(target=self._respond_worker, daemon=True).start()
         return "break"
@@ -1027,11 +1335,11 @@ class ChatPopup:
         return result.get("answer", False)
 
     def _respond_done(self, reply, err):
+        if err:
+            _set_thinking("chat", False)  # success clears it in _reveal_reply
         try:
             if err:
                 self.typing_label.config(text="")
-                if _floating_orb is not None:
-                    _floating_orb.stop_thinking()
                 self._add_system(f"Error: {err}")
                 self._finish_turn()
                 return
@@ -1070,8 +1378,6 @@ class ChatPopup:
     def _reveal_reply(self, reply: str, audio, play_now):
         try:
             self.typing_label.config(text="")
-            if _floating_orb is not None:
-                _floating_orb.stop_thinking()
             if play_now is not None:
                 play_now.set()  # let the waiting synth thread proceed to .play()
             self._add_bubble("denisse", reply)
@@ -1079,6 +1385,8 @@ class ChatPopup:
         except tk.TclError:
             pass  # popup closed out from under this async callback -- fine
         finally:
+            _show_reply_main(reply)  # the "• • •" bubble becomes the reply
+            _set_thinking("chat", False)  # the reply has landed
             # Always release the synth thread even if the popup was gone
             # before we got to it above -- otherwise it hangs forever on
             # play_now.wait(). Event.set() is idempotent, so this is a
@@ -1163,6 +1471,10 @@ _chat_popup = None
 def _open_chat(icon=None, item=None):
     def _do():
         global _chat_popup
+        # Opening the chat means he's seen the reminder and moved on --
+        # dismiss it rather than leave it beside the orb (asked 2026-10-07).
+        if _reminder_card is not None:
+            _reminder_card.close()  # its on_close clears _reminder_card
         if _chat_popup is not None:
             _chat_popup.focus()
         else:
@@ -1185,6 +1497,10 @@ def main():
 
     menu = pystray.Menu(
         pystray.MenuItem("Talk to Denisse", _open_chat, default=True),
+        pystray.MenuItem("Reminders", _open_reminders),
+        pystray.MenuItem(
+            _study_menu_text, _toggle_study_mode, checked=lambda item: _study_mode is not None and _study_mode.active
+        ),
         pystray.MenuItem("Voice mode (console)", _open_voice_console),
         pystray.MenuItem("Mission Control", _open_mission_control),
         pystray.MenuItem(
@@ -1211,12 +1527,23 @@ def main():
 
     global _floating_orb
     _floating_orb = FloatingOrb(root, on_activate=_open_chat)
+    # Right-click the orb for the reminder card (left-click stays chat).
+    _floating_orb.canvas.bind("<Button-3>", lambda e: _show_reminder_card())
+    global _study_mode
+    _study_mode = StudyMode(
+        root, _show_study_bubble, orb=_floating_orb, font_family=FONT_FAMILY,
+        avoid=lambda: [b.win for b in (_reminder_card, _study_bubble, _reply_bubble, _thinking_bubble) if b is not None],
+    )
 
     # Nudge shortly after login, then keep checking so it also fires on a
     # machine that just stays on. Delayed so it doesn't fight the tray icon
     # and orb for the first seconds of startup.
-    root.after(20_000, _remind_due_tasks)
+    root.after(
+        10_000,
+        lambda: threading.Thread(target=_remind_due_tasks, kwargs={"startup": True}, daemon=True).start(),
+    )
     threading.Thread(target=_reminder_loop, daemon=True).start()
+    threading.Thread(target=_unlock_watch_loop, daemon=True).start()
 
     _tray_icon.run_detached()  # icon runs on its own thread; tkinter owns the main thread
     root.mainloop()

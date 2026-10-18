@@ -173,7 +173,17 @@ def pull_vault_ticks() -> list:
     return closed
 
 
-def add_task(text: str, due: str = "") -> dict:
+PRIORITIES = ("high", "medium", "low")
+
+
+def _norm_priority(p) -> str:
+    """high / medium / low; anything else (or nothing) is medium, so
+    tasks from before priorities existed still read sensibly."""
+    p = (p or "").strip().lower()
+    return p if p in PRIORITIES else "medium"
+
+
+def add_task(text: str, due: str = "", priority: str = "medium") -> dict:
     """Add a task. `due` is free text ("before friday", "tomorrow 5pm");
     the raw phrase is kept alongside the parsed datetime so nothing is lost
     when parsing fails."""
@@ -193,6 +203,7 @@ def add_task(text: str, due: str = "") -> dict:
         "due_inferred": inferred,  # read out of the text, not given as `due`
         "event_id": None,      # set when it also becomes a calendar event
         "reminded_on": None,   # date we last nagged, so login reminders don't repeat
+        "priority": _norm_priority(priority),  # high / medium / low -- colours the reminder card
     }
     tasks = _load()
     tasks.append(task)
@@ -280,6 +291,37 @@ def remove_task(needle: str) -> dict | None:
     tasks = [x for x in tasks if x["id"] != t["id"]]
     _save(tasks)
     return t
+
+
+def update_task(task_id: str, text: str | None = None, due: str | None = None,
+                priority: str | None = None) -> dict | None:
+    """Edit an open task in place, by exact id.
+
+    For the reminder card's edit button, where the id is already known --
+    so no fuzzy matching (that's _match's job, for the model's free-text
+    requests). due=None leaves the deadline alone; due="" clears it; an
+    unparseable due is kept as due_text, same as add_task. A changed
+    deadline also clears reminded_on, so a task moved to tomorrow can
+    still nag tomorrow.
+    """
+    tasks = _load()
+    for t in tasks:
+        if t["id"] != task_id or t["done_at"]:
+            continue
+        if text is not None and text.strip():
+            t["text"] = text.strip()
+        if due is not None:
+            due = due.strip()
+            when = parse_due(due) if due else None
+            t["due"] = when.isoformat(timespec="minutes") if when else None
+            t["due_text"] = due or None
+            t["due_inferred"] = False
+            t["reminded_on"] = None
+        if priority is not None:
+            t["priority"] = _norm_priority(priority)
+        _save(tasks)
+        return t
+    return None
 
 
 def due_within(hours: int = 48) -> tuple:
