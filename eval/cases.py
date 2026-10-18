@@ -24,6 +24,7 @@ STATE_TOOLS = {
     "recall", "read_file", "list_directory", "find_files", "run_shell_command",
     "get_current_time", "get_news", "get_weather", "get_system_status",
     "list_skills", "read_skill", "list_known_facts", "play_song",
+    "search_vault",
 }
 
 # Implementation talk leaking into a reply -- she should answer like a
@@ -93,6 +94,24 @@ CASES = [
         "expect": {"any_tool_of": {"list_tasks"}, "deny": POSIX_LEAKS},
         "why": "Asking what's outstanding must read the real task list "
                "rather than being answered from context.",
+    },
+    {
+        "id": "vault_deadline",
+        "prompt": "when is computational methods coursework 1 due?",
+        "expect": {"any_tool_of": {"search_vault"}, "must_contain": ["2027"],
+                   "deny": POSIX_LEAKS},
+        "why": "The date (28 Jan 2027) exists only in his own module hub, so "
+               "'2027' in the reply can only have come from the vault. Added "
+               "2026-10-15 with search_vault -- the second attempt at vault "
+               "read-back, after prompt injection measured 0/4 on 2026-09-02.",
+    },
+    {
+        "id": "vault_not_for_general",
+        "prompt": "what's the boiling point of water in fahrenheit?",
+        "expect": {"none_of": {"search_vault"}, "deny": POSIX_LEAKS},
+        "why": "search_vault must not become the thing she reaches for on "
+               "every question. General knowledge has no business in his "
+               "notes, and a wasted search costs him real seconds.",
     },
     {
         "id": "garbled",

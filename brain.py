@@ -532,6 +532,49 @@ TOOL_DEFINITIONS = [
     },
 ]
 
+# Second attempt at letting Denisse see the Obsidian vault. The first one
+# (the disabled block in respond() below) pasted Memory/ into the system
+# prompt and measured 0/4 clean against 4/4 with it off. This one is a tool
+# she calls, so an unrelated question pays only for this description -- and
+# ALL of its guidance lives here rather than in SYSTEM_PROMPT, for the
+# reason recorded in the prompt-budget comment above.
+#
+# Gated so the A/B can be re-run: DENISSE_VAULT_SEARCH=0 removes the tool
+# entirely, which is the control arm.
+VAULT_SEARCH_DEFINITION = {
+    "type": "function",
+    "function": {
+        "name": "search_vault",
+        "description": (
+            "Search Chuen's own Obsidian notes and quote them. Use this for a question "
+            "about HIS material and HIS history -- his modules, lectures, tutorials and "
+            "deadlines, what was decided about Denisse and why, how his machine is set "
+            "up, his societies. 'When is the CM coursework due', 'who lectures "
+            "electromagnetism', 'what did we decide about the reminder card', 'what is "
+            "convolution again' all belong here, because his notes have his answer "
+            "rather than a general one. Do NOT use it for general knowledge, for "
+            "anything about the current moment (time, weather, news), or for his task "
+            "list -- list_tasks owns that. Report only what the result actually quotes; "
+            "if it says nothing in the notes matches, say exactly that instead of "
+            "filling the gap from your own guess."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The subject to look up, in a few words -- 'computational methods coursework deadline', 'reminder card decision'. Keywords, not a sentence.",
+                }
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+if os.environ.get("DENISSE_VAULT_SEARCH", "1").lower() not in ("0", "false", "off", "no"):
+    TOOL_DEFINITIONS.append(VAULT_SEARCH_DEFINITION)
+
+
 def _unleak_json(text: str, last_tool_result: str) -> str:
     """Replace a reply that is really a JSON status object with something a
     person would say.

@@ -20,6 +20,7 @@ import obsidian_sync
 import optimize
 import spotify_control
 import tasks
+import vault_search
 
 FACTS_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "memory", "facts.json"
@@ -648,6 +649,7 @@ TOOL_FUNCTIONS = {
     "list_tasks": list_open_tasks,
     "complete_task": complete_task,
     "remove_task": remove_task,
+    "search_vault": vault_search.search_vault,
     "play_song": spotify_control.play_song,
     "pause_music": spotify_control.pause_music,
     "resume_music": spotify_control.resume_music,
