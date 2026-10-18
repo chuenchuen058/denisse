@@ -65,10 +65,17 @@ GROUPS = {
         r"|agenda|schedule|by (monday|tuesday|wednesday|thursday|friday"
         r"|saturday|sunday|tomorrow|tonight)|outstanding|pending",
     ),
-    "info": (
-        {"get_weather", "get_news"},
+    # Weather and news used to be one 'info' group, so "do you like rainy
+    # days?" was offered get_news and called it (eval small_talk,
+    # 2026-10-18). Split so each word only brings its own tool.
+    "weather": (
+        {"get_weather"},
         r"weather|rain|temperature|forecast|hot\b|cold\b|sunny|umbrella"
-        r"|news|headline|happening|current events|going on in",
+        r"|snow|wind|humid|degrees",
+    ),
+    "news": (
+        {"get_news"},
+        r"news|headline|happening|current events|going on in",
     ),
     "system": (
         {"get_system_status", "clean_temp_files", "list_startup_programs",
@@ -82,7 +89,11 @@ GROUPS = {
         {"recall", "list_known_facts"},
         r"remember|recall|forget|know about me|you know|do you know"
         r"|what'?s my|what is my|what are my|my fav|favou?rite|about me"
-        r"|my name|who am i",
+        r"|my name|who am i"
+        # A question about his own habits is a facts question even without
+        # 'my': "which code editor do I use?" matched nothing before
+        # 2026-10-18, so recall was never even offered for it.
+        r"|\b(do|did|have|am) i\b|\bi (use|like|prefer|love|hate|usually)\b",
     ),
     # search_vault was the one tool still offered on every turn (it was
     # added before it had a group), and the eval caught a greeting calling

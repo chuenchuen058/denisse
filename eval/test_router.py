@@ -72,10 +72,27 @@ CASES = [
     ("greet_no_vault", [user("hey")], set(), {"search_vault"}),
 ]
 
+# Every model-eval case that needs a tool gets a routing check for free, so
+# a new case in eval/cases.py can't fail nightly just because the router
+# never offered the tool it needs -- that shows up here, in a second.
+from eval.cases import CASES as EVAL_CASES  # noqa: E402
+
+for _c in EVAL_CASES:
+    _want = _c["expect"].get("any_tool_of")
+    if _want:
+        # (id, messages, must all be offered, must not be, at least one of)
+        CASES.append((f"eval:{_c['id']}",
+                      list(_c.get("before", [])) + [user(_c["prompt"])],
+                      set(), set(), set(_want)))
+    if _c["expect"].get("no_tools"):
+        CASES.append((f"eval:{_c['id']}", [user(_c["prompt"])],
+                      set(), {"recall", "search_vault", "get_news"}))
+
 # search_vault only exists while DENISSE_VAULT_SEARCH is on; drop its cases
 # otherwise so the control arm still runs clean.
 if "search_vault" not in {d["function"]["name"] for d in brain.TOOL_DEFINITIONS}:
-    CASES = [c for c in CASES if "search_vault" not in c[2]]
+    CASES = [c for c in CASES
+             if "search_vault" not in c[2] and c[4:] != ({"search_vault"},)]
 
 
 def names(defs):
@@ -88,13 +105,16 @@ def main() -> int:
     failures = 0
     sizes = []
 
-    for cid, msgs, need, ban in CASES:
+    for cid, msgs, need, ban, *rest in CASES:
+        any_of = rest[0] if rest else None
         offered = tool_router.select(everything, msgs)
         got = names(offered)
         sizes.append(len(json.dumps(offered)))
         problems = []
         if need - got:
             problems.append(f"missing {sorted(need - got)}")
+        if any_of and not (any_of & got):
+            problems.append(f"offers none of {sorted(any_of)}")
         if ban & got:
             problems.append(f"offered banned {sorted(ban & got)}")
         failures += bool(problems)
