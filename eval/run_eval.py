@@ -81,7 +81,10 @@ def run_case(brain, case: dict, history: list) -> dict:
         tools.append(name)
         return name not in safety.RISKY_TOOLS
 
-    messages = list(history) + [{"role": "user", "content": case["prompt"]}]
+    # `before` is a case's own scripted earlier turns, for follow-ups like
+    # "and in Penang?" that only make sense after another question.
+    messages = (list(history) + list(case.get("before", []))
+                + [{"role": "user", "content": case["prompt"]}])
     started = time.monotonic()
     try:
         reply, _ = brain.respond(messages, confirm=spy)
@@ -99,6 +102,7 @@ def run_case(brain, case: dict, history: list) -> dict:
         "seconds": seconds,
         "passed": not fails,
         "failures": fails,
+        "follow_up": bool(case.get("before")),
     }
 
 
@@ -125,6 +129,10 @@ def write_dataset(results: dict) -> int:
     with DATASET.open("a", encoding="utf-8") as f:
         for r in results["clean"]:
             if not r["passed"] or r["prompt"] in seen or not r["reply"]:
+                continue
+            # A follow-up's reply is meaningless without the turns before
+            # it, and the dataset stores single user->assistant pairs.
+            if r.get("follow_up"):
                 continue
             f.write(json.dumps({
                 "messages": [
@@ -201,6 +209,19 @@ def main() -> int:
     scratch = Path(tempfile.mkdtemp(prefix="denisse-eval-")) / "tasks.json"
     tasks.TASKS_FILE = str(scratch)
     tasks.add_task("file the Spritzer paperwork", "friday")
+
+    # Same for remembered facts. On 2026-10-18 a new recall case ("which
+    # code editor do I use?") got a remember() call instead -- and it wrote
+    # an invented code_editor fact into the REAL memory/facts.json, which
+    # _save_facts then mirrored into the Obsidian vault. The suite now
+    # reads a scratch copy of his real facts (so recall cases still test
+    # real data) and the vault mirror is switched off for the run.
+    import obsidian_sync
+    import tools
+    facts_scratch = scratch.with_name("facts.json")
+    facts_scratch.write_text(json.dumps(tools._load_facts(), indent=2), encoding="utf-8")
+    tools.FACTS_FILE = str(facts_scratch)
+    obsidian_sync.sync_facts = lambda facts: None
 
     now = datetime.datetime.now()
     results = {"stamp": now.strftime("%Y-%m-%d %H:%M"), "date": now.strftime("%Y-%m-%d")}

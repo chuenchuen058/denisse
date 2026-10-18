@@ -15,7 +15,14 @@ Each case:
                 none_of       set  -> none of these may be called
                 must_contain  list -> substring(s) required in the reply
                 deny          list -> substrings that must NOT appear
+    before    optional scripted earlier turns (role/content dicts), for
+              follow-ups that only make sense after another message
     why       the regression this case exists to catch
+
+Every case really runs its tools, every night. So only cases whose tools
+are read-only, or write to the eval's scratch task store, belong here --
+nothing that plays music, opens an app, writes a file or cleans temp files
+at 3am. A case that needs one of those must assert it is NOT called.
 """
 
 # Tools that read or change the machine. A greeting reaching for any of
@@ -120,5 +127,109 @@ CASES = [
                    "deny": POSIX_LEAKS},
         "why": "A mangled voice transcript should get 'didn't catch that', "
                "not a guessed tool call with nonsense arguments.",
+    },
+
+    # --- added 2026-10-18, after the tool router: one case per routed
+    # group, so a keyword gap in tool_router.py shows up as a failure here.
+    {
+        "id": "greet_morning",
+        "prompt": "good morning",
+        "expect": {"no_tools": True, "deny": LEAKS + POSIX_LEAKS},
+        "why": "A third greeting shape. 'hey' and 'thanks' alone let a "
+               "greeting-specific fix pass without the general rule holding.",
+    },
+    {
+        "id": "small_talk",
+        "prompt": "do you like rainy days?",
+        "expect": {"none_of": STATE_TOOLS - {"get_weather"}, "deny": LEAKS + POSIX_LEAKS},
+        "why": "Chat about the weather is not a request for files, memory or "
+               "notes. get_weather is tolerated: the router offers it on "
+               "'rainy', and checking is a defensible reading.",
+    },
+    {
+        "id": "time_elsewhere",
+        "prompt": "what time is it in Tokyo?",
+        "expect": {"any_tool_of": {"get_current_time"}, "deny": POSIX_LEAKS},
+        "why": "The timezone argument path of get_current_time.",
+    },
+    {
+        "id": "weather",
+        "prompt": "is it going to rain in London today?",
+        "expect": {"any_tool_of": {"get_weather"}, "deny": POSIX_LEAKS},
+        "why": "Weather must come from the tool, never a guess.",
+    },
+    {
+        "id": "weather_follow_up",
+        "before": [
+            {"role": "user", "content": "what's the weather like in London?"},
+            {"role": "assistant", "content": "It's 14°C and cloudy in London right now."},
+        ],
+        "prompt": "and in Penang?",
+        "expect": {"any_tool_of": {"get_weather"}, "deny": POSIX_LEAKS},
+        "why": "'and in Penang?' names no tool group on its own; the router "
+               "has to carry weather over from the previous message.",
+    },
+    {
+        "id": "news",
+        "prompt": "what's in the news today?",
+        "expect": {"any_tool_of": {"get_news"}, "deny": POSIX_LEAKS},
+        "why": "News must come from get_news, never invented headlines.",
+    },
+    {
+        "id": "now_playing",
+        "prompt": "what song is playing right now?",
+        "expect": {"any_tool_of": {"current_track"},
+                   "none_of": {"play_song", "skip_song", "pause_music",
+                               "resume_music", "previous_song", "open_application"},
+                   "deny": POSIX_LEAKS},
+        "why": "A question about the music must read it, not change it.",
+    },
+    {
+        "id": "system_status",
+        "prompt": "my laptop feels slow, how's the cpu and memory?",
+        "expect": {"any_tool_of": {"get_system_status"},
+                   "none_of": {"clean_temp_files", "disable_startup_program",
+                               "run_shell_command"},
+                   "deny": POSIX_LEAKS},
+        "why": "Asking how the machine is doing must check it, not start "
+               "changing it.",
+    },
+    {
+        "id": "recall_british",
+        "prompt": "what's my favourite programming language?",
+        "expect": {"any_tool_of": {"recall", "list_known_facts"},
+                   "none_of": {"remember"},
+                   "must_contain": ["python"], "deny": POSIX_LEAKS},
+        "why": "The fact is stored as favorite_programming_language. A "
+               "British-spelled question used to need the model to guess "
+               "that exact key for recall() to find it.",
+    },
+    {
+        "id": "recall_loose",
+        "prompt": "which code editor do I use?",
+        "expect": {"any_tool_of": {"recall", "list_known_facts"},
+                   "none_of": {"remember"},
+                   "must_contain": ["neovim"], "deny": POSIX_LEAKS},
+        "why": "Stored as favorite_editor; 'code editor' / 'editor_used' "
+               "are the keys a model actually guesses. First run (2026-10-18) "
+               "the router didn't offer recall at all, and she called "
+               "remember('code_editor', 'Visual Studio Code') instead -- an "
+               "invented fact. A question must never write memory.",
+    },
+    {
+        "id": "self_voice",
+        "prompt": "what voice are you using right now?",
+        "expect": {"any_tool_of": {"get_voice_settings"}, "deny": POSIX_LEAKS},
+        "why": "She has no built-in knowledge of her voice; she must check.",
+    },
+    {
+        # Keep last: it closes the seeded task, which the earlier task
+        # cases in this condition still need open.
+        "id": "task_complete_one",
+        "prompt": "I've filed the Spritzer paperwork, tick it off",
+        "expect": {"any_tool_of": {"complete_task"}, "none_of": {"remove_task"},
+                   "deny": POSIX_LEAKS},
+        "why": "Done work is completed (kept on record), not deleted -- and "
+               "the 2026-09-23 bug closed an unrelated task as well.",
     },
 ]
