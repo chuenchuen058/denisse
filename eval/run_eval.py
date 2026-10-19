@@ -166,6 +166,12 @@ def report(results: dict, added: int) -> str:
             "what's accumulated in `memory/conversation.json`.", "",
         ]
 
+    # What his real conversations say went wrong -- see learning.py. The
+    # suite only ever asks its own fixed prompts; this is where new cases
+    # for it come from.
+    if results.get("learned"):
+        lines += ["## Learned from live use", ""] + results["learned"] + [""]
+
     for cond in ("clean", "live"):
         lines += [f"## {cond}", ""]
         for r in results[cond]:
@@ -248,6 +254,14 @@ def main() -> int:
     results["median"] = times[len(times) // 2] if times else 0
 
     added = write_dataset(results)
+
+    # Never let it cost the night's eval: a bad history file is reported,
+    # not fatal.
+    try:
+        import learning
+        results["learned"] = learning.summary(learning.run())
+    except Exception as exc:
+        results["learned"] = [f"- learning pass failed: {exc}"]
     results["dataset_total"] = sum(1 for _ in DATASET.open(encoding="utf-8")) if DATASET.exists() else 0
 
     out_dir = Path(args.out)
