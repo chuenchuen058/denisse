@@ -1,22 +1,27 @@
 """The nightly vault job: check, flag, commit. One entry point.
 
-Four stages, in this order:
+Five stages, in this order:
 
   1. contract   -- runs vault_contract.py, which rewrites Denisse/Vault Health.md
   2. naming     -- names inside every Week N/ folder, against the convention
                    recorded in SEM 1 Modules/.keats-manifest.json
   3. flag       -- one open task per week note still at 'status: files-only',
                    so a missing write-up turns up on the reminder card
-  4. commit     -- commits ONLY the files this job writes
+  4. propose    -- runs scripts/propose_cases.py, which turns yesterday's live
+                   failures into DRAFT eval cases awaiting a human assertion
+  5. commit     -- commits ONLY the files this job writes
 
 What it deliberately does NOT do:
 
-  * fetch from KEATS. That needs a Moodle token, and how to sign in is still
-    Chuen's open decision (Memory/decisions.md, 2026-10-08). Until he answers,
-    this stage prints why it is skipping and moves on.
+  * fetch from KEATS. Denisse does not sign in to KEATS at all -- the weekly
+    pull is a scheduled Claude session driving Chuen's own browser session
+    (Memory/decisions.md, 2026-10-19). Nothing here needs a Moodle token, and
+    keats_login.py is not authorised; see the 2026-10-08 entry.
   * move or rename anything. Guessing which week a PDF belongs to, and what
     kind of file it is, is what produced the week-3 mess; this job reports
     names that break the convention and leaves them where they are.
+  * write eval/cases.py. Stage 4 proposes; the assertion is a judgement and
+    a wrong case is worse than no case.
   * git add -A. Chuen runs parallel sessions against these repos, so the
     commit stages an explicit list and nothing else.
 
@@ -84,7 +89,12 @@ for module in sorted(os.listdir(MODULES)):
         title = re.sub(r"\s*\([^)]*\)\s*$", "", module.split(" ", 1)[1]).strip()
         expect_note = f"{title} Week {week}.md"
         for fn in sorted(os.listdir(wpath)):
-            if fn == expect_note or fn.endswith(".m") or fn.startswith("."):
+            # .m and .mat come down from KEATS as an exercise's own assets --
+            # a script and the data it loads. Their names belong to the
+            # exercise (ex1_data.mat is loaded by name), so the convention
+            # does not apply and renaming them would break the exercise.
+            if (fn == expect_note or fn.startswith(".")
+                    or fn.endswith((".m", ".mat"))):
                 continue
             if not NAME_OK.match(fn):
                 say(f"  off-convention  {module}/{sub}/{fn}")
@@ -124,12 +134,58 @@ for note in sorted(pending):
 if not pending:
     say("  no week note is waiting on a write-up")
 
+# -- 4. promote live failures into draft cases ------------------------------
+# This closes the loop the roadmap asked for ("every bug found becomes a
+# case"): learning.py labels live turns, and until now a human had to read the
+# eval report and remember. Drafts only -- the assertion is a judgement, so
+# nothing lands in eval/cases.py without being looked at. The output quotes
+# his real conversation, so eval/proposed_cases.py is gitignored; the repo is
+# public.
+say("== propose ==")
+# Refresh learned.json first, or the drafts are yesterday's. learning.py only
+# reads the stored history; the write goes to gitignored memory/learned.json.
+learner = subprocess.run(
+    [sys.executable, os.path.join(REPO, "learning.py")], cwd=REPO,
+    capture_output=True, text=True, encoding="utf-8", errors="replace",
+)
+if learner.returncode:
+    say("  learning.py exited %d -- drafts may be stale" % learner.returncode)
+    say("  " + (learner.stderr.strip().splitlines() or ["no stderr"])[-1])
+else:
+    for l in learner.stdout.splitlines():
+        if "live turns" in l or "distinct failing" in l:
+            say("  " + l.lstrip("- ").strip())
+
+proposer = os.path.join(HERE, "propose_cases.py")
+if not os.path.exists(proposer):
+    say("  propose_cases.py is missing -- skipped")
+    drafts = -1
+else:
+    # --write even on --dry: the file is a gitignored scratch draft, not a
+    # change to the vault or to the suite, and seeing it is the point.
+    pc = subprocess.run(
+        [sys.executable, proposer, "--write"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    m = re.search(r"(\d+) draft case\(s\) need a human decision", pc.stdout)
+    drafts = int(m.group(1)) if m else 0
+    for l in pc.stdout.splitlines():
+        if re.search(r"learned\.json:|already covers|already covered|"
+                     r"need a human decision|caught up|wrote |no memory/", l):
+            say("  " + l.strip())
+    if pc.returncode:
+        say(f"  propose_cases.py exited {pc.returncode}")
+        say("  " + (pc.stderr.strip().splitlines() or ["no stderr"])[-1])
+    elif drafts:
+        say("  -> decide each assertion, then move it into eval/cases.py by hand")
+
 # -- the stage that isn't running -------------------------------------------
 say("== keats ==")
-say("  skipped: no Moodle token, and how to sign in is still Chuen's call")
-say("  (Memory/decisions.md, 2026-10-08). Nothing was fetched.")
+say("  not this job's work: the weekly pull is a scheduled Claude session")
+say("  driving Chuen's own browser (Memory/decisions.md, 2026-10-19).")
+say("  Nothing here fetches, and no Moodle token is involved.")
 
-# -- 4. commit, narrowly ----------------------------------------------------
+# -- 5. commit, narrowly ----------------------------------------------------
 say("== commit ==")
 MINE = ["Denisse/Vault Health.md", "Denisse/Tasks.md"]
 
@@ -156,7 +212,8 @@ else:
 
 # -- a trail ----------------------------------------------------------------
 line = (f"{datetime.now():%Y-%m-%d %H:%M}  contract_rc={contract.returncode} "
-        f"off_convention={odd} pending_writeups={len(pending)}{' DRY' if DRY else ''}")
+        f"off_convention={odd} pending_writeups={len(pending)} "
+        f"draft_cases={drafts}{' DRY' if DRY else ''}")
 os.makedirs(os.path.dirname(LOG), exist_ok=True)
 with open(LOG, "a", encoding="utf-8") as f:
     f.write(line + "\n")
