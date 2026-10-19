@@ -43,6 +43,10 @@ cases = [
     ("study session over", "stop_study"),
     ("pomodoro done", "stop_study"),
     ("study timer finished", "stop_study"),
+    # 2026-10-19 23:08: he typed this and it went to the model
+    ("study sesh", "study"),
+    ("start a study sesh", "study"),
+    ("study sesh off", "stop_study"),
     # must still go to the model
     ("what is the pomodoro technique?", None),
     ("how long is a study mode session", None),
@@ -66,6 +70,17 @@ context_cases = [
     ("cancel it", True, "stop_study"),
     ("stop it", False, None),
     ("end it", False, None),
+    # bare one-worders -- he typed "off" at 23:08 with the timer on screen
+    ("off", True, "stop_study"),
+    ("off", False, None),
+    ("stop", True, "stop_study"),
+    ("stop", False, None),
+    ("end", True, "stop_study"),
+    ("done", True, "stop_study"),
+    ("finished", True, "stop_study"),
+    ("enough", True, "stop_study"),
+    ("cancel", True, "stop_study"),
+    ("done", False, None),
     # still the model's, running or not -- these name a subject that is not
     # the timer, or ask a question
     ("turn off the music", True, None),

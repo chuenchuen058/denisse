@@ -60,7 +60,7 @@ REST_LINES = (
 # here rather than a new tool because this has to work with Ollama down.
 _THING = (
     r"(?:the\s+|a\s+|my\s+)?"
-    r"(?:study\s+(?:mode|time|timer|session)|p[ao]m[ao]doro(?:\s+timer)?)"
+    r"(?:study\s+(?:mode|time|timer|session|sesh)|p[ao]m[ao]doro(?:\s+timer)?)"
 )
 _STUDY_ON = re.compile(
     rf"^(?:(?:start|begin|turn\s+on|enter|open)\s+)?{_THING}(?:\s+on)?$"
@@ -83,9 +83,15 @@ _STUDY_OFF = re.compile(
 # Known consequence, accepted: with music playing AND the timer running,
 # "turn it off" stops the timer. The timer is the thing he just asked for;
 # "turn off the music" still names its subject and goes to the model.
+# The bare one-worders are here because he typed "off" at 23:08 on 2026-10-19
+# with the timer visibly running, and the first version of this rule left them
+# out as "too broad". That was wrong: breadth is exactly what `active` buys.
+# While a 25-minute timer is counting down on screen, "off" is not ambiguous.
+# With nothing running they still mean nothing here and go to the model.
 _STUDY_OFF_IF_ACTIVE = re.compile(
     r"^(?:turn|switch|shut)\s+(?:it|that|this)\s+off$"
     r"|^(?:stop|end|cancel|kill)\s+(?:it|that|this)$"
+    r"|^(?:off|stop|end|cancel|done|finished|enough)$"
 )
 
 _CURRENT = None  # the one StudyMode in this process, so is_active() is real
