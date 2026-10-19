@@ -26,6 +26,4 @@ spotipy>=2.24.0
 dateparser==1.4.3
 msal==1.39.0
 
-# KEATS sign-in (keats_login.py)
 requests>=2.31.0
-pywebview>=5.0
