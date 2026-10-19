@@ -21,6 +21,7 @@ fire a stale alert hours late as if nothing happened -- it notices the
 deadline passed and moves on with a fresh phase from now.
 """
 
+import re
 import tkinter as tk
 from datetime import datetime, timedelta
 
@@ -44,6 +45,41 @@ REST_LINES = (
     "Rest time.",
     "Nice work -- take {n} minutes. Stand up, drink some water.",
 )
+
+
+# What turns it on and off, typed or said. Whole-message only, so a question
+# about studying still goes to the model.
+#
+# It only knew "study mode" in its first version, and on 2026-10-19
+# learning.py found what Chuen actually typed: "study time", "pomodoro",
+# "pamodoro", "off study mode". None matched, so each went to the model,
+# which has no study-mode tool -- it guessed read_skill('study'), got "No
+# skill named", and answered with a made-up pomodoro how-to. The fix is
+# here rather than a new tool because this has to work with Ollama down.
+_THING = (
+    r"(?:the\s+|a\s+|my\s+)?"
+    r"(?:study\s+(?:mode|time|timer|session)|p[ao]m[ao]doro(?:\s+timer)?)"
+)
+_STUDY_ON = re.compile(
+    rf"^(?:(?:start|begin|turn\s+on|enter|open)\s+)?{_THING}(?:\s+on)?$"
+    r"|^(?:time\s+to|let'?s|start)\s+study(?:ing)?$"
+)
+_STUDY_OFF = re.compile(
+    rf"^(?:stop|end|exit|quit|turn\s+off|cancel|close|off)\s+{_THING}$"
+    rf"|^{_THING}\s+off$"
+    r"|^(?:i'?m\s+|i\s+am\s+|i'?ve\s+|i\s+have\s+|i\s+)?(?:done|finished|stop)\s+studying$"
+)
+
+
+def match_command(text: str):
+    """-> 'study', 'stop_study', or None."""
+    t = " ".join((text or "").lower().replace(",", " ").rstrip(".!?").split())
+    t = re.sub(r"^(?:please\s+)|(?:\s+please)$", "", t)
+    if _STUDY_OFF.match(t):
+        return "stop_study"
+    if _STUDY_ON.match(t):
+        return "study"
+    return None
 
 
 def _chime():

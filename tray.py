@@ -62,7 +62,9 @@ import optimize
 import wake_word
 from floating_orb import FloatingOrb
 from reminder_card import TYPING_MS, ReminderCard, ThinkingBubble
-from study_mode import StudyBubble, StudyMode
+# "study mode" / "pomodoro" / "stop study mode" ... -- the phrases live in
+# study_mode.match_command, shared with the wake word.
+from study_mode import StudyBubble, StudyMode, match_command as _match_study_command
 from brain import Brain
 from mission_control import get_status
 from safety import RISKY_TOOLS
@@ -509,24 +511,6 @@ _REMINDER_COMMAND = re.compile(
 
 def _is_reminder_command(text: str) -> bool:
     return bool(_REMINDER_COMMAND.match(" ".join(text.lower().rstrip(".!?").split())))
-
-
-# "study mode" / "start study mode" turns the pomodoro on, "stop study
-# mode" / "end study mode" turns it off (asked 2026-10-14). Whole-message
-# only, like the reminder command, so a question about studying still goes
-# to the model.
-_STUDY_COMMAND = re.compile(
-    r"^(?:(?P<off>stop|end|exit|quit|turn\s+off|cancel)\s+|(?:start|begin|turn\s+on|enter)\s+)?"
-    r"(?:the\s+)?study\s+mode(?:\s+(?P<off2>off)|\s+on)?(?:\s+please)?$"
-)
-
-
-def _match_study_command(text: str):
-    """-> 'study', 'stop_study', or None."""
-    m = _STUDY_COMMAND.match(" ".join(text.lower().rstrip(".!?").split()))
-    if not m:
-        return None
-    return "stop_study" if (m.group("off") or m.group("off2")) else "study"
 
 
 def _is_manually_offline() -> bool:

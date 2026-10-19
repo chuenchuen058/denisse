@@ -58,6 +58,7 @@ import pyttsx3
 
 import conversation
 import stt_vosk
+import study_mode
 import voice_mode
 from brain import Brain
 from safety import confirm_risky_tool
@@ -678,12 +679,13 @@ def run(stop_event=None, on_exchange=None, on_heard=None, is_offline=None, on_mo
                     on_mode_command("online")
                 voice_mode.speak(tts_engine, "Back online.")
                 continue
-            if normalized in ("study mode", "start study mode"):
+            study = study_mode.match_command(normalized)
+            if study == "study":
                 if on_mode_command:
                     on_mode_command("study")
                 voice_mode.speak(tts_engine, "Study mode on. Twenty-five minutes, starting now.")
                 continue
-            if normalized in ("stop study mode", "end study mode", "study mode off"):
+            if study == "stop_study":
                 if on_mode_command:
                     on_mode_command("stop_study")
                 voice_mode.speak(tts_engine, "Study mode off.")
