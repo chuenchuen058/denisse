@@ -47,6 +47,28 @@ def existing_prompts() -> set:
     return {norm(m) for m in re.findall(r'"prompt":\s*"((?:[^"\\]|\\.)*)"', src)}
 
 
+def handled_before_the_model(prompt: str) -> bool:
+    """Is this prompt intercepted before it ever reaches the model?
+
+    study_mode.match_command catches the study/pomodoro phrases in tray.py
+    and wake_word.py, with no model call -- so an eval case for one would
+    measure the wrong thing, and `scripts/test_study_command.py` is where it
+    is really tested. Without this check the five study-mode failures of
+    2026-10-19 would be re-proposed every night forever: they are fixed, but
+    fixed somewhere eval/cases.py cannot see.
+
+    Checked with active=True as well, since a phrase like "turn it off" is a
+    stop command only while the timer runs -- which is when it was said.
+    """
+    try:
+        sys.path.insert(0, ROOT)
+        import study_mode
+    except Exception:
+        return False  # can't tell (no Tk, no PIL) -- propose it and let a human look
+    return bool(study_mode.match_command(prompt, active=False)
+                or study_mode.match_command(prompt, active=True))
+
+
 def slug(text: str, used: set) -> str:
     base = re.sub(r"[^a-z0-9]+", "_", norm(text))[:28].strip("_") or "case"
     name, n = base, 2
@@ -109,10 +131,13 @@ def main() -> None:
     print(f"eval/cases.py already covers {len(covered)} prompts\n")
 
     used, drafts = set(), []
-    skipped = 0
+    skipped = intercepted = 0
     for fo in failures:
         if norm(fo["prompt"]) in covered:
             skipped += 1
+            continue
+        if handled_before_the_model(fo["prompt"]):
+            intercepted += 1
             continue
         expect, decide = suggest(fo)
         name = slug(fo["prompt"], used)
@@ -127,7 +152,12 @@ def main() -> None:
         })
 
     if skipped:
-        print(f"  {skipped} already covered by a case — not proposed again\n")
+        print(f"  {skipped} already covered by a case — not proposed again")
+    if intercepted:
+        print(f"  {intercepted} now handled before the model (study_mode.match_command) —"
+              f" tested in scripts/test_study_command.py, not here")
+    if skipped or intercepted:
+        print()
     if not drafts:
         print("  nothing new to propose. The loop is caught up.")
         return

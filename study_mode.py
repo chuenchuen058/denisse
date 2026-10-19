@@ -11,9 +11,11 @@ reminder card; StudyBubble only swaps the task list for the message.
 While it runs, a small pill under the orb counts down the current phase
 (StudyBadge) -- click it for a status bubble.
 
-Started and stopped from the tray menu, by typing or saying "study mode"
-/ "stop study mode", or from the bubble itself. No model call anywhere:
-it's a clock, it has to be exact, and it works with Ollama down.
+Started and stopped from the tray menu, from the bubble itself, or by typing
+or saying any of the phrases in match_command -- "study session", "start
+pomodoro", "study session end", and while it is running the bare "turn it
+off". No model call anywhere: it's a clock, it has to be exact, and it works
+with Ollama down.
 
 Timing runs on wall-clock deadlines checked every second rather than one
 long Tk after(), so a laptop that sleeps mid-session doesn't come back and
@@ -66,19 +68,52 @@ _STUDY_ON = re.compile(
 )
 _STUDY_OFF = re.compile(
     rf"^(?:stop|end|exit|quit|turn\s+off|cancel|close|off)\s+{_THING}$"
-    rf"|^{_THING}\s+off$"
+    rf"|^{_THING}\s+(?:off|end|ends|over|done|finished)$"
     r"|^(?:i'?m\s+|i\s+am\s+|i'?ve\s+|i\s+have\s+|i\s+)?(?:done|finished|stop)\s+studying$"
 )
 
+# Phrases that name no subject, so they only mean the timer WHILE it is
+# running. Asked for by Chuen on 2026-10-19: "turn the timer off and end it
+# when I say 'turn it off'". That reverses the same day's earlier decision to
+# leave "turn it off" to the model, and it is his call to reverse -- but the
+# ambiguity it was protecting is real: with nothing running, "turn it off" is
+# usually the music. So these resolve only when study mode is active, and
+# otherwise fall through untouched.
+#
+# Known consequence, accepted: with music playing AND the timer running,
+# "turn it off" stops the timer. The timer is the thing he just asked for;
+# "turn off the music" still names its subject and goes to the model.
+_STUDY_OFF_IF_ACTIVE = re.compile(
+    r"^(?:turn|switch|shut)\s+(?:it|that|this)\s+off$"
+    r"|^(?:stop|end|cancel|kill)\s+(?:it|that|this)$"
+)
 
-def match_command(text: str):
-    """-> 'study', 'stop_study', or None."""
+_CURRENT = None  # the one StudyMode in this process, so is_active() is real
+
+
+def is_active() -> bool:
+    """Is study mode running right now? False when there is no StudyMode."""
+    return _CURRENT is not None and _CURRENT.active
+
+
+def match_command(text: str, active=None):
+    """-> 'study', 'stop_study', or None.
+
+    `active` is whether study mode is running. Leave it None to read the live
+    state (`is_active()`); pass a bool to decide explicitly, which is what the
+    tests do. It only affects the subject-less phrases above -- everything
+    else matches the same either way.
+    """
     t = " ".join((text or "").lower().replace(",", " ").rstrip(".!?").split())
     t = re.sub(r"^(?:please\s+)|(?:\s+please)$", "", t)
     if _STUDY_OFF.match(t):
         return "stop_study"
     if _STUDY_ON.match(t):
         return "study"
+    if active is None:
+        active = is_active()
+    if active and _STUDY_OFF_IF_ACTIVE.match(t):
+        return "stop_study"
     return None
 
 
@@ -295,6 +330,11 @@ class StudyMode:
         self.ends_at = None
         self.round_no = 0
         self._job = None
+        # One StudyMode per process (tray.py builds it once). Registering it
+        # here is what lets match_command answer "is it running?" without the
+        # chat and the wake word each having to be handed the instance.
+        global _CURRENT
+        _CURRENT = self
 
     @property
     def active(self):
