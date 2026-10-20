@@ -102,6 +102,30 @@ CASES = [
         "why": "Asking what's outstanding must read the real task list "
                "rather than being answered from context.",
     },
+    # The 2026-10-20 timer cases. Live, "start timer" got
+    # run_shell_command("start") and "The timer has started.", and "stop
+    # timer" got "Done." with no tool. set_timer only holds an in-process
+    # countdown with no notifier here, so these touch nothing real.
+    {
+        "id": "timer_start",
+        "prompt": "start timer",
+        "expect": {"any_tool_of": {"set_timer"}, "none_of": {"run_shell_command", "open_application"}},
+        "why": "A timer with no length must go to set_timer -- never a shell command. "
+               "Clean, she asks how long; with live history she picks 10 minutes "
+               "herself and says so, and either is fine: the tool result is real.",
+    },
+    {
+        "id": "timer_set",
+        "prompt": "set a timer for 10 minutes",
+        "expect": {"any_tool_of": {"set_timer"}, "none_of": {"run_shell_command"}},
+        "why": "A timer with a length must actually start one.",
+    },
+    {
+        "id": "timer_stop",
+        "prompt": "stop timer",
+        "expect": {"any_tool_of": {"cancel_timer"}},
+        "why": "'Done.' with no tool call stopped nothing; stopping must call cancel_timer.",
+    },
     {
         "id": "vault_deadline",
         "prompt": "when is computational methods coursework 1 due?",

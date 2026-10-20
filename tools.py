@@ -21,6 +21,7 @@ import obsidian_sync
 import optimize
 import spotify_control
 import tasks
+import timers
 import vault_search
 
 FACTS_FILE = os.path.join(
@@ -710,4 +711,7 @@ TOOL_FUNCTIONS = {
     "skip_song": spotify_control.skip_song,
     "previous_song": spotify_control.previous_song,
     "current_track": spotify_control.current_track,
+    "set_timer": timers.set_timer,
+    "cancel_timer": timers.cancel_timer,
+    "list_timers": timers.list_timers,
 }

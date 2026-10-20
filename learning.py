@@ -82,6 +82,20 @@ _CORRECTION = re.compile(
     re.IGNORECASE,
 )
 
+# A reply saying something was DONE. brain.py uses the same pattern live,
+# to send her back before a false "done" reaches him; here it labels the
+# ones that got through. From 2026-10-20: "stop timer" -> no tool -> "Done."
+CLAIMS_DONE = re.compile(
+    r"^\s*(?:done|all set|sorted|ok(?:ay)?[,.]?\s+done)\b[.!]?\s*$"
+    r"|\b(?:has|have) been (?:started|stopped|set|turned (?:on|off)|completed|opened"
+    r"|closed|cancell?ed|created|saved|added|removed|paused|played|scheduled)\b"
+    r"|\bi(?:'ve| have)\s+(?:just\s+)?(?:started|stopped|set|turned|opened|closed"
+    r"|cancell?ed|created|saved|added|removed|paused|scheduled)\b"
+    r"|\b(?:has|is now)\s+(?:started|stopped|running)\b"
+    r"|\bsuccessfully\b",
+    re.IGNORECASE,
+)
+
 _THANKS = re.compile(
     r"^\s*(thanks|thank you|thx|cheers|perfect|great|nice|awesome|good job|"
     r"that works|that'?s right)\b",
@@ -126,19 +140,29 @@ def label(turn: dict, next_user: str | None) -> tuple[str, str]:
         if not turn["reply"] or not _ADMITS_FAILURE.search(turn["reply"]):
             return "bad", "claimed success after tools failed"
 
+    if not turn["tools"] and CLAIMS_DONE.search(turn["reply"] or ""):
+        return "bad", "claimed an action with no tool call"
+
     if next_user and _THANKS.search(next_user) and turn["reply"]:
         return "good", "thanked"
     return "unknown", ""
 
 
-def learn(history: list) -> dict:
-    """Label every turn and collect what's worth keeping."""
+def label_turns(history: list) -> list:
+    """Every turn in order, each with its label -- instincts.py reads the
+    sequence (a failure, then what worked), not just the failures."""
     turns = split_turns(history)
     labelled = []
     for i, turn in enumerate(turns):
         next_user = turns[i + 1]["user"] if i + 1 < len(turns) else None
         verdict, reason = label(turn, next_user)
         labelled.append({**turn, "label": verdict, "reason": reason, "next_user": next_user})
+    return labelled
+
+
+def learn(history: list) -> dict:
+    """Label every turn and collect what's worth keeping."""
+    labelled = label_turns(history)
 
     # One entry per distinct prompt: the same failure every day is one bug
     # with a count, not a page of duplicates.

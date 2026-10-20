@@ -16,6 +16,7 @@ import re
 import ollama
 from dotenv import load_dotenv
 
+import learning
 import tool_router
 import tools
 # obsidian_sync is intentionally not imported -- its read_claude_memory()
@@ -531,6 +532,55 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    # Timers (timers.py), added 2026-10-20 after "start timer" was answered
+    # with run_shell_command("start") and "The timer has started." All the
+    # guidance is in these descriptions, not SYSTEM_PROMPT -- see the
+    # prompt-budget comment above -- and tool_router only offers them when
+    # the message is about a timer, so no other turn pays for them.
+    {
+        "type": "function",
+        "function": {
+            "name": "set_timer",
+            "description": (
+                "Start a countdown timer that pings Chuen from the orb when it ends. Use for "
+                "'start a timer', 'set a timer for 10 minutes', 'remind me in 5 minutes to "
+                "check the oven', 'time me for 30 seconds'. This is the ONLY way to start a "
+                "timer -- never use run_shell_command or open_application for one. If he "
+                "didn't say how long, call it with no length and it will tell you to ask him. "
+                "Not for the pomodoro study timer, and not for a deadline days away (add_task)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "minutes": {"type": "number", "description": "Length in minutes, e.g. 10 or 1.5."},
+                    "seconds": {"type": "number", "description": "Extra seconds, or the whole length for a short timer."},
+                    "label": {"type": "string", "description": "What it's for, in a few words, e.g. 'oven'. Optional."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cancel_timer",
+            "description": (
+                "Stop a running countdown timer: 'stop the timer', 'cancel the oven timer'. "
+                "Report exactly what it returns -- if it says no timer was running, say that."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"label": {"type": "string", "description": "Which timer, if he named one. Leave out to stop the running one."}},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_timers",
+            "description": "How long is left on running timers: 'how long is left on my timer?'.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
 ]
 
 # Second attempt at letting Denisse see the Obsidian vault. The first one
@@ -623,6 +673,65 @@ _PLAIN_REPLY_NUDGE = (
     "last message the way a person would, in a few words, and don't mention "
     "tools or functions."
 )
+
+
+# A reply that says something was DONE (learning.CLAIMS_DONE, shared with
+# the nightly labeller). Seen 2026-10-20: "start timer" ->
+# run_shell_command("start") -> "(no output)" -> "The timer has started.",
+# then "stop timer" -> no tool at all -> "Done." Neither was true; there was
+# no timer. The system prompt already says a tool result is ground truth,
+# and an 8B model claims success anyway, so -- like _unleak_json -- this is
+# the net underneath, checked against what actually ran this turn.
+_CLAIMS_DONE = learning.CLAIMS_DONE
+
+_NO_TOOL_CLAIM_NUDGE = (
+    "You just said it was done, but you didn't call any tool this turn, so "
+    "nothing actually happened. If one of your tools does what he asked, "
+    "call it now. If none does, tell him plainly that you can't do that yet "
+    "-- don't say it's done."
+)
+
+_UNCONFIRMED_CLAIM_NUDGE = (
+    "You just said it worked, but no tool this turn confirmed that anything "
+    "happened -- they returned: {results}. Don't say it worked. Either call "
+    "the tool that actually does what he asked, or tell him plainly what "
+    "happened."
+)
+
+_WRONG_TOOL_CLAIM_NUDGE = (
+    "You just said it was done, but the only tools that ran this turn were "
+    "{ran}, and none of them does that. Call the tool that actually does "
+    "what he asked now, or tell him plainly it isn't done."
+)
+
+
+# A claim about a thing that only certain tools can change. "Timer set for 5
+# minutes" after calculate(300) passed the check above -- calculate DID
+# succeed, it just isn't a timer (2026-10-20). So a done-claim that names one
+# of these also needs one of its tools to have run this turn.
+_CLAIM_NEEDS = (
+    (re.compile(r"\btimers?\b", re.IGNORECASE), {"set_timer", "cancel_timer"}),
+    (re.compile(r"\btasks?\b|\bto-?do\b|\breminders?\b", re.IGNORECASE),
+     {"add_task", "complete_task", "remove_task", "set_timer"}),
+    (re.compile(r"\b(?:song|track|music|spotify|playing)\b", re.IGNORECASE),
+     {"play_song", "pause_music", "resume_music", "skip_song", "previous_song"}),
+)
+_SET_FOR = re.compile(r"\b(?:set|started|running)\s+for\b", re.IGNORECASE)
+
+
+def _claim_without_its_tool(text: str, ran: set) -> bool:
+    if not (_CLAIMS_DONE.search(text) or _SET_FOR.search(text)):
+        return False
+    return any(rx.search(text) and not (ran & needs) for rx, needs in _CLAIM_NEEDS)
+
+
+def _confirms_nothing(result: str) -> bool:
+    """A tool result that is no evidence the thing was done: an error, a
+    refusal, or no output at all (run_shell_command("start") returns
+    "(no output)" and opens nothing useful)."""
+    r = (result or "").strip()
+    return (not r or r == "(no output)" or learning.tool_failed(r)
+            or r.startswith(("User declined", "Refused", "No timer started")))
 
 
 def _get(obj, key, default=None):
@@ -784,6 +893,9 @@ class Brain:
         full_messages = [{"role": "system", "content": system_content}] + messages
         last_tool_result = ""  # fallback for _unleak_json
         used_once = set()      # guards _ONCE_PER_TURN tools; per turn, not per round
+        turn_results = []      # every tool result this turn, for the _CLAIMS_DONE check
+        turn_tools_ran = set() # and which tools produced them
+        honesty_nudged = False # that check sends her back at most once per turn
         # Only the tools this turn could plausibly need -- see tool_router.py
         # for why sending all of them costs reply quality on an 8B model.
         turn_tools = tool_router.select(TOOL_DEFINITIONS, messages)
@@ -830,6 +942,26 @@ class Brain:
                     retry_text = (_get(_get(retry, "message"), "content", "") or "").strip()
                     if retry_text and not _TOOL_NARRATION.match(retry_text):
                         final_text = retry_text
+                unconfirmed = all(_confirms_nothing(r) for r in turn_results)
+                wrong_tool = _claim_without_its_tool(final_text, turn_tools_ran)
+                if fake_call is None and ((unconfirmed and _CLAIMS_DONE.search(final_text)) or wrong_tool):
+                    if not honesty_nudged and not last_round:
+                        # Back round the loop, tools still on offer, with the
+                        # nudge in this call only -- never in `messages`, so
+                        # the false claim and the nudge are never persisted.
+                        honesty_nudged = True
+                        if not turn_results:
+                            nudge = _NO_TOOL_CLAIM_NUDGE
+                        elif wrong_tool and not unconfirmed:
+                            nudge = _WRONG_TOOL_CLAIM_NUDGE.format(ran=", ".join(sorted(turn_tools_ran)))
+                        else:
+                            nudge = _UNCONFIRMED_CLAIM_NUDGE.format(results="; ".join(r[:120] for r in turn_results))
+                        full_messages.append({"role": "system", "content": nudge})
+                        continue
+                    if turn_results and all(learning.tool_failed(r) for r in turn_results):
+                        # Still claiming success over nothing but errors: say
+                        # what the tool said, the one thing here that's true.
+                        final_text = "That didn't work -- " + turn_results[-1].strip()[:300]
                 if fake_call is None:
                     messages.append({"role": "assistant", "content": final_text})
                     return final_text, messages
@@ -843,6 +975,8 @@ class Brain:
                 full_messages.append(assistant_msg)
                 result = _run_tool(fake_call["name"], fake_call["arguments"], confirm, used_once)
                 last_tool_result = str(result)
+                turn_results.append(last_tool_result)
+                turn_tools_ran.add(fake_call["name"])
                 tool_msg = {"role": "tool", "content": str(result)}
                 messages.append(tool_msg)
                 full_messages.append(tool_msg)
@@ -866,6 +1000,8 @@ class Brain:
                 args = dict(_get(func_info, "arguments") or {})
                 result = _run_tool(name, args, confirm, used_once)
                 last_tool_result = str(result)
+                turn_results.append(last_tool_result)
+                turn_tools_ran.add(name)
                 tool_msg = {"role": "tool", "content": str(result)}
                 messages.append(tool_msg)
                 full_messages.append(tool_msg)

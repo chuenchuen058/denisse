@@ -33,6 +33,8 @@ control arm for re-running the A/B in eval/run_eval.py.
 import os
 import re
 
+import instincts
+
 CORE = {
     "get_current_time",
     "calculate",
@@ -107,6 +109,19 @@ GROUPS = {
         r"|decid|decision|why did we|set ?up|society|societies|msoc|robotics"
         r"|keats|again|remind me what|explain",
     ),
+    # Added with timers.py, 2026-10-20. "start timer" used to match only
+    # "files" (on "start"), so the closest thing on offer was
+    # run_shell_command -- which it called with "start".
+    "timer": (
+        {"set_timer", "cancel_timer", "list_timers"},
+        r"timer|countdown|count down|stopwatch|time me|\bin \d+\s*(?:sec|min|hour)"
+        r"|\b\d+\s*(?:s|sec|second|m|min|minute|h|hour)s?\b.*\b(?:remind|ping|tell|alert)"
+        r"|how long (?:is )?left"
+        # A bare length is the answer to "how long?" -- "5 minutes" right
+        # after "start timer" used to route to nothing, so she called
+        # calculate(300) and said "Timer set for 5 minutes" (2026-10-20).
+        r"|^\s*(?:for\s+|like\s+|about\s+)?\d+(?:\.\d+)?\s*(?:s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?)\s*$",
+    ),
     "self": (
         {"get_voice_settings", "get_brain_location"},
         r"voice|sound like|speak|accent|your brain|your code|your memory"
@@ -180,6 +195,12 @@ def select(tool_definitions: list, messages: list) -> list:
     allowed = set(CORE)
     for name in matched_groups(messages):
         allowed |= GROUPS[name][0]
+    # What she learned from being corrected (instincts.py): adds the tool
+    # that worked last time, and -- once seen enough -- drops the one that
+    # didn't. Only ever changes this list, never the prompt.
+    texts = _user_texts(messages, 1)
+    if texts:
+        allowed = instincts.adjust(allowed, texts[0], protected=CORE)
 
     def name_of(defn):
         return defn.get("function", {}).get("name")

@@ -65,6 +65,9 @@ from reminder_card import TYPING_MS, ReminderCard, ThinkingBubble
 # "study mode" / "pomodoro" / "stop study mode" ... -- the phrases live in
 # study_mode.match_command, shared with the wake word.
 from study_mode import StudyBubble, StudyMode, match_command as _match_study_command
+from timer_ui import TimerDisplay
+
+_timer_display = None
 from brain import Brain
 from mission_control import get_status
 from safety import RISKY_TOOLS
@@ -1517,6 +1520,16 @@ def main():
     _study_mode = StudyMode(
         root, _show_study_bubble, orb=_floating_orb, font_family=FONT_FAMILY,
         avoid=lambda: [b.win for b in (_reminder_card, _study_bubble, _reply_bubble, _thinking_bubble) if b is not None],
+    )
+    # Plain countdowns (timers.py) set by her set_timer tool. Its pill also
+    # keeps off study mode's pill, so both can run at once.
+    global _timer_display
+    _timer_display = TimerDisplay(
+        root, _floating_orb, _show_reply_main,
+        notify=lambda title, text: _tray_icon.notify(text, title) if _tray_icon is not None else None,
+        font_family=FONT_FAMILY,
+        avoid=lambda: [b.win for b in (_reminder_card, _study_bubble, _reply_bubble, _thinking_bubble,
+                                        _study_mode.badge if _study_mode is not None else None) if b is not None],
     )
 
     # Nudge shortly after login, then keep checking so it also fires on a

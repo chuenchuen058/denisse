@@ -8,7 +8,9 @@ Five stages, in this order:
   3. flag       -- one open task per week note still at 'status: files-only',
                    so a missing write-up turns up on the reminder card
   4. propose    -- runs scripts/propose_cases.py, which turns yesterday's live
-                   failures into DRAFT eval cases awaiting a human assertion
+                   failures into DRAFT eval cases awaiting a human assertion,
+                   then instincts.py, which turns corrections that worked
+                   into tool-routing instincts (Denisse/Brain/instincts.json)
   5. commit     -- commits ONLY the files this job writes
 
 What it deliberately does NOT do:
@@ -179,6 +181,22 @@ else:
     elif drafts:
         say("  -> decide each assertion, then move it into eval/cases.py by hand")
 
+# Instincts (instincts.py, 2026-10-20): a correction that worked becomes a
+# tool-routing instinct in Denisse/Brain/instincts.json. Unlike the drafts
+# above these act on their own -- but only on which tools she is offered,
+# never on her prompt -- and they live in the vault, where git can undo one.
+inst = subprocess.run(
+    [sys.executable, os.path.join(REPO, "instincts.py")] + (["--dry"] if DRY else []), cwd=REPO,
+    capture_output=True, text=True, encoding="utf-8", errors="replace",
+)
+if inst.returncode:
+    say("  instincts.py exited %d" % inst.returncode)
+    say("  " + (inst.stderr.strip().splitlines() or ["no stderr"])[-1])
+else:
+    for l in inst.stdout.splitlines()[:6]:
+        if "instinct" in l or "->" in l:
+            say("  " + l.strip())
+
 # -- the stage that isn't running -------------------------------------------
 say("== keats ==")
 say("  not this job's work: the weekly pull is a scheduled Claude session")
@@ -187,7 +205,8 @@ say("  Nothing here fetches, and no Moodle token is involved.")
 
 # -- 5. commit, narrowly ----------------------------------------------------
 say("== commit ==")
-MINE = ["Denisse/Vault Health.md", "Denisse/Tasks.md"]
+MINE = ["Denisse/Vault Health.md", "Denisse/Tasks.md",
+        "Denisse/Brain/instincts.json", "Denisse/Brain/instincts.md"]
 
 
 def git(*args, cwd=VAULT):
