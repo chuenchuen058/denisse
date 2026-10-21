@@ -1,5 +1,7 @@
 # Denisse
 
+<p align="center"><img src="assets/orb.svg" width="160" alt="Denisse's orb, breathing"/></p>
+
 A personal AI assistant that runs 100% locally on this machine, no cloud
 API, no API key — a v1 in the direction of Jarvis/IRIS: talk to it, and it
 can check the time, read/write files, run commands, open applications, and
