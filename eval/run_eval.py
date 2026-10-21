@@ -29,7 +29,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from eval.cases import CASES  # noqa: E402
+from eval.cases import CASES, LEAKS, MISHEARD, POSIX_LEAKS  # noqa: E402
+
+
+def _tool_names() -> set:
+    """Tool names with an underscore -- get_weather, current_track. Plain
+    words like 'calculate' or 'recall' are ordinary English in a reply."""
+    try:
+        from brain import TOOL_DEFINITIONS
+    except Exception:
+        return set()
+    return {d["function"]["name"] for d in TOOL_DEFINITIONS
+            if "_" in d["function"]["name"]}
 
 
 VAULT_EVAL_DIR = Path(
@@ -62,9 +73,24 @@ def check(case: dict, reply: str, tools: list) -> list:
         if s.lower() not in low:
             fails.append(f"missing {s!r}")
 
-    for s in e.get("deny", []):
+    anyof = e.get("contains_any")
+    if anyof and not any(s.lower() in low for s in anyof):
+        fails.append(f"missing any of {anyof!r}")
+
+    # Leaks are checked on every case, not only the ones that list them:
+    # on 2026-10-20 the weather and news replies narrated their tool calls
+    # and passed, and the news one went into dataset.jsonl.
+    always = LEAKS + POSIX_LEAKS + ([] if case.get("misheard_ok") else MISHEARD)
+    for s in dict.fromkeys(list(e.get("deny", [])) + always):
         if s.lower() in low:
             fails.append(f"contains {s!r}")
+
+    if low.lstrip().startswith(("assistant", "user:", "system:")):
+        fails.append("starts with a role name")
+
+    named = sorted(n for n in _tool_names() if n in low)
+    if named:
+        fails.append(f"names tool {named}")
 
     return fails
 
@@ -194,6 +220,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Score Denisse against the prompt suite")
     ap.add_argument("--out", default=str(VAULT_EVAL_DIR), help="where to write the report")
     ap.add_argument("--quiet", action="store_true", help="only print the summary line")
+    ap.add_argument("--no-dataset", action="store_true",
+                    help="don't append to dataset.jsonl -- for A/B runs")
     args = ap.parse_args()
 
     try:
@@ -240,6 +268,12 @@ def main() -> int:
 
     conditions = {"clean": [], "live": conversation.replay()}
     for cond, history in conditions.items():
+        # Fresh task store per condition. Until 2026-10-21 it was seeded
+        # once, so clean's task_complete_one closed the Spritzer task and
+        # live's had nothing to close -- it was testing nothing.
+        if cond != "clean":
+            scratch.unlink(missing_ok=True)
+            tasks.add_task("file the Spritzer paperwork", "friday")
         results[cond] = []
         for case in CASES:
             r = run_case(brain, case, history)
@@ -253,7 +287,7 @@ def main() -> int:
     times = sorted(r["seconds"] for c in ("clean", "live") for r in results[c])
     results["median"] = times[len(times) // 2] if times else 0
 
-    added = write_dataset(results)
+    added = 0 if args.no_dataset else write_dataset(results)
 
     # Never let it cost the night's eval: a bad history file is reported,
     # not fatal.

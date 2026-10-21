@@ -10,6 +10,7 @@ Both were observed live on 2026-09-23 while testing the task tools:
 
 No model calls here; these are pure functions.
 """
+import re
 import sys
 from pathlib import Path
 
@@ -51,8 +52,8 @@ check("known kept, unknown dropped",
 check("**kwargs tool untouched",
       brain._drop_unexpected_args(var_kwargs, {"anything": 1}) == {"anything": 1})
 check("the real failing call now succeeds",
-      brain._run_tool("list_tasks", {"task": "the N20 motor"}, None).startswith(
-          ("Nothing on your list", "1 open", "2 open", "3 open", "4 open", "5 open")))
+      re.match(r"Nothing on your list|\d+ open",
+               brain._run_tool("list_tasks", {"task": "the N20 motor"}, None)))
 
 print("\n== tool errors must not invite invention ==")
 err = brain._run_tool("list_tasks", {}, lambda n, a: True)
@@ -77,6 +78,49 @@ cases = [
 for text, last, want in cases:
     got = brain._unleak_json(text, last)
     check(f"{text[:38]!r} -> {want[:30]!r}", got == want)
+
+print("\n== tool talk net ==")
+for text, want in [
+    ("I called the get_weather tool to get the current weather in London.", True),
+    ("The tool call returned a list of news headlines.", True),
+    ("According to the tool, it's raining.", True),
+    ("Nothing is playing -- current_track came back empty.", True),
+    ("It's 12 degrees and raining in London.", False),
+    ("Done, ticked off the Spritzer paperwork.", False),
+    ("That's in your toolbox folder.", False),
+    ("", False),
+]:
+    check(f"{text[:40]!r} -> {want}", brain._talks_about_tools(text) == want)
+
+print("\n== role prefix net ==")
+for text, want in [
+    ("assistant No worries.", "No worries."),
+    ("assistant Not much, just hanging around.", "Not much, just hanging around."),
+    ("assistant: hi", "hi"),
+    ("assistant", "assistant"),            # nothing left -> untouched
+    ("Assistant mode is on.", "Assistant mode is on."),
+    ("No worries.", "No worries."),
+]:
+    check(f"role {text!r}", brain._strip_role_prefix(text) == want)
+
+# Real replies from the 2026-10-20 eval report.
+for text, want in [
+    ("I called the get_weather tool to get the current weather in London. "
+     "According to the tool, it's going to be a bit rainy in London today, "
+     "with a temperature of +12°C.",
+     "It's going to be a bit rainy in London today, with a temperature of +12°C."),
+    ("I called the 'current_track' tool to see what's playing, and it said "
+     "nothing is currently playing.",
+     "Nothing is currently playing."),
+    # Nothing but narration: no answer inside, so leave it alone.
+    ("The tool call returned a list of news headlines from various categories.",
+     "The tool call returned a list of news headlines from various categories."),
+    ("It's 12 degrees and raining.", "It's 12 degrees and raining."),
+]:
+    got = brain._strip_tool_talk(text)
+    check(f"strip {text[:34]!r}", got == want)
+    if got != want:
+        print("      got:", got)
 
 print("\n" + ("ALL PASS" if not fails else "FAILED: " + ", ".join(fails)))
 sys.exit(1 if fails else 0)

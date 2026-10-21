@@ -14,6 +14,7 @@ Each case:
                 any_tool_of   set  -> at least one call from this set
                 none_of       set  -> none of these may be called
                 must_contain  list -> substring(s) required in the reply
+                contains_any  list -> at least one of these in the reply
                 deny          list -> substrings that must NOT appear
     before    optional scripted earlier turns (role/content dicts), for
               follow-ups that only make sense after another message
@@ -39,7 +40,19 @@ STATE_TOOLS = {
 LEAKS = [
     "function call", "tool call", "i don't have a specific function",
     "as an ai language model", "system prompt",
+    # 2026-10-21: "I called the get_weather tool to get..." and "The tool
+    # call returned a list of news headlines" both passed, because only the
+    # greeting cases checked LEAKS. run_eval now checks these on every case,
+    # and also rejects any tool's own name (get_weather, current_track).
+    "i called the", "tool returned", "the tool",
 ]
+
+# The garbled-input rule ("say you didn't catch that") misfiring on plain
+# chat. 2026-10-20 had "do you like rainy days?" and, in live, "hey" both
+# answered "I didn't catch that" -- passing, and the first one was then
+# written into dataset.jsonl as a verified-good pair. run_eval checks this
+# on every case except those marked "misheard_ok" (only `garbled`).
+MISHEARD = ["didn't catch", "did not catch", "rephrase"]
 
 # A Windows machine. A POSIX path in a reply means she invented one.
 POSIX_LEAKS = ["/home/", "/usr/", "/var/", "/etc/"]
@@ -54,8 +67,12 @@ CASES = [
     {
         "id": "greet_thanks",
         "prompt": "thanks",
-        "expect": {"no_tools": True, "deny": LEAKS + POSIX_LEAKS},
-        "why": "Short acknowledgment, same rule.",
+        "expect": {"no_tools": True,
+                   "deny": LEAKS + POSIX_LEAKS
+                   + ["doing alright", "how are you", "how about you"]},
+        "why": "Short acknowledgment, same rule -- and answered as thanks. "
+               "2026-10-20 clean got 'Doing alright, you?', the prompt's "
+               "first greeting example copied onto the wrong message.",
     },
     {
         "id": "identity",
@@ -147,6 +164,7 @@ CASES = [
     {
         "id": "garbled",
         "prompt": "the do way or take a bite white the way",
+        "misheard_ok": True,
         "expect": {"none_of": {"get_news", "play_song", "run_shell_command"},
                    "deny": POSIX_LEAKS},
         "why": "A mangled voice transcript should get 'didn't catch that', "
@@ -165,7 +183,8 @@ CASES = [
     {
         "id": "small_talk",
         "prompt": "do you like rainy days?",
-        "expect": {"none_of": STATE_TOOLS - {"get_weather"}, "deny": LEAKS + POSIX_LEAKS},
+        "expect": {"none_of": STATE_TOOLS - {"get_weather"},
+                   "deny": LEAKS + POSIX_LEAKS},
         "why": "Chat about the weather is not a request for files, memory or "
                "notes. get_weather is tolerated: the router offers it on "
                "'rainy', and checking is a defensible reading.",
@@ -252,8 +271,11 @@ CASES = [
         "id": "task_complete_one",
         "prompt": "I've filed the Spritzer paperwork, tick it off",
         "expect": {"any_tool_of": {"complete_task"}, "none_of": {"remove_task"},
+                   "contains_any": ["spritzer", "paperwork"],
                    "deny": POSIX_LEAKS},
         "why": "Done work is completed (kept on record), not deleted -- and "
-               "the 2026-09-23 bug closed an unrelated task as well.",
+               "the 2026-09-23 bug closed an unrelated task as well. Since "
+               "2026-10-21 the reply must say which task it closed: it had "
+               "been answering with the dentist task instead, and passing.",
     },
 ]

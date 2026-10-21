@@ -120,6 +120,14 @@ SYSTEM_PROMPT = (
     # that only matters for one tool belongs in that tool's description,
     # where it is in context; the JSON ban lives in _unleak_json, where it
     # costs no attention at all. Think hard before adding to this prompt.
+    #
+    # Also tried 2026-10-21, and reverted: pairing the greeting examples
+    # ("'hey, what's up?' to a greeting, 'anytime' to thanks, an opinion to
+    # small talk") and narrowing the garbled clause below to "doesn't make
+    # sense at all". Aim: stop "thanks" -> "doing alright, you?" and "do you
+    # like rainy days?" -> "I didn't catch that". Clean went 25,25 -> 24,24
+    # over two runs each, and greetings started calling list_skills and
+    # read_skill. Small talk still answered "didn't catch that".
     "IMPORTANT: for a "
     "greeting, small talk, or a short acknowledgment like 'thanks' or "
     "'ok', respond the way a person actually would -- 'doing alright, "
@@ -668,6 +676,73 @@ _TOOL_NARRATION = re.compile(
     re.IGNORECASE,
 )
 
+# A real answer wrapped in commentary on how she got it: "I called the
+# get_weather tool to get the current weather in London. According to the
+# tool, ..." and "The tool call returned a list of news headlines" (eval,
+# 2026-10-20 -- both passed, and the second went into dataset.jsonl).
+# _TOOL_NARRATION only matches a reply made entirely of such talk, so these
+# got through. Any tool's own name in a reply counts too: Chuen never says
+# "current_track", so she has no reason to.
+_TOOL_TALK = re.compile(
+    r"\b(?:i (?:called|used|ran|invoked)|called the|tool calls?|function calls?|"
+    r"the tool|the function|according to the (?:tool|function))\b",
+    re.IGNORECASE,
+)
+_TOOL_NAMES = {d["function"]["name"] for d in TOOL_DEFINITIONS
+               if "_" in d["function"]["name"]}
+
+
+def _talks_about_tools(text: str) -> bool:
+    low = (text or "").lower()
+    return bool(_TOOL_TALK.search(low)) or any(n in low for n in _TOOL_NAMES)
+
+
+# Lead-ins that wrap a real answer: "According to the tool, it's raining" and
+# "I called the 'current_track' tool to see what's playing, and it said
+# nothing is". Cut, the rest is the answer.
+_TOOL_LEAD_IN = re.compile(
+    r"^(?:according to the (?:tool|function)[^,]*,\s*"
+    r"|i (?:called|used|ran|checked) [^,]*?(?:tool|function)[^,]*,\s*"
+    r"(?:and\s+)?(?:it|that)\s+(?:said|says|shows?|showed|returned|reports?|reported)"
+    r"\s+(?:that\s+)?)",
+    re.IGNORECASE,
+)
+
+
+# The chat template's role marker emitted as text: "assistant\n\nNo worries."
+# Seen 2026-10-21 on live greetings, old code too. Traced to the
+# _PLAIN_REPLY_NUDGE retry: a request ending on a system note gets the
+# marker back 3 times out of 3. Lowercase only, as observed.
+_ROLE_PREFIX = re.compile(r"^\s*assistant\b[:\s]+")
+
+
+def _strip_role_prefix(text: str) -> str:
+    out = _ROLE_PREFIX.sub("", text or "", count=1)
+    return out if out.strip() else text
+
+
+def _strip_tool_talk(text: str) -> str:
+    """Cut the narration out of a reply that wraps a real answer in it.
+
+    Deterministic on purpose. The first version re-asked the model with tools
+    off, and on 2026-10-21 that turned a good weather answer into "assistant
+    I checked the weather for you." and the news into "assistant I didn't
+    catch that." -- worse than the narration. So: strip lead-ins, drop the
+    sentences that are still tool talk, and if fewer than four words survive
+    there was no answer inside it -- return the original untouched.
+    """
+    if not _talks_about_tools(text):
+        return text
+    kept = []
+    for sentence in re.split(r"(?<=[.!?])\s+", text.strip()):
+        cut, n = _TOOL_LEAD_IN.subn("", sentence)
+        if n and cut:
+            cut = cut[0].upper() + cut[1:]
+        if cut and not _talks_about_tools(cut):
+            kept.append(cut)
+    out = " ".join(kept)
+    return out if len(out.split()) >= 4 else text
+
 _PLAIN_REPLY_NUDGE = (
     "Your last draft talked about tools instead of answering. Reply to his "
     "last message the way a person would, in a few words, and don't mention "
@@ -926,7 +1001,7 @@ class Brain:
             tool_calls = _get(msg, "tool_calls") or []
 
             if not tool_calls:
-                final_text = _unleak_json(_get(msg, "content", "") or "",
+                final_text = _unleak_json(_strip_role_prefix(_get(msg, "content", "") or ""),
                                           last_tool_result)
                 fake_call = _sniff_fake_tool_call(final_text)
                 if fake_call is None and _TOOL_NARRATION.match(final_text):
@@ -939,9 +1014,14 @@ class Brain:
                         keep_alive=-1,
                         options={"temperature": 0.2, "num_ctx": NUM_CTX},
                     )
-                    retry_text = (_get(_get(retry, "message"), "content", "") or "").strip()
+                    # The retry, ending on a system note, comes back as
+                    # "assistant\n\nNo worries." -- 3/3 traced 2026-10-21.
+                    retry_text = _strip_role_prefix(
+                        (_get(_get(retry, "message"), "content", "") or "").strip())
                     if retry_text and not _TOOL_NARRATION.match(retry_text):
                         final_text = retry_text
+                elif fake_call is None:
+                    final_text = _strip_tool_talk(final_text)
                 unconfirmed = all(_confirms_nothing(r) for r in turn_results)
                 wrong_tool = _claim_without_its_tool(final_text, turn_tools_ran)
                 if fake_call is None and ((unconfirmed and _CLAIMS_DONE.search(final_text)) or wrong_tool):
