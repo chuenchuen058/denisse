@@ -672,9 +672,11 @@ def _unleak_json(text: str, last_tool_result: str) -> str:
 # real answer that happens to mention a tool is never touched.
 _TOOL_NARRATION = re.compile(
     r"^\s*(?:no|none|there(?:'s| is) no|i don'?t need)\b[^.!?\n]*"
-    r"\b(?:tools?|functions?)(?:\s+calls?)?\b[^.!?\n]*[.!]?\s*$",
+    r"\b(?:tools?|functions?|json)(?:\s+(?:calls?|responses?))?\b[^.!?\n]*[.!]?\s*$",
     re.IGNORECASE,
 )
+# "json" since 2026-10-22: "No JSON response is needed for this one." --
+# all three greetings in one eval run once _STYLE_EXAMPLES were on.
 
 # A real answer wrapped in commentary on how she got it: "I called the
 # get_weather tool to get the current weather in London. According to the
@@ -714,6 +716,85 @@ _TOOL_LEAD_IN = re.compile(
 # _PLAIN_REPLY_NUDGE retry: a request ending on a system note gets the
 # marker back 3 times out of 3. Lowercase only, as observed.
 _ROLE_PREFIX = re.compile(r"^\s*assistant\b[:\s]+")
+
+
+# Made-up exchanges in her voice, placed between the system prompt and the
+# real conversation. 2026-10-22: Chuen wants her to "speak like a real
+# person", and she talks in report-voice -- "The Pomodoro Timer has been
+# started.", "The result of the multiplication is 391." Rules in
+# SYSTEM_PROMPT have twice made her worse (see its comments), but the model
+# demonstrably copies the conversation it's shown -- that is how the bad
+# history poisoned her on 2026-09-04. This turns that the right way round.
+# Tool results use the real formats so the examples look like her own turns.
+# No prompt here may match an eval case -- the suite would then measure
+# recall of the example, not her voice.
+_STYLE_EXAMPLES = [
+    {"role": "system", "content":
+        "Here are a few made-up example exchanges showing how you sound. They "
+        "never happened -- never mention them. The real conversation follows."},
+    {"role": "user", "content": "yo"},
+    {"role": "assistant", "content": "Hey Chuen. What's up?"},
+    {"role": "user", "content": "what's 12 times 4?"},
+    {"role": "assistant", "content": "", "tool_calls": [
+        {"function": {"name": "calculate", "arguments": {"expression": "12*4"}}}]},
+    {"role": "tool", "content": "12*4 = 48"},
+    {"role": "assistant", "content": "48."},
+    {"role": "user", "content": "remind me to email Ben friday at 5"},
+    {"role": "assistant", "content": "", "tool_calls": [
+        {"function": {"name": "add_task", "arguments": {"text": "email Ben", "due": "friday 5pm"}}}]},
+    {"role": "tool", "content": "Added: email Ben (Fri 17:00)"},
+    {"role": "assistant", "content": "Got it -- I'll remind you to email Ben on Friday at 5."},
+    {"role": "user", "content": "cats or dogs?"},
+    {"role": "assistant", "content": "Dogs, probably. Cats do have the better attitude though. You?"},
+    {"role": "user", "content": "cheers"},
+    {"role": "assistant", "content": "Anytime."},
+]
+
+
+def _style_examples() -> list:
+    # Read per call, so the eval can A/B it without a restart.
+    on = os.environ.get("DENISSE_STYLE_EXAMPLES", "1").lower() not in ("0", "false", "off", "no")
+    return [dict(m) for m in _STYLE_EXAMPLES] if on else []
+
+
+# A news reply with no news in it: "I've got the latest news for you.",
+# "Today's news.", "It looks like the news summary was cut off" -- all real
+# (his history and the 2026-10-22 eval), while get_news had returned six
+# good headlines. Its description already demands 2-3 named headlines and
+# the model ignores that, so -- like _unleak_json -- the net reads them out
+# from the tool result, the one thing here that is definitely true.
+_NEWS_HEAD = re.compile(r"^[^:]*headlines[^:]*:\s*", re.IGNORECASE)
+
+
+def _headlines(result: str) -> list:
+    body = _NEWS_HEAD.sub("", (result or "").strip(), count=1)
+    if body == (result or "").strip():
+        return []           # not a headline list -- an error, say
+    heads = [re.sub(r"\s*\[[^\]]*\]\s*\.?$", "", h).strip().rstrip(".")
+             for h in body.split(";")]
+    return [h for h in heads if h]
+
+
+def _has_news_content(reply: str, result: str) -> bool:
+    """True if the reply uses at least two distinctive words from the
+    headlines -- enough to show it relayed some of them."""
+    words = {w for h in _headlines(result)
+             for w in re.findall(r"[a-z]{5,}", h.lower())}
+    if not words:
+        return True         # nothing to compare against; leave it alone
+    said = set(re.findall(r"[a-z]{5,}", (reply or "").lower()))
+    return len(words & said) >= 2
+
+
+def _speak_headlines(result: str, n: int = 3) -> str:
+    heads = _headlines(result)[:n]
+    if not heads:
+        return ""
+    heads = [re.sub(r"^Analysis:\s*", "", h) for h in heads]
+    if len(heads) == 1:
+        return f"Top story on CNA: {heads[0]}."
+    return ("Top stories on CNA: " + ". ".join(heads[:-1])
+            + f". And {heads[-1]}.")
 
 
 def _strip_role_prefix(text: str) -> str:
@@ -965,11 +1046,13 @@ class Brain:
         #         "\n\nAdditional context Claude Code/Claude Desktop have saved "
         #         "to the shared Obsidian memory vault:\n\n" + claude_context
         #     )
-        full_messages = [{"role": "system", "content": system_content}] + messages
+        full_messages = ([{"role": "system", "content": system_content}]
+                         + _style_examples() + messages)
         last_tool_result = ""  # fallback for _unleak_json
         used_once = set()      # guards _ONCE_PER_TURN tools; per turn, not per round
         turn_results = []      # every tool result this turn, for the _CLAIMS_DONE check
         turn_tools_ran = set() # and which tools produced them
+        news_result = ""       # for _has_news_content
         honesty_nudged = False # that check sends her back at most once per turn
         # Only the tools this turn could plausibly need -- see tool_router.py
         # for why sending all of them costs reply quality on an 8B model.
@@ -1022,6 +1105,8 @@ class Brain:
                         final_text = retry_text
                 elif fake_call is None:
                     final_text = _strip_tool_talk(final_text)
+                if news_result and fake_call is None and not _has_news_content(final_text, news_result):
+                    final_text = _speak_headlines(news_result) or final_text
                 unconfirmed = all(_confirms_nothing(r) for r in turn_results)
                 wrong_tool = _claim_without_its_tool(final_text, turn_tools_ran)
                 if fake_call is None and ((unconfirmed and _CLAIMS_DONE.search(final_text)) or wrong_tool):
@@ -1057,6 +1142,8 @@ class Brain:
                 last_tool_result = str(result)
                 turn_results.append(last_tool_result)
                 turn_tools_ran.add(fake_call["name"])
+                if fake_call["name"] == "get_news":
+                    news_result = last_tool_result
                 tool_msg = {"role": "tool", "content": str(result)}
                 messages.append(tool_msg)
                 full_messages.append(tool_msg)
@@ -1082,6 +1169,8 @@ class Brain:
                 last_tool_result = str(result)
                 turn_results.append(last_tool_result)
                 turn_tools_ran.add(name)
+                if name == "get_news":
+                    news_result = last_tool_result
                 tool_msg = {"role": "tool", "content": str(result)}
                 messages.append(tool_msg)
                 full_messages.append(tool_msg)

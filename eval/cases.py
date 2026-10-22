@@ -15,6 +15,7 @@ Each case:
                 none_of       set  -> none of these may be called
                 must_contain  list -> substring(s) required in the reply
                 contains_any  list -> at least one of these in the reply
+                min_words     int  -> the reply has at least this many words
                 deny          list -> substrings that must NOT appear
     before    optional scripted earlier turns (role/content dicts), for
               follow-ups that only make sense after another message
@@ -45,6 +46,8 @@ LEAKS = [
     # greeting cases checked LEAKS. run_eval now checks these on every case,
     # and also rejects any tool's own name (get_weather, current_track).
     "i called the", "tool returned", "the tool",
+    # 2026-10-22: "hey" -> "No JSON response is needed for a greeting."
+    " json ",
 ]
 
 # The garbled-input rule ("say you didn't catch that") misfiring on plain
@@ -53,6 +56,25 @@ LEAKS = [
 # written into dataset.jsonl as a verified-good pair. run_eval checks this
 # on every case except those marked "misheard_ok" (only `garbled`).
 MISHEARD = ["didn't catch", "did not catch", "rephrase"]
+
+# Report-voice: phrasing a person wouldn't use to a friend. Counted, never
+# failed -- it's a measure of how she sounds, kept apart from whether she's
+# right. Every entry is from a real reply in memory/conversation.json or an
+# eval report (2026-10-22), when Chuen asked for her to talk "like a real
+# person": "The Pomodoro Timer has been started.", "Your task list is still
+# there: 2 open: - ...", "Today's news includes various headlines ...".
+ROBOTIC = [
+    "has been ", "have been ", "the result of", "could you please",
+    "is there anything else", "let me know if", "i apologize",
+    "it looks like", "it seems", "various", "here is", "the following",
+    "you can use the", "you can now", "the current time is",
+    "is still there", "includes reports", "headlines include",
+    "news summary:", "i've got the latest", "how can i assist",
+    "i've added", "open:\n", " open: -",
+    # The AI disclaimer instead of an opinion (2026-10-22, "do you like cats?")
+    "personal preferences", "computer program", "i'm designed to",
+    "as an ai", "don't have feelings",
+]
 
 # A Windows machine. A POSIX path in a reply means she invented one.
 POSIX_LEAKS = ["/home/", "/usr/", "/var/", "/etc/"]
@@ -215,8 +237,10 @@ CASES = [
     {
         "id": "news",
         "prompt": "what's in the news today?",
-        "expect": {"any_tool_of": {"get_news"}, "deny": POSIX_LEAKS},
-        "why": "News must come from get_news, never invented headlines.",
+        "expect": {"any_tool_of": {"get_news"}, "min_words": 12, "deny": POSIX_LEAKS},
+        "why": "News must come from get_news, never invented headlines -- and "
+               "actually say some. 'Today's news.' and 'Here's what's in the "
+               "news today, Chuen.' both passed on 2026-10-22, with no news.",
     },
     {
         "id": "now_playing",

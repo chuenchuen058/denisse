@@ -29,7 +29,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from eval.cases import CASES, LEAKS, MISHEARD, POSIX_LEAKS  # noqa: E402
+from eval.cases import CASES, LEAKS, MISHEARD, POSIX_LEAKS, ROBOTIC  # noqa: E402
 
 
 def _tool_names() -> set:
@@ -73,6 +73,9 @@ def check(case: dict, reply: str, tools: list) -> list:
         if s.lower() not in low:
             fails.append(f"missing {s!r}")
 
+    if len((reply or "").split()) < e.get("min_words", 0):
+        fails.append(f"under {e['min_words']} words")
+
     anyof = e.get("contains_any")
     if anyof and not any(s.lower() in low for s in anyof):
         fails.append(f"missing any of {anyof!r}")
@@ -93,6 +96,12 @@ def check(case: dict, reply: str, tools: list) -> list:
         fails.append(f"names tool {named}")
 
     return fails
+
+
+def robotic(reply: str) -> list:
+    """Report-voice phrases in a reply. Counted, not failed -- see ROBOTIC."""
+    low = (reply or "").lower()
+    return [s for s in ROBOTIC if s in low]
 
 
 def run_case(brain, case: dict, history: list) -> dict:
@@ -128,6 +137,7 @@ def run_case(brain, case: dict, history: list) -> dict:
         "seconds": seconds,
         "passed": not fails,
         "failures": fails,
+        "robotic": robotic(reply),
         "follow_up": bool(case.get("before")),
     }
 
@@ -180,6 +190,7 @@ def report(results: dict, added: int) -> str:
         f"- **clean** (no history): {results['clean_pass']}/{len(CASES)} passed",
         f"- **live** (real replayed history): {results['live_pass']}/{len(CASES)} passed",
         f"- median reply: {results['median']}s",
+        f"- sounds robotic: {results['robotic']} of {2 * len(CASES)} replies",
         f"- curated dataset: +{added} this run, {results['dataset_total']} total",
         "",
     ]
@@ -208,6 +219,9 @@ def report(results: dict, added: int) -> str:
             lines.append(f"tools: `{r['tools'] or 'none'}`")
             lines.append("")
             lines.append(r["reply"][:400] or "_(empty)_")
+            if r.get("robotic"):
+                lines.append("")
+                lines.append(f"_robotic: {r['robotic']}_")
             if r["failures"]:
                 lines.append("")
                 for f in r["failures"]:
@@ -286,6 +300,7 @@ def main() -> int:
     results["live_pass"] = sum(r["passed"] for r in results["live"])
     times = sorted(r["seconds"] for c in ("clean", "live") for r in results[c])
     results["median"] = times[len(times) // 2] if times else 0
+    results["robotic"] = sum(bool(r["robotic"]) for c in ("clean", "live") for r in results[c])
 
     added = 0 if args.no_dataset else write_dataset(results)
 
@@ -310,7 +325,7 @@ def main() -> int:
 
     print(f"\n{results['stamp']}  clean {results['clean_pass']}/{len(CASES)}  "
           f"live {results['live_pass']}/{len(CASES)}  "
-          f"median {results['median']}s  dataset {results['dataset_total']}")
+          f"median {results['median']}s  robotic {results['robotic']}  dataset {results['dataset_total']}")
     print(where)
     return 0 if results["live_pass"] == len(CASES) else 1
 

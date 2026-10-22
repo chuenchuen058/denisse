@@ -103,6 +103,33 @@ for text, want in [
 ]:
     check(f"role {text!r}", brain._strip_role_prefix(text) == want)
 
+print("\n== narration net ==")
+for text, want in [
+    ("No tool call needed for that one.", True),
+    ("No JSON response is needed for this one.", True),
+    ("No JSON is needed for this one.", True),
+    ("No worries.", False),
+    ("Saved it to settings.json for you.", False),
+]:
+    check(f"narration {text!r} -> {want}", bool(brain._TOOL_NARRATION.match(text)) == want)
+
+print("\n== news content net ==")
+NEWS = ("Today's CNA headlines: IBM falls as analysts question staying power "
+        "of software rebound [Business]; Law Society of Singapore elects new "
+        "council members after troubled year [Singapore]; Analysis:Anthropic "
+        "IPO stands alone as AI market jitters sideline others [Business]; "
+        "England's magnificent Brook hits fastest ODI double century [Sport].")
+check("empty news reply caught", not brain._has_news_content("Today's news.", NEWS))
+check("narrated news reply caught",
+      not brain._has_news_content("Here's what's in the news today, Chuen.", NEWS))
+check("real summary kept",
+      brain._has_news_content("IBM shares fell, and the Law Society has a new council.", NEWS))
+check("error result left alone", brain._has_news_content("Couldn't get the news.", "Error: timeout"))
+spoken = brain._speak_headlines(NEWS)
+check("speaks three headlines, no tags",
+      spoken.startswith("Top stories on CNA: IBM falls") and "[" not in spoken
+      and "And Anthropic IPO" in spoken and "Brook" not in spoken)
+
 # Real replies from the 2026-10-20 eval report.
 for text, want in [
     ("I called the get_weather tool to get the current weather in London. "
