@@ -88,6 +88,15 @@ _STUDY_OFF = re.compile(
 # out as "too broad". That was wrong: breadth is exactly what `active` buys.
 # While a 25-minute timer is counting down on screen, "off" is not ambiguous.
 # With nothing running they still mean nothing here and go to the model.
+# Bare "timer" is deliberately NOT here. A 2026-10-22 session was about to
+# add it -- "stop timer", "cancel timer", "timer off" -- because he typed
+# "stop timer" and got a confident reply while the pill kept counting. That
+# would have been wrong twice over: decisions.md 2026-10-20 gave her real
+# set_timer/cancel_timer tools and kept timer wording OUT of this
+# whole-message matcher on purpose, because this path skips the model, which
+# is the thing that lets her cope with wording nobody listed. And with a
+# 5-minute timer running as well, "cancel timer" means the timer, not the
+# pomodoro. Check the timer tools before touching this rule.
 _STUDY_OFF_IF_ACTIVE = re.compile(
     r"^(?:turn|switch|shut)\s+(?:it|that|this)\s+off$"
     r"|^(?:stop|end|cancel|kill)\s+(?:it|that|this)$"
