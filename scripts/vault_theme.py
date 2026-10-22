@@ -38,13 +38,14 @@ Three things make that one work, and only one of them is the hue:
    (ACCENT below, already the orb's violet) -- the folder groups are the
    minority colours scattered through it.
 
-So: a narrow arc centred on violet. Wide enough that the sidebar is a visible
-gradient top to bottom, narrow enough that every node in the graph is some
-shade of blue-violet-pink and the whole thing reads purple.
+So: a full-wheel ramp built in OKLab, starting at violet. Every chip the same
+perceived lightness and chroma, 36 degrees of hue apart -- as separable as ten
+colours can be while still looking like one set. The graph reads purple
+regardless, because that comes from ACCENT.
 """
-import colorsys
 import io
 import json
+import math
 import os
 import sys
 
@@ -59,10 +60,30 @@ APPEARANCE = os.path.join(V, ".obsidian", "appearance.json")
 
 ACCENT = "#a855f7"      # the orb's violet. Also what most graph nodes become.
 INK = "#1c1130"         # near-black violet for text on a chip -- not pure black
-HUE_FROM, HUE_TO = 226, 336   # blue -> pink, with violet landing mid-ramp
-SAT, LIGHT = 0.88, 0.76       # candy pastel, not washed out: the reference
-                              # vault's chips sit around this, and 0.72/0.78
-                              # came out visibly chalkier than the screenshot
+
+# A FULL wheel, starting at violet. The first version used a narrow 226-336
+# arc to keep everything purple, which put neighbouring folders ~12 deg apart
+# -- AKC, Denisse and GitHub came out as three near-identical blues and Chuen
+# said he could not tell them apart. He was right, and the narrow arc was
+# never buying anything: the graph reads purple because unmatched nodes fall
+# back to ACCENT, not because of these. So the sidebar gets the whole
+# spectrum for maximum separation and the graph stays purple regardless.
+# NOTE these are OKLCH hue angles, which are NOT the HSL ones: 270 here is a
+# periwinkle blue, not violet. The ramp lands Denisse (306) on lavender, which
+# happens to be the orb's own colour, and SEM 1 Modules on cyan. Shift
+# HUE_FROM to rotate which folder gets which; the spacing stays even.
+HUE_FROM, HUE_SPAN = 270, 360   # blue -> violet -> pink -> warm -> green -> back
+
+# Colours are built in OKLab, not HSL, and this is the part that actually
+# matters. Two earlier attempts failed on the same thing -- HSL's "lightness"
+# and "saturation" mean something different at every hue:
+#   * equal HSL lightness  -> yellows blinding, blues muddy;
+#   * equal WCAG luminance -> greens driven to #13e428, electric, not pastel.
+# OKLab is built so that equal L and equal C LOOK equal at any hue, which is
+# exactly the property a ten-hue pastel ramp needs. L and C below are read off
+# the kind of chip Chuen liked in the reference vault.
+OK_L, OK_C = 0.845, 0.105        # lightness, chroma
+SUB_L, SUB_C = 0.845, 0.105      # subfolders override these per entry
 
 # Sidebar order -- Obsidian sorts folders alphabetically, and the ramp follows
 # that order so the gradient runs cleanly down the pane. Reordering this list
@@ -86,14 +107,14 @@ AREAS = [
 # and move in shade: a hue offset collided (Denisse/Evals landed on exactly
 # AKC's blue), and a shade reads as "part of Denisse" where a neighbouring
 # hue reads as a separate area.
-# (lightness delta, saturation delta). Saturation comes DOWN as lightness
-# does, or a darker shade goes vivid instead of deeper -- the first attempt
-# used lightness alone and produced #2c32f2, a saturated blue that the dark
-# chip text cannot be read on. Every chip has to stay light enough for INK.
-SUBS = {
-    "Denisse/Brain": (+0.08, -0.14),
-    "Denisse/Evals": (-0.06, -0.26),
-    "Denisse/Project Log": (-0.12, -0.38),
+# (luminance delta, saturation delta), both relative to the parent. Dropping
+# saturation alongside luminance keeps a darker shade deeper rather than more
+# vivid -- an early version moved lightness alone and produced #2c32f2, a
+# saturated blue the dark chip text could not be read on.
+SUBS = {              # (OKLab lightness delta, chroma delta)
+    "Denisse/Brain": (+0.07, -0.045),
+    "Denisse/Evals": (-0.07, +0.015),
+    "Denisse/Project Log": (-0.14, +0.005),
 }
 
 # Explorer-only: the quiet things. A chip would shout, so these stay as text.
@@ -104,30 +125,69 @@ MUTED = {
 }
 
 
-def hexof(h, s=SAT, l=LIGHT):
-    r, g, b = colorsys.hls_to_rgb((h % 360) / 360.0, l, s)
+def _gamma(c):
+    return 12.92 * c if c <= 0.0031308 else 1.055 * (c ** (1 / 2.4)) - 0.055
+
+
+def _lin(c):
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def oklch_rgb(L, C, h_deg):
+    """OKLCH -> linear sRGB. Returns floats, which may fall outside 0..1."""
+    a = C * math.cos(math.radians(h_deg))
+    b = C * math.sin(math.radians(h_deg))
+    l_ = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3
+    m_ = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3
+    s_ = (L - 0.0894841775 * a - 1.2914855480 * b) ** 3
+    return (+4.0767416621 * l_ - 3.3077115913 * m_ + 0.2309699292 * s_,
+            -1.2684380046 * l_ + 2.6097574011 * m_ - 0.3413193965 * s_,
+            -0.0041960863 * l_ - 0.7034186147 * m_ + 1.7076147010 * s_)
+
+
+def hexof(h, L=None, C=None):
+    """A hex for this hue at the ramp's lightness and chroma.
+
+    Not every hue can hold the same chroma inside sRGB -- the gamut is
+    lopsided, and a vivid yellow-green exists where an equally vivid blue does
+    not. So chroma is reduced until the colour fits. Clamping the channels
+    instead would shift the hue, which is exactly the thing this is for.
+    """
+    L = OK_L if L is None else L
+    C = OK_C if C is None else C
+    for _ in range(60):
+        rgb = oklch_rgb(L, C, h)
+        if all(-1e-4 <= v <= 1 + 1e-4 for v in rgb):
+            break
+        C *= 0.97
+    r, g, b = (min(1.0, max(0.0, _gamma(v))) for v in rgb)
     return "#%02x%02x%02x" % (round(r * 255), round(g * 255), round(b * 255))
 
 
+def luminance_of(hx):
+    r, g, b = [int(hx[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+    return 0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b)
+
+
 def ramp():
-    """One hue per area, evenly spaced across the arc, in sidebar order."""
+    """One hue per area, evenly spaced round the wheel, in sidebar order."""
     n = len(AREAS)
-    step = (HUE_TO - HUE_FROM) / (n - 1)
-    return {p: HUE_FROM + i * step for i, (p, _) in enumerate(AREAS)}
+    step = HUE_SPAN / n          # /n not /(n-1): the wheel wraps, so the last
+    return {p: HUE_FROM + i * step  # folder must not land back on the first
+            for i, (p, _) in enumerate(AREAS)}
 
 
 HUES = ramp()
-LIGHTS = {p: LIGHT for p in HUES}
-SATS = {p: SAT for p in HUES}
-for sub, (dl, ds) in SUBS.items():
-    parent = sub.split("/")[0]
-    HUES[sub] = HUES[parent]
-    LIGHTS[sub] = LIGHT + dl
-    SATS[sub] = SAT + ds
+OKL = {p: OK_L for p in HUES}
+OKC = {p: OK_C for p in HUES}
+for sub, (dL, dC) in SUBS.items():
+    HUES[sub] = HUES[sub.split("/")[0]]
+    OKL[sub] = OK_L + dL
+    OKC[sub] = OK_C + dC
 
 
 def swatch(p):
-    return hexof(HUES[p], s=SATS[p], l=LIGHTS[p])
+    return hexof(HUES[p], OKL[p], OKC[p])
 
 
 # Two folders the same colour is the one failure this script exists to stop,
@@ -138,9 +198,14 @@ for _p in HUES:
     _hx = swatch(_p)
     assert _hx not in _seen, f"{_p} and {_seen[_hx]} are both {_hx}"
     _seen[_hx] = _p
-# Dark chip text needs a light chip. 0.60 is about where INK stops reading.
+# The dark ink has to be readable on every chip, so check the real thing --
+# WCAG contrast ratio -- rather than a lightness number that means something
+# different on a yellow than on a blue. 4.5 is the AA threshold for body text.
+_INK_LUM = luminance_of(INK)
 for _p in HUES:
-    assert LIGHTS[_p] >= 0.60, f"{_p} at lightness {LIGHTS[_p]:.2f} is too dark for INK"
+    _l = luminance_of(swatch(_p))
+    _ratio = (max(_l, _INK_LUM) + 0.05) / (min(_l, _INK_LUM) + 0.05)
+    assert _ratio >= 4.5, f"{_p} {swatch(_p)}: ink contrast only {_ratio:.1f}:1"
 
 
 def to_int(hx):
@@ -174,7 +239,7 @@ graph["colorGroups"] = [
     {"query": f'path:"{p}"', "color": {"a": 1, "rgb": to_int(swatch(p))}}
     for p in order if exists(p)
 ]
-print("graph.json — node groups")
+print("graph.json â€” node groups")
 for g in graph["colorGroups"]:
     q, rgb = g["query"], g["color"]["rgb"]
     mark = " " if before.get(q) == rgb else ("~" if q in before else "+")
@@ -182,7 +247,7 @@ for g in graph["colorGroups"]:
 for q in before:
     if q not in {g['query'] for g in graph['colorGroups']}:
         print(f"  - {q:<34} #{before[q]:06x}  (dropped)")
-print("    every other node falls back to the accent — that is the purple bulk")
+print("    every other node falls back to the accent â€” that is the purple bulk")
 
 # -- the file explorer ------------------------------------------------------
 folders = load(FOLDERS)
@@ -201,7 +266,7 @@ for p, e in MUTED.items():
         styles[p] = e          # deliberately no chip
 folders["styles"] = styles
 
-print("\ncolor-folders-files — the sidebar")
+print("\ncolor-folders-files â€” the sidebar")
 for p, e in styles.items():
     was = old.get(p)
     mark = " " if was == e else ("~" if was else "+")
@@ -254,7 +319,7 @@ if PREVIEW:
   <span class="accent"></span><span class="accent"></span><span class="accent"></span>
   <span class="accent"></span><span class="accent"></span><span class="accent"></span>
   {dots}</div>
-<p>The big dots are the accent — most nodes match no folder rule and land
+<p>The big dots are the accent â€” most nodes match no folder rule and land
 there, which is why the graph reads purple overall. The small dots are the
 folder groups scattered through it.</p></div>
 """
@@ -266,6 +331,6 @@ if WRITE:
     save(GRAPH, graph)
     save(FOLDERS, folders)
     save(APPEARANCE, appearance)
-    print("\nwritten — reopen Obsidian to see it")
+    print("\nwritten â€” reopen Obsidian to see it")
 elif not PREVIEW:
-    print("\ndry run — re-run with --write (with Obsidian closed)")
+    print("\ndry run â€” re-run with --write (with Obsidian closed)")
