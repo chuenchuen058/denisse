@@ -120,7 +120,10 @@ for dirpath, dirnames, filenames in os.walk(MODULES):
             continue
         with open(os.path.join(dirpath, fn), encoding="utf-8-sig") as f:
             head = f.read(1200)
-        if re.search(r"^status: files-only\s*$", head, re.M):
+        # 'scaffolded' (2026-10-22) means the headings and slide numbers are
+        # there but the understanding is not, so it still wants a write-up --
+        # the flag stays until the status line goes entirely.
+        if re.search(r"^status: (files-only|scaffolded)\s*$", head, re.M):
             pending.append(fn[:-3])
 
 open_text = {t["text"].lower() for t in tasks.list_tasks()}
