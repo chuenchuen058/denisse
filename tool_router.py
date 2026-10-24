@@ -13,7 +13,8 @@ So each turn gets:
 
   CORE    a small set that is always offered: time, maths, saving a fact,
           the skills library. Cheap, and needed by too many kinds of
-          request to gate on keywords.
+          request to gate on keywords. Gating the skills library instead
+          was measured on 2026-10-24 and not kept -- see SKILLS_IN_CORE.
   groups  everything else, offered only when the recent user messages
           contain one of the group's keywords.
 
@@ -39,9 +40,48 @@ CORE = {
     "get_current_time",
     "calculate",
     "remember",
-    "list_skills",
-    "read_skill",
 }
+
+# The skills library is in CORE on the reasoning quoted above -- "needed by
+# too many kinds of request to gate on keywords". The hypothesis on
+# 2026-10-24 was that this is also why she reaches for a tool on turns that
+# want none: on 2026-10-22 `small_talk` ("do you like rainy days?") called
+# read_skill, and greetings had picked up list_skills/read_skill in the
+# reverted 2026-10-21 prompt experiment too. A tool offered on every turn is
+# a tool available on every turn.
+#
+# Measured, 3 rounds per arm, arms alternating (logs/ab_skills.json):
+#
+#   in CORE (control)   clean 75/81   live 69/81   combined 144/162
+#   gated (test)        clean 76/81   live 71/81   combined 147/162
+#
+# The aggregate favours gating by 3 in 162, which is inside this suite's own
+# noise -- identical code gave clean 25/live 26 and clean 26/live 25 on
+# 2026-10-22. Underneath it, two real effects that nearly cancel:
+#
+#   small_talk  6/6 failures -> 0/6     (gating fixed it outright)
+#   greetings   3/12         -> 7/12    (greet_morning started deflecting)
+#
+# So the reflex did not go away, it moved -- the same thing the 2026-10-21
+# prompt experiment did when the deflection shifted from small_talk to
+# greet_hey. Gating is NOT kept as the default: "I didn't catch that" in
+# answer to "good morning" is a worse failure than a stiff answer about
+# rainy days, because he says good morning to her most days and asks about
+# rainy days roughly never. A count that improves while the user-visible
+# failure gets more frequent is not an improvement.
+#
+# Conclusion for whoever picks this up: tool routing is the wrong lever for
+# the low-content turn. The deflection is conserved across whatever is in
+# CORE, so the next attempt should be before the model (a matcher, as
+# study_mode does) or in the examples (as _STYLE_EXAMPLES does), not here.
+#
+# DENISSE_SKILLS_CORE=0 gates them behind the "skills" group below -- the
+# test arm. Keep the switch so this can be re-measured when the skill set
+# changes; re-running it unchanged just reproduces the numbers above.
+SKILLS_IN_CORE = os.environ.get("DENISSE_SKILLS_CORE", "1").lower() not in (
+    "0", "false", "off", "no")
+if SKILLS_IN_CORE:
+    CORE |= {"list_skills", "read_skill"}
 
 # group name -> (tools, keyword pattern). Patterns are matched
 # case-insensitively against the recent user text.
@@ -126,6 +166,22 @@ GROUPS = {
         {"get_voice_settings", "get_brain_location"},
         r"voice|sound like|speak|accent|your brain|your code|your memory"
         r"|your files|where (do you|are you)|stored|source code",
+    ),
+    # Only live when DENISSE_SKILLS_CORE=0; with the default these tools
+    # are in CORE as well and this group is redundant. It is kept so the
+    # 2026-10-24 experiment can be re-run with one env var rather than
+    # rebuilt from scratch. Keywords lean broad on purpose, per the
+    # docstring: an over-offered skill costs a little attention, a missing
+    # one costs the answer. Covers both ways of asking -- naming a skill's
+    # subject, and asking for a procedure. Known gap if this is ever made
+    # the default: it matches subject names ("biology") but not the terms
+    # inside them, so "mitosis vs meiosis" routes to nothing.
+    "skills": (
+        {"list_skills", "read_skill"},
+        r"skill|how (do|should|can) (i|you|we)|teach me|show me how"
+        r"|walk me through|step by step|guide|procedure|instructions"
+        r"|briefing|brief me|biology|chemistry|physics|python|code\b"
+        r"|organi[sz]e|tidy|sort out|take notes?|note-?taking|summar",
     ),
 }
 
