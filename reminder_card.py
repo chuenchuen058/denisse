@@ -823,6 +823,21 @@ class ThinkingBubble(ReminderCard):
     REPLY_MAX_CHARS = 600  # the chat keeps the full text; this is the glance
 
     def deliver(self, text):
+        """Turn this bubble into the reply. Returns True if it is on screen.
+
+        False means the window had already gone -- closed by hand, or by
+        the reminder card / a second question taking the bubble's place
+        during the typing pause. This used to swallow the TclError and
+        return nothing, so the caller believed the reply had landed when
+        in fact it was shown nowhere at all; with the chat popup closed
+        and TTS off that is a whole exchange lost. tray._deliver_reply
+        rebuilds on a False.
+        """
+        try:
+            if not self.win.winfo_exists():
+                return False
+        except tk.TclError:
+            return False
         self.thinking = self.typing = False
         text = " ".join((text or "").split())
         if len(text) > self.REPLY_MAX_CHARS:
@@ -834,7 +849,9 @@ class ThinkingBubble(ReminderCard):
             ms = min(45_000, max(6_000, 3_000 + 70 * len(text)))
             self.win.after(ms, self._expire)
         except tk.TclError:
-            pass  # closed before the reply came
+            self.message = None  # nothing is up -- don't claim it landed
+            return False
+        return True
 
     def _expire(self):
         # Tk doesn't cancel after() when the window goes -- only close

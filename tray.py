@@ -781,7 +781,7 @@ def _show_reply(text: str):
     root.after(0, lambda: _show_reply_main(text))
 
 
-def _show_reply_main(text: str):
+def _show_reply_main(text: str, _retry: bool = False):
     global _thinking_bubble, _reply_bubble
     if _floating_orb is None or not (text or "").strip():
         return
@@ -798,16 +798,46 @@ def _show_reply_main(text: str):
             bubble = _thinking_bubble
             _thinking_bubble = None  # it's the reply now; "thinking off" mustn't close it
             bubble.on_close = _closed
-            bubble.deliver(text)
+            if not bubble.deliver(text):
+                # Its window had already gone. Build a fresh bubble rather
+                # than let the reply land nowhere -- see _deliver_reply.
+                _show_reply_main(text, _retry=True)
+                return
+            _reply_bubble = bubble
         else:
             _close_study_bubble()
             if _reminder_card is not None:
                 _reminder_card.close()
             bubble = ThinkingBubble(root, _floating_orb, font_family=FONT_FAMILY, on_close=_closed)
-            root.after(TYPING_MS, lambda: bubble.deliver(text))
-        _reply_bubble = bubble
+            _reply_bubble = bubble
+            # A retry has already waited through one typing pause; show it
+            # straight away so the gap can't be interrupted a second time.
+            root.after(0 if _retry else TYPING_MS,
+                       lambda b=bubble: _deliver_reply(b, text, _retry))
     except Exception:
         pass  # cosmetic -- the reply itself is already in the chat / spoken
+
+
+def _deliver_reply(bubble, text: str, retried: bool):
+    """Land the reply in `bubble`, or rebuild once if that bubble has gone.
+
+    A fresh bubble types for TYPING_MS before the message lands, and that
+    pause is a window in which anything calling _close_reply_bubble()
+    destroys it: the reminder card on its 15-minute loop or on an unlock,
+    a pomodoro phase turning over, or a second question starting its own
+    "thinking" bubble (ask by voice, then start typing before her answer
+    renders). deliver() swallowed the resulting TclError and the reply was
+    never shown -- with the chat popup closed and TTS off, the whole
+    visible answer to a "hey Denisse" simply vanished.
+
+    One retry, not a loop: if something is closing bubbles that
+    persistently, a second rebuild would just feed it.
+    """
+    if bubble.deliver(text):
+        return
+    if retried:
+        return
+    _show_reply_main(text, _retry=True)
 
 
 def _close_reply_bubble():
