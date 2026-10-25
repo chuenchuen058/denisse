@@ -166,7 +166,17 @@ for path in sorted(md_files):
             else:
                 errors.append((r, f"broken attachment link `[[{target}]]`"))
         else:
+            # [[Note#Heading]] links to a heading inside a note (the per-module
+            # concepts notes use these, 2026-10-25). Resolve the note by name,
+            # then check the heading exists, so a renamed heading still shows up.
+            target, _, heading = target.partition("#")
+            target = target.strip()
             hits = by_name.get(target, [])
+            if hits and heading.strip() and len(set(hits)) == 1:
+                with open(hits[0], encoding="utf-8-sig", errors="replace") as hf:
+                    heads = {h.strip() for h in re.findall(r"(?m)^#{1,6}\s+(.+?)\s*#*\s*$", hf.read())}
+                if heading.strip() not in heads:
+                    errors.append((r, f"broken link `[[{target}#{heading}]]` -- no such heading"))
             if not hits:
                 errors.append((r, f"broken link `[[{target}]]` -- nothing of that name"))
             elif len(set(hits)) > 1:
