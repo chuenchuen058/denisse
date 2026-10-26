@@ -306,6 +306,8 @@ class StudyBadge:
             gap = round(BADGE_GAP * self.s)
             for win in self.avoid():
                 try:
+                    if not win.winfo_ismapped():
+                        continue
                     bx, by = win.winfo_rootx(), win.winfo_rooty()
                     bw, bh = win.winfo_width(), win.winfo_height()
                 except tk.TclError:
