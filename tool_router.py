@@ -23,9 +23,9 @@ are always offered, so a new tool can never silently go missing because
 someone forgot to route it. Over-including is safe; under-including is
 the failure that matters, so keywords lean broad.
 
-Matching uses the newest user message. If that names nothing but reads
-like a follow-up ("skip that one", "and tomorrow?"), the previous user
-message is used instead, so the tools it needed carry over.
+Matching uses the newest user message. Short follow-ups can look back
+through six user messages for their topic, stopping at a fresh topic.
+Complaints about a reply never receive machine-changing tools.
 
 DENISSE_TOOL_ROUTER=0 turns routing off (every tool, every turn) -- the
 control arm for re-running the A/B in eval/run_eval.py.
@@ -90,6 +90,7 @@ GROUPS = {
         {"run_shell_command", "open_application", "list_directory",
          "find_files", "read_file", "write_file"},
         r"file|folder|director|pdf|docx?\b|txt|csv|xlsx|pptx|path|desktop"
+        r"|\bcv\b|\br[eé]sum[eé]\b|passport|invoice|pull up|bring up"
         r"|download|document|read|write|save|create|find|locate|search|look for"
         r"|where('?s| is| are| did)|open|launch|start|run|command|terminal"
         r"|powershell|cmd\b|app\b|apps\b|application|program|install",
@@ -147,7 +148,7 @@ GROUPS = {
         r"note|obsidian|vault|module|lecture|tutorial|seminar|coursework"
         r"|\bcw\b|assignment|exam|deadline|due|week \d|semester|term\b"
         r"|decid|decision|why did we|set ?up|society|societies|msoc|robotics"
-        r"|keats|again|remind me what|explain",
+        r"|keats|remind me what|explain",
     ),
     # Added with timers.py, 2026-10-20. "start timer" used to match only
     # "files" (on "start"), so the closest thing on offer was
@@ -214,29 +215,61 @@ def _user_texts(messages: list, n: int = 2) -> list:
 # that (greet_hey calling get_news with real history replayed).
 _FOLLOW_UP = re.compile(
     r"\b(it|this|that|those|them|one|again|another|more|too|also|and|then"
-    r"|instead|same)\b",
+    r"|instead|same|meant)\b",
     re.IGNORECASE,
 )
+
+# These are complaints about the last answer, not new tasks or facts.
+# Keep this narrow: "no, add a reminder" is still a real new instruction.
+_FEEDBACK_ONLY = re.compile(
+    r"^\s*(?:your\s+['\"]?done['\"]?\s+(?:is|means)\s+nothing"
+    r"|what(?:'?s| is)\s+done|you\s+(?:didn'?t|did not)\s+(?:do\s+)?anything"
+    r"|(?:that|it)\s+(?:didn'?t|did not)\s+work|not\s+what\s+i\s+(?:asked|meant)"
+    r"|that'?s\s+(?:wrong|not right)|you tell me|wrong|nope)[.!?\s]*$",
+    re.IGNORECASE,
+)
+
+MUTATING_TOOLS = {
+    "remember", "add_task", "complete_task", "remove_task", "write_file",
+    "run_shell_command", "open_application", "set_timer", "cancel_timer",
+    "play_song", "pause_music", "resume_music", "skip_song", "previous_song",
+    "clean_temp_files", "disable_startup_program", "restore_startup_program",
+}
+
+
+def feedback_only(text: str) -> bool:
+    return bool(_FEEDBACK_ONLY.fullmatch(text or ""))
 
 
 def _groups_in(text: str) -> list:
     return [name for name, rx in _COMPILED.items() if rx.search(text)]
 
 
-def matched_groups(messages: list) -> list:
-    """Names of the groups this turn needs.
+def request_context(messages: list) -> tuple[str, list]:
+    """Resolve short follow-ups through up to six user turns.
 
-    The newest user message decides on its own when it names something.
-    Only when it names nothing *and* reads like a follow-up does the
-    previous user message get a say.
+    Stop at a fresh topic even when it has no tools (e.g. a greeting).
+    Generic retry words must not create a new notes/tasks/system topic.
     """
-    texts = _user_texts(messages)
-    if not texts:
-        return []
-    found = _groups_in(texts[0])
-    if found or len(texts) < 2 or not _FOLLOW_UP.search(texts[0]):
-        return found
-    return _groups_in(texts[1])
+    for text in _user_texts(messages, 6):
+        complaint = feedback_only(text)
+        found = [] if complaint else _groups_in(text)
+        continuation = complaint or bool(_FOLLOW_UP.search(text))
+        routed_text = text
+        if continuation and found == ["system"]:
+            # "it's in my laptop, try again" still refers to the file.
+            specific = re.sub(r"\b(?:laptop|computer|pc)\b", "", text, flags=re.I)
+            found = _groups_in(specific)
+            routed_text = specific
+        if found:
+            return routed_text, found
+        if not continuation:
+            break
+    return "", []
+
+
+def matched_groups(messages: list) -> list:
+    return request_context(messages)[1]
 
 
 def select(tool_definitions: list, messages: list) -> list:
@@ -245,9 +278,6 @@ def select(tool_definitions: list, messages: list) -> list:
     Order is preserved, so the model sees tools in the same order as
     before -- only fewer of them.
     """
-    if not enabled():
-        return tool_definitions
-
     allowed = set(CORE)
     for name in matched_groups(messages):
         allowed |= GROUPS[name][0]
@@ -261,5 +291,7 @@ def select(tool_definitions: list, messages: list) -> list:
     def name_of(defn):
         return defn.get("function", {}).get("name")
 
+    complaint = bool(texts and feedback_only(texts[0]))
     return [d for d in tool_definitions
-            if name_of(d) in allowed or name_of(d) not in _ROUTED]
+            if (not complaint or name_of(d) not in MUTATING_TOOLS)
+            and (not enabled() or name_of(d) in allowed or name_of(d) not in _ROUTED)]

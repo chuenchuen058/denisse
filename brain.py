@@ -9,6 +9,7 @@ No API key, no internet required after the model is downloaded once.
 
 import inspect
 import json
+import ntpath
 import os
 import platform
 import re
@@ -178,7 +179,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "open_application",
-            "description": "Open a local application by name.",
+            "description": "Open an installed app by name, or open an existing document using its full path. For a file, CV or resume, first use find_files to get the real full path; then pass that path here. Finding or reading a file does not open it on screen.",
             "parameters": {
                 "type": "object",
                 "properties": {"app_name": {"type": "string", "description": "Name or path of the application to open."}},
@@ -869,8 +870,10 @@ _CLAIM_NEEDS = (
     (re.compile(r"\btimers?\b", re.IGNORECASE), {"set_timer", "cancel_timer"}),
     (re.compile(r"\btasks?\b|\bto-?do\b|\breminders?\b", re.IGNORECASE),
      {"add_task", "complete_task", "remove_task", "set_timer"}),
-    (re.compile(r"\b(?:song|track|music|spotify|playing)\b", re.IGNORECASE),
+    (re.compile(r"\b(?:playing|played|paused|resumed|skipped)\b", re.IGNORECASE),
      {"play_song", "pause_music", "resume_music", "skip_song", "previous_song"}),
+    (re.compile(r"\b(?:opened|pulled up)\b|\bis (?:now )?open\b", re.IGNORECASE),
+     {"open_application"}),
 )
 _SET_FOR = re.compile(r"\b(?:set|started|running)\s+for\b", re.IGNORECASE)
 
@@ -887,7 +890,66 @@ def _confirms_nothing(result: str) -> bool:
     "(no output)" and opens nothing useful)."""
     r = (result or "").strip()
     return (not r or r == "(no output)" or learning.tool_failed(r)
-            or r.startswith(("User declined", "Refused", "No timer started")))
+            or r.startswith(("User declined", "Refused", "No timer started"))
+            or "nothing was stopped" in r.lower())
+
+
+def _has_task_content(reply: str, result: str) -> bool:
+    """Don't replace a real task list with 'you have a lot on your plate'."""
+    items = re.findall(r"^\s*-\s+(.+)$", result, re.MULTILINE)
+    if not items:
+        return True
+    words = {w for item in items for w in re.findall(r"[a-z]{4,}", item.lower())}
+    words -= {"overdue", "today", "tomorrow", "monday", "tuesday", "wednesday",
+              "thursday", "friday", "saturday", "sunday", "task", "tasks"}
+    said = set(re.findall(r"[a-z]{4,}", reply.lower()))
+    return bool(words) and len(words & said) >= min(2, len(words))
+
+
+_VAULT_ACCESS_DENIAL = re.compile(
+    r"\b(?:don'?t|do not|can'?t|cannot|no longer)\s+(?:have\s+)?access\b.{0,60}\bvault\b"
+    r"|\bvault\b.{0,100}\b(?:inaccessible|disabled|not accessible)\b"
+    r"|\bit(?:'s| has| is)\s+(?:been\s+)?disabled\b",
+    re.IGNORECASE,
+)
+
+_FILE_ABSENCE = re.compile(
+    r"\b(?:couldn'?t|could not|can'?t|cannot)\s+find\b"
+    r"|\b(?:doesn'?t|does not|does not appear to)\s+exist\b",
+    re.IGNORECASE,
+)
+
+
+def _known_document_path(path: str, messages: list, outputs: dict) -> bool:
+    """Only open a document path supplied by Chuen or observed in a lookup.
+
+    A model guessing 'latest_cv.pdf' must search, not use the app launcher
+    to pretend the document was found. No filesystem scan is done here.
+    """
+    if not isinstance(path, str) or not ntpath.isabs(path):
+        return False
+    wanted = ntpath.normcase(ntpath.normpath(path.strip().strip('"')))
+    sources = [m.get("content", "") for m in messages if m.get("role") == "user"]
+    found = outputs.get("find_files", "")
+    if found.startswith("Found "):
+        sources.append(found)
+    pattern = re.compile(re.escape(wanted) + r"(?=$|[\s\"'\)\],;]|\.(?:\s|$))")
+    return any(pattern.search(source.replace("/", "\\").lower()) for source in sources if source)
+
+
+_OPEN_DOCUMENT_REQUEST = re.compile(
+    r"^\s*(?:(?:could|can|would|will)\s+you\s+|please\s+|i (?:want|need) you to\s+)?"
+    r"(?:open|pull up|bring up|show(?!\s+(?:me\s+)?(?:how|why|whether)\b)(?:\s+me)?)\b"
+    r"(?!\s+(?:how|why|whether)\b)",
+    re.IGNORECASE,
+)
+
+
+def _single_document_path(result: str) -> str:
+    if not re.match(r"^Found\s+1\s+match", result):
+        return ""
+    match = re.search(r"(?:[A-Za-z]:[\\/]|\\\\)[^\r\n]+", result)
+    return match.group(0).strip().strip('"') if match else ""
 
 
 def _get(obj, key, default=None):
@@ -1097,15 +1159,56 @@ class Brain:
         #     )
         full_messages = ([{"role": "system", "content": system_content}]
                          + _style_examples() + messages)
+        latest_user = next((m.get("content", "") for m in reversed(messages)
+                            if m.get("role") == "user"), "")
+        if tool_router.feedback_only(latest_user) and re.search(r"\bdone\b", latest_user, re.I):
+            # A complaint about 'Done' isn't permission for another action.
+            # Don't turn it into an invented task, fact, path or promise.
+            answer = "I shouldn't have said 'Done' without verifying it. The last action is unverified."
+            messages.append({"role": "assistant", "content": answer})
+            return answer, messages
         last_tool_result = ""  # fallback for _unleak_json
         used_once = set()      # guards _ONCE_PER_TURN tools; per turn, not per round
         turn_results = []      # every tool result this turn, for the _CLAIMS_DONE check
-        turn_tools_ran = set() # and which tools produced them
+        successful_tools = set()  # attempts and successful actions are different
+        tool_outputs = {}
         news_result = ""       # for _has_news_content
         honesty_nudged = False # that check sends her back at most once per turn
         # Only the tools this turn could plausibly need -- see tool_router.py
         # for why sending all of them costs reply quality on an 8B model.
         turn_tools = tool_router.select(TOOL_DEFINITIONS, messages)
+        offered_names = {d["function"]["name"] for d in turn_tools}
+        request_text, request_groups = tool_router.request_context(messages)
+        file_request = ("files" in request_groups
+                        and bool(re.search(r"\b(?:file|document|cv|r[eé]sum[eé]|passport|invoice)\b",
+                                           request_text, re.I)))
+        expected_actions = set()
+        if file_request and _OPEN_DOCUMENT_REQUEST.search(request_text):
+            expected_actions = {"open_application"}
+        elif "timer" in request_groups:
+            if re.search(r"\b(?:stop|cancel)\b|turn.{0,15}off", request_text, re.I):
+                expected_actions = {"cancel_timer"}
+            elif re.search(r"\b(?:start|set|begin)\b", request_text, re.I):
+                expected_actions = {"set_timer"}
+        completion_attempted = False
+
+        def execute(name, args):
+            # Enforce the offered set, including complaints filtered by the
+            # router. The model can hallucinate calls in structured or raw
+            # JSON form; neither is permission to run an unrelated tool.
+            if last_round or name not in offered_names:
+                result = f"Refused: '{name}' isn't available for this request. Answer the user's actual request."
+            elif (name == "open_application" and file_request
+                  and not _known_document_path(args.get("app_name", ""), messages, tool_outputs)):
+                result = ("Refused: no verified document path was supplied. Use find_files to locate "
+                          "the requested file, then open_application with the full path it returns.")
+            else:
+                result = str(_run_tool(name, args, confirm, used_once))
+            turn_results.append(result)
+            tool_outputs[name] = result
+            if not _confirms_nothing(result):
+                successful_tools.add(name)
+            return result
 
         for _round in range(MAX_TOOL_ROUNDS + 1):
             # Last round: stop offering tools, so the model has to answer in
@@ -1133,9 +1236,20 @@ class Brain:
             tool_calls = _get(msg, "tool_calls") or []
 
             if not tool_calls:
-                final_text = _unleak_json(_strip_role_prefix(_get(msg, "content", "") or ""),
-                                          last_tool_result)
-                fake_call = _sniff_fake_tool_call(final_text)
+                raw_text = _strip_role_prefix(_get(msg, "content", "") or "")
+                fake_call = _sniff_fake_tool_call(raw_text)
+                final_text = raw_text if fake_call else _unleak_json(raw_text, last_tool_result)
+                open_result = tool_outputs.get("open_application", "")
+                if (fake_call is None and file_request and not completion_attempted and not last_round
+                        and _OPEN_DOCUMENT_REQUEST.search(request_text)
+                        and (not open_result or open_result.startswith("Refused: no verified document"))):
+                    path = _single_document_path(tool_outputs.get("find_files", ""))
+                    if path:
+                        # He already asked to open it. With one verified
+                        # match there is no new choice to ask him to make.
+                        # Use the normal executor/confirmation/history path.
+                        fake_call = {"name": "open_application", "arguments": {"app_name": path}}
+                        completion_attempted = True
                 if fake_call is None and _TOOL_NARRATION.match(final_text):
                     # One retry, no tools, with the nudge as a system note
                     # for this call only -- never added to `messages`, so it
@@ -1156,8 +1270,13 @@ class Brain:
                     final_text = _strip_tool_talk(final_text)
                 if news_result and fake_call is None and not _has_news_content(final_text, news_result):
                     final_text = _speak_headlines(news_result) or final_text
-                unconfirmed = all(_confirms_nothing(r) for r in turn_results)
-                wrong_tool = _claim_without_its_tool(final_text, turn_tools_ran)
+                # A clock lookup or calculation is not evidence that an
+                # action happened. A failed timer call isn't evidence either.
+                unconfirmed = not (successful_tools & tool_router.MUTATING_TOOLS)
+                wrong_tool = _claim_without_its_tool(final_text, successful_tools)
+                if (_CLAIMS_DONE.search(final_text) and expected_actions
+                        and not successful_tools & expected_actions):
+                    wrong_tool = True
                 if fake_call is None and ((unconfirmed and _CLAIMS_DONE.search(final_text)) or wrong_tool):
                     if not honesty_nudged and not last_round:
                         # Back round the loop, tools still on offer, with the
@@ -1167,30 +1286,71 @@ class Brain:
                         if not turn_results:
                             nudge = _NO_TOOL_CLAIM_NUDGE
                         elif wrong_tool and not unconfirmed:
-                            nudge = _WRONG_TOOL_CLAIM_NUDGE.format(ran=", ".join(sorted(turn_tools_ran)))
+                            nudge = _WRONG_TOOL_CLAIM_NUDGE.format(ran=", ".join(sorted(successful_tools)))
                         else:
                             nudge = _UNCONFIRMED_CLAIM_NUDGE.format(results="; ".join(r[:120] for r in turn_results))
                         full_messages.append({"role": "system", "content": nudge})
                         continue
-                    if turn_results and all(learning.tool_failed(r) for r in turn_results):
+                    if turn_results and all(_confirms_nothing(r) for r in turn_results):
                         # Still claiming success over nothing but errors: say
                         # what the tool said, the one thing here that's true.
-                        final_text = "That didn't work -- " + turn_results[-1].strip()[:300]
+                        final_text = "I couldn't complete that action."
+                    else:
+                        # The retry is best effort, never a licence to let
+                        # the same unsupported 'Done' escape a second time.
+                        final_text = "I haven't confirmed that action, so I can't say it's done."
                 if fake_call is None:
+                    if file_request and _FILE_ABSENCE.search(final_text):
+                        lookup = tool_outputs.get("find_files", "")
+                        if lookup.startswith("Found "):
+                            final_text = lookup
+                        elif lookup.startswith("No files matching"):
+                            final_text = lookup + " That only covers the folders searched."
+                        else:
+                            final_text = "I couldn't complete the file lookup, so I can't tell whether it's there."
+                    lookup = tool_outputs.get("find_files", "")
+                    if (file_request and lookup.startswith("Found ")
+                            and not successful_tools & {"read_file", "open_application"}):
+                        paths = re.findall(r"(?:[A-Za-z]:[\\/]|\\\\)[^\r\n]+", lookup)
+                        said = final_text.replace("/", "\\").lower()
+                        if paths and not any(p.replace("/", "\\").lower() in said for p in paths):
+                            final_text += "\n\nMatching files:\n" + "\n".join(paths[:3])
+                    task_result = tool_outputs.get("list_tasks", "")
+                    if ("list_tasks" in successful_tools
+                            and not successful_tools & {"add_task", "complete_task", "remove_task"}
+                            and not _has_task_content(final_text, task_result)):
+                        final_text = task_result
+                    for name in ("add_task", "complete_task", "remove_task"):
+                        result = tool_outputs.get(name, "")
+                        confirmed = re.split(
+                            r"\.\s+(?:That was the last one|\d+ other tasks? still open)", result, maxsplit=1)[0]
+                        if (name in successful_tools and result.startswith(("Added:", "Done:", "Marked done:", "Removed:"))
+                                and not _has_task_content(final_text, "- " + confirmed.partition(":")[2])):
+                            final_text = confirmed
+                    vault_result = tool_outputs.get("search_vault", "")
+                    if (vault_result.startswith("From your notes")
+                            and _VAULT_ACCESS_DENIAL.search(final_text)):
+                        excerpt = vault_result.partition("\n\n")[2]
+                        final_text = "I can search your vault. Here's what I found:\n\n" + excerpt[:900]
+                    if vault_result.startswith("From your notes") and re.search(r"\bdue\b|\bdeadline\b", latest_user, re.I):
+                        # Preserve an unambiguous due-year from the retrieved
+                        # evidence, not the note's unrelated update date.
+                        years = set(re.findall(
+                            r"\bdue\s+(?:(?:mon|tue|wed|thu|fri|sat|sun)\w*\s+)?"
+                            r"\d{1,2}\s+[A-Za-z]{3,9}\s+(20\d{2})\b", vault_result, re.I))
+                        if len(years) == 1 and not years & set(re.findall(r"\b20\d{2}\b", final_text)):
+                            final_text += " Your notes specify " + next(iter(years)) + "."
                     messages.append({"role": "assistant", "content": final_text})
                     return final_text, messages
 
-                # Recovered a tool call the model wrote as raw text instead
-                # of using Ollama's structured field -- run it for real
-                # instead of showing broken JSON, then loop so the model
-                # can respond to the (real) result.
+                # A recovered JSON call, or completion of an explicit
+                # single-match file-open request. Record the real call and
+                # result, then let the model answer from that evidence.
                 assistant_msg = {"role": "assistant", "content": "", "tool_calls": [{"function": fake_call}]}
                 messages.append(assistant_msg)
                 full_messages.append(assistant_msg)
-                result = _run_tool(fake_call["name"], fake_call["arguments"], confirm, used_once)
+                result = execute(fake_call["name"], fake_call["arguments"])
                 last_tool_result = str(result)
-                turn_results.append(last_tool_result)
-                turn_tools_ran.add(fake_call["name"])
                 if fake_call["name"] == "get_news":
                     news_result = last_tool_result
                 tool_msg = {"role": "tool", "content": str(result)}
@@ -1214,10 +1374,8 @@ class Brain:
                 func_info = _get(call, "function")
                 name = _get(func_info, "name")
                 args = dict(_get(func_info, "arguments") or {})
-                result = _run_tool(name, args, confirm, used_once)
+                result = execute(name, args)
                 last_tool_result = str(result)
-                turn_results.append(last_tool_result)
-                turn_tools_ran.add(name)
                 if name == "get_news":
                     news_result = last_tool_result
                 tool_msg = {"role": "tool", "content": str(result)}

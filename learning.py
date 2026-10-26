@@ -62,7 +62,12 @@ _TOOL_FAILURE = re.compile(
     r"|doesn't see an active device"
     r"|\bnot found\b"
     r"|\bno such file\b"
-    r"|\bpermission denied\b",
+    r"|\bpermission denied\b"
+    r"|^the system cannot find\b"
+    r"|is not recognized as an internal or external command"
+    r"|^no files matching\b"
+    r"|^no single open task matched\b"
+    r"|^don'?t know a location\b",
     re.IGNORECASE,
 )
 
@@ -86,12 +91,14 @@ _CORRECTION = re.compile(
 # to send her back before a false "done" reaches him; here it labels the
 # ones that got through. From 2026-10-20: "stop timer" -> no tool -> "Done."
 CLAIMS_DONE = re.compile(
-    r"^\s*(?:done|all set|sorted|ok(?:ay)?[,.]?\s+done)\b[.!]?\s*$"
+    r"^\s*(?:done|all done|all set|sorted|ok(?:ay)?[,.]?\s+done)\b\s*(?:[.!,:]|$)"
     r"|\b(?:has|have) been (?:started|stopped|set|turned (?:on|off)|completed|opened"
     r"|closed|cancell?ed|created|saved|added|removed|paused|played|scheduled)\b"
-    r"|\bi(?:'ve| have)\s+(?:just\s+)?(?:started|stopped|set|turned|opened|closed"
+    r"|\bi(?:'ve| have)?\s+(?:just\s+)?(?:started|stopped|set|turned|opened|closed"
     r"|cancell?ed|created|saved|added|removed|paused|scheduled)\b"
     r"|\b(?:has|is now)\s+(?:started|stopped|running)\b"
+    r"|\b(?:timer|pomodoro|spotify|music)\s+is\s+(?:running|paused|playing|off|on)\b"
+    r"|\b(?:file|document|cv|resume)\b.{0,40}\bis\s+(?:now\s+)?open\b"
     r"|\bsuccessfully\b",
     re.IGNORECASE,
 )
