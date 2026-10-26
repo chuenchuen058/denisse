@@ -77,7 +77,14 @@ def _open_windows_store_app(app_name: str) -> bool:
 
 
 def open_application(app_name: str) -> str:
-    """Open a local application by name (best-effort, OS-dependent)."""
+    """Launch an installed APPLICATION by name -- Chrome, Word, Spotify,
+    Fusion. Not for documents: "open a file called passport" is a file,
+    so find_files it first and open the path that comes back. Asked to
+    open something that isn't an app you know, search for it before
+    deciding it doesn't exist (2026-10-26: this was called with
+    'passport', found no such app, and Denisse told Chuen the file
+    wasn't on his machine -- it was, six copies of it).
+    """
     system = platform.system()
     if system != "Windows":
         try:
@@ -104,7 +111,14 @@ def open_application(app_name: str) -> str:
     except Exception as e:
         return f"Error opening {app_name}: {e}"
 
-    return f"Couldn't find an app matching '{app_name}' (tried a direct launch and a Start Menu search)."
+    # Point at the next step rather than stopping here. A bare "couldn't
+    # find it" reads to the model as a settled answer, and it relayed that
+    # to Chuen as the file not existing.
+    return (f"No application called '{app_name}' (tried a direct launch and "
+            f"a Start Menu search). This only looks at installed apps, not "
+            f"at files. If '{app_name}' is a document, call "
+            f"find_files(query='{app_name}') before telling Chuen anything "
+            f"about whether it exists.")
 
 
 def list_directory(path: str = ".") -> str:

@@ -169,8 +169,14 @@ def search_vault(query: str = "") -> str:
         hits.append((score, rel, fm.get("description", "").strip('"'), lines))
 
     if not hits:
-        return (f"Nothing in your notes mentions {' or '.join(words)}. "
-                "I checked and there's genuinely nothing there -- don't take "
+        # Say what was searched, not just that nothing turned up. On
+        # 2026-10-26 this came back empty for "passport" and was relayed
+        # to Chuen as the file not existing anywhere -- but it only ever
+        # looked at notes, and the file was on disk the whole time.
+        return (f"Nothing in your notes mentions {' or '.join(words)}. This "
+                "searched the Obsidian vault only -- not files on disk. If "
+                "he asked about a file, call find_files before answering. "
+                "Within the notes there is genuinely nothing -- don't take "
                 "silence as a yes.")
 
     hits.sort(key=lambda h: -h[0])
