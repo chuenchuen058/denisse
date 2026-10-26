@@ -131,16 +131,35 @@ def _default_search_dirs() -> dict:
     }
     # OneDrive is where a lot of real work actually lives on this machine
     # (the Obsidian vault included) -- fold in its top-level folders too,
-    # under their own names, if it's there.
-    for entry in os.listdir(home) if os.path.isdir(home) else []:
+    # if it's there.
+    #
+    # These must NOT be setdefault'd under their own names. Windows
+    # redirects Desktop and Documents into OneDrive, which leaves a
+    # near-empty C:\Users\<me>\Documents behind -- and because that stub
+    # exists, setdefault kept it and silently dropped the real
+    # OneDrive\Documents. On 2026-10-26 Denisse told Chuen his passport
+    # wasn't on the machine; it was sitting in OneDrive\Documents\Resume
+    # \IUMC, in a folder she had never been given to search. So a
+    # collision registers the OneDrive copy under its own key instead,
+    # and both get searched.
+    for entry in sorted(os.listdir(home)) if os.path.isdir(home) else []:
         if entry.lower().startswith("onedrive"):
             onedrive = os.path.join(home, entry)
             if os.path.isdir(onedrive):
                 try:
                     for sub in os.listdir(onedrive):
                         sub_path = os.path.join(onedrive, sub)
-                        if os.path.isdir(sub_path) and not sub.startswith("."):
-                            dirs.setdefault(sub.lower(), sub_path)
+                        if not os.path.isdir(sub_path) or sub.startswith("."):
+                            continue
+                        key = sub.lower()
+                        if os.path.normcase(dirs.get(key, "")) == os.path.normcase(sub_path):
+                            continue
+                        if key in dirs:
+                            key = f"onedrive {key}"
+                            n = 2
+                            while key in dirs:
+                                key, n = f"onedrive {sub.lower()} {n}", n + 1
+                        dirs[key] = sub_path
                 except OSError:
                     pass
     return {name: path for name, path in dirs.items() if os.path.isdir(path)}
@@ -181,8 +200,13 @@ def find_files(query: str, location: str = "") -> str:
     search_dirs = _default_search_dirs()
     if location:
         loc_key = location.strip().lower()
-        if loc_key in search_dirs:
-            roots = {loc_key: search_dirs[loc_key]}
+        # "documents" has to reach "onedrive documents" too, or narrowing
+        # the search puts you back in the empty redirected stub.
+        named = {k: v for k, v in search_dirs.items()
+                 if k == loc_key or k == f"onedrive {loc_key}"
+                 or k.startswith(f"onedrive {loc_key} ")}
+        if named:
+            roots = named
         elif os.path.isdir(location):
             roots = {location: location}
         else:

@@ -968,6 +968,46 @@ def _drop_unexpected_args(func, args: dict) -> dict:
     return {k: v for k, v in args.items() if k in allowed}
 
 
+def _required_params(func) -> list:
+    try:
+        params = inspect.signature(func).parameters
+    except (TypeError, ValueError):
+        return []
+    return [n for n, p in params.items()
+            if p.default is inspect.Parameter.empty
+            and p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                           inspect.Parameter.KEYWORD_ONLY)]
+
+
+def _rescue_arg_names(func, args: dict) -> dict:
+    """Put a value back when the model got the argument's NAME wrong.
+
+    _drop_unexpected_args exists because junk arguments used to raise a
+    TypeError and the model covered the error by inventing a result. But
+    dropping is the wrong answer when the name was wrong rather than the
+    argument spurious: on 2026-10-26 the model called
+    find_files(filename='passport'), the value was discarded, the call
+    died with "missing 1 required positional argument: 'query'", and
+    Denisse told Chuen the file wasn't on his machine. It was. She had
+    simply never searched for it -- twice, because read_file then got the
+    same treatment.
+
+    Only the unambiguous case is repaired: exactly one required parameter
+    left unfilled and exactly one scalar value dropped. Anything less
+    clear-cut is left alone for _run_tool to report honestly.
+    """
+    kept = _drop_unexpected_args(func, args)
+    if kept == args:
+        return kept
+    dropped = [v for k, v in args.items() if k not in kept]
+    missing = [p for p in _required_params(func) if p not in kept]
+    if len(missing) == 1 and len(dropped) == 1 and isinstance(
+            dropped[0], (str, int, float)):
+        kept = dict(kept)
+        kept[missing[0]] = dropped[0]
+    return kept
+
+
 # Tools that change something and are almost never wanted twice in one
 # turn. Completing a task is the case that bit: told "I've ordered the N20
 # motor, tick it off", the model closed that task and then closed an
@@ -989,8 +1029,17 @@ def _run_tool(name: str, args: dict, confirm, used: set | None = None) -> str:
         used.add(name)
     if confirm is not None and not confirm(name, args):
         return f"User declined to run '{name}'."
+    call_args = _rescue_arg_names(func, args)
+    missing = [p for p in _required_params(func) if p not in call_args]
+    if missing:
+        # Say what to do about it. The raw TypeError told the model the
+        # call had failed but not how to fix it, so it gave up and
+        # reported the thing as not found instead of calling again.
+        return (f"Error running '{name}': no value was given for the "
+                f"required argument '{missing[0]}'. Call '{name}' again "
+                f"with {missing[0]}=<value>. Do not invent a result.")
     try:
-        return func(**_drop_unexpected_args(func, args))
+        return func(**call_args)
     except Exception as e:
         # Be explicit that this failed and that nothing may be invented to
         # cover it -- the model's instinct on a tool error is to make
