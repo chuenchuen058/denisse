@@ -735,6 +735,8 @@ def _set_thinking_main(source: str, on: bool):
         _thinking_sources.add(source)
     else:
         _thinking_sources.discard(source)
+    if _floating_orb is not None:
+        _floating_orb.set_thinking(bool(_thinking_sources))
     if not _thinking_sources:
         _close_thinking_bubble()
         return
@@ -761,6 +763,8 @@ def _thinking_timed_out():
     global _thinking_timeout_job
     _thinking_timeout_job = None
     _thinking_sources.clear()
+    if _floating_orb is not None:
+        _floating_orb.set_thinking(False)
     _close_thinking_bubble()
 
 
@@ -785,6 +789,8 @@ def _show_reply_main(text: str, _retry: bool = False):
     global _thinking_bubble, _reply_bubble
     if _floating_orb is None or not (text or "").strip():
         return
+    if not _retry:
+        _floating_orb.react("happy", 3.0)
     if _reminder_card is not None and _reminder_card.editing is not None:
         return  # he's mid-edit in the reminder card -- don't take it away
     try:
@@ -1502,6 +1508,13 @@ def _open_chat(icon=None, item=None):
 
 
 
+def _toggle_pet_motion(icon=None, item=None):
+    def toggle():
+        if _floating_orb is not None:
+            _floating_orb.motion_enabled = not _floating_orb.motion_enabled
+    root.after(0, toggle)
+
+
 def main():
     global root
     root = tk.Tk()
@@ -1515,6 +1528,10 @@ def main():
     menu = pystray.Menu(
         pystray.MenuItem("Talk to Denisse", _open_chat, default=True),
         pystray.MenuItem("Reminders", _open_reminders),
+        pystray.MenuItem(
+            "Pet movement", _toggle_pet_motion,
+            checked=lambda item: _floating_orb is not None and _floating_orb.motion_enabled,
+        ),
         pystray.MenuItem(
             _study_menu_text, _toggle_study_mode, checked=lambda item: _study_mode is not None and _study_mode.active
         ),

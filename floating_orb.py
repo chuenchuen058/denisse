@@ -195,6 +195,15 @@ class FloatingOrb:
         self.root = root
         self.on_activate = on_activate
         scale = _dpi_scale(root)
+        self._scale = scale
+        self.motion_enabled = True
+        self._last_interaction = time.monotonic()
+        self._hovered = False
+        self._held = False
+        self._thinking = False
+        self._reaction = "idle"
+        self._reaction_until = 0.0
+        self._phase = 0.0
 
         self.orb_px = round(ORB_SIZE * scale)
         self.total_px = round((ORB_SIZE + GLOW_PAD * 2) * scale)
@@ -215,20 +224,20 @@ class FloatingOrb:
         # Breathing pulse (BREATH_FRAMES) and JARVIS-style targeting ring
         # (RING_FRAMES), both supersampled PIL frames -- Tk's own arcs
         # aren't anti-aliased on Windows, which is what made the ring look
-        # jagged/gappy. Both advance one frame a tick, so the combined
-        # loop is RING_FRAMES long (a multiple of BREATH_FRAMES); each
-        # combined frame is pre-flattened once, no per-tick PIL work.
+        # jagged/gappy. Reuse these frames at different speeds by state;
+        # only the small motion transform is applied each tick.
         ring_r = self.orb_px / 2 + round(RING_GAP * scale)
         orbs = [_make_orb_frame(self.total_px, self.orb_px, _breath_curve(i, BREATH_FRAMES)) for i in range(BREATH_FRAMES)]
         rings = [_make_ring_frame(self.total_px, ring_r, i * RING_DEG_PER_TICK) for i in range(RING_FRAMES)]
+        self._images = [Image.alpha_composite(orbs[i % BREATH_FRAMES], rings[i]) for i in range(RING_FRAMES)]
         self._frame_i = 0  # breath index -- reminder_card reads it to breathe in step
         self._tick_i = 0
         self._painter = None
         try:
             from layered import LayeredPainter, to_bgra
             self._painter = LayeredPainter(self.win, (self.total_px, self.total_px))
-            self._combined = [to_bgra(Image.alpha_composite(orbs[i % BREATH_FRAMES], rings[i])) for i in range(RING_FRAMES)]
-            if not self._painter.show(self._combined[0]):
+            self._to_bgra = to_bgra
+            if not self._painter.show(to_bgra(self._images[0])):
                 raise OSError("UpdateLayeredWindow failed")
         except Exception:
             # Fallback: the old colour-keyed window, crisp edges, no soft glow.
@@ -264,6 +273,8 @@ class FloatingOrb:
         self.canvas.bind("<ButtonPress-1>", self._on_press)
         self.canvas.bind("<B1-Motion>", self._on_motion)
         self.canvas.bind("<ButtonRelease-1>", self._on_release)
+        self.canvas.bind("<Enter>", lambda e: self._hover(True))
+        self.canvas.bind("<Leave>", lambda e: self._hover(False))
         self.canvas.config(cursor="hand2")
 
         self._place_initial(scale)
@@ -303,6 +314,8 @@ class FloatingOrb:
     # -- drag vs. click --
 
     def _on_press(self, event):
+        self._held = True
+        self.react("happy", 1.0)
         self._dragging = False
         self._drag_start = (event.x_root, event.y_root)
         self._win_start = (self.win.winfo_x(), self.win.winfo_y())
@@ -328,6 +341,8 @@ class FloatingOrb:
         self.win.geometry(f"+{nx}+{ny}")
 
     def _on_release(self, event):
+        self._held = False
+        self.react("happy", 1.2)
         if self._dragging:
             self._save_position()
         else:
@@ -335,18 +350,73 @@ class FloatingOrb:
 
     # -- animation --
 
+    def _hover(self, hovered):
+        self._hovered = hovered
+        if hovered:
+            self.react("happy", 0.8)
+
+    def react(self, reaction="happy", seconds=2.0):
+        """Brief UI reaction; call on the Tk thread, never from a worker."""
+        self._last_interaction = time.monotonic()
+        self._reaction = reaction
+        self._reaction_until = self._last_interaction + seconds
+
+    def set_thinking(self, active):
+        self._thinking = bool(active)
+        self._last_interaction = time.monotonic()
+
+    def _pet_state(self, now):
+        if self._held:
+            return "held"
+        if self._thinking:
+            return "thinking"
+        if now < self._reaction_until:
+            return self._reaction
+        if self._hovered:
+            return "curious"
+        return "sleepy" if now - self._last_interaction > 180 else "idle"
+
+    def _pet_frame(self, state, now):
+        # Motion stays inside the existing transparent window: cards and
+        # countdowns retain a stable anchor, and the saved position never drifts.
+        speed = {"sleepy": 0.2, "thinking": 2.0, "listening": 1.5,
+                 "happy": 1.4, "held": 1.5}.get(state, 0.6)
+        self._phase = (self._phase + speed) % RING_FRAMES
+        self._tick_i = int(self._phase)
+        self._frame_i = self._tick_i % BREATH_FRAMES
+        x = y = 0.0
+        if self.motion_enabled:
+            if state == "held":
+                x = 2 * math.sin(now * 16)
+            elif state == "happy":
+                y = -3 * abs(math.sin(now * 7))
+            elif state == "thinking":
+                x, y = math.cos(now * 4) * 1.5, math.sin(now * 4) * 1.5
+            elif state in ("curious", "listening"):
+                y = -2
+            elif state == "idle":
+                y = math.sin(now * 1.8) * 2
+        if x == 0 and y == 0:
+            return self._images[self._tick_i]
+        return self._images[self._tick_i].transform(
+            (self.total_px, self.total_px), Image.Transform.AFFINE,
+            (1, 0, -x * self._scale, 0, 1, -y * self._scale),
+            resample=Image.Resampling.BICUBIC,
+        )
+
     def _animate(self):
         try:
-            self._tick_i = (self._tick_i + 1) % RING_FRAMES
-            self._frame_i = self._tick_i % BREATH_FRAMES
+            now = time.monotonic()
+            frame = self._pet_frame(self._pet_state(now), now)
             if self._painter is not None:
                 if not self.win.winfo_exists():
                     self._painter.close()
                     return
-                self._painter.show(self._combined[self._tick_i])
+                self._painter.show(self._to_bgra(frame))
             else:
-                self.canvas.itemconfig(self._orb_img_id, image=self._frames[self._frame_i])
-                self.canvas.itemconfig(self._ring_img_id, image=self._ring_frames[self._tick_i])
+                self._pet_photo = ImageTk.PhotoImage(_flatten(frame))
+                self.canvas.itemconfig(self._orb_img_id, image=self._pet_photo)
+                self.canvas.itemconfig(self._ring_img_id, state="hidden")
         except tk.TclError:
             return  # window torn down (app quitting) -- just stop
         self.root.after(TICK_MS, self._animate)
@@ -357,6 +427,7 @@ class FloatingOrb:
         """Show a brief speech-bubble above the orb's current position --
         used for live 'here's what I heard' feedback, same data as the
         chat popup's own show_heard(), not a new recording of anything."""
+        self.react("listening", duration_ms / 1000)
         try:
             if self._bubble_hide_job is not None:
                 self.root.after_cancel(self._bubble_hide_job)
