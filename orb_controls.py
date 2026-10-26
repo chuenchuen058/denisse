@@ -29,56 +29,144 @@ def _icon(label, size, color):
     return image.resize((size, size), Image.Resampling.LANCZOS)
 
 
+def _dock_frame(scale, hovered=None, active=False, pressed=None):
+    """Render one compact pill; shared by the live dock and visual previews."""
+    ss = 3
+    w, h = round(144 * scale), round(46 * scale)
+    image = Image.new("RGBA", (w * ss, h * ss))
+    d = ImageDraw.Draw(image)
+    k = scale * ss
+    def box(coords):
+        return tuple(round(v * k) for v in coords)
+    d.rounded_rectangle(box((2, 2, 142, 44)), radius=round(21*k),
+                        fill="#100d19", outline="#49345f", width=max(1, round(k)))
+    d.line(box((30, 3, 114, 3)), fill="#6c4b89", width=max(1, round(k/2)))
+    for i, label in enumerate(("Chat", "Voice", "Reminders")):
+        cx = 28 + i * 44
+        is_active = label == "Voice" and active
+        if label == hovered or is_active:
+            fill = "#462c60" if label == pressed else "#2d203f" if label == hovered else "#142d2c"
+            d.rounded_rectangle(box((cx-18, 5, cx+18, 41)),
+                                radius=round(14*k), fill=fill)
+        color = "#80e4c4" if is_active else "#faf2ff" if label == hovered else "#c2b1d5"
+        icon = _icon(label, round(22*k), color)
+        image.alpha_composite(icon, (round((cx-11)*k), round(11*k)))
+        if is_active:
+            d.ellipse(box((cx+9, 9, cx+12, 12)), fill="#80e4c4")
+    return image.resize((w, h), Image.Resampling.LANCZOS)
+
+
 class OrbControls:
+    LABELS = ("Chat", "Voice", "Reminders")
+
     def __init__(self, root, orb, on_chat, on_voice, on_reminders,
                  voice_active, font_family="Segoe UI"):
         self.root, self.orb = root, orb
         self.voice_active = voice_active
+        self.actions = dict(zip(self.LABELS, (on_chat, on_voice, on_reminders)))
         self._job = None
         self._closed = False
         self._visible = False
         self._last_hover = 0.0
+        self._hovered = self._pressed = None
+        self._hover_since = 0.0
+        self._drawn = None
+        self._cache = {}
         self.win = tk.Toplevel(root)
         self.win.withdraw()
+        self.win.title("Denisse controls")
         self.win.overrideredirect(True)
         self.win.attributes("-topmost", True)
-        self.win.configure(bg="#4c3575", padx=1, pady=1)
-        body = tk.Frame(self.win, bg="#0d0916")
-        body.pack()
-        self.buttons = {}
-        size = max(18, round(20 * orb._scale))
-        self._icons = {label: ImageTk.PhotoImage(_icon(label, size, "#ddd0f5"))
-                       for label in ("Chat", "Voice", "Reminders")}
-        self._voice_on = ImageTk.PhotoImage(_icon("Voice", size, "#74ebc5"))
-        for label, action in (("Chat", on_chat), ("Voice", on_voice),
-                              ("Reminders", on_reminders)):
-            button = tk.Button(
-                body, text=label, image=self._icons[label], command=lambda fn=action: self._invoke(fn),
-                font=(font_family, 9), bg="#0d0916", fg="#ddd0f5",
-                activebackground="#38204f", activeforeground="#ffffff",
-                relief="flat", bd=0, padx=9, pady=6, cursor="hand2",
-                highlightthickness=0, takefocus=True,
-            )
-            button.pack(side="left")
-            button.bind("<Enter>", lambda e, b=button: b.config(bg="#281a3b"))
-            button.bind("<Leave>", lambda e, b=button: b.config(bg="#0d0916"))
-            self.buttons[label] = button
+        self.win.configure(bg="#010203")
+        self.w, self.h = round(144*orb._scale), round(46*orb._scale)
+        self.canvas = tk.Canvas(self.win, width=self.w, height=self.h,
+                                bg="#010203", bd=0, highlightthickness=0,
+                                takefocus=True, cursor="hand2")
+        self.canvas.pack()
+        self._image_id = self.canvas.create_image(0, 0, anchor="nw")
+        self._painter = None
+        try:
+            from layered import LayeredPainter, to_bgra
+            self._painter = LayeredPainter(self.win, (self.w, self.h))
+            self._convert = to_bgra
+            if not self._painter.show(to_bgra(_dock_frame(orb._scale))):
+                raise OSError("Dock alpha painter unavailable")
+        except Exception:
+            if self._painter is not None:
+                self._painter.close()
+            self._painter = None
+            self.win.attributes("-transparentcolor", "#010203")
+        self.canvas.bind("<ButtonPress-1>", self._press)
+        self.canvas.bind("<ButtonRelease-1>", self._release)
+        self.canvas.bind("<Right>", lambda e: self._keyboard_step(1))
+        self.canvas.bind("<Left>", lambda e: self._keyboard_step(-1))
+        self.canvas.bind("<Return>", lambda e: self._invoke(self._hovered or "Chat"))
+        self.canvas.bind("<space>", lambda e: self._invoke(self._hovered or "Chat"))
+        self.canvas.bind("<Escape>", lambda e: self._hide())
+        self.tip = tk.Toplevel(root)
+        self.tip.withdraw()
+        self.tip.overrideredirect(True)
+        self.tip.attributes("-topmost", True)
+        self._tip_label = tk.Label(self.tip, bg="#191222", fg="#e6d9f4",
+                                   font=(font_family, 8), padx=8, pady=4)
+        self._tip_label.pack()
         self.win.update_idletasks()
         self._follow()
 
-    def _invoke(self, action):
-        self.orb.react("happy", 1.0)
-        action()
-        self._refresh_voice()
+    def _button_at(self, x, y):
+        x, y = x/self.orb._scale, y/self.orb._scale
+        if not 5 <= y <= 41:
+            return None
+        for i, label in enumerate(self.LABELS):
+            if 10+i*44 <= x <= 46+i*44:
+                return label
+        return None
 
-    def _refresh_voice(self):
-        active = self.voice_active()
-        # Keep the label and width stable so toggling never shifts a target.
-        self.buttons["Voice"].configure(
-            image=self._voice_on if active else self._icons["Voice"],
-            fg="#74ebc5" if active else "#ddd0f5",
-            relief="sunken" if active else "flat",
-        )
+    def _press(self, event):
+        self._pressed = self._button_at(event.x, event.y)
+        self.canvas.focus_set()
+        self._draw()
+
+    def _release(self, event):
+        label, self._pressed = self._pressed, None
+        if label is not None and label == self._button_at(event.x, event.y):
+            self._invoke(label)
+        self._draw()
+
+    def _invoke(self, label):
+        self.orb.react("happy", 1.0)
+        self.actions[label]()
+        self.tip.withdraw()
+        self._draw()
+
+    def _keyboard_step(self, delta):
+        i = self.LABELS.index(self._hovered) if self._hovered else 0
+        self._hovered = self.LABELS[(i+delta) % 3]
+        self._draw()
+        return "break"
+
+    def _draw(self):
+        state = (self._hovered, bool(self.voice_active()), self._pressed)
+        if state == self._drawn:
+            return
+        if state not in self._cache:
+            frame = _dock_frame(self.orb._scale, *state)
+            if self._painter is not None:
+                self._cache[state] = self._convert(frame)
+            else:
+                from floating_orb import _flatten
+                self._cache[state] = ImageTk.PhotoImage(_flatten(frame, matte=(16, 13, 25)))
+        if self._painter is not None:
+            self._painter.show(self._cache[state])
+        else:
+            self.canvas.itemconfig(self._image_id, image=self._cache[state])
+        self._drawn = state
+
+    def _hide(self):
+        self.win.withdraw()
+        self.tip.withdraw()
+        self._visible = False
+        self._hovered = self._pressed = None
 
     def _follow(self):
         self._job = None
@@ -88,11 +176,11 @@ class OrbControls:
             if not self.orb.win.winfo_exists():
                 self.close()
                 return
-            w, h = self.win.winfo_reqwidth(), self.win.winfo_reqheight()
+            w, h = self.w, self.h
             ox, oy = self.orb.win.winfo_x(), self.orb.win.winfo_y()
             left, top, right, bottom = _work_area(
                 self.win.winfo_screenwidth(), self.win.winfo_screenheight())
-            gap = round(4 * self.orb._scale)
+            gap = round(2 * self.orb._scale)
             x = max(left, min(ox + self.orb.total_px // 2 - w // 2, right - w))
             y = oy + self.orb.total_px + gap
             if y + h > bottom:
@@ -102,33 +190,50 @@ class OrbControls:
             if self.win.geometry() != geo:
                 self.win.geometry(geo)
             px, py = self.win.winfo_pointerxy()
-            self._update_visibility(px, py, time.monotonic(), (x, y, w, h), (ox, oy))
-            self._refresh_voice()
-            self._job = self.root.after(100, self._follow)
+            now = time.monotonic()
+            self._update_visibility(px, py, now, (x, y, w, h), (ox, oy))
+            hovered = self._button_at(px-x, py-y) if self._visible else None
+            if hovered != self._hovered:
+                self._hovered = hovered
+                self._hover_since = now
+                self.tip.withdraw()
+            if hovered and now-self._hover_since > .6:
+                text = "Voice: listening on" if hovered == "Voice" and self.voice_active() else hovered
+                self._tip_label.config(text=text)
+                self.tip.update_idletasks()
+                tw, th = self.tip.winfo_reqwidth(), self.tip.winfo_reqheight()
+                tx = max(left, min(px-tw//2, right-tw))
+                ty = y+h+3 if y+h+th+3 < bottom else y-th-3
+                self.tip.geometry(f"+{tx}+{max(top, ty)}")
+                self.tip.deiconify()
+            self._draw()
+            self._job = self.root.after(75, self._follow)
         except tk.TclError:
             self.close()
 
     def _update_visibility(self, px, py, now, dock_rect, orb_pos):
         x, y, w, h = dock_rect
         ox, oy = orb_pos
-        over_orb = ox <= px < ox + self.orb.total_px and oy <= py < oy + self.orb.total_px
-        over_dock = self._visible and x <= px < x + w and y <= py < y + h
+        over_orb = ox <= px < ox+self.orb.total_px and oy <= py < oy+self.orb.total_px
+        over_dock = self._visible and x <= px < x+w and y <= py < y+h
         if over_orb or over_dock:
             self._last_hover = now
             if not self._visible:
                 self.win.deiconify()
                 self._visible = True
-        elif self._visible and now - self._last_hover > 0.4:
-            # Enough time to cross the transparent gap without losing targets.
-            self.win.withdraw()
-            self._visible = False
+        elif self._visible and now-self._last_hover > .4:
+            self._hide()
 
     def close(self):
         self._closed = True
         if self._job is not None:
             self.root.after_cancel(self._job)
             self._job = None
+        if self._painter is not None:
+            self._painter.close()
+            self._painter = None
         try:
+            self.tip.destroy()
             self.win.destroy()
         except tk.TclError:
             pass
