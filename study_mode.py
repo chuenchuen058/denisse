@@ -311,7 +311,8 @@ class StudyBadge:
                 except tk.TclError:
                     continue
                 if x < bx + bw and bx < x + self.w and y < by + bh and by < y + self.h:
-                    y = by - self.h - gap if above else by + bh + gap
+                    below_y = by + bh + gap
+                    y = by - self.h - gap if above or below_y + self.h > area[3] else below_y
             y = max(area[1], min(y, area[3] - self.h))
         # Compared with where the window actually is, not a cached value --
         # a cache let a move get skipped and leave it on a bubble.

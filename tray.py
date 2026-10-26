@@ -61,6 +61,7 @@ import obsidian_sync
 import optimize
 import wake_word
 from floating_orb import FloatingOrb
+from orb_controls import OrbControls
 from reminder_card import TYPING_MS, ReminderCard, ThinkingBubble
 # "study mode" / "pomodoro" / "stop study mode" ... -- the phrases live in
 # study_mode.match_command, shared with the wake word.
@@ -321,6 +322,7 @@ def _open_project_folder(icon, item):
 _tray_icon = None  # set in main() once the pystray Icon exists -- lets
 # the optimize loop below show notifications via _tray_icon.notify(...)
 _floating_orb = None  # set in main() once the FloatingOrb exists
+_orb_controls = None
 
 _organize_thread = None
 _organize_stop_event = threading.Event()
@@ -1559,14 +1561,21 @@ def main():
     _start_optimizing()
     _start_news_briefing()
 
-    global _floating_orb
+    global _floating_orb, _orb_controls
     _floating_orb = FloatingOrb(root, on_activate=_open_chat)
+    _orb_controls = OrbControls(
+        root, _floating_orb, on_chat=_open_chat,
+        on_voice=lambda: _toggle_wake_word(None, None),
+        on_reminders=_show_reminder_card,
+        voice_active=lambda: _is_listening_for_wake_word() and not _wake_word_stop_event.is_set(),
+        font_family=FONT_FAMILY,
+    )
     # Right-click the orb for the reminder card (left-click stays chat).
     _floating_orb.canvas.bind("<Button-3>", lambda e: _show_reminder_card())
     global _study_mode
     _study_mode = StudyMode(
         root, _show_study_bubble, orb=_floating_orb, font_family=FONT_FAMILY,
-        avoid=lambda: [b.win for b in (_reminder_card, _study_bubble, _reply_bubble, _thinking_bubble) if b is not None],
+        avoid=lambda: [b.win for b in (_reminder_card, _study_bubble, _reply_bubble, _thinking_bubble, _orb_controls) if b is not None],
     )
     # Plain countdowns (timers.py) set by her set_timer tool. Its pill also
     # keeps off study mode's pill, so both can run at once.
@@ -1576,6 +1585,7 @@ def main():
         notify=lambda title, text: _tray_icon.notify(text, title) if _tray_icon is not None else None,
         font_family=FONT_FAMILY,
         avoid=lambda: [b.win for b in (_reminder_card, _study_bubble, _reply_bubble, _thinking_bubble,
+                                        _orb_controls,
                                         _study_mode.badge if _study_mode is not None else None) if b is not None],
     )
 
