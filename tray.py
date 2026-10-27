@@ -60,9 +60,10 @@ import tasks
 import obsidian_sync
 import optimize
 import wake_word
+import speech_control
 from floating_orb import FloatingOrb
 from orb_controls import OrbControls
-from reminder_card import TYPING_MS, ReminderCard, ThinkingBubble
+from reminder_card import TYPING_MS, ReminderCard, ThinkingBubble, _place, _work_area
 # "study mode" / "pomodoro" / "stop study mode" ... -- the phrases live in
 # study_mode.match_command, shared with the wake word.
 from study_mode import StudyBubble, StudyMode, match_command as _match_study_command
@@ -640,7 +641,11 @@ def _show_reminder_card():
 
 
 def _open_reminders(icon=None, item=None):
-    root.after(0, _show_reminder_card)
+    def show():
+        if _chat_popup is not None:
+            _chat_popup.close()
+        _show_reminder_card()
+    root.after(0, show)
 
 
 # Study mode (study_mode.py): 25 min study / 5 min rest, each switch texted
@@ -741,7 +746,12 @@ def _set_thinking_main(source: str, on: bool):
         _floating_orb.set_thinking(bool(_thinking_sources))
     if not _thinking_sources:
         _close_thinking_bubble()
+        if _chat_popup is not None and not _chat_popup.busy:
+            _chat_popup.typing_label.config(text="")
         return
+    if _chat_popup is not None:
+        _chat_popup.typing_label.config(text="Thinking…")
+        return  # the attached chat is already the pet's conversation bubble
     # The reminder card already sits beside the orb; don't stack a second.
     if _thinking_bubble is None and _reminder_card is None and _study_bubble is None and _floating_orb is not None:
         _close_reply_bubble()  # the last reply makes way for the next "• • •"
@@ -752,7 +762,8 @@ def _set_thinking_main(source: str, on: bool):
                 _thinking_bubble = None
 
         try:
-            bubble = ThinkingBubble(root, _floating_orb, font_family=FONT_FAMILY, on_close=_closed)
+            bubble = ThinkingBubble(root, _floating_orb, font_family=FONT_FAMILY, on_close=_closed,
+                                    on_reply=_open_chat, on_stop=_stop_speaking)
             _thinking_bubble = bubble
         except Exception:
             _thinking_bubble = None  # cosmetic -- never let it break a reply
@@ -787,12 +798,18 @@ def _show_reply(text: str):
     root.after(0, lambda: _show_reply_main(text))
 
 
-def _show_reply_main(text: str, _retry: bool = False):
+def _show_reply_main(text: str, _retry: bool = False, source=None):
     global _thinking_bubble, _reply_bubble
     if _floating_orb is None or not (text or "").strip():
         return
     if not _retry:
         _floating_orb.react("happy", 3.0)
+    if _chat_popup is not None:
+        if source != "chat":
+            _chat_popup.receive_reply(text)
+        _close_thinking_bubble()
+        _close_reply_bubble()
+        return
     if _reminder_card is not None and _reminder_card.editing is not None:
         return  # he's mid-edit in the reminder card -- don't take it away
     try:
@@ -816,7 +833,8 @@ def _show_reply_main(text: str, _retry: bool = False):
             _close_study_bubble()
             if _reminder_card is not None:
                 _reminder_card.close()
-            bubble = ThinkingBubble(root, _floating_orb, font_family=FONT_FAMILY, on_close=_closed)
+            bubble = ThinkingBubble(root, _floating_orb, font_family=FONT_FAMILY, on_close=_closed,
+                                    on_reply=_open_chat, on_stop=_stop_speaking)
             _reply_bubble = bubble
             # A retry has already waited through one typing pause; show it
             # straight away so the gap can't be interrupted a second time.
@@ -963,7 +981,14 @@ def _status_display(status: dict) -> tuple:
     return STATUS_OK, "Online"
 
 
-CHAT_WIDTH, CHAT_HEIGHT = 240, 310  # ~50% smaller by area than the original 340x440
+CHAT_WIDTH, CHAT_HEIGHT = 320, 380
+
+
+def _stop_speaking():
+    """Immediate speech control, including replies still synthesizing."""
+    wake_word.interrupt()
+    if _chat_popup is not None:
+        _chat_popup.typing_label.config(text="Speech stopped")
 
 # How long the "🎤 heard: ..." live indicator stays up before clearing --
 # was 2.5s (too quick to actually read), lengthened on request.
@@ -971,8 +996,7 @@ HEARD_DISPLAY_MS = int(os.environ.get("DENISSE_HEARD_DISPLAY_MS", "8000"))
 
 
 class ChatPopup:
-    """An in-tray chat window: shows online/offline status and lets you
-    type straight to Denisse, right there -- no console window."""
+    """A conversation flyout anchored to the desktop pet."""
 
     def __init__(self):
         self.win = tk.Toplevel(root)
@@ -980,12 +1004,13 @@ class ChatPopup:
         self.win.attributes("-topmost", True)
         self.win.configure(bg=POPUP_BG, highlightbackground=POPUP_BORDER, highlightthickness=1)
 
-        w, h = _px(CHAT_WIDTH), _px(CHAT_HEIGHT)
-        taskbar_height = _px(48)  # approximate -- just needs to clear the taskbar
-        margin = _px(10)
-        x = self.win.winfo_screenwidth() - w - margin
-        y = self.win.winfo_screenheight() - taskbar_height - h - margin
-        self.win.geometry(f"{w}x{h}+{x}+{y}")
+        area = _work_area(self.win.winfo_screenwidth(), self.win.winfo_screenheight())
+        w = min(_px(CHAT_WIDTH), area[2] - area[0] - _px(20))
+        h = min(_px(CHAT_HEIGHT), area[3] - area[1] - _px(20))
+        self._window_size = w, h
+        self._anchor_job = None
+        self._anchor_geometry = None
+        self._follow_anchor()
         self.win.bind("<Escape>", lambda e: self.close())
 
         # -- header: name + online/offline status. No filled bar (Tron panels
@@ -996,7 +1021,7 @@ class ChatPopup:
         name_col = tk.Frame(header, bg=HEADER_BG)
         name_col.pack(side="left", padx=_px(10), pady=_px(5), fill="x", expand=True)
         tk.Label(
-            name_col, text="D E N I S S E", bg=HEADER_BG, fg=POPUP_TEXT, font=(FONT_FAMILY, 11, "bold")
+            name_col, text="Denisse", bg=HEADER_BG, fg=POPUP_TEXT, font=(FONT_FAMILY, 11, "bold")
         ).pack(anchor="w")
         # Status dot + text -- toggled by saying or typing "offline mode" /
         # "online mode" (see _match_mode_command), not by clicking anything.
@@ -1016,6 +1041,10 @@ class ChatPopup:
             activebackground=HEADER_BG, activeforeground=POPUP_TEXT, relief="flat", bd=0,
             font=(FONT_FAMILY, 10), cursor="hand2",
         ).pack(side="right", padx=_px(10))
+        tk.Button(header, text="Stop voice", command=_stop_speaking,
+                  bg=HEADER_BG, fg=POPUP_MUTED, activebackground=HEADER_BG,
+                  activeforeground=POPUP_TEXT, relief="flat", bd=0,
+                  font=(FONT_FAMILY, 8), cursor="hand2").pack(side="right")
 
         # Thin glowing line standing in for the header's old filled bar --
         # the one place a Tron panel actually earns a solid glow, since it
@@ -1061,8 +1090,8 @@ class ChatPopup:
         self._send_arrow_id = self.send_btn.create_text(
             center, center, text="➤", fill=POPUP_MUTED, font=(FONT_FAMILY, 11)
         )
-        self.send_btn.tag_bind(self._send_circle_id, "<Button-1>", self._send)
-        self.send_btn.tag_bind(self._send_arrow_id, "<Button-1>", self._send)
+        self.send_btn.tag_bind(self._send_circle_id, "<Button-1>", self._send_clicked)
+        self.send_btn.tag_bind(self._send_arrow_id, "<Button-1>", self._send_clicked)
 
         self.typing_label = tk.Label(
             self.win, text="", bg=POPUP_BG, fg=POPUP_MUTED, font=(FONT_FAMILY, 8, "italic"),
@@ -1107,6 +1136,7 @@ class ChatPopup:
         self._turn_start = len(self.messages)
         self._turn_tail = []
         self._heard_clear_job = None
+        self._speech_epoch = speech_control.capture()
         self.refresh_status()
         self._render_history()
 
@@ -1115,6 +1145,42 @@ class ChatPopup:
         threading.Thread(target=self._init_brain, daemon=True).start()
 
     # -- startup --
+
+    def _follow_anchor(self):
+        try:
+            if not self.win.winfo_exists():
+                return
+            area = _work_area(self.win.winfo_screenwidth(), self.win.winfo_screenheight())
+            orb = None
+            if _floating_orb is not None:
+                ow = _floating_orb.win
+                orb = (ow.winfo_x(), ow.winfo_y(), _floating_orb.total_px)
+            w, h = self._window_size
+            x, y, _, _ = _place(w, h, 0, area, _px(10), orb=orb, gap=-_px(8))
+            geometry = f"{w}x{h}{x:+d}{y:+d}"
+            if geometry != self._anchor_geometry:
+                self.win.geometry(geometry)
+                self._anchor_geometry = geometry
+            self._anchor_job = self.win.after(75, self._follow_anchor)
+        except tk.TclError:
+            pass
+
+    def receive_reply(self, text):
+        """Voice replies join the same conversation when its flyout is open."""
+        if not self.busy and self.brain is not None:
+            history = conversation.replay()
+            latest = next((m.get("content", "") for m in reversed(history)
+                           if m.get("role") == "assistant"), "")
+            if latest == text:
+                self.messages = history
+                self.canvas.delete("all")
+                self._bubble_images.clear()
+                self._y = _px(6)
+                self._render_history()
+                return
+        # Timer/study alerts aren't conversation records. They still have
+        # to be visible when chat is open, without writing a fake exchange.
+        self._add_bubble("denisse", text)
 
     def _init_brain(self):
         try:
@@ -1126,9 +1192,15 @@ class ChatPopup:
         root.after(0, lambda: self._brain_ready(brain, err))
 
     def _brain_ready(self, brain, err):
+        try:
+            if not self.win.winfo_exists():
+                return
+        except tk.TclError:
+            return
         self.brain = brain
         self.canvas.delete("connecting")
-        self._y = self._connecting_y
+        bounds = self.canvas.bbox("all")
+        self._y = bounds[3] + _px(BUBBLE_GAP) if bounds else _px(6)
         if err:
             self._add_system(err)
         else:
@@ -1153,9 +1225,10 @@ class ChatPopup:
             self._send_circle_id, image=self._send_circle_on if enabled else self._send_circle_off
         )
         self.send_btn.itemconfig(
-            self._send_arrow_id, fill=BUBBLE_OUT_FG if enabled else POPUP_MUTED
+            self._send_arrow_id, fill=BUBBLE_OUT_FG if enabled else POPUP_MUTED,
+            text="➤" if enabled else "■"
         )
-        self.send_btn.config(cursor="hand2" if enabled else "arrow")
+        self.send_btn.config(cursor="hand2")
 
     # -- bubble drawing --
 
@@ -1190,7 +1263,9 @@ class ChatPopup:
     def _add_bubble(self, who: str, text: str):
         is_out = who == "you"
         pad_x, pad_y, gap, margin = _px(BUBBLE_PAD_X), _px(BUBBLE_PAD_Y), _px(BUBBLE_GAP), _px(6)
-        lines = self._wrap_text(text, _px(BUBBLE_MAX_TEXT_W))
+        lines = []
+        for paragraph in text.splitlines() or [""]:
+            lines.extend(self._wrap_text(paragraph, self._canvas_w() - _px(66)))
         line_h = self._font.metrics("linespace")
         ts = datetime.now().strftime("%H:%M")
         text_w = max(self._font.measure(l) for l in lines)
@@ -1261,8 +1336,18 @@ class ChatPopup:
 
     # -- sending --
 
+    def _send_clicked(self, event=None):
+        if self.busy:
+            _stop_speaking()  # stop square works even with a follow-up draft
+            return "break"
+        return self._send(event)
+
     def _send(self, event=None):
         text = self.entry.get().strip()
+        if speech_control.is_stop_request(text) or (self.busy and not text):
+            self.entry.delete(0, "end")
+            _stop_speaking()
+            return "break"
         if not text:
             return "break"
 
@@ -1312,12 +1397,15 @@ class ChatPopup:
 
         self.entry.delete(0, "end")
         self._add_bubble("you", text)
+        _stop_speaking()  # a new request cuts off earlier chat/voice playback
+        self._speech_epoch = speech_control.capture()
+        self.messages = conversation.replay()
         self._turn_start = len(self.messages)
         self._turn_tail = []
         self.messages.append({"role": "user", "content": text})
 
         self.busy = True
-        self.entry.config(state="disabled")
+        self.entry.config(state="normal")  # keep typed speech controls usable
         self._set_send_enabled(False)
         self.typing_label.config(text="Denisse is typing...")
         _set_thinking("chat", True)
@@ -1381,10 +1469,10 @@ class ChatPopup:
         # playback fired at the same instant, so only the unavoidable final
         # "play" command's own latency remains between them. A no-op if
         # INWORLD_API_KEY isn't set -- reveal just happens almost instantly.
-        threading.Thread(target=self._synthesize_then_reveal, args=(reply,), daemon=True).start()
+        threading.Thread(target=self._synthesize_then_reveal, args=(reply, self._speech_epoch), daemon=True).start()
 
-    def _synthesize_then_reveal(self, reply: str):
-        path = synthesize_inworld(reply)
+    def _synthesize_then_reveal(self, reply: str, speech_epoch):
+        path = None if speech_control.cancelled(speech_epoch) else synthesize_inworld(reply)
         audio = prepare_audio(path) if path else None
         play_now = threading.Event() if audio is not None else None
         root.after(0, lambda: self._reveal_reply(reply, audio, play_now))
@@ -1396,7 +1484,7 @@ class ChatPopup:
             # UI) until the bubble reveal fires, then plays and closes.
             play_now.wait()
             try:
-                audio.play()
+                audio.play(speech_epoch=speech_epoch)
             finally:
                 audio.close()
 
@@ -1405,12 +1493,13 @@ class ChatPopup:
             self.typing_label.config(text="")
             if play_now is not None:
                 play_now.set()  # let the waiting synth thread proceed to .play()
-            self._add_bubble("denisse", reply)
+            if reply:
+                self._add_bubble("denisse", reply)
             self._finish_turn()
         except tk.TclError:
             pass  # popup closed out from under this async callback -- fine
         finally:
-            _show_reply_main(reply)  # the "• • •" bubble becomes the reply
+            _show_reply_main(reply, source="chat" if _chat_popup is self else None)
             _set_thinking("chat", False)  # the reply has landed
             # Always release the synth thread even if the popup was gone
             # before we got to it above -- otherwise it hangs forever on
@@ -1473,6 +1562,11 @@ class ChatPopup:
 
     def close(self):
         global _chat_popup
+        if self._anchor_job is not None:
+            try:
+                self.win.after_cancel(self._anchor_job)
+            except tk.TclError:
+                pass
         if self._glow_anim_job is not None:
             try:
                 self.win.after_cancel(self._glow_anim_job)
@@ -1482,7 +1576,8 @@ class ChatPopup:
             self.win.destroy()
         except tk.TclError:
             pass
-        _chat_popup = None
+        if _chat_popup is self:
+            _chat_popup = None
 
     def focus(self):
         self.win.lift()
@@ -1500,10 +1595,17 @@ def _open_chat(icon=None, item=None):
         # dismiss it rather than leave it beside the orb (asked 2026-10-07).
         if _reminder_card is not None:
             _reminder_card.close()  # its on_close clears _reminder_card
+        pending = getattr(_reply_bubble, "full_message", None)
+        _close_thinking_bubble()
+        _close_reply_bubble()
         if _chat_popup is not None:
             _chat_popup.focus()
         else:
             _chat_popup = ChatPopup()
+            latest = next((m.get("content", "") for m in reversed(_chat_popup.messages)
+                           if m.get("role") == "assistant"), "")
+            if isinstance(pending, str) and pending and pending != latest:
+                _chat_popup._add_bubble("denisse", pending)
 
     root.after(0, _do)
 

@@ -11,6 +11,7 @@ import os
 import tempfile
 import time
 import wave
+import speech_control
 from ctypes import c_buffer
 
 # Inworld's neural TTS. Unlike the rest of Denisse, this is a paid cloud API
@@ -107,7 +108,7 @@ class PreparedAudio:
         except Exception:
             pass  # play() below still works even without a known duration
 
-    def play(self, block: bool = True, interrupt_event=None) -> None:
+    def play(self, block: bool = True, interrupt_event=None, speech_epoch=None) -> None:
         """`interrupt_event`, if given (a threading.Event), lets another
         thread cut this playback short -- checked in a short polling loop
         instead of a single sleep. The actual MCI "stop" always runs on
@@ -116,17 +117,21 @@ class PreparedAudio:
         the same thread-affinity requirement as open/play/close (calling
         it cross-thread raises "device is not open"), so a cross-thread
         stop has to work this way -- poll-and-self-stop, not call-in."""
+        if speech_epoch is None:
+            speech_epoch = speech_control.capture()
+        def cancelled():
+            return speech_control.cancelled(speech_epoch) or (
+                interrupt_event is not None and interrupt_event.is_set())
+        if cancelled():
+            return  # a stopped pending reply must never start playing
         _mci(f"play {self._alias} from 0 to {self._duration_ms}")
         if not block:
             return
         duration_s = self._duration_ms / 1000.0
-        if interrupt_event is None:
-            time.sleep(duration_s)
-            return
         step = 0.05
         elapsed = 0.0
         while elapsed < duration_s:
-            if interrupt_event.is_set():
+            if cancelled():
                 try:
                     _mci(f"stop {self._alias}")
                 except Exception:
@@ -155,6 +160,30 @@ def prepare_audio(path: str) -> "PreparedAudio | None":
     except Exception as e:
         _safe_print(f"(couldn't prepare audio: {e})")
         return None
+
+
+def speak_local(engine, text, speech_epoch=None):
+    """Keep local fallback speech stoppable on its own engine thread."""
+    if not text or engine is None:
+        return
+    if speech_epoch is None:
+        speech_epoch = speech_control.capture()
+    if speech_control.cancelled(speech_epoch):
+        return
+    started = False
+    try:
+        engine.say(text)
+        engine.startLoop(False)
+        started = True
+        while engine.isBusy():
+            if speech_control.cancelled(speech_epoch):
+                engine.stop()
+                break
+            engine.iterate()
+            time.sleep(.02)
+    finally:
+        if started:
+            engine.endLoop()
 
 
 def warm_up_audio() -> None:

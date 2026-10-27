@@ -218,7 +218,7 @@ def _user_texts(messages: list, n: int = 2) -> list:
 # that (greet_hey calling get_news with real history replayed).
 _FOLLOW_UP = re.compile(
     r"\b(it|this|that|those|them|one|again|another|more|too|also|and|then"
-    r"|instead|same|meant)\b",
+    r"|instead|same|meant)\b|^\s*why (?:can'?t|cannot|couldn'?t|not)\b",
     re.IGNORECASE,
 )
 

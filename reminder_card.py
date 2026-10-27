@@ -805,7 +805,10 @@ class ThinkingBubble(ReminderCard):
     (typed chat or "hey Denisse") and closes it when the reply lands. Same
     breathing, sweeping border as the card, so the two read as one thing."""
 
-    def __init__(self, root, orb, font_family="Segoe UI", on_close=None):
+    def __init__(self, root, orb, font_family="Segoe UI", on_close=None,
+                 on_reply=None, on_stop=None):
+        self.on_reply = on_reply
+        self.on_stop = on_stop
         super().__init__(root, orb, None, font_family=font_family, on_close=on_close, thinking=True)
 
     # -- the reply landing in the same bubble --
@@ -839,6 +842,7 @@ class ThinkingBubble(ReminderCard):
         except tk.TclError:
             return False
         self.thinking = self.typing = False
+        self.full_message = text
         text = " ".join((text or "").split())
         if len(text) > self.REPLY_MAX_CHARS:
             text = text[: self.REPLY_MAX_CHARS - 1].rstrip() + "…"
@@ -867,18 +871,24 @@ class ThinkingBubble(ReminderCard):
             return super().render()
         if self.body is not None:
             self.body.destroy()
-        self.body = tk.Frame(self.canvas, bg=FILL, cursor="hand2")
+        self.body = tk.Frame(self.canvas, bg=FILL)
         self._img_key = None
         inner_w = self._px(self.REPLY_W - PAD * 2)
         msg = tk.Label(
             self.body, text=self.message, bg=FILL, fg=TEXT, font=self._f(10),
-            anchor="w", wraplength=inner_w, justify="left", cursor="hand2",
+            anchor="w", wraplength=inner_w, justify="left",
         )
         msg.pack(fill="x")
-        stamp = tk.Label(self.body, text=f"{datetime.now():%H:%M}", bg=FILL, fg=FAINT, font=self._f(7), cursor="hand2")
-        stamp.pack(anchor="e")
-        for w in (self.body, msg, stamp):
-            w.bind("<Button-1>", lambda e: self.close())
+        actions = tk.Frame(self.body, bg=FILL)
+        actions.pack(fill="x", pady=(self._px(10), 0))
+        if self.on_reply is not None:
+            self._link(actions, "Continue chat →", self.on_reply,
+                       fg=ACCENT, hover=TEXT, size=9).pack(side="left")
+        if self.on_stop is not None:
+            self._link(actions, "Stop voice", self.on_stop,
+                       size=8).pack(side="left", padx=(self._px(12), 0))
+        self._link(actions, "Dismiss", self.close, fg=FAINT, hover=MUTED,
+                   size=8).pack(side="right")
         self._layout(self.REPLY_W, inner_w)
 
     def refresh(self):

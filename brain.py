@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 
 import learning
 import brain_rules
+import speech_control
 import tool_router
 import tools
 # obsidian_sync is intentionally not imported -- its read_claude_memory()
@@ -1161,6 +1162,12 @@ class Brain:
                          + _style_examples() + messages)
         latest_user = next((m.get("content", "") for m in reversed(messages)
                             if m.get("role") == "user"), "")
+        if speech_control.is_stop_request(latest_user):
+            speech_control.stop()
+            # Silence is the requested behaviour. Do not ask a model to
+            # manufacture a spoken 'I'll stop talking' acknowledgement.
+            messages.append({"role": "assistant", "content": ""})
+            return "", messages
         if latest_user.strip().lower() in ("/good", "/bad"):
             answer = ("Thanks — that tells me the last answer was helpful." if latest_user.strip().lower() == "/good"
                       else "Got it — the last answer was wrong. Tell me what should happen instead.")
@@ -1309,6 +1316,13 @@ class Brain:
                         # the same unsupported 'Done' escape a second time.
                         final_text = "I haven't confirmed that action, so I can't say it's done."
                 if fake_call is None:
+                    if file_request and not successful_tools & {"read_file", "open_application"}:
+                        said_paths = re.findall(r"(?:[A-Za-z]:[\\/]|\\\\)[^\r\n]+", final_text)
+                        if any(not _known_document_path(p.strip().rstrip('"\'.,;`'), messages, tool_outputs)
+                               for p in said_paths):
+                            lookup = tool_outputs.get("find_files", "")
+                            final_text = (lookup if lookup.startswith(("Found ", "No files matching")) else
+                                          "I don't have verified file-search results for that request yet.")
                     if file_request and _FILE_ABSENCE.search(final_text):
                         lookup = tool_outputs.get("find_files", "")
                         if lookup.startswith("Found "):

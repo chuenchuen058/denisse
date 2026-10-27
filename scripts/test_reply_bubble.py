@@ -39,6 +39,12 @@ class StubOrb:
     _frame_i = 0
     total_px = 64
 
+    def react(self, *args):
+        pass
+
+    def set_thinking(self, active):
+        pass
+
 
 def pump(ms):
     """Let Tk run its event loop for ms, the way the tray's mainloop would."""

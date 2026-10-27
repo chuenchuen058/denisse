@@ -145,8 +145,16 @@ _generation = 0
 _active_interrupt = None
 
 
+def interrupt():
+    """Quiet the current voice request and all in-process reply playback."""
+    _start_new_request()
+    _cancel_pending_confirm()
+
+
 def _start_new_request() -> int:
     global _generation, _active_interrupt
+    import speech_control
+    speech_control.stop()
     with _state_lock:
         _generation += 1
         gen = _generation
@@ -195,7 +203,6 @@ _MISHEARD_NAME_RE = re.compile(r"\bthe\s+nice\b", re.IGNORECASE)
 # interrupt machinery a fresh mention of her name already uses (see
 # _start_new_request), just without dispatching a new command afterward.
 # Checked before the wake-word match on every finalized utterance.
-_SHUSH_RE = re.compile(r"\bshush\b", re.IGNORECASE)
 
 
 def _strip_wake_word(transcript: str, pattern=_NAME_RE, false_positives=_NAME_FALSE_POSITIVES):
@@ -395,6 +402,11 @@ def _process_command(command: str, gen: int, brain: Brain, tts_engine, on_exchan
     """Runs in its own thread: compose + speak a reply, dropping out
     quietly at any point if a newer mention of her name has since
     superseded this request (see _start_new_request/_is_current)."""
+    import speech_control
+    if speech_control.is_stop_request(command):
+        interrupt()
+        return
+    speech_epoch = speech_control.capture()
     print(f"you> {command}", flush=True)
 
     # Ephemeral only -- see brain.py's extra_context param and the module
@@ -473,17 +485,14 @@ def _process_command(command: str, gen: int, brain: Brain, tts_engine, on_exchan
             interrupt_event = threading.Event()
             _register_playing(interrupt_event)
             try:
-                audio.play(interrupt_event=interrupt_event)
+                audio.play(interrupt_event=interrupt_event, speech_epoch=speech_epoch)
             finally:
                 audio.close()
                 _unregister_playing(interrupt_event)
     elif tts_engine is not None:
-        # Inworld unavailable -- local fallback. Short enough, and rare
-        # enough (opt-in voice normally works), that it isn't worth
-        # making interruptible too.
         try:
-            tts_engine.say(reply)
-            tts_engine.runAndWait()
+            from voice_output import speak_local
+            speak_local(tts_engine, reply, speech_epoch=speech_epoch)
         except Exception:
             pass
 
@@ -610,7 +619,8 @@ def run(stop_event=None, on_exchange=None, on_heard=None, is_offline=None, on_mo
                 except Exception:
                     pass
 
-            if _SHUSH_RE.search(heard):
+            import speech_control
+            if speech_control.is_stop_request(heard):
                 # Interrupt whatever's in flight (composing or speaking --
                 # _start_new_request bumps the generation so a stale
                 # _process_command drops its result, and sets the active
@@ -618,8 +628,7 @@ def run(stop_event=None, on_exchange=None, on_heard=None, is_offline=None, on_mo
                 # too) without dispatching any new command. Also cancels a
                 # pending "just said her name" follow-up wait, if one was
                 # active -- "shush" isn't a command for that flow either.
-                _start_new_request()
-                _cancel_pending_confirm()
+                interrupt()
                 awaiting_followup = False
                 pending_gen = None
                 followup_deadline = None

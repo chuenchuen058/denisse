@@ -231,6 +231,14 @@ public template is `brain_rules.example.json`.
 See [Adaptive brain](docs/adaptive_brain.md) for `/good` and `/bad`, the
 settings, current-project vault overview, off-switches and tests.
 
+### Pet chat
+
+Chat opens beside the purple orb and follows her when dragged. Voice and
+typed replies share that conversation; folded replies offer **Continue chat**.
+**Stop voice**, **shush** and **stop talking** silence current and pending
+tray speech without another spoken acknowledgement. See
+[Pet chat](docs/pet_chat.md) for controls, limits and verification.
+
 ## Roadmap
 
 - **Model-weight fine-tuning** is a separate future experiment, requiring
