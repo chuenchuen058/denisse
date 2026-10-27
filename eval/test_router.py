@@ -68,7 +68,10 @@ CASES = [
      {"search_vault"}, set()),
     ("vault_decision", [user("what did we decide about the reminder card?")],
      {"search_vault"}, set()),
-    ("vault_again", [user("what is convolution again?")], {"search_vault"}, set()),
+    # "again" inherits a real notes topic; it must not create one by itself.
+    ("vault_again", [user("read my signals lecture notes"), bot("..."),
+                     user("what is convolution again?")], {"search_vault"}, set()),
+    ("again_without_notes", [user("what is convolution again?")], set(), {"search_vault"}),
     ("greet_no_vault", [user("hey")], set(), {"search_vault"}),
 ]
 
