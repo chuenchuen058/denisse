@@ -18,6 +18,7 @@ import ollama
 from dotenv import load_dotenv
 
 import learning
+import brain_rules
 import tool_router
 import tools
 # obsidian_sync is intentionally not imported -- its read_claude_memory()
@@ -143,10 +144,7 @@ SYSTEM_PROMPT = (
     "the 'topic'). Only reach for a tool once the message actually reads "
     "like a coherent request for something. Every tool call costs real time "
     "the person is sitting there waiting "
-    "through, so skip it whenever a direct answer is possible. When you learn "
-    "something worth remembering about "
-    "the user (their name, preferences, ongoing projects), use the "
-    "'remember' tool to save it without being asked. You also have a "
+    "through, so skip it whenever a direct answer is possible. You also have a "
     "skills library -- specific how-to guides for particular kinds of "
     "tasks. Call 'list_skills' to see what's available, and 'read_skill' "
     "to load one BEFORE attempting a task it covers (e.g. organizing "
@@ -367,7 +365,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "get_brain_location",
-            "description": "Report the real filesystem/Obsidian-vault paths where your own code and memory live. Call this instead of guessing or typing out a path yourself if asked where your brain/code/memory is.",
+            "description": "Check your actual code/memory paths, editable brain rules and current learning status. Use when asked about your brain, rules or whether you are learning; never guess these settings.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -609,7 +607,8 @@ VAULT_SEARCH_DEFINITION = {
             "Search Chuen's own Obsidian notes and quote them. Use this for a question "
             "about HIS material and HIS history -- his modules, lectures, tutorials and "
             "deadlines, what was decided about Denisse and why, how his machine is set "
-            "up, his societies. 'When is the CM coursework due', 'who lectures "
+            "up. For a current-project overview use query 'current projects'. "
+            "For his societies, 'when is the CM coursework due', 'who lectures "
             "electromagnetism', 'what did we decide about the reminder card', 'what is "
             "convolution again' all belong here, because his notes have his answer "
             "rather than a general one. Do NOT use it for general knowledge, for "
@@ -754,7 +753,8 @@ _STYLE_EXAMPLES = [
 
 def _style_examples() -> list:
     # Read per call, so the eval can A/B it without a restart.
-    on = os.environ.get("DENISSE_STYLE_EXAMPLES", "1").lower() not in ("0", "false", "off", "no")
+    default = "1" if brain_rules.load().style_examples else "0"
+    on = os.environ.get("DENISSE_STYLE_EXAMPLES", default).lower() not in ("0", "false", "off", "no")
     return [dict(m) for m in _STYLE_EXAMPLES] if on else []
 
 
@@ -1161,6 +1161,11 @@ class Brain:
                          + _style_examples() + messages)
         latest_user = next((m.get("content", "") for m in reversed(messages)
                             if m.get("role") == "user"), "")
+        if latest_user.strip().lower() in ("/good", "/bad"):
+            answer = ("Thanks — that tells me the last answer was helpful." if latest_user.strip().lower() == "/good"
+                      else "Got it — the last answer was wrong. Tell me what should happen instead.")
+            messages.append({"role": "assistant", "content": answer})
+            return answer, messages
         if tool_router.feedback_only(latest_user) and re.search(r"\bdone\b", latest_user, re.I):
             # A complaint about 'Done' isn't permission for another action.
             # Don't turn it into an invented task, fact, path or promise.
@@ -1203,6 +1208,10 @@ class Brain:
                 result = ("Refused: no verified document path was supplied. Use find_files to locate "
                           "the requested file, then open_application with the full path it returns.")
             else:
+                if name == "search_vault":
+                    import instincts
+                    if instincts.wants_vault_overview(latest_user):
+                        args = {**args, "query": "current projects"}
                 result = str(_run_tool(name, args, confirm, used_once))
             turn_results.append(result)
             tool_outputs[name] = result
@@ -1328,6 +1337,10 @@ class Brain:
                                 and not _has_task_content(final_text, "- " + confirmed.partition(":")[2])):
                             final_text = confirmed
                     vault_result = tool_outputs.get("search_vault", "")
+                    if vault_result.startswith("From your notes (dated context"):
+                        # Preserve dates and recorded-status caveats as well
+                        # as topics; keyword overlap cannot verify a summary.
+                        final_text = vault_result
                     if (vault_result.startswith("From your notes")
                             and _VAULT_ACCESS_DENIAL.search(final_text)):
                         excerpt = vault_result.partition("\n\n")[2]
@@ -1340,6 +1353,10 @@ class Brain:
                             r"\d{1,2}\s+[A-Za-z]{3,9}\s+(20\d{2})\b", vault_result, re.I))
                         if len(years) == 1 and not years & set(re.findall(r"\b20\d{2}\b", final_text)):
                             final_text += " Your notes specify " + next(iter(years)) + "."
+                    if "get_brain_location" in successful_tools:
+                        # Current settings are inspectable facts, not a
+                        # persona for the model to invent or paraphrase away.
+                        final_text = tool_outputs["get_brain_location"]
                     messages.append({"role": "assistant", "content": final_text})
                     return final_text, messages
 

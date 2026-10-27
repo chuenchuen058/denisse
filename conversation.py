@@ -33,12 +33,15 @@ clobbered). Keeping those two separate is the whole point of the module.
 """
 
 import threading
+import logging
+import uuid
 
+import brain_rules
 import memory_store
 
 # How many past turns to replay. A turn is a user message plus everything
 # the brain produced before the next user message. Small on purpose: the
-# model is served with a 4096-token context, and the failure above was a
+# model is served with an 8192-token context, and the failure above was a
 # context-crowding failure, not a memory-capacity one.
 REPLAY_TURNS = 6
 
@@ -63,7 +66,7 @@ def get_brain():
 
 
 def _is_turn_start(msg: dict) -> bool:
-    return msg.get("role") == "user"
+    return msg.get("role") == "user" and (msg.get("content") or "").strip().lower() not in ("/good", "/bad")
 
 
 def _prose_only(messages: list) -> list:
@@ -78,7 +81,12 @@ def _prose_only(messages: list) -> list:
     Nothing is deleted from disk: this shapes the replay only.
     """
     out = []
+    feedback_turn = False
     for m in messages:
+        if m.get("role") == "user":
+            feedback_turn = (m.get("content") or "").strip().lower() in ("/good", "/bad")
+        if feedback_turn:
+            continue  # learner sees these on disk; the model needn't imitate them
         if m.get("role") == "tool":
             continue
         if m.get("role") == "assistant" and m.get("tool_calls"):
@@ -89,10 +97,12 @@ def _prose_only(messages: list) -> list:
     return out
 
 
-def replay(turns: int = REPLAY_TURNS) -> list:
+def replay(turns: int | None = None) -> list:
     """The context to hand the brain for a new turn: the last `turns`
     exchanges, prose only. Always a fresh list -- callers append their new
     user message to it and hand it straight to Brain.respond()."""
+    if turns is None:
+        turns = brain_rules.load().recent_turns
     with _lock:
         history = memory_store.load_history()
 
@@ -152,8 +162,19 @@ def record(new_messages: list, source: str = "typed") -> bool:
 
     with _lock:
         history = memory_store.load_history()
-        history.extend(new_messages)
+        # IDs are storage metadata only; _prose_only never sends them to
+        # the model. They distinguish independent lessons from rereads.
+        stored = [dict(m) for m in new_messages]
+        for m in stored:
+            if m.get("role") == "user":
+                m.setdefault("turn_id", uuid.uuid4().hex)
+        history.extend(stored)
         memory_store.save_history(history)
+    try:
+        import instincts
+        instincts.rebuild(history)
+    except Exception as exc:
+        logging.warning("Learning observation deferred: %s", exc)
     return True
 
 

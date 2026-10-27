@@ -220,14 +220,23 @@ actually execute and persist to disk, the confirm/decline path was
 checked live, and the dashboard's API and tray icon were both checked
 live against a running Ollama instance.
 
+## Adaptive brain and editable preferences
+
+Denisse can learn phrase-specific tool-routing lessons from corrections you
+positively confirm. Candidate lessons need two independent accepted fixes;
+negative feedback can demote them. This updates routing, not model weights
+or source code. Private settings live in `memory/brain_rules.json`; the
+public template is `brain_rules.example.json`.
+
+See [Adaptive brain](docs/adaptive_brain.md) for `/good` and `/bad`, the
+settings, current-project vault overview, off-switches and tests.
+
 ## Roadmap
 
-- **Real fine-tuning**: once `memory/conversation.json` and
-  `memory/facts.json` have real history in them, that becomes training data
-  for actually fine-tuning a local model on your own conversations/style
-  (e.g. via Ollama's `Modelfile` + LoRA, or tools like Unsloth/Axolotl).
-  This is a bigger, separate project — worth doing once there's enough
-  real data to train on, not from day one.
+- **Model-weight fine-tuning** is a separate future experiment, requiring
+  curated examples and held-out evaluation. Raw history and facts are not
+  automatically training data. The adaptive brain currently learns routing
+  from confirmed corrections without changing model weights.
 - Wake word ("hey Denisse") instead of push-to-talk
 - Fully offline speech-to-text (swap Google's API for local
   faster-whisper) so voice mode needs zero internet

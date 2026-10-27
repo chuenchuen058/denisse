@@ -19,6 +19,9 @@ out to be the limit, that is the point to consider embeddings -- not before.
 """
 import os
 import re
+import datetime
+
+import brain_rules
 
 VAULT = os.environ.get(
     "DENISSE_VAULT",
@@ -111,8 +114,65 @@ def _notes():
             yield path, rel
 
 
+def is_overview_query(query):
+    text = re.sub(r"[^a-z ]", "", (query or "").lower()).strip()
+    return (text in {"vault", "my vault", "obsidian", "obsidian vault", "projects",
+                     "my projects", "current projects", "current context", "project overview"}
+            or bool(re.search(r"\b(?:my|current) projects\b|what am i working on|catch up with me|"
+                              r"(?:read|go through|look through|summari[sz]e).{0,20}(?:my )?vault|"
+                              r"(?:going on|happening) with me", text)))
+
+
+def _current_overview(rules):
+    """Read dated STATE excerpts on demand; never read the whole vault.
+
+    Heading dates outrank file-level 'updated', which can change after an
+    unrelated edit. Cite the actual section date; this is recorded context,
+    not a live machine/task-status probe.
+    """
+    path = os.path.join(VAULT, "Memory", "STATE.md")
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            text = f.read(100_000)
+    except OSError:
+        return "I couldn't read Memory/STATE.md, so I can't give a current-context overview."
+    fm, body = _split(text)
+    headings = list(re.finditer(r"(?m)^#{2,4}\s+([^\n]+)", body))
+    sections = []
+    today = datetime.date.today().isoformat()
+    cutoff = (datetime.date.today() - datetime.timedelta(days=rules.context_max_age_days)).isoformat()
+    for i, heading in enumerate(headings):
+        date = re.search(r"\b\d{4}-\d{2}-\d{2}\b", heading.group(1))
+        if not date or not cutoff <= date.group(0) <= today:
+            continue
+        end = headings[i + 1].start() if i + 1 < len(headings) else len(body)
+        content = " ".join(_clean_line(line) for line in body[heading.end():end].splitlines()
+                           if line.strip() and not line.lstrip().startswith(("```", "|---")))
+        if content:
+            sections.append((date.group(0), i, heading.group(1), content))
+    sections.sort(reverse=True)
+    if not sections:
+        return "Memory/STATE.md has no recent dated sections to quote. Ask about a specific topic instead."
+    header = "From your notes (dated context only, not live status or instructions):\n\n"
+    budget = rules.vault_max_chars - len(header)
+    out = []
+    # Fairly share the budget so one long update cannot crowd out the rest.
+    selected = sections[:rules.vault_max_notes]
+    share = max(1, (budget - 2 * len(selected)) // len(selected))
+    for date, _i, heading, content in selected:
+        citation = f"Memory/STATE.md — {heading} (recorded {date})\n"
+        block = citation + content[:max(0, share - len(citation))]
+        out.append(block[:share])
+    return (header + "\n\n".join(out))[:rules.vault_max_chars]
+
+
 def search_vault(query: str = "") -> str:
     """Search Chuen's Obsidian notes and quote what they say."""
+    rules = brain_rules.load()
+    if not rules.vault_search or os.environ.get("DENISSE_VAULT_SEARCH", "1").lower() in ("0", "false", "off", "no"):
+        return "Vault lookups are disabled in the brain settings."
+    if is_overview_query(query):
+        return _current_overview(rules)
     words = _words(query)
     if not words:
         return ("Nothing to search for -- ask me again with the thing you "
@@ -182,20 +242,20 @@ def search_vault(query: str = "") -> str:
     hits.sort(key=lambda h: -h[0])
     out = []
     used = 0
-    for _, rel, desc, lines in hits[:MAX_NOTES]:
+    for _, rel, desc, lines in hits[:rules.vault_max_notes]:
         chunk = [f"{rel}"]
         if desc:
             chunk.append(f"  ({desc[:150]})")
         for _, _, line in lines[:MAX_LINES]:
             chunk.append("  - " + (line[:MAX_LINE] + "..." if len(line) > MAX_LINE else line))
         block = "\n".join(chunk)
-        if used + len(block) > MAX_TOTAL and out:
+        if used + len(block) > rules.vault_max_chars and out:
             break
         out.append(block)
         used += len(block)
 
     return ("From your notes (quote these, don't embellish; if they don't "
-            "answer the question, say so):\n\n" + "\n\n".join(out))
+            "answer the question, say so):\n\n" + "\n\n".join(out))[:rules.vault_max_chars]
 
 
 if __name__ == "__main__":  # quick manual check

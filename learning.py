@@ -82,7 +82,7 @@ _ADMITS_FAILURE = re.compile(
 # The next user message telling her the last reply was wrong. Anchored at
 # the start: "no" inside a sentence ("no rush") is not a correction.
 _CORRECTION = re.compile(
-    r"^\s*(no\b(?!\s+(?:worries|problem|rush|thanks))|nope\b|wrong\b|not that\b|that'?s (?:not|wrong)\b|i meant\b|"
+    r"^\s*(/bad\b|no\b(?!\s+(?:worries|problem|rush|thanks))|nope\b|wrong\b|not that\b|that'?s (?:not|wrong)\b|i meant\b|"
     r"i said\b|not what i\b|you didn'?t\b|that didn'?t\b|it didn'?t\b)",
     re.IGNORECASE,
 )
@@ -104,8 +104,8 @@ CLAIMS_DONE = re.compile(
 )
 
 _THANKS = re.compile(
-    r"^\s*(thanks|thank you|thx|cheers|perfect|great|nice|awesome|good job|"
-    r"that works|that'?s right)\b",
+    r"^\s*(/good|thanks|thank you|thx|cheers|perfect|great|nice|awesome|good job|"
+    r"that work(?:s|ed)|that'?s right)\b",
     re.IGNORECASE,
 )
 
@@ -121,7 +121,8 @@ def split_turns(history: list) -> list:
     for m in history:
         role = m.get("role")
         if role == "user":
-            turns.append({"user": m.get("content") or "", "tools": [], "results": [], "reply": ""})
+            turns.append({"user": m.get("content") or "", "tools": [], "results": [], "reply": "",
+                          "id": m.get("turn_id")})
         elif not turns:
             continue
         elif role == "assistant":

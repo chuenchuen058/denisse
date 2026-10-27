@@ -1,0 +1,11 @@
+{
+  "recent_turns": 6,
+  "style_examples": true,
+  "save_facts": "explicit",
+  "vault_search": true,
+  "vault_max_notes": 3,
+  "vault_max_chars": 1200,
+  "context_max_age_days": 14,
+  "self_learning": true,
+  "learning_confirmations": 2
+}

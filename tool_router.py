@@ -34,6 +34,7 @@ control arm for re-running the A/B in eval/run_eval.py.
 import os
 import re
 
+import brain_rules
 import instincts
 
 CORE = {
@@ -148,7 +149,8 @@ GROUPS = {
         r"note|obsidian|vault|module|lecture|tutorial|seminar|coursework"
         r"|\bcw\b|assignment|exam|deadline|due|week \d|semester|term\b"
         r"|decid|decision|why did we|set ?up|society|societies|msoc|robotics"
-        r"|keats|remind me what|explain",
+        r"|keats|remind me what|explain|my projects|current projects|current context"
+        r"|what am i working on|catch up with me|(?:going on|happening) with me",
     ),
     # Added with timers.py, 2026-10-20. "start timer" used to match only
     # "files" (on "start"), so the closest thing on offer was
@@ -166,7 +168,8 @@ GROUPS = {
     "self": (
         {"get_voice_settings", "get_brain_location"},
         r"voice|sound like|speak|accent|your brain|your code|your memory"
-        r"|your files|where (do you|are you)|stored|source code",
+        r"|your files|where (do you|are you)|stored|source code|your rules|brain rules|rules (?:do you|you) follow"
+        r"|are you learning|learning status",
     ),
     # Only live when DENISSE_SKILLS_CORE=0; with the default these tools
     # are in CORE as well and this group is redundant. It is kept so the
@@ -229,12 +232,7 @@ _FEEDBACK_ONLY = re.compile(
     re.IGNORECASE,
 )
 
-MUTATING_TOOLS = {
-    "remember", "add_task", "complete_task", "remove_task", "write_file",
-    "run_shell_command", "open_application", "set_timer", "cancel_timer",
-    "play_song", "pause_music", "resume_music", "skip_song", "previous_song",
-    "clean_temp_files", "disable_startup_program", "restore_startup_program",
-}
+MUTATING_TOOLS = brain_rules.MUTATING_TOOLS
 
 
 def feedback_only(text: str) -> bool:
@@ -251,7 +249,7 @@ def request_context(messages: list) -> tuple[str, list]:
     Stop at a fresh topic even when it has no tools (e.g. a greeting).
     Generic retry words must not create a new notes/tasks/system topic.
     """
-    for text in _user_texts(messages, 6):
+    for text in _user_texts(messages, brain_rules.load().recent_turns):
         complaint = feedback_only(text)
         found = [] if complaint else _groups_in(text)
         continuation = complaint or bool(_FOLLOW_UP.search(text))
@@ -275,15 +273,14 @@ def matched_groups(messages: list) -> list:
 def select(tool_definitions: list, messages: list) -> list:
     """Return the subset of `tool_definitions` to offer for this turn.
 
-    Order is preserved, so the model sees tools in the same order as
-    before -- only fewer of them.
+    Confirmed lessons may prioritise their tools; other order is preserved.
     """
+    rules = brain_rules.load()
     allowed = set(CORE)
     for name in matched_groups(messages):
         allowed |= GROUPS[name][0]
-    # What she learned from being corrected (instincts.py): adds the tool
-    # that worked last time, and -- once seen enough -- drops the one that
-    # didn't. Only ever changes this list, never the prompt.
+    # Confirmed corrections can add read-only tools and prioritise them.
+    # No learned text enters the prompt, and no existing tool is removed.
     texts = _user_texts(messages, 1)
     if texts:
         allowed = instincts.adjust(allowed, texts[0], protected=CORE)
@@ -292,6 +289,11 @@ def select(tool_definitions: list, messages: list) -> list:
         return defn.get("function", {}).get("name")
 
     complaint = bool(texts and feedback_only(texts[0]))
-    return [d for d in tool_definitions
+    may_save = rules.save_facts == "conversation" or bool(texts and brain_rules.explicit_memory_request(texts[0]))
+    selected = [d for d in tool_definitions
             if (not complaint or name_of(d) not in MUTATING_TOOLS)
+            and (name_of(d) != "remember" or may_save)
+            and (name_of(d) != "search_vault" or rules.vault_search)
             and (not enabled() or name_of(d) in allowed or name_of(d) not in _ROUTED)]
+    preferred = instincts.preferred(texts[0], {name_of(d) for d in selected}) if texts else set()
+    return sorted(selected, key=lambda d: name_of(d) not in preferred)

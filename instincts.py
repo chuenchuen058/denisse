@@ -1,49 +1,34 @@
-"""
-Denisse -- instincts: what she learned from being corrected, used to pick
-her tools.
+"""Feedback-validated, non-parametric learning for Denisse's tool router.
 
-The retrieval half of self-learning (vault: Denisse/Project Log/
-Self-Learning.md). It stayed unbuilt because "a failure is not a lesson":
-knowing that "study time" went wrong doesn't say what was right. A
-correction that WORKED does. When Chuen corrects a turn and the next try
-succeeds, the pair says both halves:
+After each saved turn (and nightly), a failed request followed by an
+explicit correction, non-failing tools and positive human feedback creates
+a candidate lesson. Two distinct accepted fixes are required for activation.
+Evidence IDs survive history truncation; rereading never inflates counts.
+Observed negatives can demote lessons below an 80% positive-feedback ratio.
 
-    "play lofi"   -> open_application, failed        <- bad
-    "no, on spotify" -> play_song, succeeded         <- what worked
-    => instinct: when he says "play", use play_song, not open_application
+Lessons match the original phrase (ignoring polite fillers), prioritise
+available tools and may add read-only tools. They never grant new mutation
+permissions, remove existing tools, rewrite source/prompts or train weights.
+Manual enabled:false is preserved. Legacy unvalidated lessons stay inactive.
+Private data lives in Denisse/Brain/instincts.json + .md in the vault.
+Set self_learning:false in memory/brain_rules.json, or DENISSE_INSTINCTS=0,
+to freeze learning and disable its routing effects.
 
-How an instinct changes what she does -- and the constraint that picks it:
-NOTHING here enters her prompt (decisions.md, 2026-10-19: everything in the
-prompt competes for an 8B model's attention, and lessons in it made her
-measurably worse). An instinct only changes which tools tool_router offers
-for a matching message:
-
-  use    added to that turn's tools. Always safe -- the router already errs
-         towards over-including -- so it applies from the first sighting.
-  avoid  removed from that turn's tools. Withholding a tool can break a
-         request that needed it, so it waits for MIN_AVOID sightings, and
-         never removes a CORE tool.
-
-Where they live: Denisse/Brain/instincts.json in the vault, beside
-facts.json, with instincts.md as the readable copy. Not in this repo -- the
-evidence quotes his real messages and the repo is public. In the vault, git
-makes a bad instinct one revert away, and he (or any session) can switch one
-off by setting "enabled": false, which a nightly rebuild keeps.
-
-Rebuilt nightly from the whole stored history (scripts/nightly.py, stage 4),
-so counts are recounted rather than accumulated: running it twice changes
-nothing. DENISSE_INSTINCTS=0 turns the router hook off -- the control arm.
-
-Run:
-    python instincts.py          # rebuild from memory/conversation.json
-    python instincts.py --dry    # show what it would learn, write nothing
+    python instincts.py --dry    # inspect without writing
+    python instincts.py          # observe saved history
 """
 
 import datetime
+import hashlib
 import json
 import os
 import re
+import tempfile
+import threading
+import time
+from contextlib import contextmanager
 
+import brain_rules
 import learning
 
 VAULT = os.environ.get("DENISSE_VAULT", r"C:\Users\Xichu\OneDrive - King's College London\Denisse")
@@ -51,7 +36,6 @@ BRAIN_DIR = os.path.join(VAULT, "Denisse", "Brain")
 INSTINCTS_FILE = os.path.join(BRAIN_DIR, "instincts.json")
 INSTINCTS_MD = os.path.join(BRAIN_DIR, "instincts.md")
 
-MIN_AVOID = 2  # sightings before an instinct may withhold a tool
 LOOKAHEAD = 2  # how many turns after a failure the fix may come
 
 _STOP = set("""
@@ -70,11 +54,18 @@ def keywords(text: str) -> set:
 
 
 def _worked(turn: dict) -> bool:
-    """Tools ran and none of them failed or came back empty."""
-    if turn["label"] == "bad" or not turn["tools"] or not turn["results"]:
+    """Positive human feedback AND non-failing tool evidence, not silence."""
+    if turn["label"] != "good" or not turn["tools"] or not turn["results"]:
         return False
     return not any(learning.tool_failed(r) or (r or "").strip() in ("", "(no output)")
+                   or (r or "").startswith(("Refused", "User declined", "No timer started"))
+                   or "nothing was stopped" in (r or "").lower()
                    for r in turn["results"])
+
+
+def phrase(text):
+    return " ".join(w for w in _WORD.findall((text or "").lower())
+                    if w not in {"please", "denisse", "hey"})
 
 
 def derive(labelled: list) -> list:
@@ -83,29 +74,45 @@ def derive(labelled: list) -> list:
     for i, bad in enumerate(labelled):
         if bad["label"] != "bad":
             continue
-        for fix in labelled[i + 1:i + 1 + LOOKAHEAD]:
+        for j, fix in enumerate(labelled[i + 1:i + 1 + LOOKAHEAD], start=i + 1):
+            if fix["user"].strip().lower() == "/bad":
+                continue  # explicit feedback can precede the corrected command
             if fix["label"] == "bad":
                 continue  # corrected again -- keep looking, this wasn't it
             if not _worked(fix):
                 break  # he moved on; nothing here says what was right
+            linked_feedback = (j > i + 1 and labelled[j - 1]["user"].strip().lower() == "/bad"
+                               and bool(keywords(bad["user"]) & keywords(fix["user"])))
+            if not learning._CORRECTION.search(fix["user"]) and not linked_feedback:
+                break  # a successful new subject is not a validated correction
             use = sorted(set(fix["tools"]) - set(bad["tools"]))
             if not use:
                 break
-            # The trigger is what the failed message and its fix share --
-            # "play lofi" / "no, play lofi on spotify" -> {"play", "lofi"}.
-            # Sharing nothing means the next success was a new subject, not
-            # a fix: the first dry run (2026-10-20) learned "turn it off ->
-            # get_news" from exactly that, because he asked for the news next.
-            keys = keywords(bad["user"]) & keywords(fix["user"])
-            if not keys or len(keys) > 4:
+            # An explicit correction plus positive human feedback links the
+            # turns. Match the original phrase rather than generalising from
+            # a shared word such as "timer" to every timer operation.
+            keys = keywords(bad["user"])
+            if not keys:
                 break  # unrelated, or too specific to recur
             avoid = sorted(set(bad["tools"]) - set(fix["tools"]))
-            k = (tuple(sorted(keys)), tuple(use))
+            trigger = phrase(bad["user"])
+            import vault_search
+            overview = "search_vault" in use and vault_search.is_overview_query(fix["user"])
+            k = (trigger, tuple(use), overview)
             entry = found.setdefault(k, {
-                "when": sorted(keys), "use": use, "avoid": avoid, "count": 0,
+                "when": sorted(keys)[:4], "phrase": trigger, "use": use, "avoid": avoid,
+                "vault_overview": overview,
+                "count": 0, "validated": True, "evidence_ids": [],
                 "evidence": {"failed": bad["user"][:120], "fixed_by": fix["user"][:120]},
             })
-            entry["count"] += 1
+            # Several failed attempts before ONE accepted fix still count
+            # as one confirmation, not several independent experiments.
+            identity = (["accepted_fix", fix["id"]] if fix.get("id") else
+                        [bad["user"], fix["user"], fix["tools"], fix["results"]])
+            evidence_id = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+            if evidence_id not in entry["evidence_ids"]:
+                entry["evidence_ids"].append(evidence_id)
+            entry["count"] = len(entry["evidence_ids"])
             break
     return sorted(found.values(), key=lambda e: -e["count"])
 
@@ -114,27 +121,60 @@ def load(path: str | None = None) -> list:
     try:
         with open(path or INSTINCTS_FILE, encoding="utf-8") as f:
             data = json.load(f)
-        return data.get("instincts", []) if isinstance(data, dict) else []
+        items = data.get("instincts", []) if isinstance(data, dict) else []
+        if not isinstance(items, list):
+            return []
+        clean = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if not all(isinstance(item.get(k, []), list) and
+                       all(isinstance(v, str) for v in item.get(k, []))
+                       for k in ("when", "use", "avoid", "evidence_ids", "negative_ids")):
+                continue
+            if type(item.get("enabled", True)) is not bool:
+                continue
+            if not isinstance(item.get("phrase", ""), str):
+                continue
+            if type(item.get("count", 0)) is not int or item.get("count", 0) < 0:
+                continue
+            e = dict(item)
+            for key in ("when", "use", "avoid"):
+                e.setdefault(key, [])
+            e.setdefault("count", len(set(e.get("evidence_ids", []))))
+            clean.append(e)
+        return clean
     except (OSError, ValueError):
         return []
 
 
 def _key(e):
-    return (tuple(e["when"]), tuple(e["use"]))
+    return (e.get("phrase") or tuple(e.get("when", [])), tuple(e.get("use", [])),
+            e.get("vault_overview") is True)
 
 
 def merge(old: list, new: list) -> list:
-    """New counts win; his "enabled": false survives; an instinct whose
-    evidence has since scrolled out of the history is kept as it was."""
+    """Union stable evidence IDs. Re-observation never fabricates new trials."""
     old_by = {_key(e): e for e in old}
     out = []
     for e in new:
         prev = old_by.pop(_key(e), None)
+        if prev is None:
+            legacy_key = next((k for k, old_item in old_by.items()
+                               if not old_item.get("phrase") and old_item.get("when")
+                               and set(old_item["when"]) <= set(e["when"])
+                               and old_item.get("use") == e.get("use")), None)
+            if legacy_key is not None:
+                prev = old_by.pop(legacy_key)
         e = dict(e)
         e["enabled"] = prev.get("enabled", True) if prev else True
+        if prev and e.get("validated"):
+            e["evidence_ids"] = sorted(set(prev.get("evidence_ids", [])) | set(e["evidence_ids"]))[-128:]
+            e["count"] = len(e["evidence_ids"])
+            e["negative_ids"] = prev.get("negative_ids", [])
         e["first_seen"] = (prev or {}).get("first_seen") or datetime.date.today().isoformat()
         out.append(e)
-    out.extend(old_by.values())
+    out.extend(dict(e) for e in old_by.values())
     return out
 
 
@@ -142,7 +182,7 @@ def _md(instincts: list) -> str:
     lines = [
         "---",
         "name: instincts",
-        'description: "What Denisse learned from being corrected - which tool to reach for. Generated nightly by instincts.py; edit instincts.json, not this."',
+        'description: "What Denisse learned from being corrected - which tool to reach for. Generated after saved turns and nightly; edit instincts.json, not this."',
         "tags: [denisse, learning]",
         f"updated: {datetime.date.today().isoformat()}",
         "---",
@@ -150,7 +190,8 @@ def _md(instincts: list) -> str:
         "",
         "Learned from turns Chuen corrected where the retry worked. They only change",
         "**which tools she's offered** for a matching message -- nothing here enters her",
-        f"prompt. `avoid` applies only after {MIN_AVOID} sightings. To switch one off, set",
+        f"prompt. Lessons activate after {brain_rules.load().learning_confirmations} positively confirmed episodes.",
+        "They prioritise tools; they never grant new machine-changing permissions or remove existing tools. To switch one off, set",
         '`"enabled": false` in `instincts.json` (a rebuild keeps it). See [[Self-Learning]].',
         "",
     ]
@@ -159,27 +200,97 @@ def _md(instincts: list) -> str:
     else:
         lines += ["| when he says | use | avoid | seen | on |", "|---|---|---|---|---|"]
         for e in instincts:
-            avoid = ", ".join(e["avoid"]) or "-"
-            if e["avoid"] and e["count"] < MIN_AVOID:
-                avoid += " (not yet)"
-            lines.append(f"| {' + '.join(e['when'])} | {', '.join(e['use'])} | {avoid} "
-                         f"| {e['count']} | {'yes' if e.get('enabled', True) else 'off'} |")
+            state = ('off' if not e.get('enabled', True) else 'active' if _validated(e) else 'candidate')
+            lines.append(f"| {e.get('phrase') or ' + '.join(e['when'])} | {', '.join(e['use'])} | recorded only "
+                         f"| {e['count']} | {state} |")
     return "\n".join(lines) + "\n"
 
 
+_write_lock = threading.RLock()
+
+
+@contextmanager
+def _store_lock():
+    """Coordinate the tray and nightly rebuild; never write partial JSON."""
+    os.makedirs(os.path.dirname(INSTINCTS_FILE), exist_ok=True)
+    with _write_lock, open(INSTINCTS_FILE + ".lock", "a+b") as lock:
+        if os.path.getsize(lock.name) == 0:
+            lock.write(b"0"); lock.flush()
+        acquired = False
+        for _ in range(20):
+            try:
+                lock.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+                break
+            except OSError:
+                time.sleep(.025)
+        if not acquired:
+            raise TimeoutError("learning store is busy")
+        try:
+            yield
+        finally:
+            lock.seek(0)
+            if os.name == "nt":
+                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+def _atomic_write(path, content):
+    temp = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=os.path.dirname(path), delete=False) as f:
+            temp = f.name
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp, path)
+        temp = None
+    finally:
+        if temp is not None:
+            os.unlink(temp)
+
+
 def rebuild(history: list | None = None, dry: bool = False) -> list:
+    if not enabled():
+        return load()
     if history is None:
         import memory_store
         history = memory_store.load_history()
-    instincts = merge(load(), derive(learning.label_turns(history)))
-    if not dry:
-        os.makedirs(BRAIN_DIR, exist_ok=True)
-        with open(INSTINCTS_FILE, "w", encoding="utf-8") as f:
-            json.dump({"updated": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
-                       "instincts": instincts}, f, indent=2, ensure_ascii=False)
-        with open(INSTINCTS_MD, "w", encoding="utf-8") as f:
-            f.write(_md(instincts))
-    return instincts
+    labelled = learning.label_turns(history)
+    derived = derive(labelled)
+    if dry:
+        return merge(load(), derived)
+    with _store_lock():
+        old = load()
+        items = merge(old, derived)
+        for item in items:
+            negative_ids = set(item.get("negative_ids", []))
+            for turn in labelled:
+                if (turn["label"] == "bad" and item.get("phrase") == phrase(turn["user"])
+                        and set(item.get("use", [])) & set(turn["tools"])):
+                    identity = turn.get("id") or [turn["user"], turn["tools"], turn["results"]]
+                    negative_ids.add(hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest())
+            if negative_ids:
+                item["negative_ids"] = sorted(negative_ids)[-128:]
+        if items != old or not os.path.exists(INSTINCTS_FILE):
+            _atomic_write(INSTINCTS_FILE, json.dumps({"updated": datetime.datetime.now().isoformat(timespec="seconds"),
+                                                      "instincts": items}, indent=2, ensure_ascii=False))
+        rendered = _md(items)
+        try:
+            with open(INSTINCTS_MD, encoding="utf-8") as f:
+                previous_md = f.read()
+        except OSError:
+            previous_md = None
+        if rendered != previous_md:
+            _atomic_write(INSTINCTS_MD, rendered)
+    return items
 
 
 # -- runtime: tool_router asks this ----------------------------------------
@@ -188,13 +299,21 @@ _cache = {"mtime": None, "items": []}
 
 
 def enabled() -> bool:
-    return os.environ.get("DENISSE_INSTINCTS", "1").lower() not in ("0", "false", "off", "no")
+    return brain_rules.load().self_learning and os.environ.get("DENISSE_INSTINCTS", "1").lower() not in ("0", "false", "off", "no")
+
+
+def _validated(e):
+    positives = len(set(e.get("evidence_ids", [])))
+    negatives = len(set(e.get("negative_ids", [])))
+    return (e.get("validated") is True and e.get("enabled", True)
+            and positives >= brain_rules.load().learning_confirmations
+            and positives >= 4 * negatives)  # at least 80% observed positive feedback
 
 
 def _active() -> list:
-    """The file, re-read only when it changes (the nightly rebuild)."""
+    """The private store, re-read when an observation or manual edit changes it."""
     try:
-        mtime = os.path.getmtime(INSTINCTS_FILE)
+        mtime = (INSTINCTS_FILE, os.stat(INSTINCTS_FILE).st_mtime_ns)
     except OSError:
         return []
     if mtime != _cache["mtime"]:
@@ -203,18 +322,44 @@ def _active() -> list:
 
 
 def adjust(allowed: set, text: str, protected: set = frozenset()) -> set:
-    """Apply every instinct whose words all appear in `text`."""
+    """Confirmed exact phrases may add read tools, never new action powers."""
     if not enabled():
         return allowed
-    words = keywords(text)
     out = set(allowed)
     for e in _active():
-        if not e.get("when") or not set(e["when"]) <= words:
+        if not _validated(e) or not e.get("phrase") or e["phrase"] != phrase(text):
             continue
-        out |= set(e.get("use", []))
-        if e.get("count", 0) >= MIN_AVOID:
-            out -= set(e.get("avoid", [])) - set(protected) - set(e.get("use", []))
+        out |= set(e.get("use", [])) - brain_rules.MUTATING_TOOLS
     return out
+
+
+def preferred(text, allowed):
+    if not enabled():
+        return set()
+    return {name for e in _active() if _validated(e) and e.get("phrase") == phrase(text)
+            for name in e.get("use", []) if name in allowed}
+
+
+def wants_vault_overview(text):
+    """A confirmed correction can select the existing read-only overview.
+
+    This stores a supported intent, never arbitrary tool arguments or code.
+    Conflicting confirmed meanings leave the model's query unchanged.
+    """
+    if not enabled():
+        return False
+    matches = [e for e in _active() if _validated(e) and e.get("phrase") == phrase(text)
+               and "search_vault" in e.get("use", [])]
+    return bool(matches) and all(e.get("vault_overview") is True for e in matches)
+
+
+def status():
+    items = load()
+    return {"enabled": enabled(), "confirmed_lessons": sum(bool(_validated(e)) for e in items),
+            "candidates": sum(bool(e.get("enabled", True) and not _validated(e)) for e in items),
+            "disabled_lessons": sum(not e.get("enabled", True) for e in items),
+            "confirmations_required": brain_rules.load().learning_confirmations,
+            "store": INSTINCTS_FILE}
 
 
 def main():

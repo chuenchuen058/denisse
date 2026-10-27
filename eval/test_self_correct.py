@@ -147,7 +147,7 @@ reply, msgs, fake = run_turn([
 ], "5 minutes")
 timers.cancel_timer()
 check("brain: right claim, wrong tool, sent back",
-      any("none of them does that" in m.get("content", "") for m in fake.sent[2]["messages"])
+      any(any(phrase in m.get("content", "") for phrase in ("none of them does that", "no tool this turn confirmed")) for m in fake.sent[2]["messages"])
       and len(fake.sent) == 4, reply)
 check("router: bare '5 minutes' gets set_timer", "set_timer" in offered("5 minutes"))
 check("timer: 'timer' label dropped", timers.set_timer(minutes=1, label="timer").startswith("Timer started"))
@@ -163,28 +163,30 @@ instincts.INSTINCTS_FILE = str(tmp / "instincts.json")
 instincts.INSTINCTS_MD = str(tmp / "instincts.md")
 instincts.BRAIN_DIR = str(tmp)
 
-lofi = [
-    user("play lofi"), call("open_application"), result("Error: couldn't find an app called lofi"),
-    bot("Opening lofi."),
-    user("no, play lofi on spotify"), call("play_song"), result("Playing Lofi Girl - beats to study to."),
-    bot("Playing some lofi."),
-]
+# Promotion now requires independent, explicitly accepted corrections.
+os.environ['DENISSE_RULES_FILE'] = str(tmp / 'rules.json')
+(tmp / 'rules.json').write_text('{}')
+
+def lofi_trial(number):
+    first = user("play lofi"); first["turn_id"] = f"{number}-bad"
+    fix = user("no, play lofi on spotify"); fix["turn_id"] = f"{number}-fix"
+    feedback = user("that worked"); feedback["turn_id"] = f"{number}-feedback"
+    return [first, call("open_application"), result("Error: couldn't find an app called lofi"),
+            bot("Couldn't open lofi."), fix, call("play_song"),
+            result("Playing Lofi Girl - beats to study to."), bot("Playing some lofi."), feedback]
+
+lofi = lofi_trial(1)
 got = instincts.rebuild(lofi)
 one = got[0] if got else {}
-check("instincts: correction that worked",
-      one.get("use") == ["play_song"] and one.get("avoid") == ["open_application"]
+check("instincts: correction + acceptance", one.get("use") == ["play_song"]
       and set(one.get("when", [])) == {"play", "lofi"}, str(one.get("when")))
 check("instincts: files written", Path(instincts.INSTINCTS_FILE).exists() and Path(instincts.INSTINCTS_MD).exists())
-
-adj = instincts.adjust({"open_application"}, "play lofi please")
-check("instincts: adds 'use' at once", "play_song" in adj)
-check("instincts: keeps 'avoid' until seen twice", "open_application" in adj)
-
-got = instincts.rebuild(lofi + lofi)
-os.utime(instincts.INSTINCTS_FILE, (time.time() + 5, time.time() + 5))  # force the cache to reload
+check("instincts: one episode not active", not instincts.preferred("play lofi", {"play_song"}))
+got = instincts.rebuild(lofi + lofi_trial(2))
+check("instincts: two accepted fixes active", "play_song" in instincts.preferred("play lofi", {"play_song"}))
 adj = instincts.adjust({"open_application", "calculate"}, "play lofi", protected={"calculate"})
-check("instincts: drops 'avoid' after two", "open_application" not in adj and "calculate" in adj,
-      f"count {got[0]['count']}")
+check("instincts: cannot grant new actions", "play_song" not in adj)
+check("instincts: preserves existing tools", {"open_application", "calculate"} <= adj)
 check("instincts: unrelated message untouched", instincts.adjust({"x"}, "what's the weather") == {"x"})
 
 unrelated = [
@@ -198,7 +200,7 @@ data = instincts.load()
 data[0]["enabled"] = False
 import json  # noqa: E402
 Path(instincts.INSTINCTS_FILE).write_text(json.dumps({"instincts": data}), encoding="utf-8")
-got = instincts.rebuild(lofi + lofi)
+got = instincts.rebuild(lofi + lofi_trial(2))
 check("instincts: his 'off' survives a rebuild", got[0]["enabled"] is False)
 
 print(f"\n{sum(results)}/{len(results)} passed.")

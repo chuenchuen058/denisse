@@ -23,6 +23,7 @@ import spotify_control
 import tasks
 import timers
 import vault_search
+import brain_rules
 
 FACTS_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "memory", "facts.json"
@@ -485,16 +486,27 @@ def get_brain_location() -> str:
     import obsidian_sync
 
     code_dir = os.path.dirname(os.path.abspath(__file__))
-    lines = [
-        f"My real code and memory -- the actual, authoritative copy -- live at "
-        f"{code_dir} (code + {os.path.dirname(FACTS_FILE)} for conversation/facts)."
-    ]
+    import instincts
+    config = brain_rules.status()
+    rules = brain_rules.load()
+    learned = instincts.status()
+    vault_on = rules.vault_search and os.environ.get("DENISSE_VAULT_SEARCH", "1").lower() not in ("0", "false", "off", "no")
+    save = "only when asked" if rules.save_facts == "explicit" else "when useful facts appear in conversation"
+    lines = [f"I save personal facts {save}. I use the last {rules.recent_turns} conversation turns.",
+             f"Vault lookup is {'on' if vault_on else 'off'}, limited to {rules.vault_max_chars} characters per lookup.",
+             f"Learning is {'on' if learned['enabled'] else 'off'}: {learned['confirmed_lessons']} confirmed lessons, "
+             f"{learned['candidates']} candidates. Activation requires {rules.learning_confirmations} accepted fixes "
+             "and at least 80% positive feedback on that lesson.",
+             "Learning changes tool selection and supported read-only retrieval intent; it cannot grant new action permissions or rewrite code.",
+             f"Editable preferences: {config['file']}.",
+             f"Code: {code_dir}. Conversation and facts: {os.path.dirname(FACTS_FILE)}."]
+    if config["error"]:
+        lines.append(f"The last settings edit was invalid: {config['error']}. Keeping the last valid settings.")
     if obsidian_sync._vault_available():
         lines.append(
             f"That memory also gets mirrored (read-only, one-way) into the "
-            f"Obsidian vault at {obsidian_sync.BRAIN_DIR}, just so it's "
-            f"browsable as notes -- not a second real copy, and not where I "
-            f"actually read from."
+            f"Obsidian vault at {obsidian_sync.BRAIN_DIR}. The mirror is not my conversation store. "
+            "Vault notes are searchable on demand when enabled; validated routing lessons are also stored there."
         )
     else:
         lines.append("The Obsidian vault isn't currently reachable, so nothing is mirrored there right now.")
