@@ -1,254 +1,202 @@
 # Denisse
 
-<p align="center"><img src="assets/orb.svg" width="160" alt="Denisse's orb, breathing"/></p>
+[![Offline regression checks](https://github.com/chuenchuen058/denisse/actions/workflows/checks.yml/badge.svg)](https://github.com/chuenchuen058/denisse/actions/workflows/checks.yml)
 
-A personal AI assistant that runs 100% locally on this machine, no cloud
-API, no API key — a v1 in the direction of Jarvis/IRIS: talk to it, and it
-can check the time, read/write files, run commands, open applications, and
-remember things about you, not just answer questions.
+<p align="center"><img src="assets/orb.svg" width="140" alt="Denisse's animated purple orb"/></p>
 
-## Why
+A Windows desktop assistant with a local Ollama language model, offline
+speech recognition, persistent conversation, and tools for everyday laptop
+work. Chat and spoken replies attach to an animated purple orb.
 
-Most "AI assistant" demos are a chat box wrapped around an LLM. The
-interesting part is the tool-use loop underneath: Denisse decides *when* a
-task needs a real action on the machine versus just an answer, executes it,
-and folds the result back into the conversation. Running the model itself
-locally (via [Ollama](https://ollama.com)) means everything stays private
-and there's nothing to pay for per message.
+The language model runs locally. Optional Inworld speech synthesis sends
+reply text to a cloud service; Spotify, news and weather also use network
+services. Text chat and local speech recognition need no cloud API key.
 
-## How it works
+## Engineering focus
 
-- `main.py` — text CLI: read input, get a reply, print it, persist history.
-- `voice_mode.py` — push-to-talk voice CLI: press Enter, speak, Denisse
-  transcribes it, replies, and speaks back. Same brain and memory as the
-  text CLI.
-- `wake_word.py` — hands-free "hey Denisse" voice mode: no button, just
-  say the wake word (see "Hands-free" below). Same brain/memory again.
-- `brain.py` — talks to a model running locally via Ollama
-  (`localhost:11434`), defines the tool schema, and runs the tool-use loop
-  (model calls a tool → local function executes → result goes back to the
-  model → repeat until it has a final answer).
-- `tools.py` — the actual local functions the model can call: run a shell
-  command, open an app, list/read/write files, get the time, and
-  remember/recall/list facts about you.
-- `memory_store.py` — persists conversation history to
-  `memory/conversation.json` so context survives a restart.
-- `memory/facts.json` — the growing set of things Denisse has learned about
-  you via the `remember` tool. This is Denisse's personalization today —
-  see Roadmap for where this goes next.
-- `skills/` — a small skills library: markdown how-to guides (with a name +
-  description in frontmatter) for specific tasks, e.g. taking notes,
-  organizing files, giving a daily briefing. Denisse calls `list_skills` /
-  `read_skill` to consult one before attempting a task it covers, instead
-  of improvising.
-- `mission_control.py` — a local web dashboard (see below).
-- `tray.py` — a system tray icon with an in-popup chat (see below).
-- `voice_output.py` — shared text-to-speech helper (see "Talking to
-  Denisse" below) used by both `voice_mode.py` and the tray popup.
-- `auto_organize.py` — background Downloads-folder sorter (see "Background
-  maintenance" below).
-- `optimize.py` — background temp-file cleanup + resource monitoring, plus
-  on-demand startup-program management (see "Background maintenance").
-- `obsidian_sync.py` — best-effort mirror of Denisse's memory into an
-  Obsidian vault, if one is configured on this machine (see its own
-  docstring); a no-op if there isn't one.
-- `safety.py` — a confirmation gate in front of tools that touch the real
-  machine. Currently only `open_application` and `disable_startup_program`
-  prompt; `run_shell_command` and `write_file` were opened up on request
-  (see the file's own comments for the current exact set and why).
+Denisse connects model-generated requests to real machine actions. The core
+engineering problem is deciding which tools to offer, checking what actually
+ran, and reporting the result without inventing success.
 
-## Setup
+- **Bounded tool loop:** requests get relevant tools rather than every schema;
+  execution and retries are limited, including recovery from malformed calls.
+- **Evidence checks:** unsupported completion claims, invented document paths
+  and missing task results have deterministic regression checks.
+- **Separate history and context:** shared conversation recording keeps tool
+  evidence; model replay contains recent prose rather than raw tool traffic.
+- **Feedback learning:** independently accepted corrections can change
+  phrase-specific routing. Evidence is deduplicated and negative feedback can
+  demote lessons. This does not train model weights.
+- **Responsive desktop interaction:** attached chat, hover controls, reminders,
+  timers and speech cancellation, including replies still being synthesized.
 
-Requires [Ollama](https://ollama.com) installed and running (it starts
-automatically in the background after install — look for its icon in the
-system tray), with a model pulled:
+This is a personal engineering prototype. The local model still makes
+incorrect tool choices and weak conversational replies; the tests below
+separate implementation regressions from model quality.
 
-```
-ollama pull llama3.1:8b
-```
+## Quick start
 
-Then:
+Use **Windows and Python 3.12**. The audio implementation uses `audioop`,
+which is unavailable in Python 3.13. Desktop CI currently targets Windows.
 
-```
+```powershell
+git clone https://github.com/chuenchuen058/denisse.git
+cd denisse
 python -m venv .venv
-.venv\Scripts\activate   # Windows
-pip install -r requirements.txt
-python main.py
+.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-No API key, no `.env` required (unless you want to override the model —
-see `.env.example`).
+To inspect the engineering checks first, no model or API keys are needed:
 
-## Talking to Denisse (voice mode)
-
-```
-python voice_mode.py
+```powershell
+.venv\Scripts\python.exe scripts/run_checks.py --report logs/checks.json
 ```
 
-Press Enter, then speak — it records until you pause, transcribes with
-Google's free speech API (no key needed, but does need internet for this
-one step), sends the text through the same local brain as the text CLI, and
-speaks the reply back.
+For text chat, install and start [Ollama](https://ollama.com), then:
 
-Replies are spoken with [Inworld](https://inworld.ai)'s neural voice,
-**Ashley**, by default — this is the one piece of Denisse that isn't
-free: it's a paid cloud API (a ~40-minute free trial, then billed per
-character) and needs your own `INWORLD_API_KEY` (see `.env.example`, key
-from [platform.inworld.ai](https://platform.inworld.ai)). It's entirely
-opt-in — with no key set, voice mode just uses your system's local built-in
-voice instead (fully offline, free, less natural-sounding), same as if
-Inworld's API fails for any other reason. Override the voice with
-`DENISSE_INWORLD_VOICE` (any Inworld voice name).
-
-### Hands-free: say her name (`wake_word.py`)
-
-```
-python wake_word.py
+```powershell
+ollama pull llama3.1:8b
+.venv\Scripts\python.exe main.py
 ```
 
-Or toggle **'Listen for "hey Denisse"'** from the tray icon's right-click
-menu — off by default. Any mention of her name wakes her up — "hey
-Denisse, what time is it", "Denisse, what time is it", or just "Denisse"
-alone (then wait for "Yes?" and say your command) — no chat popup, no
-pressing Enter.
+The default model context is 8192 tokens. Model resources and response times
+vary with hardware. `DENISSE_MODEL` and `DENISSE_NUM_CTX` are optional
+configuration variables; see [.env.example](.env.example).
 
-**Real tradeoff worth knowing**: unlike push-to-talk, where nothing is
-sent anywhere until you press Enter, this listens continuously and sends
-every detected phrase to Google's free speech API to check whether it was
-the wake word — not just the ones meant for Denisse. A true offline wake
-word would need a dedicated local engine (and, for a custom phrase like
-"hey Denisse," another third-party account to train it), so this is the
-pragmatic version: same free API `voice_mode.py` already uses, just
-always listening instead of push-to-talk.
+To use the desktop orb:
 
-### Desktop shortcut
-
-A shortcut is already on your Desktop: **Denisse.lnk** — double-click it to
-launch voice mode directly, no terminal needed.
-
-To pin it to the taskbar (Windows 11 no longer offers "Pin to taskbar" from
-a plain right-click on a shortcut):
-1. Double-click **Denisse.lnk** so Denisse starts and its window/icon shows
-   up in the taskbar.
-2. Right-click that taskbar icon and choose **Pin to taskbar**.
-
-(Alternatively, drag the Desktop icon down onto the taskbar.)
-
-## Mission Control (dashboard)
-
-```
-python mission_control.py
+```powershell
+.venv\Scripts\python.exe tray.py
 ```
 
-Opens a local web dashboard at `http://localhost:8765` (nothing leaves
-your machine — it just reads local files and your local Ollama server).
-It shows:
+The tray starts background Downloads sorting and temporary-file maintenance.
+Its menu lets you pause these features. Start with the text CLI if you want
+to explore the assistant before enabling desktop maintenance.
 
-- **Status** — whether Ollama is reachable and your model is pulled.
-- **Quick Launch** — a sidebar of one-click shortcuts (→ Talk to Denisse,
-  → Outlook, → File Explorer, → project/skills folders by default). Click
-  **+ Add shortcut** to pin your own — an app to open, a folder to open,
-  or another "Talk to Denisse" launcher — the same idea as pinning a
-  shortcut anywhere else, just inside Denisse's own page. Shortcuts are
-  saved to `memory/shortcuts.json`.
-- **Overview / Memory / Skills / Tools tabs** — recent conversation, every
-  fact Denisse has remembered about you, the installed skills, and the
-  full tool list, all live.
+## Desktop and voice
 
-A **Denisse Mission Control** shortcut is also on your Desktop.
+Click the orb or its hover-only **Chat** icon to open a conversation beside
+it. Dragging the orb moves the chat; placement flips near screen edges.
+**Voice** toggles wake-word listening and **Reminders** opens the task card.
 
-## Tray icon
+Typed and spoken replies share the open chat. With chat folded away, a small
+reply bubble offers **Continue chat**, **Stop voice**, and **Dismiss**.
+Type or say **shush** or **stop talking** to silence current and pending
+tray speech without another spoken acknowledgement. Spoken controls require
+wake-word listening to be enabled and remain dependent on recognition quality.
 
+For offline recognition, download the Vosk model once:
+
+```powershell
+.venv\Scripts\python.exe scripts/download_vosk_model.py
+.venv\Scripts\python.exe voice_mode.py
 ```
-python tray.py
+
+`voice_mode.py` is push-to-talk. Hands-free mode is available from the tray
+or `wake_word.py`. Microphone audio is transcribed locally with Vosk.
+Standalone voice mode uses the local system voice when Inworld is unavailable;
+the tray's typed replies stay text-only without Inworld configured.
+
+Inworld is optional, paid cloud speech synthesis, configured with
+`INWORLD_API_KEY`. See [.env.example](.env.example). Spotify integration is
+also optional and requires its own account configuration.
+
+More controls and interruption details: [Pet chat](docs/pet_chat.md).
+
+## Architecture
+
+```mermaid
+flowchart LR
+    UI[Chat / voice / desktop pet] --> C[Shared conversation]
+    C --> R[Tool router]
+    R --> M[Local Ollama model]
+    M --> E[Tool executor + evidence checks]
+    E --> M
+    M --> UI
+    E --> H[Recorded tool evidence]
+    H --> L[Feedback-validated lessons]
+    L --> R
+    V[On-demand vault excerpts] --> E
 ```
 
-Puts a **D** icon in the system tray (bottom-right, next to the clock).
-Left-click / double-click it to open a small chat popup right above the
-tray — type and get replies right there (spoken aloud too, if voice is
-set up), no console window involved. Right-click for the full menu:
-chat, a console-based voice mode for anyone who wants that instead,
-Mission Control, the auto-organize/auto-optimize toggles (see below), the
-project folder, or Quit.
+| Component | Responsibility |
+|---|---|
+| `brain.py`, `tool_router.py` | Model interaction, relevant tool selection, bounded execution and reply checks |
+| `tools.py`, `tasks.py`, `timers.py` | Local actions and application state |
+| `conversation.py`, `memory_store.py` | One process-level brain, recent replay and appended history |
+| `brain_rules.py`, `learning.py`, `instincts.py` | Validated preferences and correction evidence |
+| `tray.py`, `floating_orb.py`, `orb_controls.py`, `reminder_card.py` | Desktop pet, attached chat and cards |
+| `stt_vosk.py`, `voice_output.py`, `speech_control.py` | Recognition, speech playback and interruption |
+| `vault_search.py`, `obsidian_sync.py` | Optional bounded knowledge retrieval and memory mirroring |
 
-## Background maintenance
+## Knowledge and preferences
 
-Two things run continuously in the background whenever the tray icon is
-up (which, with autostart below, is whenever you're logged in) — both
-deterministic and rule-based, not LLM-driven, since nobody's watching a
-confirmation prompt for something running unattended:
+The assistant works without an Obsidian vault. To use your own, set the
+`DENISSE_VAULT` environment variable before starting the process. Vault
+lookups retrieve bounded excerpts on demand; the whole vault is not loaded
+into the system prompt. The current-project overview quotes recent dated
+sections of `Memory/STATE.md`, which must be maintained separately.
 
-- **Auto-organize** (`auto_organize.py`) — sorts loose files dropped in
-  Downloads into type folders (Documents, Images, Videos, Audio, Archives,
-  Installers, Other) every 15s. Never touches subfolders, never deletes or
-  overwrites (same-named collisions get a " (2)" suffix), and leaves a
-  file alone until it's sat untouched for 20s so it doesn't grab something
-  mid-download. Every move is logged to `memory/organize_log.json`.
-- **Auto-optimize** (`optimize.py`) — cleans temp files (anything in your
-  Temp folder untouched for 24h+) once an hour, logged to
-  `memory/cleanup_log.json`; checks disk space and memory every 5 minutes
-  and shows a tray notification if either looks concerning.
+Create supported preferences without overwriting an existing file:
 
-Both can be paused/resumed from the tray's right-click menu, and Denisse
-can also be asked directly to check system status, list what launches at
-login, or disable/re-enable a startup program (the last one asks for
-confirmation first — see `safety.py`).
+```powershell
+.venv\Scripts\python.exe scripts/brain_settings.py --init
+```
 
-Windows puts new tray icons in the hidden/overflow area behind the **^**
-arrow by default — drag it out onto the main tray, or go to **Settings →
-Personalization → Taskbar → Other system tray icons** and turn it on, if
-you want it always visible.
+Private preferences live in `memory/brain_rules.json`; the template is
+[brain_rules.example.json](brain_rules.example.json). Facts are saved only
+when explicitly requested by default. Corrections followed by `/good` or
+"that worked" can build candidate lessons; two independent accepted fixes
+are needed for activation. `/bad` marks a failure.
 
-### Autostart
+See [Adaptive brain](docs/adaptive_brain.md) for validation, evidence rules,
+off switches and the limits of this learning mechanism.
 
-A shortcut is already in your Startup folder (`shell:startup` →
-**Denisse Tray.lnk**), so the tray icon launches automatically every time
-you log in — nothing to run by hand. To stop that, delete the shortcut
-from `shell:startup`; to launch it manually instead, run `python tray.py`
-or double-click the shortcut yourself.
+## Verification
 
-## Status
+**Offline regression gate:** `scripts/run_checks.py` runs nine explicit suites
+in separate processes with scratch vault/rule paths and service keys disabled.
+It requires no Ollama server, downloaded model, microphone or personal history.
+The same command runs on pushes and pull requests in
+[GitHub Actions](https://github.com/chuenchuen058/denisse/actions/workflows/checks.yml).
+The JSON summary records suite exit codes and durations rather than transcripts.
 
-v1: fully local text chat + voice mode + local system/task tools +
-persistent memory + growing personal fact store + a skills library +
-a Mission Control dashboard + a system tray icon with its own in-popup
-chat, background file-sorting and system optimization, with desktop
-shortcuts and autostart for quick launch, plus a confirmation gate in
-front of tools that touch the real machine. Verified end-to-end: tool
-calls (time, weather, system status, remember/recall, shell commands)
-actually execute and persist to disk, the confirm/decline path was
-checked live, and the dashboard's API and tray icon were both checked
-live against a running Ollama instance.
+**Real-model checks:** with Ollama running, test model decisions using synthetic
+conversations and harmless tool fixtures:
 
-## Adaptive brain and editable preferences
+```powershell
+.venv\Scripts\python.exe scripts/eval_dialogue_reliability.py --rounds 3 --out logs/dialogue.json
+```
 
-Denisse can learn phrase-specific tool-routing lessons from corrections you
-positively confirm. Candidate lessons need two independent accepted fixes;
-negative feedback can demote them. This updates routing, not model weights
-or source code. Private settings live in `memory/brain_rules.json`; the
-public template is `brain_rules.example.json`.
+The most recent recorded three-round run on 27 October 2026 passed **16/21**
+scenarios. This is a small local-model evaluation, not a general reliability
+score. Passing mocked regressions does not imply every model answer is correct.
 
-See [Adaptive brain](docs/adaptive_brain.md) for `/good` and `/bad`, the
-settings, current-project vault overview, off-switches and tests.
+**Desktop checks:** `scripts/smoke_pet_chat.py` requires an interactive Windows
+desktop. It uses synthetic history and checks placement, scaling, reply actions
+and window lifecycles. Native microphone and audio quality need separate tests.
 
-### Pet chat
+Generated reports, downloaded models, credentials and personal memory stay out
+of Git. Avoid publishing local diagnostic reports that include personal data.
 
-Chat opens beside the purple orb and follows her when dragged. Voice and
-typed replies share that conversation; folded replies offer **Continue chat**.
-**Stop voice**, **shush** and **stop talking** silence current and pending
-tray speech without another spoken acknowledgement. See
-[Pet chat](docs/pet_chat.md) for controls, limits and verification.
+## Action boundaries
 
-## Roadmap
+Typed shell commands, file writes and app opening currently run without a
+confirmation prompt, following the original user's configuration. Startup
+program disabling still asks. Hands-free mode additionally asks before shell
+commands and file writes. See [safety.py](safety.py) for the actual policy.
+The assistant is not a hardened sandbox for untrusted instructions.
 
-- **Model-weight fine-tuning** is a separate future experiment, requiring
-  curated examples and held-out evaluation. Raw history and facts are not
-  automatically training data. The adaptive brain currently learns routing
-  from confirmed corrections without changing model weights.
-- Wake word ("hey Denisse") instead of push-to-talk
-- Fully offline speech-to-text (swap Google's API for local
-  faster-whisper) so voice mode needs zero internet
-- Calendar and email integration
-- Background/daemon mode instead of foreground CLI (the tray icon still
-  launches a full CLI process per action rather than running Denisse as
-  a persistent background service)
+Speech cancellation does not undo actions already performed. Learning cannot
+grant new mutating tools or bypass execution checks. Obsidian integration,
+news, Spotify and maintenance are separate from the local language model.
+
+## Next work
+
+- Improve model tool-choice reliability on held-out, repeated scenarios.
+- Reduce coupling between model orchestration, desktop code and tool effects.
+- Make optional integrations easier to configure on a fresh machine.
+- Prepare a reproducible demo using synthetic tasks and files.
+
+Model-weight fine-tuning remains a separate future experiment requiring curated
+data and held-out evaluation. Current feedback learning adjusts routing only.
