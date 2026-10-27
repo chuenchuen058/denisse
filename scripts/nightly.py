@@ -1,6 +1,6 @@
 """The nightly vault job: check, flag, commit. One entry point.
 
-Five stages, in this order:
+Six stages, in this order:
 
   1. contract   -- runs vault_contract.py, which rewrites Denisse/Vault Health.md
   2. naming     -- names inside every Week N/ folder, against the convention
@@ -12,6 +12,7 @@ Five stages, in this order:
                    then instincts.py, which turns corrections that worked
                    into tool-routing instincts (Denisse/Brain/instincts.json)
   5. commit     -- commits ONLY the files this job writes
+  6. backup     -- opt-in push to a GitHub repository verified private
 
 What it deliberately does NOT do:
 
@@ -27,7 +28,7 @@ What it deliberately does NOT do:
   * git add -A. Chuen runs parallel sessions against these repos, so the
     commit stages an explicit list and nothing else.
 
-Run it by hand with --dry to see everything except the commit.
+Run it by hand with --dry to skip committing and pushing.
 """
 import io
 import os
@@ -35,6 +36,7 @@ import re
 import subprocess
 import sys
 from datetime import datetime
+from vault_git import BackupError, commit_owned, push_private
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
@@ -208,8 +210,9 @@ say("  Nothing here fetches, and no Moodle token is involved.")
 
 # -- 5. commit, narrowly ----------------------------------------------------
 say("== commit ==")
-MINE = ["Denisse/Vault Health.md", "Denisse/Tasks.md",
-        "Denisse/Brain/instincts.json", "Denisse/Brain/instincts.md"]
+MINE = ["Denisse/Vault Health.md", "Denisse/Tasks.md"]
+# Learning stores remain local/OneDrive data, not new Git checkpoints.
+git_error = False
 
 
 def git(*args, cwd=VAULT):
@@ -224,20 +227,37 @@ if not dirty:
 elif DRY:
     say(f"  would commit {', '.join(dirty)}")
 else:
-    for p in dirty:
-        git("add", "--", p)
     msg = ("nightly: vault health" + (" and write-up flags" if pending else "")
-           + f"\n\nAutomated run {datetime.now():%Y-%m-%d %H:%M}. Only this job's"
-             "\nown files are staged -- parallel sessions own everything else.")
-    r = git("-c", "user.name=Denisse", "-c", "user.email=denisse@local", "commit", "-m", msg)
-    say("  " + (r.stdout.strip().splitlines() or ["commit produced no output"])[0])
+           + f"\n\nAutomated by Denisse on {datetime.now():%Y-%m-%d %H:%M}."
+             "\nOnly this job's files are committed; parallel staged work is preserved.")
+    try:
+        sha = commit_owned(VAULT, dirty, msg)
+        say("  committed " + sha[:7] if sha else "  no checkpoint needed")
+    except BackupError as exc:
+        git_error = True
+        say(f"  checkpoint failed: {exc}")
+
+# -- 6. back up existing committed history, including earlier failed pushes --
+say("== backup ==")
+backup = "dry"
+if DRY:
+    say("  dry run: no network push")
+else:
+    try:
+        backup = push_private(VAULT)
+        say("  private GitHub backup pushed" if backup == "pushed" else
+            "  disabled: opt in with git config denisse.privateBackup true")
+    except BackupError as exc:
+        git_error = True
+        backup = "failed"
+        say(f"  backup failed; local commits retained: {exc}")
 
 # -- a trail ----------------------------------------------------------------
 line = (f"{datetime.now():%Y-%m-%d %H:%M}  contract_rc={contract.returncode} "
         f"off_convention={odd} pending_writeups={len(pending)} "
-        f"draft_cases={drafts}{' DRY' if DRY else ''}")
+        f"draft_cases={drafts} backup={backup}{' DRY' if DRY else ''}")
 os.makedirs(os.path.dirname(LOG), exist_ok=True)
 with open(LOG, "a", encoding="utf-8") as f:
     f.write(line + "\n")
 print("\n" + line)
-sys.exit(0)
+sys.exit(1 if git_error else 0)
