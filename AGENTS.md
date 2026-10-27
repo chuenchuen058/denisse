@@ -28,6 +28,12 @@ hypotheses to pin down, and the two that were disproved.
 - **Re-read before editing.** Chuen runs his own terminal AI sessions
   against this repo in parallel with remote ones. Files change under you.
   Never `git add -A` — stage only what you changed.
+- **Commit and push as work is completed.** Chuen requested this on
+  2026-10-27. Make a focused commit after each meaningful, coherent change
+  and its relevant checks, then push it; don't batch an entire session
+  into one large commit. Keep code with the tests needed to verify it.
+  Preserve other sessions' staged work and keep private vault/memory data
+  out of this public repository. Never make empty commits just for counts.
 - **`conversation.py` owns the history**, not `memory_store` directly.
   `replay()` = what the model sees (recent, prose only). `record()` = what
   goes on disk (everything, appended). `get_brain()` = one Brain per process.
@@ -52,4 +58,4 @@ hypotheses to pin down, and the two that were disproved.
 - The tray appears as two `pythonw.exe` processes and that is *one* tray —
   the venv launcher stub spawns the base interpreter.
 - Multi-line commit messages: write to a temp file, `git commit -F` it.
-- Remote is `github.com/chuenchuen058/denisse` (private). Push your work.
+- Remote is `github.com/chuenchuen058/denisse` (public). Push your work.
