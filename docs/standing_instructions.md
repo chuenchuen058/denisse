@@ -32,7 +32,8 @@ separately; deterministic checks do not establish the quality of suggestions.
 2. **Tools:** `agent_tools.py` binds task reads, project Git reads and the
    existing Downloads organiser. The model supplies no paths or shell commands.
    Task review cannot complete tasks; project review cannot modify or commit.
-   Reports distinguish observed facts from model suggestions.
+   Displayed briefs use observed task selections and fixed next-step wording.
+   The model's free-text notes remain in the local debug record.
 3. **Instructions:** `standing_instructions.py` loads private persistent goals,
    enabled flags, intervals and the project path. Defaults: tasks every six
    hours, project every hour, Downloads every 15 seconds. Downloads rules are
@@ -108,4 +109,8 @@ also caught invented task IDs during project review; the decoder now offers
 only observed IDs, with an independent execution-time check. These tests
 measure scoped execution and completion, not general reasoning quality;
 early suggestions were often shallow, so practical usefulness remains a
-separate criterion. Downloads effects are tested with real temporary files.
+separate criterion. A later trial produced "Dirty Git tree" on a task review
+and "All tasks completed" on an empty snapshot. Briefs therefore use observed
+task selections and fixed next-step wording; free-text model notes are not
+displayed as advice or action evidence. Downloads effects are tested with real
+temporary files.

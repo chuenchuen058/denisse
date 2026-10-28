@@ -276,6 +276,21 @@ class InstructionTests(unittest.TestCase):
 
 
 class ToolTests(unittest.TestCase):
+    def test_user_briefs_use_observations_instead_of_invented_model_claims(self):
+        result = {"status": "completed", "focus_ids": ["a"], "suggestion": "All tasks completed. Dirty Git tree.",
+                  "evidence": {"task_snapshot": {"open_count": 1, "tasks": [
+                      {"id": "a", "text": "Synthetic report", "due": None}]}}}
+        brief = agent_tools.render_brief("task_review", result)
+        self.assertIn("Synthetic report", brief)
+        self.assertNotIn("All tasks completed", brief)
+        self.assertNotIn("Dirty Git tree", brief)
+        result["evidence"] = {"project_snapshot": {"project": "fixture", "branch": "main",
+            "latest_commit": "abc", "changes": " M sample.py", "limits": "No tests run"}}
+        result["suggestion"] = "No further action needed; all tests passed."
+        brief = agent_tools.render_brief("project_review", result)
+        self.assertIn("review the listed changes", brief)
+        self.assertNotIn("all tests passed", brief)
+
     def test_task_snapshot_does_not_sync_or_complete_tasks(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "tasks.json"

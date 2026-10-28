@@ -67,13 +67,17 @@ def render_brief(job_id, result):
         focus = set(result["focus_ids"])
         chosen = [t for t in snapshot["tasks"] if t["id"] in focus] or snapshot["tasks"][:3]
         lines += [f"- {t['text']} | due: {t.get('due') or 'not set'}" for t in chosen]
+        if chosen:
+            lines += ["Suggested next step: work on the selected task(s) above; no task was marked done."]
+        else:
+            lines += ["There are no open tasks in this snapshot."]
     elif job_id == "project_review":
         snapshot = evidence["project_snapshot"]
         lines = [f"{snapshot['project']} ({snapshot['branch'] or 'detached/unborn'}).",
                  snapshot["latest_commit"] or "No commits yet.",
                  snapshot["changes"] or "Working tree clean.", snapshot["limits"]]
+        lines += ["Suggested next step: review the listed changes and run relevant checks." if snapshot["changes"]
+                  else "Suggested next step: choose the next small change and its checks."]
     else:
         return f"Downloads: {evidence['organize_downloads']['moved']} files organised."
-    if result["suggestion"]:
-        lines += ["Suggested next step (model): " + result["suggestion"]]
     return "\n".join(lines)
