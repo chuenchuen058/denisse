@@ -73,10 +73,34 @@ def is_daily_briefing_due() -> bool:
     return state.get("last_briefing_date") != now.strftime("%Y-%m-%d")
 
 
-def mark_daily_briefing_done() -> None:
+def _save_briefing_state(**changes) -> None:
+    # Merge, never overwrite: this file now holds the on/off switch as well
+    # as the last date, and rewriting it with only the date would silently
+    # turn a briefing he switched off back on the next day.
+    state = _load_briefing_state()
+    state.update(changes)
     os.makedirs(os.path.dirname(BRIEFING_STATE_FILE), exist_ok=True)
     with open(BRIEFING_STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump({"last_briefing_date": datetime.datetime.now().strftime("%Y-%m-%d")}, f, indent=2)
+        json.dump(state, f, indent=2)
+
+
+def mark_daily_briefing_done() -> None:
+    _save_briefing_state(last_briefing_date=datetime.datetime.now().strftime("%Y-%m-%d"))
+
+
+# The unprompted daily briefing can be switched off, and stays off across
+# restarts. Turned off 2026-10-28 at Chuen's request ("stop telling me the
+# CNA news, I don't need them anymore") -- which he had to say to Denisse
+# three times, because she had no way to act on it and the word "news"
+# routed her straight to get_news each time. The tray menu's "Daily CNA
+# news briefing" item flips this. Asking her for the news still works;
+# only the daily unasked one is affected.
+def briefing_enabled() -> bool:
+    return bool(_load_briefing_state().get("enabled", True))
+
+
+def set_briefing_enabled(on: bool) -> None:
+    _save_briefing_state(enabled=bool(on))
 
 
 def main() -> None:

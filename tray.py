@@ -994,9 +994,14 @@ def _stop_news_briefing():
 
 
 def _toggle_news_briefing(icon, item):
+    # Persisted, so "off" survives the restart at every login -- main()
+    # used to start the briefing unconditionally, so switching it off here
+    # only lasted until the next boot.
     if _is_news_briefing_active():
         _stop_news_briefing()
+        news.set_briefing_enabled(False)
     else:
+        news.set_briefing_enabled(True)
         _start_news_briefing()
 
 
@@ -1704,7 +1709,8 @@ def main():
     global _tray_icon
     _tray_icon = pystray.Icon("denisse", _make_icon_image(), "Denisse", menu)
     _start_optimizing()
-    _start_news_briefing()
+    if news.briefing_enabled():
+        _start_news_briefing()
 
     global _floating_orb, _orb_controls
     _floating_orb = FloatingOrb(root, on_activate=_open_chat)
