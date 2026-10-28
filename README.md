@@ -29,6 +29,9 @@ ran, and reporting the result without inventing success.
   demote lessons. This does not train model weights.
 - **Responsive desktop interaction:** attached chat, hover controls, reminders,
   timers and speech cancellation, including replies still being synthesized.
+- **Standing instructions:** persistent task/project reviews and Downloads
+  rules, scoped tools, checked results, restart cooldowns and a pause switch.
+  See [Independent work](docs/standing_instructions.md).
 
 This is a personal engineering prototype. The local model still makes
 incorrect tool choices and weak conversational replies; the tests below
@@ -103,6 +106,21 @@ also optional and requires its own account configuration.
 
 More controls and interruption details: [Pet chat](docs/pet_chat.md).
 
+## Independent work
+
+Enable the three supported standing jobs with private settings:
+
+```powershell
+.venv\Scripts\python.exe scripts/standing.py --init --enable
+```
+
+While the tray runs, Denisse reviews open tasks every six hours, checks this
+project's local Git status hourly and applies the existing Downloads rules
+every 15 seconds. Task and project reviews propose next steps; they do not
+complete tasks or edit code. Downloads stays deterministic and works without
+Ollama. Pause with **Independent work** and inspect **What Denisse did** in the
+tray. [Setup, permissions and verification](docs/standing_instructions.md).
+
 ## Architecture
 
 ```mermaid
@@ -154,7 +172,7 @@ off switches and the limits of this learning mechanism.
 
 ## Verification
 
-**Offline regression gate:** `scripts/run_checks.py` runs nine explicit suites
+**Offline regression gate:** `scripts/run_checks.py` runs ten explicit suites
 in separate processes with scratch vault/rule paths and service keys disabled.
 It requires no Ollama server, downloaded model, microphone or personal history.
 The same command runs on pushes and pull requests in

@@ -29,6 +29,9 @@ import json
 import os
 import shutil
 import time
+import threading
+
+_organize_lock = threading.RLock()
 
 FILE_ATTRIBUTE_HIDDEN = 0x2
 FILE_ATTRIBUTE_SYSTEM = 0x4
@@ -90,6 +93,11 @@ def _unique_destination(dest_dir: str, name: str) -> str:
 
 def organize_folder(folder: str) -> list:
     """Run one pass over `folder`. Returns the list of moves made."""
+    with _organize_lock:
+        return _organize_folder(folder)
+
+
+def _organize_folder(folder: str) -> list:
     if not os.path.isdir(folder):
         return []
 
@@ -113,11 +121,17 @@ def organize_folder(folder: str) -> list:
                 continue  # e.g. desktop.ini -- a folder-view settings file, not your file
             if now - st.st_mtime < QUIET_SECONDS:
                 continue  # just written -- give it time to settle
+            if os.path.islink(path):
+                continue
         except OSError:
             continue
 
         category = _category_for(name)
         dest_dir = os.path.join(folder, category)
+        # Existing junction/category links must not send moves outside the
+        # watched folder. Leave these files alone rather than following them.
+        if os.path.commonpath([os.path.realpath(folder), os.path.realpath(dest_dir)]) != os.path.realpath(folder):
+            continue
         dest_path = _unique_destination(dest_dir, name)
 
         try:

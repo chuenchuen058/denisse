@@ -53,6 +53,7 @@ except Exception:
         pass
 
 import auto_organize
+import standing_instructions
 import conversation
 import memory_store
 import news
@@ -325,32 +326,28 @@ _tray_icon = None  # set in main() once the pystray Icon exists -- lets
 _floating_orb = None  # set in main() once the FloatingOrb exists
 _orb_controls = None
 
-_organize_thread = None
-_organize_stop_event = threading.Event()
+_agent_engine = None
+_agent_threads = []
 
 
-def _organize_loop():
-    while not _organize_stop_event.is_set():
-        for folder in auto_organize.WATCH_FOLDERS:
-            auto_organize.organize_folder(folder)
-        _organize_stop_event.wait(auto_organize.POLL_SECONDS)
+def _get_agent_engine():
+    global _agent_engine
+    if _agent_engine is None:
+        _agent_engine = standing_instructions.Engine()
+    return _agent_engine
 
 
 def _is_organizing() -> bool:
-    return _organize_thread is not None and _organize_thread.is_alive()
+    settings = _get_agent_engine().status()
+    return settings["enabled"] and any(j["id"] == "downloads" and j["enabled"] for j in settings["jobs"])
 
 
 def _start_organizing():
-    global _organize_thread
-    if _is_organizing():
-        return
-    _organize_stop_event.clear()
-    _organize_thread = threading.Thread(target=_organize_loop, daemon=True)
-    _organize_thread.start()
+    _get_agent_engine().set_enabled(True, "downloads")
 
 
 def _stop_organizing():
-    _organize_stop_event.set()
+    _get_agent_engine().set_enabled(False, "downloads")
 
 
 def _toggle_organize(icon, item):
@@ -358,6 +355,48 @@ def _toggle_organize(icon, item):
         _stop_organizing()
     else:
         _start_organizing()
+
+
+def _toggle_independent_work(icon=None, item=None):
+    engine = _get_agent_engine()
+    engine.set_enabled(not engine.status()["enabled"])
+
+
+def _show_agent_activity(icon=None, item=None):
+    import json
+    engine = _get_agent_engine()
+    try:
+        state = json.loads(engine.state.read_text(encoding="utf-8")) if engine.state.exists() else {}
+        text = "\n\n".join(value.get("brief", "Run in progress.") for value in state.values())
+        text = text or "No independent jobs have run yet."
+    except (OSError, ValueError, AttributeError):
+        text = "I couldn't read the activity record. Check the local agent state."
+    error = engine.status()["error"]
+    _show_reply((error + "\n" if error else "") + text[:3500])
+
+
+def _start_agent_workers():
+    engine = _get_agent_engine()
+    if not engine.config.exists():
+        # Preserve the existing Downloads-only behaviour for older installs.
+        # New model-driven reviews are enabled explicitly by setup/the user.
+        legacy = standing_instructions.defaults()
+        legacy["enabled"] = True
+        for job in legacy["jobs"]:
+            job["enabled"] = job["id"] == "downloads"
+        standing_instructions.atomic_json(engine.config, legacy)
+    if any(thread.is_alive() for thread in _agent_threads):
+        return
+    engine.stop.clear()
+    def notify(result):
+        if _tray_icon is not None:
+            _tray_icon.notify(result["brief"][:220], "Denisse — " + result["job_id"].replace("_", " "))
+    for jobs in (("downloads",), ("task_review", "project_review")):
+        ready = (lambda: True) if jobs == ("downloads",) else (
+            lambda: not _is_manually_offline() and not _thinking_sources)
+        worker = threading.Thread(target=engine.serve, args=(jobs, notify, ready), daemon=True)
+        _agent_threads.append(worker)
+        worker.start()
 
 
 _optimize_thread = None
@@ -962,7 +1001,8 @@ def _toggle_news_briefing(icon, item):
 
 
 def _quit(icon, item):
-    _stop_organizing()
+    if _agent_engine is not None:
+        _agent_engine.stop.set()
     _stop_optimizing()
     _stop_wake_word_listening()
     _stop_news_briefing()
@@ -1641,8 +1681,12 @@ def main():
         ),
         pystray.MenuItem("Voice mode (console)", _open_voice_console),
         pystray.MenuItem("Mission Control", _open_mission_control),
+        pystray.MenuItem("Independent work", _toggle_independent_work,
+                         checked=lambda item: _get_agent_engine().status()["enabled"]),
+        pystray.MenuItem("What Denisse did", _show_agent_activity),
         pystray.MenuItem(
-            "Auto-organize Downloads", _toggle_organize, checked=lambda item: _is_organizing()
+            "Auto-organize Downloads", _toggle_organize, checked=lambda item: _is_organizing(),
+            enabled=lambda item: _get_agent_engine().status()["enabled"]
         ),
         pystray.MenuItem(
             "Auto-optimize (cleanup + monitoring)", _toggle_optimize, checked=lambda item: _is_optimizing()
@@ -1659,7 +1703,6 @@ def main():
     )
     global _tray_icon
     _tray_icon = pystray.Icon("denisse", _make_icon_image(), "Denisse", menu)
-    _start_organizing()
     _start_optimizing()
     _start_news_briefing()
 
@@ -1700,6 +1743,7 @@ def main():
     )
     threading.Thread(target=_reminder_loop, daemon=True).start()
     threading.Thread(target=_unlock_watch_loop, daemon=True).start()
+    _start_agent_workers()
 
     _tray_icon.run_detached()  # icon runs on its own thread; tkinter owns the main thread
     root.mainloop()
