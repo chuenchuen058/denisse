@@ -289,6 +289,112 @@ CASES = [
         "expect": {"any_tool_of": {"get_voice_settings"}, "deny": POSIX_LEAKS},
         "why": "She has no built-in knowledge of her voice; she must check.",
     },
+    # ---- 2026-10-26..28: the replies Chuen actually got this week ------
+    # Every case below is a turn from memory/conversation.json that went
+    # wrong in front of him. The suite was passing 24-27/27 clean on the
+    # same days he said "denisse is really broken", because it was almost
+    # entirely single-turn and none of these shapes were in it.
+    {
+        "id": "stop_talking",
+        "prompt": "okay stop talking",
+        "expect": {"no_tools": True, "allow_empty": True,
+                   "deny": ["* silence *", "*silence*"]},
+        "why": "Live: calculate('0') and then '* silence *'. Being told to "
+               "stop is not a calculation, and narrating silence is talking. "
+               "An empty reply is the intended answer: speech_control's stop "
+               "matcher answers with silence by design.",
+    },
+    {
+        "id": "shush",
+        "prompt": "shush",
+        "expect": {"no_tools": True, "allow_empty": True},
+        "why": "Live: 'I didn't catch that.' (MISHEARD is checked on every "
+               "case). A one-word instruction is not garbled input. Silence "
+               "is the intended answer, as above.",
+    },
+    {
+        "id": "iq_question",
+        "prompt": "how high is your iq",
+        "expect": {"none_of": STATE_TOOLS | {"calculate"}},
+        "why": "Live: calculate('100'). Nine calculate calls that afternoon "
+               "on things that were not maths -- Friday's tool reflex "
+               "(decisions.md 2026-10-24) moved from read_skill to calculate, "
+               "the other tool that is always offered.",
+    },
+    {
+        "id": "self_parameters",
+        "prompt": "how many parameters do you have?",
+        "expect": {"none_of": STATE_TOOLS | {"calculate"},
+                   "contains_any": ["8 billion", "eight billion", "8b", "8-billion"]},
+        "why": "Live: calculate('parameter') and 'I don't know what you mean'. "
+               "She runs on llama3.1:8b and the prompt says she knows it.",
+    },
+    {
+        "id": "news_stop",
+        "prompt": "stop telling me the CNA news, I don't need them anymore",
+        "expect": {"none_of": {"get_news"}},
+        "why": "Live: get_news three times in a row, once straight after "
+               "saying 'I understand, you want me to stop telling you the "
+               "news'. A word in the request is not a request for the tool.",
+    },
+    {
+        "id": "skills_named",
+        "prompt": "what skills do you have?",
+        # Any of her real skill names counts as naming one -- the first
+        # version accepted only three of the eight and failed a reply that
+        # named python and maths.
+        "expect": {"any_tool_of": {"list_skills"},
+                   "contains_any": ["briefing", "biology", "chemistry", "physics",
+                                    "math", "organi", "python", "notes"]},
+        "why": "Live: list_skills five times, and four replies of 'I have a "
+               "few skills that might be helpful' without naming one. "
+               "Fetching the answer and not saying it is the failure.",
+    },
+    {
+        "id": "find_passport",
+        "prompt": "pull up my passport",
+        "expect": {"any_tool_of": {"find_files"},
+                   # Opening is the right reading of "pull up", and run_eval
+                   # vetoes it (EVAL_VETO), so trying it is allowed and
+                   # nothing actually opens.
+                   "none_of": {"run_shell_command"},
+                   "contains_any": ["iumc", "resume", "onedrive"]},
+        "why": "2026-10-26: reported missing four times; it is in "
+               "OneDrive\\Documents\\Resume\\IUMC (b5dcafd fixed the search "
+               "roots). The reply has to say where, not just that it exists. "
+               "Depends on that file staying where it is.",
+    },
+    {
+        "id": "file_not_app",
+        "prompt": "open a file called passport",
+        "expect": {"any_tool_of": {"find_files"},
+                   "none_of": {"run_shell_command"}},
+        "why": "Live: open_application('passport'), no such app, reported as "
+               "the file not existing. A file has to be found before anything "
+               "is said about it.",
+    },
+    {
+        "id": "latest_cv",
+        "prompt": "pull up my latest cv",
+        "expect": {"any_tool_of": {"find_files"},
+                   "none_of": {"run_shell_command"}},
+        "why": "Live: 'Done.' with no tool call at all -- a claimed success "
+               "with nothing behind it.",
+    },
+    {
+        "id": "why_not_found",
+        "before": [
+            {"role": "user", "content": "could you pull up my passport file"},
+            {"role": "assistant", "content": "I couldn't complete the file lookup, so I can't tell whether it's there."},
+        ],
+        "prompt": "why cant you?",
+        "expect": {"none_of": {"open_application", "run_shell_command"}},
+        "why": "Live, the worst reply of the week: she answered with "
+               "C:\\Users\\Xichu\\Documents\\Passport\\Passport.pdf and a "
+               "second PDF, neither of which exists. The invented-path check "
+               "in run_eval does the real work here; this case gives it the "
+               "exact situation that produced the fabrication.",
+    },
     {
         # Keep last: it closes the seeded task, which the earlier task
         # cases in this condition still need open.

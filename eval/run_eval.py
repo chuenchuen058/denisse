@@ -43,20 +43,80 @@ def _tool_names() -> set:
             if "_" in d["function"]["name"]}
 
 
+import re  # noqa: E402
+
+# A Windows path in a reply, up to the first whitespace. Paths with spaces
+# in them ("Passport ctc..pdf") are cut at the space, which is fine: the
+# check below only asks whether that prefix appeared anywhere she could
+# have got it from.
+_WIN_PATH = re.compile(r"[A-Za-z]:\\[^\s\"'<>|*?`]+")
+
+
+def _norm_path_text(s: str) -> str:
+    # Tool output reaches the model JSON-escaped at times, so a real path
+    # can show up with doubled backslashes on one side only.
+    return re.sub(r"\\{2,}", r"\\", (s or "").lower())
+
+
+def invented_paths(reply: str, sources: list) -> list:
+    """Paths in the reply that came from nowhere.
+
+    2026-10-28: asked why she couldn't find his passport, she replied with
+    C:\\Users\\Xichu\\Documents\\Passport\\Passport.pdf and "Passport (2).pdf",
+    offered to open one -- and neither the files nor the folder exist. No
+    tool had returned them; she read a skill about organising files and
+    made them up. The register calls invented results worse than any
+    error, and until now nothing in the suite looked for them.
+
+    A path is allowed if it appears in a tool result from this turn or in
+    anything already in the conversation (scripted `before` turns, replayed
+    history, his own message). Everything else is invented.
+    """
+    pool = _norm_path_text("\n".join(sources))
+    bad = []
+    for m in _WIN_PATH.finditer(reply or ""):
+        p = m.group(0).rstrip(".,;:)]}")
+        if len(p) > 3 and _norm_path_text(p) not in pool:
+            bad.append(p)
+    return bad
+
+
+# Tools that change the real machine. The suite's rule was that a case must
+# assert these are NOT called -- but an assertion only fails the case after
+# the tool has already run. On 2026-10-29 the new latest_cv case opened a
+# real CV on Chuen's screen mid-run. So they are vetoed here instead: the
+# brain is told "User declined", nothing happens, and the case still
+# judges what she tried to do. (RISKY_TOOLS are vetoed too, as before.)
+EVAL_VETO = {
+    "open_application", "run_shell_command", "write_file",
+    "play_song", "pause_music", "resume_music", "skip_song", "previous_song",
+    "clean_temp_files", "disable_startup_program", "restore_startup_program",
+}
+
+
 VAULT_EVAL_DIR = Path(
     r"C:\Users\Xichu\OneDrive - King's College London\Denisse\Denisse\Evals"
 )
 DATASET = ROOT / "eval" / "dataset.jsonl"
 
 
-def check(case: dict, reply: str, tools: list) -> list:
-    """Return a list of failure strings; empty means the case passed."""
+def check(case: dict, reply: str, tools: list, sources: list | None = None) -> list:
+    """Return a list of failure strings; empty means the case passed.
+
+    `sources` is everything she could legitimately have taken a file path
+    from this turn. None skips the invented-path check (callers that don't
+    have the transcript, e.g. older tooling)."""
     e = case["expect"]
     low = (reply or "").lower()
     fails = []
 
-    if not (reply or "").strip():
+    if not (reply or "").strip() and not e.get("allow_empty"):
         fails.append("empty reply")
+
+    if sources is not None:
+        made_up = invented_paths(reply, sources)
+        if made_up:
+            fails.append(f"invented path(s) {made_up}")
 
     if e.get("no_tools") and tools:
         fails.append(f"called {tools} but should have called nothing")
@@ -114,21 +174,40 @@ def run_case(brain, case: dict, history: list) -> dict:
 
     def spy(name, args):
         tools.append(name)
-        return name not in safety.RISKY_TOOLS
+        return name not in safety.RISKY_TOOLS and name not in EVAL_VETO
 
     # `before` is a case's own scripted earlier turns, for follow-ups like
     # "and in Penang?" that only make sense after another question.
     messages = (list(history) + list(case.get("before", []))
                 + [{"role": "user", "content": case["prompt"]}])
-    started = time.monotonic()
+    # Snapshot before the call: respond() appends to the list it is given,
+    # so reading `messages` afterwards would count her own reply as a
+    # source and wave every invented path through.
+    n_in = len(messages)
+    sources = [m.get("content") or "" for m in messages]
+    # Her system prompt states her home and project folders, so quoting
+    # C:\Users\Xichu is knowledge, not invention. Without this the check
+    # failed windows_paths and small_talk on 2026-10-29.
+    import brain as _brain_mod
+    sources.append(getattr(_brain_mod, "SYSTEM_PROMPT", "") or "")
     try:
-        reply, _ = brain.respond(messages, confirm=spy)
+        sources += [m.get("content") or "" for m in _brain_mod._style_examples()]
+    except Exception:
+        pass
+    started = time.monotonic()
+    out_msgs = []
+    try:
+        reply, out_msgs = brain.respond(messages, confirm=spy)
         error = None
     except Exception as exc:
         reply, error = "", f"{type(exc).__name__}: {exc}"
     seconds = round(time.monotonic() - started, 1)
 
-    fails = [error] if error else check(case, reply, tools)
+    # ...plus whatever a tool returned this turn.
+    sources += [m.get("content") or "" for m in (out_msgs or [])[n_in:]
+                if m.get("role") == "tool"]
+
+    fails = [error] if error else check(case, reply, tools, sources)
     return {
         "id": case["id"],
         "prompt": case["prompt"],

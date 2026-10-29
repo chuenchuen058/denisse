@@ -948,7 +948,10 @@ def _remind_due_tasks(startup: bool = False):
 
 def _news_briefing_loop():
     while not _news_stop_event.is_set():
-        if news.is_daily_briefing_due():
+        # Checked every poll, not just at startup: Denisse can now switch
+        # the briefing off when asked (brain._NEWS_OFF), and that has to
+        # take effect without a tray restart.
+        if news.briefing_enabled() and news.is_daily_briefing_due():
             try:
                 brain = conversation.get_brain()
                 messages = conversation.replay()

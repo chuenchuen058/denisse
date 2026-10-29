@@ -151,19 +151,37 @@ class PetChatTests(unittest.TestCase):
         self.assertIn('files', groups)
 
     def test_file_reply_cannot_invent_paths_after_reading_a_skill(self):
+        # The 2026-10-28 fabrication: read a skill, then answer with paths
+        # that exist nowhere. Since 2026-10-29 the brain no longer stops at
+        # "I don't have verified results" -- it runs the search she skipped
+        # (brain._file_query / search_forced) and answers from that. The
+        # guarantee is unchanged and stricter: the invented path never
+        # reaches him, and the real one does, even when the model invents
+        # again after the search.
+        # One verified match plus "pull up" also triggers the existing
+        # single-match auto-open, so the chain is: invented -> searched ->
+        # the real file opened. The invented one must never be opened.
+        found = 'Found 1 match(es):\nC:\\Real\\Passport ctc..pdf'
+        searched, opened = [], []
         responses = iter([
             {'message': {'tool_calls': [{'function': {'name': 'read_skill',
                                                     'arguments': {'name': 'organize_files'}}}]}},
-            {'message': {'content': 'Matching files:\nC:\\MadeUp\\Passport.pdf'}}])
+            {'message': {'content': 'Matching files:\nC:\\MadeUp\\Passport.pdf'}},
+            {'message': {'content': 'Matching files:\nC:\\MadeUp\\Passport.pdf'}},
+            {'message': {'content': 'Opened C:\\MadeUp\\Passport.pdf'}}])
         with patch.object(brain.ollama, 'chat', side_effect=lambda **kw: next(responses)), \
              patch.dict(brain.tools.TOOL_FUNCTIONS,
-                        {'read_skill': lambda name: 'Use find_files to locate documents.'}, clear=True):
+                        {'read_skill': lambda name: 'Use find_files to locate documents.',
+                         'find_files': lambda query, location='': searched.append(query) or found,
+                         'open_application': lambda app_name: opened.append(app_name) or f'Opened {app_name}'},
+                        clear=True):
             answer, _ = brain.Brain.__new__(brain.Brain).respond([
                 {'role': 'user', 'content': 'pull up my passport file'},
                 {'role': 'assistant', 'content': "I couldn't complete the lookup."},
                 {'role': 'user', 'content': 'why cant you?'}])
+        self.assertEqual(searched, ['passport'])
+        self.assertEqual(opened, ['C:\\Real\\Passport ctc..pdf'])
         self.assertNotIn('MadeUp', answer)
-        self.assertIn('verified', answer)
 
     def test_file_reply_uses_actual_search_when_model_invents_extra_paths(self):
         found = 'Found 2 matches:\nC:\\Test\\Passport.pdf\nC:\\Test\\Cover.pdf'

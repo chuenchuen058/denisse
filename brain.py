@@ -921,6 +921,129 @@ _FILE_ABSENCE = re.compile(
 )
 
 
+# ---- 2026-10-29: replies that were wrong 3 runs out of 3 ------------------
+# Each piece below replaces a model decision that the eval showed failing
+# every time, in both clean and live (eval/cases.py, the 2026-10-26..28
+# block; scripts/test_reply_guards.py). The pattern is the one Friday's A/B
+# pointed at (decisions.md 2026-10-24): where there is one right answer,
+# decide it in code, before or after the model, not by asking it nicely.
+
+# "Stop telling me the news" asks for the daily briefing to be switched
+# off. The word "news" routed every one of these to get_news, and
+# _speak_headlines then forced the headlines into the reply even when the
+# model hadn't -- so the code itself turned "stop" into a news bulletin.
+# Nothing she could call turned the briefing off. Now it does.
+_NEWS_OFF = re.compile(
+    r"\b(?:stop|quit|no\s+more|don'?t|do\s+not|never|turn\s+off|switch\s+off"
+    r"|disable|cancel|unsubscribe)\b[^.?!]{0,40}?\b(?:news|headlines?|briefings?|cna)\b",
+    re.IGNORECASE,
+)
+
+# What she runs on is a fact, not something for the model to work out.
+# Asked "how many parameters do you have?" she called calculate and said
+# "I have 8 parameters", or list_skills and "I have 8 skills" (3/3 each).
+_SELF_MODEL = re.compile(
+    r"\bhow\s+many\s+parameters?\b"
+    r"|\bwhat(?:'?s|\s+is|\s+are)?\s+your\s+parameters?\b"
+    r"|\b(?:what|which)\s+(?:model|llm|language\s+model)\s+(?:are\s+you|do\s+you\s+(?:run|use)"
+    r"|are\s+you\s+running)\b"
+    r"|\bhow\s+big\s+(?:are\s+you|is\s+your\s+model)\b",
+    re.IGNORECASE,
+)
+
+
+def _model_identity() -> str:
+    name, _, tag = MODEL.partition(":")
+    m = re.match(r"([a-z]+)([\d.]*)", name, re.IGNORECASE)
+    family = (m.group(1).capitalize() + (" " + m.group(2) if m.group(2) else "")) if m else name
+    size = re.search(r"(\d+(?:\.\d+)?)\s*b\b", tag, re.IGNORECASE)
+    if size:
+        n = size.group(1)
+        return (f"I'm {family} {n}B -- about {n} billion parameters, running "
+                "locally on your laptop through Ollama.")
+    return f"I'm {MODEL}, running locally on your laptop through Ollama."
+
+
+# calculate is always offered (tool_router.CORE), and on 2026-10-28 she
+# called it nine times on things that were not maths: "0" for "stop
+# talking", "100" for "how high is your iq", "parameter". Friday's finding
+# again -- the tool reflex is conserved and lands on whatever is always on
+# offer. It isn't removed here, it's blocked: a calculation needs a number
+# or a maths word in what he actually said.
+_MATHS_REQUEST = re.compile(
+    r"\d|[+*/^=%]|\b(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve"
+    r"|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty"
+    r"|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion"
+    r"|half|quarter|double|twice|triple|plus|minus|times|multipl\w*|divid\w*"
+    # Not "mean", "sum" or "root": "what do you mean?" is not maths, and
+    # every real calculation using those words has a number in it anyway.
+    r"|percent\w*|squared?|cubed?|sqrt|average|calculat\w*|comput\w*"
+    r"|convert\w*"
+    # Units: a question in these is conversion-shaped. Without them the
+    # guard refused calculate('212') for "boiling point of water in
+    # fahrenheit", and the refusal itself confused her into "I didn't
+    # catch that" 2/5 -- a regression on a case that had always passed.
+    r"|fahrenheit|celsius|kelvin|degrees?|km|kilomet\w*|miles?|metres?|meters?"
+    r"|kg|kilos?|kilograms?|pounds?|lbs?|grams?|ounces?|litres?|liters?"
+    r"|gallons?|inch(?:es)?|feet|foot|cm|mm|mph|kph|usd|myr|gbp|sgd|ringgit)\b",
+    re.IGNORECASE,
+)
+
+# What to search for when she answered a file request without searching.
+# Only from "my <thing>" or "called/named <thing>" -- guessing a query out
+# of a whole sentence would search for junk.
+_FILE_QUERY_STOP = {
+    "my", "the", "a", "an", "latest", "newest", "recent", "most", "last",
+    "file", "files", "document", "documents", "doc", "copy", "please", "for",
+    "me", "it", "its", "literally", "again", "check", "that", "this", "up",
+    "pull", "open", "show", "bring", "find", "get", "called", "named", "to",
+    "of", "now", "then", "here", "there",
+}
+
+
+def _file_query(text: str) -> str | None:
+    t = (text or "").lower()
+    if re.search(r"[a-z]:\\", t):
+        return None  # he gave a path; don't turn it into keywords
+    m = re.search(r"\b(?:called|named)\s+[\"']?([^\"'?!]+)", t) or re.search(r"\bmy\s+([^?!]+)", t)
+    if not m:
+        return None
+    words = [w for w in re.findall(r"[a-z0-9][a-z0-9._-]*", m.group(1)) if w not in _FILE_QUERY_STOP]
+    return " ".join(words[:4]) or None
+
+
+# list_skills ran, and the reply was "I've got a few skills that might
+# come in handy" -- four times running on 2026-10-28, 3/3 in the eval.
+# Same shape as the task-list restore: fetching the answer and not saying
+# it is the failure.
+def _skill_names(result: str) -> list:
+    return re.findall(r"^([a-z][a-z0-9_]*):", result or "", re.MULTILINE)
+
+
+# Words in skill names that also turn up in vague replies. The first version
+# counted "take" (from take_notes), so "I can take care of a few things"
+# passed as naming a skill and the list was never restored (2/3 clean runs,
+# 2026-10-29).
+_GENERIC_SKILL_WORDS = {"elementary", "take", "daily", "files", "help", "quick"}
+
+
+def _names_a_skill(reply: str, result: str) -> bool:
+    low = (reply or "").lower()
+    for name in _skill_names(result):
+        words = [w for w in name.split("_") if len(w) >= 4 and w not in _GENERIC_SKILL_WORDS]
+        if any(w in low for w in words):
+            return True
+    return not _skill_names(result)
+
+
+def _skills_reply(result: str) -> str:
+    lines = []
+    for name, desc in re.findall(r"^([a-z][a-z0-9_]*):\s*(.+)$", result or "", re.MULTILINE):
+        desc = re.sub(r"^how to\s+", "", desc.strip(), flags=re.IGNORECASE)
+        lines.append(f"- {name.replace('_', ' ').capitalize()}: {desc}")
+    return "Here's what I can help with:\n" + "\n".join(lines) if lines else result
+
+
 def _known_document_path(path: str, messages: list, outputs: dict) -> bool:
     """Only open a document path supplied by Chuen or observed in a lookup.
 
@@ -1168,6 +1291,18 @@ class Brain:
             # manufacture a spoken 'I'll stop talking' acknowledgement.
             messages.append({"role": "assistant", "content": ""})
             return "", messages
+        if _NEWS_OFF.search(latest_user):
+            # Act on it rather than describe it -- see _NEWS_OFF.
+            import news
+            news.set_briefing_enabled(False)
+            answer = ("Okay, no more daily news -- I've switched the briefing "
+                      "off. Ask me whenever you do want the headlines.")
+            messages.append({"role": "assistant", "content": answer})
+            return answer, messages
+        if _SELF_MODEL.search(latest_user):
+            answer = _model_identity()
+            messages.append({"role": "assistant", "content": answer})
+            return answer, messages
         if latest_user.strip().lower() in ("/good", "/bad"):
             answer = ("Thanks — that tells me the last answer was helpful." if latest_user.strip().lower() == "/good"
                       else "Got it — the last answer was wrong. Tell me what should happen instead.")
@@ -1203,6 +1338,13 @@ class Brain:
             elif re.search(r"\b(?:start|set|begin)\b", request_text, re.I):
                 expected_actions = {"set_timer"}
         completion_attempted = False
+        search_forced = False  # the fallback file search runs at most once a turn
+        # A find/open request, as opposed to e.g. "how do I save a document".
+        file_lookup_request = file_request and bool(
+            _OPEN_DOCUMENT_REQUEST.search(request_text)
+            or re.search(r"\b(?:find|locate|where(?:'s|\s+is|\s+are)|search\s+for|look\s+for"
+                         r"|called|named)\b",
+                         request_text, re.IGNORECASE))
 
         def execute(name, args):
             # Enforce the offered set, including complaints filtered by the
@@ -1214,6 +1356,12 @@ class Brain:
                   and not _known_document_path(args.get("app_name", ""), messages, tool_outputs)):
                 result = ("Refused: no verified document path was supplied. Use find_files to locate "
                           "the requested file, then open_application with the full path it returns.")
+            elif name == "calculate" and not _MATHS_REQUEST.search(latest_user):
+                # Worded as what to do next, not as a fault in his question:
+                # "there's no number in what he said" made her answer "I
+                # didn't catch that" to a perfectly clear question.
+                result = ("No tool needed here. Answer his question directly, in your "
+                          "own words, from what you know.")
             else:
                 if name == "search_vault":
                     import instincts
@@ -1266,6 +1414,19 @@ class Brain:
                         # Use the normal executor/confirmation/history path.
                         fake_call = {"name": "open_application", "arguments": {"app_name": path}}
                         completion_attempted = True
+                if (fake_call is None and file_lookup_request and not search_forced
+                        and not last_round and "find_files" not in tool_outputs
+                        and not successful_tools & {"read_file", "open_application"}):
+                    # She is about to answer a file request without having
+                    # looked. Every way that went this week was wrong: asking
+                    # him for the path, "Done." with nothing done, "I didn't
+                    # find a file called passport" with no search run, and
+                    # two invented PDFs. So the code looks for her, once, and
+                    # she answers from what came back.
+                    query = _file_query(request_text) or _file_query(latest_user)
+                    if query:
+                        fake_call = {"name": "find_files", "arguments": {"query": query}}
+                        search_forced = True
                 if fake_call is None and _TOOL_NARRATION.match(final_text):
                     # One retry, no tools, with the nudge as a system note
                     # for this call only -- never added to `messages`, so it
@@ -1316,13 +1477,22 @@ class Brain:
                         # the same unsupported 'Done' escape a second time.
                         final_text = "I haven't confirmed that action, so I can't say it's done."
                 if fake_call is None:
-                    if file_request and not successful_tools & {"read_file", "open_application"}:
+                    # Checked after an open too. It used to be skipped once
+                    # open_application had succeeded, so she could open the
+                    # real file and then report a different, invented one
+                    # ("Opened C:\MadeUp\Passport.pdf") -- caught by
+                    # test_pet_chat on 2026-10-29. What was actually opened
+                    # is in the tool result, so say that instead.
+                    if file_request and "read_file" not in successful_tools:
                         said_paths = re.findall(r"(?:[A-Za-z]:[\\/]|\\\\)[^\r\n]+", final_text)
                         if any(not _known_document_path(p.strip().rstrip('"\'.,;`'), messages, tool_outputs)
                                for p in said_paths):
                             lookup = tool_outputs.get("find_files", "")
-                            final_text = (lookup if lookup.startswith(("Found ", "No files matching")) else
-                                          "I don't have verified file-search results for that request yet.")
+                            if "open_application" in successful_tools:
+                                final_text = tool_outputs["open_application"]
+                            else:
+                                final_text = (lookup if lookup.startswith(("Found ", "No files matching")) else
+                                              "I don't have verified file-search results for that request yet.")
                     if file_request and _FILE_ABSENCE.search(final_text):
                         lookup = tool_outputs.get("find_files", "")
                         if lookup.startswith("Found "):
@@ -1338,6 +1508,10 @@ class Brain:
                         said = final_text.replace("/", "\\").lower()
                         if paths and not any(p.replace("/", "\\").lower() in said for p in paths):
                             final_text += "\n\nMatching files:\n" + "\n".join(paths[:3])
+                    skills_result = tool_outputs.get("list_skills", "")
+                    if ("list_skills" in successful_tools
+                            and not _names_a_skill(final_text, skills_result)):
+                        final_text = _skills_reply(skills_result)
                     task_result = tool_outputs.get("list_tasks", "")
                     if ("list_tasks" in successful_tools
                             and not successful_tools & {"add_task", "complete_task", "remove_task"}
@@ -1418,5 +1592,12 @@ class Brain:
         # Say so plainly rather than returning an empty string, which the
         # popup would render as a blank bubble.
         give_up = "I got stuck working that one out -- could you rephrase it?"
+        # If a search already came back, that is a real answer: show it
+        # rather than asking him to rephrase a request that was fine. On
+        # 2026-10-29 "pull up my passport" ran out of rounds 3/3 in the
+        # clean eval while holding all six matches.
+        lookup = tool_outputs.get("find_files", "")
+        if lookup.startswith(("Found ", "No files matching")):
+            give_up = lookup
         messages.append({"role": "assistant", "content": give_up})
         return give_up, messages
