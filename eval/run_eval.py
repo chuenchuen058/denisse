@@ -349,6 +349,13 @@ def main() -> int:
     facts_scratch.write_text(json.dumps(tools._load_facts(), indent=2), encoding="utf-8")
     tools.FACTS_FILE = str(facts_scratch)
     obsidian_sync.sync_facts = lambda facts: None
+    # The scratch task store still mirrored every save into the vault's
+    # Tasks.md, so eval tasks ("file the Spritzer paperwork") could land in
+    # his real notes. And a study plan the suite asks for is held in a
+    # pending file -- keep that in scratch too. (2026-10-29)
+    tasks._mirror_to_vault = lambda: None
+    import planner
+    planner.PENDING_FILE = str(scratch.with_name("pending_plan.json"))
 
     now = datetime.datetime.now()
     results = {"stamp": now.strftime("%Y-%m-%d %H:%M"), "date": now.strftime("%Y-%m-%d")}

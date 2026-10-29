@@ -150,6 +150,9 @@ GROUPS = {
         r"|\bcw\b|assignment|exam|deadline|due|week \d|semester|term\b"
         r"|decid|decision|why did we|set ?up|society|societies|msoc|robotics"
         r"|keats|remind me what|explain|my projects|current projects|current context"
+        # 2026-10-29: "hows my internship tracker" and "the projects im
+        # doing" weren't routed here, so she said she had no information.
+        r"|internships?|tracker|\bprojects?\b"
         r"|what am i working on|catch up with me|(?:going on|happening) with me",
     ),
     # Added with timers.py, 2026-10-20. "start timer" used to match only

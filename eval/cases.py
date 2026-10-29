@@ -395,6 +395,88 @@ CASES = [
                "in run_eval does the real work here; this case gives it the "
                "exact situation that produced the fabrication.",
     },
+    # ---- 2026-10-29: "do the task, don't just satisfy me" -----------------
+    # From the conversation of 29 Oct, after 9287f33 shipped. Chuen's words:
+    # "i dont want her to reply me to satisfy me i want her to actually do
+    # task". Each case below is a reply that sounded helpful and did nothing.
+    {
+        "id": "briefing_real",
+        "prompt": "tell me the briefing",
+        "expect": {"contains_any": ["due", "deadline", "coursework", "task"],
+                   "deny": ["°f", "°c", "humidity", "partly cloudy", "forecast"]},
+        "why": "Live: checked the clock, then invented the weather -- '68°F, "
+               "partly cloudy, high of 72°F' with no weather tool called. A "
+               "briefing has to be built from his real tasks and deadlines.",
+    },
+    {
+        "id": "ack_no_clock",
+        "before": [
+            {"role": "user", "content": "what's on my plate?"},
+            {"role": "assistant", "content": "You've got the Signals coursework due 24 Nov and two msoc chases."},
+        ],
+        "prompt": "thats good",
+        "expect": {"none_of": STATE_TOOLS | {"calculate"}},
+        "why": "Live: 'thats good' -> get_current_time -> 'It's currently "
+               "11:32 AM.' Five turns running the clock answered things that "
+               "weren't questions about the time.",
+    },
+    {
+        "id": "complaint_retries",
+        "before": [
+            {"role": "user", "content": "tell me the briefing"},
+            {"role": "assistant", "content": "It's currently 11:32 AM."},
+        ],
+        "prompt": "thats not what im asking",
+        "expect": {"none_of": {"get_current_time", "calculate"},
+                   "contains_any": ["due", "deadline", "coursework", "task"]},
+        "why": "Live: answered the complaint with the time, twice. A "
+               "complaint means: redo what he actually asked.",
+    },
+    {
+        "id": "what_retries",
+        "before": [
+            {"role": "user", "content": "tell me the briefing"},
+            {"role": "assistant", "content": "It's currently 11:32 AM."},
+        ],
+        "prompt": "what?",
+        "expect": {"none_of": {"get_current_time", "calculate"},
+                   "contains_any": ["due", "deadline", "coursework", "task"]},
+        "why": "Live: 'what?' -> get_current_time again.",
+    },
+    {
+        "id": "my_projects",
+        "prompt": "what do you know about the projects im doing?",
+        "expect": {"any_tool_of": {"search_vault"}},
+        "why": "Live: recall('projects') returned one old saved fact "
+               "(blueband) while his vault has a whole Projects folder.",
+    },
+    {
+        "id": "internship_tracker",
+        "prompt": "hows my internship tracker",
+        "expect": {"any_tool_of": {"search_vault"},
+                   "contains_any": ["internship", "applied", "submitted", "tracker"]},
+        "why": "Live: find_files was refused, she said she had no "
+               "information, and only found it when told 'it's in obsidian'.",
+    },
+    {
+        "id": "internship_plan",
+        "prompt": "could you help me plan my internship applications",
+        "expect": {"any_tool_of": {"search_vault"},
+                   "none_of": {"list_skills", "read_skill"},
+                   "deny": ["daily briefing:", "elementary biology"]},
+        "why": "Live: read_skill('plan_internship_applications'), then "
+               "list_skills -- and 9287f33's skills restore replaced the reply "
+               "with her skills list. His notes are where the plan starts.",
+    },
+    {
+        "id": "study_plan",
+        "prompt": "plan my study modules for me please",
+        "expect": {"none_of": {"list_skills", "read_skill"},
+                   "contains_any": ["24 nov", "nov 24", "24 november", "10 dec", "28 jan"]},
+        "why": "Live: read_skill('plan_study_modules'), then 'you can use the "
+               "list_skills tool', then 'what subjects do you need to study?'. "
+               "His coursework deadlines are in his own module notes.",
+    },
     {
         # Keep last: it closes the seeded task, which the earlier task
         # cases in this condition still need open.

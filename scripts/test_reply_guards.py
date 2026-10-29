@@ -83,6 +83,87 @@ restored = brain._skills_reply(listing)
 check("restored reply names them all",
       all(w in restored.lower() for w in ("briefing", "biology", "organize")), restored[:80])
 
+# ==== 2026-10-29 afternoon: "actually do the task" ==========================
+
+for text in ("thats not what im asking", "still not what im asking", "what?",
+             "is there a problem?", "that's not it", "no, not what I meant", "huh"):
+    check(f"complaint: {text!r}", bool(brain._COMPLAINT.fullmatch(text)))
+for text in ("what time is it?", "what's the news", "that's not my file, find the cv",
+             "is there a problem with my laptop"):
+    check(f"not a complaint: {text!r}", not brain._COMPLAINT.fullmatch(text))
+
+convo = [{"role": "user", "content": "tell me the briefing"},
+         {"role": "assistant", "content": "It's 11:32 AM."},
+         {"role": "user", "content": "thats good"},
+         {"role": "assistant", "content": "It's 11:32 AM."},
+         {"role": "user", "content": "what?"},
+         {"role": "assistant", "content": "It's 11:32 AM."},
+         {"role": "user", "content": "thats not what im asking"}]
+check("retry target skips acks and complaints", brain._last_real_request(convo) == 0)
+
+for text in ("what time is it in tokyo", "remind me tomorrow", "what's the date today",
+             "set it for 5pm"):
+    check(f"time question: {text!r}", bool(brain._TIME_REQUEST.search(text)))
+for text in ("thats good", "is there a problem?", "what's the capital of japan?",
+             "how high is your iq"):
+    check(f"not a time question: {text!r}", not brain._TIME_REQUEST.search(text))
+
+fake = ("Today is October 29th, 2026. Here are the current weather conditions:\n"
+        "* Temperature: 68°F (20°C)\n* Humidity: 60%\n* Conditions: Partly Cloudy\n"
+        "* Forecast: High of 72°F\nYou have two msoc chases overdue.")
+cleaned = brain._strip_unfetched_weather(fake)
+check("invented weather is removed", "68" not in cleaned and "Humidity" not in cleaned, cleaned)
+check("the rest of the reply survives", "msoc chases overdue" in cleaned)
+for keep in ("The boiling point of water is 212 degrees Fahrenheit.",
+             "I like sunny days, honestly."):
+    check(f"non-weather text untouched: {keep!r}", brain._strip_unfetched_weather(keep) == keep)
+
+for text in ("tell me the briefing", "give me my daily briefing", "brief me",
+             "what's on today"):
+    check(f"briefing: {text!r}", bool(brain._BRIEFING.search(text)))
+check("news switch-off is not a briefing request... handled first",
+      bool(brain._NEWS_OFF.search("turn off the daily news briefing")))
+for text in ("plan my study modules for me polease", "make me a study plan",
+             "can you schedule my coursework", "plan my revision"):
+    check(f"study plan: {text!r}", bool(brain._PLAN_STUDY.search(text)))
+check("internship plan is not a study plan",
+      not brain._PLAN_STUDY.search("could you help me plan my internship applications"))
+for text in ("yes", "yes please", "add them", "go ahead", "sure, do it"):
+    check(f"yes: {text!r}", bool(brain._PLAN_YES.fullmatch(text)))
+check("'yes but only signals' is not a plain yes",
+      not brain._PLAN_YES.fullmatch("yes but only signals"))
+
+for text, want in (("hows my internship tracker", "internships"),
+                   ("could you help me plan my internship applications", "internships"),
+                   ("what do you know about the projects im doing?", "current projects"),
+                   ("what's 2+2", None)):
+    check(f"vault query {text!r}", brain._vault_query(text) == want, brain._vault_query(text))
+check("skills question", bool(brain._SKILL_QUESTION.search("what skills do you have?")))
+check("internship plan is not a skills question",
+      not brain._SKILL_QUESTION.search("could you help me plan my internship applications"))
+
+import datetime as _dt  # noqa: E402
+_am = _dt.datetime(2026, 10, 29, 9, 0)
+for text, want in (("hey", "Hey Chuen."), ("hi denisse", "Hey Chuen."),
+                   ("good morning", "Morning, Chuen."), ("thanks", "Any time."),
+                   ("thats good", "Good."), ("okay that good", "Good.")):
+    got = brain._quick_reply(text, "You've got two msoc chases overdue.", _am)
+    check(f"quick reply {text!r}", got == want, got)
+check("an 'ok' answering her own question goes to the model",
+      brain._quick_reply("ok", "Want me to open it?", _am) is None)
+check("a greeting still answered after her question",
+      brain._quick_reply("hey", "Want me to open it?", _am) == "Hey Chuen.")
+for text in ("hey can you find my cv", "ok open the passport", "thanks, now add a task"):
+    check(f"not a quick reply: {text!r}", brain._quick_reply(text, "", _am) is None)
+
+# The whole retry path through respond(): a complaint after a wrong answer
+# reruns the original request. Here that request is the briefing, which
+# needs no model, so no Ollama is touched.
+b = brain.Brain.__new__(brain.Brain)
+answer, _ = b.respond([dict(m) for m in convo])
+check("complaint reruns the briefing", answer.startswith('You asked: "tell me the briefing"')
+      and "It's " in answer, answer[:100])
+
 print()
 print(f"{sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)

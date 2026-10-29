@@ -7,6 +7,7 @@ calls).
 No API key, no internet required after the model is downloaded once.
 """
 
+import datetime
 import inspect
 import json
 import ntpath
@@ -1044,6 +1045,162 @@ def _skills_reply(result: str) -> str:
     return "Here's what I can help with:\n" + "\n".join(lines) if lines else result
 
 
+# ---- 2026-10-29 (afternoon): "actually do the task" ----------------------
+# Chuen, after the morning's fixes: "i dont want her to reply me to satisfy
+# me i want her to actually do task". Every case below sounded helpful and
+# did nothing (eval/cases.py, the block of the same date; 3/3 failures).
+
+# A complaint means "redo what I asked", not "call a tool". Live, "thats not
+# what im asking" and "what?" were answered with the time, five times.
+_COMPLAINT = re.compile(
+    r"^\s*(?:no[,.!]?\s+)?(?:"
+    r"that'?s\s+not\s+(?:it|right|what\s+i\s*(?:'?m|am)?\s*(?:asking|asked|meant|want(?:ed)?))"
+    r"|(?:still\s+)?not\s+what\s+i\s*(?:'?m|am)?\s*(?:asking|asked|meant|want(?:ed)?)"
+    r"|still\s+not\s+(?:it|right)|that'?s\s+wrong|wrong"
+    r"|what|huh|is\s+there\s+a\s+problem"
+    r"|you'?re\s+not\s+listening"
+    r"|you\s+(?:didn'?t|did\s+not)\s+(?:answer|do)\s+(?:it|that|me|my\s+question|what\s+i\s+asked)"
+    r")[.!?\s]*$",
+    re.IGNORECASE,
+)
+_ACK = re.compile(
+    r"^\s*(?:ok(?:ay)?|k|thanks?|thank\s+you|cool|nice|good|great|perfect|alright|sure"
+    r"|yes|yeah|yep|no|nope|that'?s\s+(?:good|great|fine|nice|it)"
+    r"|(?:ok(?:ay)?\s+)?(?:that'?s?\s+)?(?:good|great|fine))[.!\s]*$",
+    re.IGNORECASE,
+)
+
+
+def _last_real_request(messages: list) -> int | None:
+    """Index of the last thing he actually asked for, skipping the current
+    message and any complaints, acknowledgements or stop requests."""
+    for i in range(len(messages) - 2, -1, -1):
+        m = messages[i]
+        if m.get("role") != "user":
+            continue
+        text = (m.get("content") or "").strip()
+        if (not text or _COMPLAINT.fullmatch(text) or _ACK.fullmatch(text)
+                or tool_router.feedback_only(text) or speech_control.is_stop_request(text)):
+            continue
+        return i
+    return None
+
+
+# The clock is always offered (tool_router.CORE), and live it answered
+# "thats good", "what?", "is there a problem?" and "capital of japan".
+# Same treatment as calculate: it runs when he said something about time.
+_TIME_REQUEST = re.compile(
+    r"\b(?:time|times|date|day|days|today|tonight|tomorrow|yesterday|clock|o'?clock"
+    r"|hours?|minutes?|week|weekend|month|year|when|timezone|morning|afternoon|evening"
+    r"|night|monday|tuesday|wednesday|thursday|friday|saturday|sunday|now|late|early)\b"
+    r"|\d\s*(?:am|pm)\b",
+    re.IGNORECASE,
+)
+
+# Weather that no weather tool returned. Live, asked for the briefing:
+# "Temperature: 68°F ... Humidity: 60% ... Conditions: Partly Cloudy ...
+# Forecast: High of 72°F" -- get_weather was never called. Only replies
+# carrying weather *data* words trigger this, so "water boils at 212
+# degrees fahrenheit" or "I like sunny days" are left alone.
+_WEATHER_DATA = re.compile(
+    r"humidity|forecast|chance\s+of\s+rain|\bhigh\s+of\b|\blow\s+of\b|conditions\s*:"
+    r"|temperature\s*:|wind\s+speed|uv\s+index", re.IGNORECASE)
+_WEATHER_LINE = re.compile(
+    r"humidity|forecast|chance\s+of\s+rain|\bhigh\s+of\b|\blow\s+of\b|conditions\s*:"
+    r"|temperature|wind|cloudy|overcast|sunny|showers?|drizzle|°|\bdegrees?\b", re.IGNORECASE)
+
+
+def _strip_unfetched_weather(text: str) -> str:
+    if not _WEATHER_DATA.search(text or ""):
+        return text
+    kept_lines = []
+    for line in text.splitlines():
+        sentences = re.split(r"(?<=[.!?])\s+", line)
+        kept = [s for s in sentences if not _WEATHER_LINE.search(s)]
+        if kept or not line.strip():
+            kept_lines.append(" ".join(kept))
+    out = re.sub(r"\n{3,}", "\n\n", "\n".join(kept_lines)).strip()
+    return out or "I haven't checked the weather -- ask me and I'll look it up."
+
+
+_BRIEFING = re.compile(
+    r"\b(?:briefing|brief\s+me|check-?in)\b"
+    r"|\bwhat'?s\s+(?:up|on)\s+(?:for\s+)?today\b|\bwhat\s+do\s+i\s+have\s+(?:on\s+)?today\b",
+    re.IGNORECASE)
+_PLAN_STUDY = re.compile(
+    r"\b(?:plan|schedule|organi[sz]e|timetable)\b[^.?!]{0,40}?\b(?:stud(?:y|ies|ying)|revision"
+    r"|revis(?:e|ing)|modules?|coursework|assignments?|semester|term|deadlines?)\b"
+    r"|\b(?:study|revision)\s+(?:plan|schedule|timetable)\b",
+    re.IGNORECASE)
+_PLAN_YES = re.compile(
+    r"^\s*(?:yes|yeah|yep|yup|sure|ok(?:ay)?|please|go\s+ahead|do\s+it|add\s+(?:them|it|those|all"
+    r"(?:\s+of\s+them)?)|please\s+do)(?:[\s,]+(?:please|do\s+it|add\s+them|thanks?|go\s+ahead))*[.!\s]*$",
+    re.IGNORECASE)
+
+# His internships, projects and trackers live in the vault. Live, "hows my
+# internship tracker" was told there was no information, "the projects im
+# doing" got one stale saved fact, and "plan my internship applications"
+# went skill-hunting.
+_SKILL_QUESTION = re.compile(
+    r"\bskills?\b|what\s+can\s+you\s+do|what\s+are\s+you\s+(?:good|able)\b|capabilit|abilit",
+    re.IGNORECASE)
+
+
+# Greetings and acknowledgements have one right kind of answer, and the model
+# kept finding wrong ones: "hey" -> "No response needed." 4/6 traced, "I
+# didn't catch that." 3/3 in the eval; "thats good" -> "I didn't catch
+# that" 3/3, or the clock. This is the 2026-10-24 conclusion applied at last:
+# the low-content turn is answered before the model, not argued with.
+_GREETING = re.compile(
+    r"^\s*(?:hey|hi|hello|hiya|yo|morning|evening|good\s+(?:morning|afternoon|evening))"
+    r"(?:\s+(?:denisse|there|chuen))?[.!\s]*$", re.IGNORECASE)
+_THANKS = re.compile(r"^\s*(?:thanks?|thank\s+you|thx|ty|cheers)(?:\s+(?:denisse|a\s+lot|so\s+much))?[.!\s]*$",
+                     re.IGNORECASE)
+_PLAIN_ACK = re.compile(
+    r"^\s*(?:ok(?:ay)?|alright|cool|nice|great|perfect|good|sounds\s+good"
+    r"|(?:ok(?:ay)?\s+)?that'?s?\s+(?:good|great|fine|nice|perfect))[.!\s]*$", re.IGNORECASE)
+
+
+def _quick_reply(text: str, last_said: str, now: datetime.datetime | None = None) -> str | None:
+    """The reply to a greeting or an acknowledgement, or None if it isn't one.
+    An "ok" that answers one of her own questions is a real answer -- that
+    goes to the model, so "want me to open it?" -> "ok" still opens it."""
+    t = (text or "").strip()
+    if _GREETING.fullmatch(t):
+        hour = (now or datetime.datetime.now()).hour
+        part = "Morning" if hour < 12 else "Afternoon" if hour < 18 else "Evening"
+        if re.search(r"good\s+(?:morning|afternoon|evening)|^\s*(?:morning|evening)", t, re.IGNORECASE):
+            return f"{part}, Chuen."
+        return "Hey Chuen."
+    if (last_said or "").rstrip().endswith("?"):
+        return None
+    if _THANKS.fullmatch(t):
+        return "Any time."
+    if _PLAIN_ACK.fullmatch(t):
+        return "Good."
+    return None
+
+
+def _is_known_skill(name: str) -> bool:
+    """read_skill('plan_study_modules') was the opening move of three of the
+    week's dead-end replies. A skill that doesn't exist gets a refusal that
+    says to do the task instead. If the list can't be read, don't block."""
+    try:
+        listing = str(tools.TOOL_FUNCTIONS["list_skills"]())
+    except Exception:
+        return True
+    return name in _skill_names(listing)
+
+
+def _vault_query(text: str) -> str | None:
+    t = (text or "").lower()
+    if re.search(r"\binternships?\b|\btracker\b", t):
+        return "internships"
+    if re.search(r"\bprojects?\b", t) and re.search(r"\b(?:my|i'?m|i\s+am|im|doing|working)\b", t):
+        return "current projects"
+    return None
+
+
 def _known_document_path(path: str, messages: list, outputs: dict) -> bool:
     """Only open a document path supplied by Chuen or observed in a lookup.
 
@@ -1303,6 +1460,46 @@ class Brain:
             answer = _model_identity()
             messages.append({"role": "assistant", "content": answer})
             return answer, messages
+        if _COMPLAINT.fullmatch(latest_user.strip()) and not getattr(self, "_retrying", False):
+            # Redo what he actually asked. The wrong answer and the complaint
+            # are left out of the retry, so she can't imitate the miss.
+            prev_i = _last_real_request(messages)
+            if prev_i is not None:
+                prev = (messages[prev_i].get("content") or "").strip()
+                self._retrying = True
+                try:
+                    retry, _ = self.respond([dict(m) for m in messages[:prev_i + 1]],
+                                            confirm=confirm, extra_context=extra_context)
+                finally:
+                    self._retrying = False
+                shown = prev if len(prev) <= 80 else prev[:77].rstrip() + "..."
+                answer = f'You asked: "{shown}". {retry}'.strip()
+                messages.append({"role": "assistant", "content": answer})
+                return answer, messages
+        import planner
+        if _PLAN_YES.fullmatch(latest_user.strip()) and planner.pending():
+            last_said = next((m.get("content") or "" for m in reversed(messages[:-1])
+                              if m.get("role") == "assistant"), "")
+            if "to your tasks?" in last_said:
+                answer = planner.accept()
+                messages.append({"role": "assistant", "content": answer})
+                return answer, messages
+        quick = _quick_reply(latest_user, next((m.get("content") or "" for m in reversed(messages[:-1])
+                                                if m.get("role") == "assistant"), ""))
+        if quick:
+            messages.append({"role": "assistant", "content": quick})
+            return quick, messages
+        if _BRIEFING.search(latest_user):
+            # Built from his tasks and coursework notes -- see planner.py.
+            answer = planner.briefing()
+            messages.append({"role": "assistant", "content": answer})
+            return answer, messages
+        if _PLAN_STUDY.search(latest_user):
+            text, steps = planner.study_plan()
+            question = planner.offer(steps)
+            answer = text + (f"\n\n{question}" if question else "")
+            messages.append({"role": "assistant", "content": answer})
+            return answer, messages
         if latest_user.strip().lower() in ("/good", "/bad"):
             answer = ("Thanks — that tells me the last answer was helpful." if latest_user.strip().lower() == "/good"
                       else "Got it — the last answer was wrong. Tell me what should happen instead.")
@@ -1339,6 +1536,7 @@ class Brain:
                 expected_actions = {"set_timer"}
         completion_attempted = False
         search_forced = False  # the fallback file search runs at most once a turn
+        vault_forced = False   # and so does the fallback vault search
         # A find/open request, as opposed to e.g. "how do I save a document".
         file_lookup_request = file_request and bool(
             _OPEN_DOCUMENT_REQUEST.search(request_text)
@@ -1356,6 +1554,16 @@ class Brain:
                   and not _known_document_path(args.get("app_name", ""), messages, tool_outputs)):
                 result = ("Refused: no verified document path was supplied. Use find_files to locate "
                           "the requested file, then open_application with the full path it returns.")
+            elif name == "get_current_time" and not _TIME_REQUEST.search(latest_user):
+                result = ("No tool needed here. Answer his question directly, in your "
+                          "own words, from what you know.")
+            elif name == "list_skills" and not _SKILL_QUESTION.search(latest_user):
+                result = ("Not needed: he didn't ask about your skills. Do what he asked with "
+                          "your other tools, or answer directly. Don't mention skills or tools.")
+            elif name == "read_skill" and not _is_known_skill(args.get("name") or ""):
+                result = (f"There's no skill called '{args.get('name')}'. Don't mention skills "
+                          "or tools to him -- do what he asked with your other tools, or "
+                          "answer directly.")
             elif name == "calculate" and not _MATHS_REQUEST.search(latest_user):
                 # Worded as what to do next, not as a fault in his question:
                 # "there's no number in what he said" made her answer "I
@@ -1368,6 +1576,17 @@ class Brain:
                     if instincts.wants_vault_overview(latest_user):
                         args = {**args, "query": "current projects"}
                 result = str(_run_tool(name, args, confirm, used_once))
+                vq = _vault_query(latest_user)
+                if (name == "recall" and vq and "search_vault" in offered_names
+                        and "search_vault" not in tool_outputs):
+                    # "the projects im doing" -> recall('projects') -> one stale
+                    # saved fact. His projects are in his notes; read those too.
+                    vres = str(_run_tool("search_vault", {"query": vq}, confirm, used_once))
+                    tool_outputs["search_vault"] = vres
+                    turn_results.append(vres)
+                    if not _confirms_nothing(vres):
+                        successful_tools.add("search_vault")
+                    result += "\n\nFrom his notes:\n" + vres
             turn_results.append(result)
             tool_outputs[name] = result
             if not _confirms_nothing(result):
@@ -1427,6 +1646,14 @@ class Brain:
                     if query:
                         fake_call = {"name": "find_files", "arguments": {"query": query}}
                         search_forced = True
+                vq = _vault_query(latest_user)
+                if (fake_call is None and vq and not vault_forced and not last_round
+                        and "search_vault" in offered_names and "search_vault" not in tool_outputs):
+                    # About his internships or projects, and she's answering
+                    # without having read his notes. Same move as the file
+                    # search above: look first, then answer from it.
+                    fake_call = {"name": "search_vault", "arguments": {"query": vq}}
+                    vault_forced = True
                 if fake_call is None and _TOOL_NARRATION.match(final_text):
                     # One retry, no tools, with the nudge as a system note
                     # for this call only -- never added to `messages`, so it
@@ -1509,7 +1736,11 @@ class Brain:
                         if paths and not any(p.replace("/", "\\").lower() in said for p in paths):
                             final_text += "\n\nMatching files:\n" + "\n".join(paths[:3])
                     skills_result = tool_outputs.get("list_skills", "")
-                    if ("list_skills" in successful_tools
+                    # Only when he asked about skills. Without this check, on
+                    # 2026-10-29 "plan my internship applications" -> she
+                    # looked at her skills -> the reply was replaced with the
+                    # skills list (a regression from 9287f33).
+                    if ("list_skills" in successful_tools and _SKILL_QUESTION.search(latest_user)
                             and not _names_a_skill(final_text, skills_result)):
                         final_text = _skills_reply(skills_result)
                     task_result = tool_outputs.get("list_tasks", "")
@@ -1545,6 +1776,8 @@ class Brain:
                         # Current settings are inspectable facts, not a
                         # persona for the model to invent or paraphrase away.
                         final_text = tool_outputs["get_brain_location"]
+                    if "get_weather" not in successful_tools:
+                        final_text = _strip_unfetched_weather(final_text)
                     messages.append({"role": "assistant", "content": final_text})
                     return final_text, messages
 
