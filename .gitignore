@@ -4,6 +4,10 @@ __pycache__/
 .venv/
 venv/
 memory/*.json
+# .jsonl too: on 2026-10-29 an extract of Chuen's own prompts was written to
+# memory/real_prompts.jsonl and would NOT have been ignored -- this repo is
+# public. Caught before any commit; the extract now lives outside the repo.
+memory/*.jsonl
 !memory/.gitkeep
 memory/.spotify_cache
 
