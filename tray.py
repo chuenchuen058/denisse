@@ -1715,6 +1715,25 @@ def main():
     if news.briefing_enabled():
         _start_news_briefing()
 
+    # A job handed to Claude (delegate.py) finishes in the background a
+    # minute or two later. Say so out of the orb, notify, and keep it in her
+    # history so "where's that cover letter?" has an answer.
+    import delegate
+
+    def _delegate_done(msg):
+        try:
+            conversation.record([{"role": "assistant", "content": msg}])
+        except Exception:
+            pass
+        _show_reply(msg)
+        if _tray_icon is not None:
+            try:
+                _tray_icon.notify(msg[:220], "Denisse")
+            except Exception:
+                pass
+
+    delegate.on_done = _delegate_done
+
     global _floating_orb, _orb_controls
     _floating_orb = FloatingOrb(root, on_activate=_open_chat)
     _orb_controls = OrbControls(

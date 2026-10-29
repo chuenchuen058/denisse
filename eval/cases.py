@@ -477,6 +477,40 @@ CASES = [
                "list_skills tool', then 'what subjects do you need to study?'. "
                "His coursework deadlines are in his own module notes.",
     },
+    # ---- 2026-10-29: the jobs she hands to Claude ---------------------------
+    # From ~180 of his own non-Denisse prompts: most are writing, research
+    # and solutions an 8B model does badly. She hands those to Claude
+    # (delegate.py; the suite runs it dry). Worded generically -- this repo
+    # is public and his own prompts stay private.
+    {
+        "id": "handoff_cover_letter",
+        "prompt": "could you write me a cover letter for a software internship at a bank",
+        "expect": {"contains_any": ["claude"],
+                   "deny": ["dear hiring", "dear sir", "sincerely", "yours faithfully"]},
+        "why": "An 8B cover letter is generic and confident -- the 'reply to "
+               "satisfy me' he said he doesn't want. Claude writes it.",
+    },
+    {
+        "id": "handoff_research",
+        "prompt": "could you search the web for internships in singapore due before november",
+        "expect": {"contains_any": ["claude"], "none_of": STATE_TOOLS - {"search_vault"}},
+        "why": "She has no web search; inventing a list of internships and "
+               "deadlines would be the worst possible answer.",
+    },
+    {
+        "id": "handoff_solutions",
+        "prompt": "could you add the solutions to the electromagnetism week 5 tutorial",
+        "expect": {"contains_any": ["claude"]},
+        "why": "Worked physics solutions are past an 8B model; a wrong "
+               "derivation that looks right is worse than none.",
+    },
+    {
+        "id": "local_reminder_not_handoff",
+        "prompt": "remind me to write a cover letter tomorrow",
+        "expect": {"any_tool_of": {"add_task"}, "deny": ["claude"]},
+        "why": "A reminder that mentions a cover letter is still a reminder. "
+               "The hand-off must not swallow local jobs.",
+    },
     {
         # Keep last: it closes the seeded task, which the earlier task
         # cases in this condition still need open.

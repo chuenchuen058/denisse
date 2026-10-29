@@ -1181,6 +1181,38 @@ def _quick_reply(text: str, last_said: str, now: datetime.datetime | None = None
     return None
 
 
+# The jobs Denisse hands to Claude (delegate.py). From ~180 of his own
+# non-Denisse prompts to Claude Code and Codex: CV and cover-letter writing,
+# internship research, pitch prep, people lookups and coursework solutions.
+# An 8B model answers these plausibly and badly. Kept explicit, so the line
+# is testable: finding his CV is local, improving it is Claude's.
+_DELEGATE = re.compile(
+    r"\bcover\s+letter\b|\blinked?\s*in\s+post\b|\bpersonal\s+statement\b"
+    r"|\b(?:change|edit|improve|update|tailor|tweak|review|rewrite|polish|fix)\b[^.?!]{0,40}"
+    r"\b(?:cv|resume|r[eé]sum[eé])\b"
+    r"|\b(?:cv|resume)\b[^.?!]{0,30}\b(?:change|edit|improve|tailor|tweak|review|rewrite|feedback)\b"
+    r"|\bwhat\s+should\s+i\s+(?:add|change|put)\b"
+    r"|\bsearch\s+(?:\w+\s+){0,2}(?:up|online)\b|\bsearch\s+the\s+web\b|\blook\s+(?:\w+\s+){0,2}up\b"
+    r"|\bresearch\b"
+    r"|\bfind\s+(?:me\s+)?(?:\d+\s+|some\s+|more\s+)?(?:internships?|jobs?|roles?|companies|places)\b"
+    r"|\binternships?\b[^.?!]{0,40}\b(?:apply|due|deadline|open)\b|\bplaces\s+(?:each\s+)?to\s+apply\b"
+    r"|\bpitch\b|\bprep(?:are)?\s+me\b"
+    r"|\b(?:solve|prove)\b|\bworked\s+solutions?\b|\bsolutions?\s+(?:to|for)\b"
+    r"|\bhow\s+(?:do|should|would)\s+i\s+(?:do|approach|answer|tackle)\b"
+    r"|\bhow\s+to\s+(?:do|approach|answer|tackle)\b"
+    r"|\b(?:ask|use|get)\s+(?:claude|codex)\b|\bhand\s+(?:it|this|that)\s+(?:to|over)\b"
+    r"|\b(?:draft|write)\s+(?:me\s+)?(?:a|an|the)\s+(?:email|message|post|letter|reply|essay|summary|report)\b",
+    re.IGNORECASE)
+# ...but never these, which are local and checkable.
+_KEEP_LOCAL = re.compile(
+    r"\bremind\b|\breminder\b|\btask\b|\bto-?do\b|\btimer\b|\b(?:find|open|pull\s+up|bring\s+up"
+    r"|show\s+me|where(?:'s|\s+is))\s+(?:me\s+)?(?:my|the)\b", re.IGNORECASE)
+
+
+def _should_delegate(text: str) -> bool:
+    return bool(_DELEGATE.search(text or "")) and not _KEEP_LOCAL.search(text or "")
+
+
 def _is_known_skill(name: str) -> bool:
     """read_skill('plan_study_modules') was the opening move of three of the
     week's dead-end replies. A skill that doesn't exist gets a refusal that
@@ -1498,6 +1530,16 @@ class Brain:
             text, steps = planner.study_plan()
             question = planner.offer(steps)
             answer = text + (f"\n\n{question}" if question else "")
+            messages.append({"role": "assistant", "content": answer})
+            return answer, messages
+        if _should_delegate(latest_user):
+            # A writing/research/solutions job: Claude does it and the result
+            # lands in his vault -- see delegate.py. She says so plainly.
+            import delegate
+            context = [{"role": m["role"], "content": m.get("content") or ""}
+                       for m in messages[:-1]
+                       if m.get("role") in ("user", "assistant") and (m.get("content") or "").strip()]
+            answer = delegate.start(latest_user.strip(), context)
             messages.append({"role": "assistant", "content": answer})
             return answer, messages
         if latest_user.strip().lower() in ("/good", "/bad"):

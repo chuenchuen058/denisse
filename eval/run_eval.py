@@ -354,6 +354,10 @@ def main() -> int:
     # his real notes. And a study plan the suite asks for is held in a
     # pending file -- keep that in scratch too. (2026-10-29)
     tasks._mirror_to_vault = lambda: None
+    # The suite checks that she *decides* to hand a job to Claude; actually
+    # spending his Claude allowance every night would be absurd.
+    import delegate
+    delegate.DRY_RUN = True
     import planner
     planner.PENDING_FILE = str(scratch.with_name("pending_plan.json"))
 
