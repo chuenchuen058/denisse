@@ -105,11 +105,19 @@ def report(path=None, now=None):
     """The snapshot plus a verdict: (dict, list of reasons a restart would
     interrupt something, or why the snapshot can't be trusted)."""
     path = path or STATUS_FILE
-    try:
-        with open(path, encoding="utf-8") as f:
-            snap = json.load(f)
-    except (OSError, ValueError) as exc:
-        return {}, [f"no readable status ({type(exc).__name__}) -- this tray predates runtime_status, or isn't running"]
+    for attempt in range(10):
+        try:
+            with open(path, encoding="utf-8") as f:
+                snap = json.load(f)
+            break
+        except FileNotFoundError as exc:
+            return {}, [f"no readable status ({type(exc).__name__}) -- this tray predates runtime_status, or isn't running"]
+        except (OSError, ValueError) as exc:
+            # Windows refuses the open while the tray is replacing the file
+            # (CI, 2026-10-30): a moment later it's whole again.
+            if attempt == 9:
+                return {}, [f"no readable status ({type(exc).__name__}) -- this tray predates runtime_status, or isn't running"]
+            time.sleep(0.05)
     blockers = []
     if not isinstance(snap, dict) or "pid" not in snap:
         return {}, ["the status file isn't a status snapshot"]
