@@ -53,14 +53,23 @@ def keywords(text: str) -> set:
     return {w for w in _WORD.findall((text or "").lower()) if w not in _STOP and len(w) > 2}
 
 
+def _ran(turn: dict) -> list:
+    """(tool, result) pairs that actually ran. A "Refused:" result is a call
+    the brain blocked before running -- since 2026-10-30 a repair refuses an
+    unchanged repeat of the failed call -- so it is evidence neither way."""
+    return [(t, r) for t, r in zip(turn["tools"], turn["results"])
+            if not (r or "").startswith("Refused")]
+
+
 def _worked(turn: dict) -> bool:
     """Positive human feedback AND non-failing tool evidence, not silence."""
-    if turn["label"] != "good" or not turn["tools"] or not turn["results"]:
+    ran = _ran(turn)
+    if turn["label"] != "good" or not ran:
         return False
     return not any(learning.tool_failed(r) or (r or "").strip() in ("", "(no output)")
-                   or (r or "").startswith(("Refused", "User declined", "No timer started"))
+                   or (r or "").startswith(("User declined", "No timer started"))
                    or "nothing was stopped" in (r or "").lower()
-                   for r in turn["results"])
+                   for _, r in ran)
 
 
 def phrase(text):
@@ -70,9 +79,20 @@ def phrase(text):
 
 def derive(labelled: list) -> list:
     """Instincts from a labelled history (learning.label_turns)."""
+    try:
+        from brain import _COMPLAINT
+    except Exception:
+        _COMPLAINT = None
+    import tool_router
     found = {}
     for i, bad in enumerate(labelled):
         if bad["label"] != "bad":
+            continue
+        text = bad["user"].strip()
+        if tool_router.feedback_only(text) or (_COMPLAINT is not None and _COMPLAINT.fullmatch(text)):
+            # A complaint that was itself complained about is not a request:
+            # keying a lesson on "thats not what im asking" would reroute
+            # every later complaint. The original request carries the lesson.
             continue
         for j, fix in enumerate(labelled[i + 1:i + 1 + LOOKAHEAD], start=i + 1):
             if fix["user"].strip().lower() == "/bad":
@@ -85,7 +105,7 @@ def derive(labelled: list) -> list:
                                and bool(keywords(bad["user"]) & keywords(fix["user"])))
             if not learning._CORRECTION.search(fix["user"]) and not linked_feedback:
                 break  # a successful new subject is not a validated correction
-            use = sorted(set(fix["tools"]) - set(bad["tools"]))
+            use = sorted({t for t, _ in _ran(fix)} - set(bad["tools"]))
             if not use:
                 break
             # An explicit correction plus positive human feedback links the

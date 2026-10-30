@@ -23,6 +23,9 @@ SUITES = (
     "scripts/test_pet_chat.py",
     "scripts/test_vault_git.py",
     "scripts/test_standing_instructions.py",
+    "scripts/test_feedback.py",
+    "scripts/test_feedback_repair.py",
+    "scripts/test_study_brief.py",
 )
 
 

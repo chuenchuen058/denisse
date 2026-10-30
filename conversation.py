@@ -198,6 +198,38 @@ _FILLER = {
 }
 
 
+def last_attempt(user_text: str) -> list:
+    """The tool calls the latest stored turn for `user_text` made, each as
+    {"name", "arguments", "result"}. replay() is prose only, so when he
+    says "thats not what im asking" the failed calls exist only on disk --
+    and a retry that can't see them can repeat them exactly."""
+    want = " ".join((user_text or "").lower().split())
+    with _lock:
+        history = memory_store.load_history()
+    start = None
+    for i in range(len(history) - 1, -1, -1):
+        m = history[i]
+        if m.get("role") == "user" and " ".join((m.get("content") or "").lower().split()) == want:
+            start = i
+            break
+    if start is None:
+        return []
+    calls, results = [], []
+    for m in history[start + 1:]:
+        if m.get("role") == "user":
+            break
+        if m.get("role") == "assistant":
+            for c in m.get("tool_calls") or []:
+                f = c.get("function") or {}
+                if f.get("name"):
+                    calls.append({"name": f["name"], "arguments": f.get("arguments") or {}})
+        elif m.get("role") == "tool":
+            results.append(m.get("content") or "")
+    for call, res in zip(calls, results):
+        call["result"] = res
+    return calls
+
+
 def looks_like_noise(text: str) -> bool:
     """True only for transcripts that are pure filler -- "", "the", "the uh
     the". Those get answered but not written down.

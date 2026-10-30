@@ -1111,6 +1111,34 @@ _ACK = re.compile(
 )
 
 
+def _call_key(name: str, args) -> str:
+    return json.dumps([name, args or {}], sort_keys=True, default=str)
+
+
+def _corrected_attempt(prev: str, messages: list, prev_i: int) -> list:
+    """The calls the complained-about attempt made, with their results:
+    from `messages` when they carry tool traffic (tests, the CLI), else
+    from the stored history (the tray -- replay() is prose only)."""
+    calls, results = [], []
+    for m in messages[prev_i + 1:-1]:
+        if m.get("role") == "assistant":
+            for c in m.get("tool_calls") or []:
+                f = c.get("function") or {}
+                if f.get("name"):
+                    calls.append({"name": f["name"], "arguments": f.get("arguments") or {}})
+        elif m.get("role") == "tool":
+            results.append(m.get("content") or "")
+    if calls:
+        for call, res in zip(calls, results):
+            call["result"] = res
+        return calls
+    try:
+        import conversation
+        return conversation.last_attempt(prev)
+    except Exception:
+        return []
+
+
 def _last_real_request(messages: list) -> int | None:
     """Index of the last thing he actually asked for, skipping the current
     message and any complaints, acknowledgements or stop requests."""
@@ -1591,12 +1619,34 @@ class Brain:
             prev_i = _last_real_request(messages)
             if prev_i is not None:
                 prev = (messages[prev_i].get("content") or "").strip()
+                wrong_reply = next((m.get("content") or "" for m in reversed(messages[prev_i + 1:-1])
+                                    if m.get("role") == "assistant"), "")
+                # 2026-10-30: the retry got the same input as the miss, so it
+                # could make the very call that had just failed. A call
+                # that failed is refused if repeated unchanged; one that
+                # worked may run again (the complaint may be the wording).
+                self._retry_avoid = {_call_key(c["name"], c["arguments"])
+                                     for c in _corrected_attempt(prev, messages, prev_i)
+                                     if _confirms_nothing(c.get("result", ""))}
                 self._retrying = True
                 try:
-                    retry, _ = self.respond([dict(m) for m in messages[:prev_i + 1]],
-                                            confirm=confirm, extra_context=extra_context)
+                    retry, retry_msgs = self.respond([dict(m) for m in messages[:prev_i + 1]],
+                                                     confirm=confirm, extra_context=extra_context)
                 finally:
                     self._retrying = False
+                    self._retry_avoid = set()
+                # Keep the repair's tool calls in this turn. They used to be
+                # dropped, so the stored repair looked like a bare claim
+                # ("claimed an action with no tool call") and his "thats it"
+                # could never confirm a lesson. replay() still sends prose only.
+                for m in retry_msgs[prev_i + 1:]:
+                    if m.get("role") == "tool" or (m.get("role") == "assistant" and m.get("tool_calls")):
+                        messages.append(dict(m))
+                if wrong_reply and " ".join(retry.lower().split()) == " ".join(wrong_reply.lower().split()):
+                    # Checked against the miss: the same answer again is
+                    # not a repair, and saying it twice isn't honest.
+                    retry = ("I got the same answer again, so I haven't fixed it: " + retry +
+                             " Tell me what you meant and I'll do that instead.")
                 shown = prev if len(prev) <= 80 else prev[:77].rstrip() + "..."
                 answer = f'You asked: "{shown}". {retry}'.strip()
                 messages.append({"role": "assistant", "content": answer})
@@ -1711,6 +1761,9 @@ class Brain:
             # JSON form; neither is permission to run an unrelated tool.
             if last_round or name not in offered_names:
                 result = f"Refused: '{name}' isn't available for this request. Answer the user's actual request."
+            elif _call_key(name, args) in getattr(self, "_retry_avoid", ()):
+                result = (f"Refused: this exact '{name}' call already failed and he said the answer "
+                          "was wrong. Do something different, or tell him plainly what you can't do.")
             elif (name == "open_application" and file_request
                   and not _known_document_path(args.get("app_name", ""), messages, tool_outputs)):
                 result = ("Refused: no verified document path was supplied. Use find_files to locate "
