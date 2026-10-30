@@ -1814,9 +1814,7 @@ class Brain:
         if _WATCHLIST_SHOW.fullmatch(latest_user.strip()) or _WATCHLIST_BRIEF.fullmatch(latest_user.strip()):
             import invest
             if _WATCHLIST_SHOW.fullmatch(latest_user.strip()):
-                items = invest.watchlist()
-                answer = ("Your watchlist is empty." if not items else "On your watchlist: " +
-                          "; ".join(f"{i['symbol']} ({i['name']}, {i['currency']})" for i in items) + ".")
+                answer = invest.list_text()  # a corrupt store says so, never "empty"
             else:
                 answer = invest.brief()
             messages.append({"role": "assistant", "content": answer})

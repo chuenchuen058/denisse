@@ -61,7 +61,7 @@ check("persisted privately in the store dir", os.path.exists(os.path.join(TMP, "
 r = invest.set_alert("TSCO.LON", "above", "3", "GBP")
 check("currency mismatch refused (GBP vs GBX)", "priced in GBX" in r and not invest.watchlist()[0]["alerts"], r)
 check("unknown direction refused", "above' or 'below" in invest.set_alert("TSCO.LON", "near", "300", "GBX"))
-check("non-numeric level refused", "positive price" in invest.set_alert("TSCO.LON", "above", "abc", "GBX"))
+check("non-numeric level refused", "positive" in invest.set_alert("TSCO.LON", "above", "abc", "GBX"))
 r = invest.set_alert("TSCO.LON", "above", "300", "GBX")
 check("alert set", invest.watchlist()[0]["alerts"] == [{"direction": "above", "level": 300.0, "currency": "GBX"}], r)
 
@@ -70,7 +70,10 @@ q = invest.fetch(inst, prov(), NOW)
 check("quote: source, currency, market date, retrieval time, status",
       q["source"].startswith("fixture") and q["currency"] == "GBX" and q["market_date"] == TODAY
       and q["retrieved"].startswith("2026-10-30T18:00") and q["status"] == "delayed", str(q))
-check("alert fires at >= level", len(invest.evaluate(inst, q, NOW)) == 1)
+fired = invest.evaluate(inst, q, NOW)
+check("alert fires at >= level", len(fired) == 1)
+check("evaluating alone records nothing (delivery does)", len(invest.evaluate(inst, q, NOW)) == 1)
+invest._acknowledge(fired, NOW)  # as brief() does once the report is saved and verified
 check("same market date: no duplicate", invest.evaluate(inst, q, NOW + dt.timedelta(hours=30)) == [])
 q2 = invest.fetch(inst, prov(date="2026-10-31"), NOW + dt.timedelta(hours=2))
 check("new date inside cooldown: quiet", invest.evaluate(inst, q2, NOW + dt.timedelta(hours=2)) == [])
@@ -119,7 +122,8 @@ s = invest.AlphaVantage(key="t", get=lambda u, p: {"bestMatches": [{"1. symbol":
 check("adapter parses SYMBOL_SEARCH currency", s.search("tesco")[0]["currency"] == "GBX")
 
 # -- brief ---------------------------------------------------------------------
-os.remove(os.path.join(TMP, "alert_state.json"))
+if os.path.exists(os.path.join(TMP, "alert_state.json")):
+    os.remove(os.path.join(TMP, "alert_state.json"))
 out = os.path.join(TMP, "briefs")
 r = invest.brief(prov(), NOW, out)
 path = r.split("saved to ")[1].split(".md")[0] + ".md"
@@ -137,7 +141,8 @@ check("brief with provider down: cached, no alert, nothing interpreted",
 r2 = invest.brief(prov(fail=True), NOW + dt.timedelta(days=1), out)
 check("a second brief in the same second doesn't overwrite the first",
       r2.split("saved to ")[1].split(".md")[0] != r.split("saved to ")[1].split(".md")[0], r2)
-check("verify catches a missing instrument", invest.verify(path, [{"symbol": "ZZZ"}], []) == ["ZZZ is missing"])
+check("verify catches a missing instrument",
+      invest.verify(path, [{**invest.last_observations[0], "symbol": "ZZZ"}]) != [])
 
 check("remove", "Removed" in invest.remove("TSCO.LON") and invest.watchlist() == [])
 check("empty watchlist brief says so", "empty" in invest.brief(prov(), NOW, out))

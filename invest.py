@@ -33,19 +33,29 @@ Everything lives in memory/invest/ (gitignored): this repo is public.
 """
 import datetime as dt
 import json
+import math
 import os
 import re
 import sys
 import tempfile
+import threading
+import time
+from contextlib import contextmanager
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "memory", "invest")
 # --fixtures keeps its own store, so a demo never lands on the real watchlist.
 FIXTURE_DIR = os.path.join(BASE_DIR, "memory", "invest-fixtures")
 STALE_DAYS = 4        # an end-of-day quote older than this (weekend + a holiday) is stale
-COOLDOWN_HOURS = 24   # the same alert rule stays quiet this long after firing
+COOLDOWN_HOURS = 24   # the same alert rule stays quiet this long after a delivered alert
+LATEST_UTC_OFFSET = 14  # UTC+14 is the furthest-ahead clock on Earth
 
 FIXTURE_LABEL = "SYNTHETIC FIXTURE -- not market data"
+
+
+class StoreError(Exception):
+    """A private file exists but can't be read. Never treated as empty:
+    an empty watchlist saved over it would erase what was there."""
 
 
 def _path(name):
@@ -56,8 +66,10 @@ def _load(name, default):
     try:
         with open(_path(name), encoding="utf-8") as f:
             return json.load(f)
-    except (OSError, ValueError):
+    except FileNotFoundError:
         return default
+    except (OSError, ValueError) as e:
+        raise StoreError(f"{name} is unreadable ({type(e).__name__}); I haven't changed it")
 
 
 def _save(name, data):
@@ -68,18 +80,73 @@ def _save(name, data):
     os.replace(tmp, _path(name))
 
 
+_thread_lock = threading.RLock()
+
+
+@contextmanager
+def _locked():
+    """One read-modify-write at a time, across the CLI and the tray."""
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with _thread_lock, open(_path(".lock"), "a+b") as lock:
+        for _ in range(200):
+            try:
+                lock.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                time.sleep(.025)
+        else:
+            raise StoreError("the watchlist is busy in another window; try again")
+        try:
+            yield
+        finally:
+            lock.seek(0)
+            if os.name == "nt":
+                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+
+
 def _now():
     return dt.datetime.now(dt.timezone.utc)
 
 
 def _num(value):
-    """A provider number, or None. Never 0 for a missing value."""
+    """A finite provider number, or None. Never 0 for a missing value, and
+    never NaN or infinity ("NaN" parses as a float and compares false)."""
     try:
-        if value is None or str(value).strip() in ("", "-", "None", "null"):
+        if value is None or isinstance(value, bool) or str(value).strip() in ("", "-", "None", "null"):
             return None
-        return float(str(value).strip().rstrip("%"))
+        n = float(str(value).strip().rstrip("%"))
     except ValueError:
         return None
+    return n if math.isfinite(n) else None
+
+
+def _price(value):
+    """A usable price: a real finite number above zero, else None."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value) if math.isfinite(value) and value > 0 else None
+
+
+def _clean(text, n=120):
+    """Provider text is data: one line, short, never instructions."""
+    return " ".join(str(text).split())[:n]
+
+
+def _offset_hours(tz):
+    """'UTC+01' -> 1.0; None when the provider didn't say."""
+    m = re.fullmatch(r"\s*UTC\s*([+-])\s*(\d{1,2})(?::?(\d{2}))?\s*", tz or "")
+    if not m:
+        return None
+    hours = int(m.group(2)) + int(m.group(3) or 0) / 60
+    return hours if m.group(1) == "+" else -hours
 
 
 # -- providers --------------------------------------------------------------
@@ -91,7 +158,9 @@ class ProviderError(Exception):
 class AlphaVantage:
     name = "Alpha Vantage GLOBAL_QUOTE"
     url = "https://www.alphavantage.co/query"
+    source_url = "https://www.alphavantage.co/documentation/#latestprice"
     freshness = "delayed"  # free tier: end of day
+    reuse_hours = 6        # end-of-day data: don't spend the daily quota refetching it
 
     def __init__(self, key=None, get=None):
         self.key = key if key is not None else os.environ.get("ALPHAVANTAGE_API_KEY", "")
@@ -99,26 +168,28 @@ class AlphaVantage:
 
     def _call(self, params):
         if not self.key:
-            raise ProviderError("no ALPHAVANTAGE_API_KEY configured")
+            raise ProviderError("no ALPHAVANTAGE_API_KEY configured -- add ALPHAVANTAGE_API_KEY=<your key> "
+                                "to .env (free key: alphavantage.co/support/#api-key)")
         get = self._get
         if get is None:
             import requests
             get = lambda u, p: requests.get(u, params=p, timeout=15).json()
         try:
             data = get(self.url, {**params, "apikey": self.key})
-        except Exception as e:
+        except Exception as e:  # its text can carry the URL, key included
             raise ProviderError(f"request failed: {type(e).__name__}")
         if not isinstance(data, dict):
             raise ProviderError("unexpected response")
         for k in ("Note", "Information", "Error Message"):
             if k in data:  # rate limit or bad symbol: say so, don't parse
-                raise ProviderError(f"{k}: {str(data[k])[:120]}")
+                raise ProviderError(f"{k}: {_clean(data[k]).replace(self.key, '<key>')}")
         return data
 
     def search(self, keywords):
         data = self._call({"function": "SYMBOL_SEARCH", "keywords": keywords})
-        return [{"symbol": m.get("1. symbol"), "name": m.get("2. name"), "type": m.get("3. type"),
-                 "region": m.get("4. region"), "currency": m.get("8. currency")}
+        return [{"symbol": m.get("1. symbol"), "name": _clean(m.get("2. name") or "", 80),
+                 "type": m.get("3. type"), "region": _clean(m.get("4. region") or "", 40),
+                 "currency": m.get("8. currency"), "timezone": m.get("7. timezone")}
                 for m in data.get("bestMatches") or [] if m.get("1. symbol")]
 
     def quote(self, symbol):
@@ -133,7 +204,9 @@ class AlphaVantage:
 class FixtureProvider:
     """Synthetic quotes for tests and demos. Never market data."""
     name = "fixture provider (" + FIXTURE_LABEL + ")"
+    source_url = "fixture (no URL)"
     freshness = "delayed"
+    reuse_hours = 0
 
     def __init__(self, quotes=None, matches=None, fail=False):
         self.quotes, self.matches, self.fail = quotes or {}, matches or {}, fail
@@ -157,7 +230,7 @@ def provider(fixtures=False):
             quotes={"DEMO.FIX": {"price": 101.5, "previous_close": 100.0, "change_percent": 1.5,
                                  "market_date": today}},
             matches={"DEMO": [{"symbol": "DEMO.FIX", "name": "Demo Fixture Co (synthetic)", "type": "Equity",
-                               "region": "Fixture", "currency": "XXX"}]})
+                               "region": "Fixture", "currency": "XXX", "timezone": "UTC+00"}]})
     return AlphaVantage()
 
 
@@ -165,6 +238,16 @@ def provider(fixtures=False):
 
 def watchlist():
     return _load("watchlist.json", {"instruments": []})["instruments"]
+
+
+def list_text():
+    try:
+        items = watchlist()
+    except StoreError as e:
+        return f"Your watchlist file is unreadable, so I can't list it: {e}."
+    return ("\n".join(f"{i['symbol']} ({i['name']}, {i['currency']}) alerts: "
+                      f"{[f'{a['direction']} {a['level']:g}' for a in i['alerts']] or 'none'}"
+                      for i in items) or "Your watchlist is empty.")
 
 
 def add(query, prov=None):
@@ -187,23 +270,35 @@ def add(query, prov=None):
     m = exact[0]
     if not m.get("currency"):
         return f"The provider didn't say which currency {m['symbol']} trades in, so I haven't added it."
-    data = _load("watchlist.json", {"instruments": []})
-    if any(i["symbol"] == m["symbol"] for i in data["instruments"]):
-        return f"{m['symbol']} is already on your watchlist."
-    data["instruments"].append({"symbol": m["symbol"], "name": m["name"], "region": m["region"],
-                                "currency": m["currency"], "provider": prov.name,
-                                "added": _now().isoformat(timespec="seconds"), "alerts": []})
-    _save("watchlist.json", data)
+    try:
+        with _locked():
+            data = _load("watchlist.json", {"instruments": []})
+            if any(i["symbol"] == m["symbol"] for i in data["instruments"]):
+                return f"{m['symbol']} is already on your watchlist."
+            data["instruments"].append({"symbol": m["symbol"], "name": m["name"], "region": m["region"],
+                                        "currency": m["currency"], "utc_offset": _offset_hours(m.get("timezone")),
+                                        "provider": prov.name, "added": _now().isoformat(timespec="seconds"),
+                                        "alerts": []})
+            _save("watchlist.json", data)
+            saved = any(i["symbol"] == m["symbol"] for i in _load("watchlist.json", {"instruments": []})["instruments"])
+    except StoreError as e:
+        return f"I haven't added {m['symbol']}: {e}."
+    if not saved:
+        return f"I tried to add {m['symbol']} but it isn't in the saved watchlist."
     return f"Added {m['symbol']} ({m['name']}, {m['region']}, priced in {m['currency']}) to your watchlist."
 
 
 def remove(symbol):
-    data = _load("watchlist.json", {"instruments": []})
-    keep = [i for i in data["instruments"] if i["symbol"].upper() != (symbol or "").upper()]
-    if len(keep) == len(data["instruments"]):
-        return f"{symbol} isn't on your watchlist."
-    data["instruments"] = keep
-    _save("watchlist.json", data)
+    try:
+        with _locked():
+            data = _load("watchlist.json", {"instruments": []})
+            keep = [i for i in data["instruments"] if i["symbol"].upper() != (symbol or "").upper()]
+            if len(keep) == len(data["instruments"]):
+                return f"{symbol} isn't on your watchlist."
+            data["instruments"] = keep
+            _save("watchlist.json", data)
+    except StoreError as e:
+        return f"I haven't removed {symbol}: {e}."
     return f"Removed {symbol} from your watchlist."
 
 
@@ -214,85 +309,177 @@ def set_alert(symbol, direction, level, currency):
         return "An alert is 'above' or 'below' a price."
     lvl = _num(level)
     if lvl is None or lvl <= 0:
-        return "The alert needs a positive price."
-    data = _load("watchlist.json", {"instruments": []})
-    inst = next((i for i in data["instruments"] if i["symbol"].upper() == symbol.upper()), None)
-    if inst is None:
-        return f"{symbol} isn't on your watchlist; add it first."
-    if (currency or "").upper() != inst["currency"].upper():
-        return (f"{inst['symbol']} is priced in {inst['currency']}, not {currency}. Give the level in "
-                f"{inst['currency']} (GBX is pence: 300 GBX = 3.00 GBP).")
-    rule = {"direction": direction, "level": lvl, "currency": inst["currency"]}
-    if rule not in inst["alerts"]:
-        inst["alerts"].append(rule)
-        _save("watchlist.json", data)
+        return "The alert needs a positive, finite price, like 300 or 2.5."
+    try:
+        with _locked():
+            data = _load("watchlist.json", {"instruments": []})
+            inst = next((i for i in data["instruments"] if i["symbol"].upper() == (symbol or "").upper()), None)
+            if inst is None:
+                return f"{symbol} isn't on your watchlist; add it first."
+            if (currency or "").upper() != inst["currency"].upper():
+                return (f"{inst['symbol']} is priced in {inst['currency']}, not {currency}. Give the level in "
+                        f"{inst['currency']} (GBX is pence: 300 GBX = 3.00 GBP).")
+            rule = {"direction": direction, "level": lvl, "currency": inst["currency"]}
+            if rule not in inst["alerts"]:
+                inst["alerts"].append(rule)
+                _save("watchlist.json", data)
+    except StoreError as e:
+        return f"I haven't set that alert: {e}."
     return f"Alert set: {inst['symbol']} at or {direction} {lvl:g} {inst['currency']}."
 
 
 # -- quotes, alerts, brief ---------------------------------------------------
 
 def fetch(inst, prov, now=None):
-    """One validated quote. Status is live/delayed/cached/unavailable."""
+    """One validated quote. Status is live/delayed/cached/unavailable.
+
+    cached     the provider failed; this is the last good quote, with the
+               time it was really retrieved. Never alerts.
+    reused     (flag) a recent end-of-day quote not fetched again, to spare
+               the quota; still "delayed", with its real retrieval time.
+    """
     now = now or _now()
-    cache = _load("quotes_cache.json", {})
+    try:
+        cache = _load("quotes_cache.json", {})
+    except StoreError:
+        cache = {}  # only a cache: refetching costs a call, nothing is lost
     base = {"symbol": inst["symbol"], "currency": inst["currency"], "source": prov.name,
-            "retrieved": now.isoformat(timespec="seconds")}
+            "source_url": getattr(prov, "source_url", ""), "retrieved": now.isoformat(timespec="seconds")}
+    old = cache.get(inst["symbol"])
+    if old and old.get("source") == prov.name and getattr(prov, "reuse_hours", 0):
+        age = now - dt.datetime.fromisoformat(old["retrieved"])
+        if dt.timedelta(0) <= age < dt.timedelta(hours=prov.reuse_hours):
+            return {**old, "status": prov.freshness, "reused": True}
     try:
         q = prov.quote(inst["symbol"])
     except ProviderError as e:
-        old = cache.get(inst["symbol"])
         if old:
-            return {**old, "status": "cached", "problem": str(e)}
-        return {**base, "status": "unavailable", "problem": str(e), "price": None,
+            return {**old, "status": "cached", "problem": _clean(e)}
+        return {**base, "status": "unavailable", "problem": _clean(e), "price": None,
                 "previous_close": None, "change_percent": None, "market_date": None}
-    quote = {**base, **q, "status": prov.freshness}
+    quote = {**base, "price": _price(q.get("price")), "previous_close": _price(q.get("previous_close")),
+             "change_percent": _num(q.get("change_percent")) if isinstance(q.get("change_percent"), (int, float)) else None,
+             "market_date": q.get("market_date"), "status": prov.freshness}
     problems = []
-    if quote.get("price") is None:
-        quote["status"], problems = "unavailable", ["no price in the response"]
-    try:
-        age = (now.date() - dt.date.fromisoformat(quote["market_date"])).days
-    except (TypeError, ValueError):
-        age = None
-        problems.append("no market date in the response")
+    if quote["price"] is None:
         quote["status"] = "unavailable"
-    if age is not None and age > STALE_DAYS:
-        quote["stale"] = True
-        problems.append(f"market date is {age} days old")
+        problems.append("no valid price in the response" if q.get("price") is None else "the price in the response is invalid")
+    # Exchange-local today, from the timezone the provider gave when it was
+    # added; unknown -> the latest date anywhere, so nothing real is refused.
+    # Unknown -> UTC+14 for "can't be in the future", UTC for staleness, so
+    # neither check is ever stricter than the truth.
+    offset = inst.get("utc_offset")
+    local_today = (now + dt.timedelta(hours=offset if offset is not None else LATEST_UTC_OFFSET)).date()
+    stale_today = (now + dt.timedelta(hours=offset or 0)).date()
+    try:
+        market = dt.date.fromisoformat(quote["market_date"])
+    except (TypeError, ValueError):
+        market = None
+        problems.append("no valid market date in the response")
+        quote["status"] = "unavailable"
+    if market is not None:
+        age = (stale_today - market).days
+        if market > local_today:
+            problems.append(f"market date {market} is after the exchange's today ({local_today})")
+            quote["status"] = "unavailable"
+        elif age > STALE_DAYS:
+            quote["stale"] = True
+            problems.append(f"market date is {age} days old")
     if problems:
         quote["problem"] = "; ".join(problems)
-    if quote["status"] != "unavailable":
-        cache[inst["symbol"]] = {k: v for k, v in quote.items() if k not in ("status", "problem")}
-        _save("quotes_cache.json", cache)
+    if quote["status"] == "unavailable":
+        quote["price"] = quote["previous_close"] = quote["change_percent"] = None
+    else:
+        cache[inst["symbol"]] = {k: v for k, v in quote.items() if k not in ("status", "problem", "reused")}
+        with _locked():
+            _save("quotes_cache.json", cache)
     return quote
 
 
+def _event_id(inst, rule, quote):
+    return f"{inst['symbol']}|{rule['direction']}|{rule['level']:g}|{quote['market_date']}"
+
+
 def evaluate(inst, quote, now=None):
-    """Alerts that fire now. One per rule per market date, then COOLDOWN_HOURS."""
+    """Alert events this quote triggers. Pure: nothing is recorded here.
+    _acknowledge() records an event only after its brief is saved and
+    verified, so a failed save can't swallow it."""
     now = now or _now()
-    fired, state = [], _load("alert_state.json", {})
-    if quote["status"] in ("unavailable", "cached") or quote.get("stale"):
-        return []  # never alert on old or missing data
+    if quote["status"] not in ("live", "delayed") or quote.get("stale") or quote.get("price") is None:
+        return []  # never alert on old, cached or missing data
+    state = _load("alert_state.json", {})
+    events = []
     for rule in inst.get("alerts", []):
-        if rule["currency"] != quote["currency"]:
+        level = _num(rule.get("level"))
+        if rule["currency"] != quote["currency"] or level is None or level <= 0:
             continue
         price = quote["price"]
-        hit = price >= rule["level"] if rule["direction"] == "above" else price <= rule["level"]
-        key = f"{inst['symbol']}|{rule['direction']}|{rule['level']:g}"
-        last = state.get(key)
-        if not hit:
+        if not (price >= level if rule["direction"] == "above" else price <= level):
             continue
-        if last and (last["market_date"] == quote["market_date"] or
-                     now - dt.datetime.fromisoformat(last["at"]) < dt.timedelta(hours=COOLDOWN_HOURS)):
+        eid = _event_id(inst, rule, quote)
+        last = state.get(f"{inst['symbol']}|{rule['direction']}|{level:g}")
+        if eid in state.get("delivered", []):
             continue
-        state[key] = {"market_date": quote["market_date"], "at": now.isoformat(timespec="seconds")}
-        fired.append({**rule, "price": price})
-    if fired:
+        if last and now - dt.datetime.fromisoformat(last["at"]) < dt.timedelta(hours=COOLDOWN_HOURS):
+            continue
+        events.append({**rule, "price": price, "id": eid, "symbol": inst["symbol"]})
+    return events
+
+
+def _acknowledge(events, now, brief_path=""):
+    """Record delivered events: durable id + the rule's cooldown clock."""
+    if not events:
+        return
+    with _locked():
+        state = _load("alert_state.json", {})
+        delivered = state.setdefault("delivered", [])
+        for e in events:
+            if e["id"] not in delivered:
+                delivered.append(e["id"])
+            state[e["id"].rsplit("|", 1)[0]] = {"market_date": e["id"].rsplit("|", 1)[1],
+                                                "at": now.isoformat(timespec="seconds"),
+                                                "brief": os.path.basename(brief_path)}
+        state["delivered"] = delivered[-500:]
         _save("alert_state.json", state)
-    return fired
+
+
+def _already_in_saved_brief(events, out_dir):
+    """Events a saved, verified brief already carries (the run that wrote
+    it died before acknowledging). Pending and failed briefs don't count."""
+    found = []
+    try:
+        names = [n for n in os.listdir(out_dir) if re.fullmatch(r"brief-[\d-]+\.md", n)]
+    except OSError:
+        return found
+    texts = []
+    for n in names:
+        try:
+            with open(os.path.join(out_dir, n), encoding="utf-8") as f:
+                texts.append(f.read())
+        except OSError:
+            pass
+    for e in events:
+        if any(f"[event {e['id']}]" in t for t in texts):
+            found.append(e)
+    return found
 
 
 def _fmt(value, currency):
     return "unavailable" if value is None else f"{value:,.2f} {currency}"
+
+
+def _obs_line(q, name):
+    line = (f"- **{q['symbol']}** ({name}): {_fmt(q.get('price'), q['currency'])}; "
+            f"previous close {_fmt(q.get('previous_close'), q['currency'])}; "
+            f"status **{q['status']}**{' (stale)' if q.get('stale') else ''}; "
+            f"market date {q.get('market_date') or 'unavailable'}; retrieved {q['retrieved']}; "
+            f"source: {q['source']}" + (f" <{q['source_url']}>" if q.get("source_url") else ""))
+    return line + (f"; problem: {q['problem']}" if q.get("problem") else "")
+
+
+def _alert_line(e):
+    return (f"- {e['symbol']} is {_fmt(e['price'], e['currency'])}, at or {e['direction']} "
+            f"your {e['level']:g} {e['currency']} level. [event {e['id']}]")
 
 
 _LEARN = ("Background, not advice: one company's price can swing a lot day to day (volatility); "
@@ -300,75 +487,96 @@ _LEARN = ("Background, not advice: one company's price can swing a lot day to da
           "the outcome; fees compound against you over years; and the longer the time horizon, "
           "the more room there is to ride out falls. None of this says what you should buy.")
 
+last_observations = []  # the structured observations behind the last brief
+
 
 def brief(prov=None, now=None, out_dir=None):
-    """Fetch, validate, evaluate, write a dated brief, read it back."""
+    """Fetch, validate, evaluate, write, verify, then acknowledge alerts.
+
+    The brief is written as .pending, verified against the structured
+    observations, renamed into place, and only then are its alerts
+    recorded. A failure at any step leaves them to be delivered next run;
+    a crash after the rename is caught next run by the event id in the
+    saved brief. At-least-once, not exactly-once.
+    """
+    global last_observations
     prov, now = prov or provider(), now or _now()
-    items = watchlist()
+    out_dir = out_dir or _path("briefs")
+    try:
+        items = watchlist()
+    except StoreError as e:
+        return f"I can't brief your watchlist: {e}."
     if not items:
         return "Your watchlist is empty, so there's nothing to brief. Add an instrument first, e.g. 'python invest.py add TSCO.LON'."
-    obs, notes, alerts = [], [], []
-    for inst in items:
-        q = fetch(inst, prov, now)
-        fired = evaluate(inst, q, now)
-        line = (f"- **{inst['symbol']}** ({inst['name']}): {_fmt(q.get('price'), q['currency'])}; "
-                f"previous close {_fmt(q.get('previous_close'), q['currency'])}; "
-                f"status **{q['status']}**{' (stale)' if q.get('stale') else ''}; "
-                f"market date {q.get('market_date') or 'unavailable'}; retrieved {q['retrieved']}; "
-                f"source: {q['source']}")
-        if q.get("problem"):
-            line += f"; problem: {q['problem']}"
-        obs.append(line)
-        for a in fired:
-            alerts.append(f"- {inst['symbol']} is {_fmt(a['price'], a['currency'])}, at or {a['direction']} "
-                          f"your {a['level']:g} {a['currency']} level.")
-        cp = q.get("change_percent")
-        if q["status"] in ("live", "delayed") and not q.get("stale") and cp is not None:
-            size = "a small" if abs(cp) < 1 else "a noticeable" if abs(cp) < 3 else "a large"
-            notes.append(f"- {inst['symbol']} moved {cp:+.2f}% on its last trading day -- {size} one-day "
-                         "move for a single share. One day says little about the long run.")
-        elif q["status"] != "delayed":
-            notes.append(f"- {inst['symbol']}: no fresh data, so nothing to interpret.")
-    fixture = any(FIXTURE_LABEL in o for o in obs)
+    obs, notes, events = [], [], []
+    try:
+        for inst in items:
+            q = fetch(inst, prov, now)
+            obs.append({**q, "name": inst["name"]})
+            events += evaluate(inst, q, now)
+            cp = q.get("change_percent")
+            if q["status"] in ("live", "delayed") and not q.get("stale") and cp is not None:
+                size = "a small" if abs(cp) < 1 else "a noticeable" if abs(cp) < 3 else "a large"
+                notes.append(f"- {inst['symbol']} moved {cp:+.2f}% on its last trading day -- {size} one-day "
+                             "move for a single share. The size alone doesn't say why it moved, and one day "
+                             "says little about the long run.")
+            elif q["status"] != "delayed" or q.get("stale"):
+                notes.append(f"- {inst['symbol']}: no fresh data, so nothing to interpret.")
+    except StoreError as e:
+        return f"I can't brief your watchlist: {e}."
+    recovered = _already_in_saved_brief(events, out_dir)
+    if recovered:
+        _acknowledge(recovered, now)
+        events = [e for e in events if e not in recovered]
+    last_observations = obs
+    fixture = any(FIXTURE_LABEL in o["source"] for o in obs)
     stamp = now.strftime("%Y-%m-%d %H:%M UTC")
     text = "\n".join([
         f"# Watchlist brief -- {stamp}", "",
         *([f"> **{FIXTURE_LABEL}.** Every number below is made up for testing.", ""] if fixture else []),
-        "## Observations (from the source named on each line)", "", *obs, "",
-        "## Alerts", "", *(alerts or ["- None fired."]), "",
+        "## Observations (from the source named on each line)", "", *[_obs_line(o, o["name"]) for o in obs], "",
+        "## Alerts", "", *([_alert_line(e) for e in events] or ["- None fired."]), "",
         "## Interpretation (mine, not a fact and not advice)", "", *(notes or ["- Nothing to interpret."]), "",
         "## Background", "", _LEARN, "",
     ])
-    out_dir = out_dir or _path("briefs")
-    os.makedirs(out_dir, exist_ok=True)
-    # Never overwrite an earlier brief: it may hold the only record of an
-    # alert that the cooldown now suppresses.
-    stem, n = os.path.join(out_dir, f"brief-{now.strftime('%Y%m%d-%H%M%S')}"), 1
-    path = stem + ".md"
-    while os.path.exists(path):
-        n += 1
-        path = f"{stem}-{n}.md"
-    with open(path, "x", encoding="utf-8") as f:
-        f.write(text)
-    problems = verify(path, items, obs)
-    head = f"Watchlist brief saved to {path}."
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+        stem, n = os.path.join(out_dir, f"brief-{now.strftime('%Y%m%d-%H%M%S')}"), 1
+        path = stem + ".md"
+        while os.path.exists(path) or os.path.exists(path + ".pending"):
+            n += 1
+            path = f"{stem}-{n}.md"
+        with open(path + ".pending", "x", encoding="utf-8") as f:
+            f.write(text)
+    except OSError as e:
+        return f"I couldn't save the brief ({type(e).__name__}), so no alert was marked as sent; I'll include it next time."
+    problems = verify(path + ".pending", obs, events)
     if problems:
-        return head + " But the check found: " + "; ".join(problems) + "."
-    summary = f" {len(items)} instrument(s), {len(alerts)} alert(s)."
-    return head + summary + (" These are synthetic fixtures, not market data." if fixture else "")
+        os.replace(path + ".pending", path[:-3] + ".failed.md")
+        return (f"The brief at {path[:-3]}.failed.md didn't match what was fetched, so no alert was marked as "
+                "sent. The check found: " + "; ".join(problems) + ".")
+    os.replace(path + ".pending", path)
+    _acknowledge(events, now, path)
+    summary = f" {len(items)} instrument(s), {len(events)} alert(s)."
+    return (f"Watchlist brief saved to {path}." + summary
+            + (" These are synthetic fixtures, not market data." if fixture else ""))
 
 
-def verify(path, items, obs):
+def verify(path, obs, events=()):
+    """Read the saved brief back and check every observation and alert
+    line exactly -- value, currency, date, status, source -- not just that
+    a symbol appears."""
     try:
         with open(path, encoding="utf-8") as f:
-            saved = f.read()
+            saved = f.read().splitlines()
     except OSError as e:
-        return [f"the brief couldn't be read back ({e})"]
-    problems = [f"{i['symbol']} is missing" for i in items if f"**{i['symbol']}**" not in saved]
-    problems += ["an observation line has no source" for o in obs if "source:" not in o]
-    if re.search(r"\b0\.00 [A-Z]{3}\b", saved):
-        problems.append("a zero price appears -- check it isn't a missing value")
-    if "## Interpretation" not in saved or saved.index("## Observations") > saved.index("## Interpretation"):
+        return [f"the brief couldn't be read back ({type(e).__name__})"]
+    problems = [f"{o['symbol']}: the saved line doesn't match what was fetched"
+                for o in obs if _obs_line(o, o["name"]) not in saved]
+    problems += [f"alert {e['id']} is missing or changed" for e in events if _alert_line(e) not in saved]
+    heads = [line for line in saved if line.startswith("## ")]
+    if heads[:2] != ["## Observations (from the source named on each line)", "## Alerts"] \
+            or "## Interpretation (mine, not a fact and not advice)" not in heads:
         problems.append("observations and interpretation are not separated")
     return problems
 
@@ -405,10 +613,7 @@ def main(argv):
     elif cmd == "brief":
         print(brief(prov))
     elif cmd == "list":
-        items = watchlist()
-        print("\n".join(f"{i['symbol']} ({i['name']}, {i['currency']}) alerts: "
-                        f"{[f'{a['direction']} {a['level']:g}' for a in i['alerts']] or 'none'}"
-                        for i in items) or "Watchlist is empty.")
+        print(list_text())
     else:
         print(__doc__)
         return 2
