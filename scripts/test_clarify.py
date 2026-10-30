@@ -177,6 +177,11 @@ check("...so a later 'yes' resolves nothing", r == "Mm?", r)
 
 meeting()
 say("that's not what i meant")
+r, _ = say("no, the sponsor one", ["Your sponsor meeting is on 3 November at 10am, on Zoom."])
+check("naming the first one explicitly picks it, from its evidence", "3 November" in r and "isn't one I found" not in r, r)
+
+meeting()
+say("that's not what i meant")
 r, _ = say("no")
 check("'no': says what was found and what's missing, without dates",
       "sponsor meeting" in r and "supervisor meeting" in r and "?" in r and "November" not in r, r)

@@ -213,7 +213,9 @@ def pick(text, p, complaint=False):
     said = set(_words(t)) - _STOP
     distinct = _distinct(p["seen"]) if len(p["seen"]) > 1 else [set(_words(o["label"])) - _STOP for o in p["seen"]]
     own = {id(o): d for o, d in zip(p["seen"], distinct)}
-    hits = [o for o in options if said & own.get(id(o), set())]
+    # Any item he names counts, even the one he first turned down: "the
+    # sponsor one" after "do you mean the supervisor meeting?" is a choice.
+    hits = [o for o in p["seen"] if said & own.get(id(o), set())] or         [o for o in options if said & own.get(id(o), set())]
     if len(hits) == 1:
         return "pick", hits[0]
     if len(hits) > 1:
