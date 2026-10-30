@@ -1811,8 +1811,12 @@ class Brain:
                 latest_user = "give me the briefing"
             elif _PLAN_STUDY.search(prev_user) or _PLAN_STUDY.search(last_said):
                 latest_user = "plan my study modules"
+        import invest
+        said = invest.chat(latest_user.strip())  # exact watchlist commands only; None otherwise
+        if said is not None:
+            messages.append({"role": "assistant", "content": said})
+            return said, messages
         if _WATCHLIST_SHOW.fullmatch(latest_user.strip()) or _WATCHLIST_BRIEF.fullmatch(latest_user.strip()):
-            import invest
             if _WATCHLIST_SHOW.fullmatch(latest_user.strip()):
                 answer = invest.list_text()  # a corrupt store says so, never "empty"
             else:

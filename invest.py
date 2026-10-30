@@ -581,6 +581,109 @@ def verify(path, obs, events=()):
     return problems
 
 
+def cancel_alert(symbol, direction, level):
+    lvl = _num(level)
+    try:
+        with _locked():
+            data = _load("watchlist.json", {"instruments": []})
+            inst = next((i for i in data["instruments"] if i["symbol"].upper() == (symbol or "").upper()), None)
+            if inst is None:
+                return f"{symbol} isn't on your watchlist."
+            keep = [a for a in inst["alerts"] if not (a["direction"] == direction and a["level"] == lvl)]
+            if len(keep) == len(inst["alerts"]):
+                return f"There's no {direction} {level} alert on {inst['symbol']}."
+            inst["alerts"] = keep
+            _save("watchlist.json", data)
+    except StoreError as e:
+        return f"I haven't cancelled it: {e}."
+    return f"Cancelled the {inst['symbol']} alert at or {direction} {lvl:g} {inst['currency']}."
+
+
+# -- chat: a few exact commands, no model call -------------------------------
+# Watching only. "what is a watchlist" and "should i buy X" are not commands
+# and go to the model. An ambiguous add is held as a pending choice tied to
+# that request; only a listed symbol or its number answers it.
+
+_SYM = r"([A-Za-z0-9][A-Za-z0-9.\-]{0,14})"
+_CHAT = [
+    ("search", re.compile(rf"^\s*(?:find|look\s+up|search(?:\s+for)?)\s+(?:the\s+)?(?:ticker|instrument|stock|share)s?\s+(?:for\s+)?(.+?)\s*[.?!]*$", re.I)),
+    ("add", re.compile(rf"^\s*(?:please\s+)?(?:add|watch)\s+{_SYM}\s+(?:to|on)\s+my\s+watchlist\s*[.!]*$", re.I)),
+    ("remove", re.compile(rf"^\s*(?:please\s+)?(?:remove|delete|drop)\s+{_SYM}\s+from\s+my\s+watchlist\s*[.!]*$", re.I)),
+    ("alert", re.compile(rf"^\s*(?:set\s+an?\s+alert\s+(?:for|on)|alert\s+me\s+(?:if|when))\s+{_SYM}\s+(?:goes\s+|is\s+|gets\s+)?(above|below)\s+([0-9][0-9.,]*)\s*([A-Za-z]{{3}})?\s*[.!]*$", re.I)),
+    ("cancel", re.compile(rf"^\s*(?:cancel|remove|delete)\s+(?:the\s+|my\s+)?{_SYM}\s+alert\s+(above|below)\s+([0-9][0-9.,]*)\s*[.!]*$", re.I)),
+    ("alerts", re.compile(r"^\s*(?:list|show)\s+my\s+(?:price\s+)?alerts\s*[.?!]*$|^\s*what\s+alerts\s+do\s+i\s+have\s*\??$", re.I)),
+]
+PENDING_MINUTES = 10
+
+
+def _pending_choice(text, now):
+    try:
+        pending = _load("pending.json", None)
+    except StoreError:
+        return None
+    if not pending:
+        return None
+    with _locked():
+        _save("pending.json", {})  # one answer, whatever it is
+    if now - dt.datetime.fromisoformat(pending["at"]) > dt.timedelta(minutes=PENDING_MINUTES):
+        return None
+    pick = text.strip().rstrip(".").upper()
+    options = pending["options"]
+    chosen = (options[int(pick) - 1] if pick.isdigit() and 1 <= int(pick) <= len(options)
+              else pick if pick in options else None)
+    return chosen
+
+
+def chat(text, prov=None, now=None):
+    """A reply for a watchlist command, or None if it isn't one."""
+    now = now or _now()
+    chosen = _pending_choice(text or "", now)
+    if chosen:
+        return add(chosen, prov)
+    for kind, rx in _CHAT:
+        m = rx.match(text or "")
+        if not m:
+            continue
+        prov = prov or provider()
+        if kind == "search":
+            try:
+                found = prov.search(m.group(1))
+            except ProviderError as e:
+                return f"I couldn't search the data provider: {e}."
+            return ("No instrument matches that." if not found else "Matches: " + "; ".join(
+                f"{f['symbol']} ({f['name']}, {f['region']}, {f['currency']})" for f in found[:5]) + ".")
+        if kind == "add":
+            reply = add(m.group(1), prov)
+            if "isn't one exact instrument" in reply:
+                try:
+                    options = [f["symbol"].upper() for f in prov.search(m.group(1))][:5]
+                except ProviderError:
+                    return reply
+                with _locked():
+                    _save("pending.json", {"request": text, "options": options, "at": now.isoformat(timespec="seconds")})
+                return (reply.replace(" Add the exact symbol you mean. Nothing added.", "") + " Which one? Say its symbol or "
+                        "number (" + ", ".join(f"{n} = {o}" for n, o in enumerate(options, 1)) + "). Nothing added yet.")
+            return reply
+        if kind == "remove":
+            return remove(m.group(1))
+        if kind == "alert":
+            sym, direction, level, cur = m.group(1), m.group(2).lower(), m.group(3).replace(",", ""), m.group(4)
+            if not cur:
+                return (f"Which currency is {level} in? Say it with the currency, e.g. 'alert me if {sym} goes "
+                        f"{direction} {level} GBX' -- pence and pounds differ by 100x, so I won't guess.")
+            return set_alert(sym, direction, level, cur.upper())
+        if kind == "cancel":
+            return cancel_alert(m.group(1), m.group(2).lower(), m.group(3).replace(",", ""))
+        if kind == "alerts":
+            try:
+                rows = [f"{i['symbol']} {a['direction']} {a['level']:g} {a['currency']}"
+                        for i in watchlist() for a in i["alerts"]]
+            except StoreError as e:
+                return f"I can't read your alerts: {e}."
+            return "Your alerts: " + "; ".join(rows) + "." if rows else "You have no price alerts."
+    return None
+
+
 def main(argv):
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")

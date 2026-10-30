@@ -28,6 +28,7 @@ SUITES = (
     "scripts/test_study_brief.py",
     "scripts/test_invest.py",
     "scripts/test_invest_correctness.py",
+    "scripts/test_invest_chat.py",
 )
 
 
