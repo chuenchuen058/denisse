@@ -769,6 +769,24 @@ _thinking_timeout_job = None
 THINKING_MAX_MS = 120_000  # never leave it stuck if a "done" gets lost
 
 
+def _runtime_state():
+    """In-memory state for runtime_status.py, read on its own thread, so
+    a restart can be judged from outside: timers and study mode exist
+    nowhere else."""
+    import timers
+    study = _study_mode
+    try:
+        runs = _get_agent_engine().status().get("last_runs") or {}
+    except Exception:
+        runs = {}
+    when = lambda t: t.isoformat(timespec="seconds") if t is not None else None
+    return {"timers": [{"label": t.get("label") or "", "ends_at": when(t.get("ends_at"))} for t in timers.active()],
+            "study": {"active": bool(study is not None and study.active),
+                      "phase": getattr(study, "phase", None), "ends_at": when(getattr(study, "ends_at", None))},
+            "chat_busy": bool(_thinking_sources),
+            "jobs": {k: v.get("status") for k, v in runs.items() if isinstance(v, dict)}}
+
+
 def _set_thinking(source: str, on: bool):
     """Show the "typing" bubble out of the orb while Denisse composes a
     reply (see reminder_card.ThinkingBubble). Safe from any thread."""
@@ -1772,6 +1790,9 @@ def main():
     threading.Thread(target=_reminder_loop, daemon=True).start()
     threading.Thread(target=_unlock_watch_loop, daemon=True).start()
     _start_agent_workers()
+    # What's running, for a restart decision made from outside the tray.
+    import runtime_status
+    runtime_status.start(_runtime_state)
 
     _tray_icon.run_detached()  # icon runs on its own thread; tkinter owns the main thread
     root.mainloop()
