@@ -72,6 +72,76 @@ def _load(name, default):
         raise StoreError(f"{name} is unreadable ({type(e).__name__}); I haven't changed it")
 
 
+def _when(value):
+    """A timezone-aware ISO time, or None."""
+    try:
+        t = dt.datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    return t if t.tzinfo else None
+
+
+def _finite(value):
+    return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value)
+
+
+def _watchlist_shape(data):
+    """Why the watchlist can't be used as it is, or None. Valid JSON in the
+    wrong shape ({"instruments": null}) used to escape as a TypeError."""
+    if not isinstance(data, dict) or not isinstance(data.get("instruments"), list):
+        return "it has no list of instruments"
+    for n, i in enumerate(data["instruments"], 1):
+        if not isinstance(i, dict):
+            return f"entry {n} isn't an instrument"
+        for k in ("symbol", "name", "currency"):
+            if not isinstance(i.get(k), str) or not i[k].strip():
+                return f"entry {n} has no {k}"
+        if i.get("utc_offset") is not None and not _finite(i["utc_offset"]):
+            return f"{i['symbol']} has an invalid timezone offset"
+        if not isinstance(i.get("alerts"), list):
+            return f"{i['symbol']} has no list of alerts"
+        for a in i["alerts"]:
+            if not (isinstance(a, dict) and a.get("direction") in ("above", "below") and _finite(a.get("level"))
+                    and a["level"] > 0 and isinstance(a.get("currency"), str)):
+                return f"{i['symbol']} has an invalid alert"
+    return None
+
+
+def _alert_state_shape(data):
+    if not isinstance(data, dict):
+        return "it isn't a record of sent alerts"
+    if not (isinstance(data.get("delivered", []), list) and all(isinstance(d, str) for d in data.get("delivered", []))):
+        return "its list of sent alerts is invalid"
+    if any(k != "delivered" and not (isinstance(v, dict) and _when(v.get("at"))) for k, v in data.items()):
+        return "a sent-alert entry has no valid time"
+    return None
+
+
+def _pending_shape(data):
+    if data in ({}, None):
+        return None
+    if not (isinstance(data, dict) and isinstance(data.get("question"), str) and _when(data.get("at"))
+            and isinstance(data.get("options"), list) and data["options"]
+            and all(isinstance(o, str) for o in data["options"])):
+        return "it isn't a valid pending choice"
+    return None
+
+
+def _load_checked(name, default, shape):
+    """_load, plus the structure every caller relies on. A file in the wrong
+    shape is refused and left as it is -- never reset, never saved over."""
+    data = _load(name, default)
+    why = shape(data)
+    if why:
+        raise StoreError(f"{name} isn't in the shape I expect ({why}); I haven't changed it -- "
+                         f"fix or move {_path(name)} and I'll start again")
+    return data
+
+
+def _load_watchlist():
+    return _load_checked("watchlist.json", {"instruments": []}, _watchlist_shape)
+
+
 def _save(name, data):
     os.makedirs(DATA_DIR, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=DATA_DIR)
@@ -237,14 +307,14 @@ def provider(fixtures=False):
 # -- watchlist --------------------------------------------------------------
 
 def watchlist():
-    return _load("watchlist.json", {"instruments": []})["instruments"]
+    return _load_watchlist()["instruments"]
 
 
 def list_text():
     try:
         items = watchlist()
     except StoreError as e:
-        return f"Your watchlist file is unreadable, so I can't list it: {e}."
+        return f"I can't read your watchlist, so I haven't listed or changed anything: {e}."
     return ("\n".join(f"{i['symbol']} ({i['name']}, {i['currency']}) alerts: "
                       f"{[f'{a['direction']} {a['level']:g}' for a in i['alerts']] or 'none'}"
                       for i in items) or "Your watchlist is empty.")
@@ -272,7 +342,7 @@ def add(query, prov=None):
         return f"The provider didn't say which currency {m['symbol']} trades in, so I haven't added it."
     try:
         with _locked():
-            data = _load("watchlist.json", {"instruments": []})
+            data = _load_watchlist()
             if any(i["symbol"] == m["symbol"] for i in data["instruments"]):
                 return f"{m['symbol']} is already on your watchlist."
             data["instruments"].append({"symbol": m["symbol"], "name": m["name"], "region": m["region"],
@@ -280,7 +350,7 @@ def add(query, prov=None):
                                         "provider": prov.name, "added": _now().isoformat(timespec="seconds"),
                                         "alerts": []})
             _save("watchlist.json", data)
-            saved = any(i["symbol"] == m["symbol"] for i in _load("watchlist.json", {"instruments": []})["instruments"])
+            saved = any(i["symbol"] == m["symbol"] for i in _load_watchlist()["instruments"])
     except StoreError as e:
         return f"I haven't added {m['symbol']}: {e}."
     if not saved:
@@ -291,7 +361,7 @@ def add(query, prov=None):
 def remove(symbol):
     try:
         with _locked():
-            data = _load("watchlist.json", {"instruments": []})
+            data = _load_watchlist()
             keep = [i for i in data["instruments"] if i["symbol"].upper() != (symbol or "").upper()]
             if len(keep) == len(data["instruments"]):
                 return f"{symbol} isn't on your watchlist."
@@ -312,7 +382,7 @@ def set_alert(symbol, direction, level, currency):
         return "The alert needs a positive, finite price, like 300 or 2.5."
     try:
         with _locked():
-            data = _load("watchlist.json", {"instruments": []})
+            data = _load_watchlist()
             inst = next((i for i in data["instruments"] if i["symbol"].upper() == (symbol or "").upper()), None)
             if inst is None:
                 return f"{symbol} isn't on your watchlist; add it first."
@@ -343,31 +413,57 @@ def fetch(inst, prov, now=None):
         cache = _load("quotes_cache.json", {})
     except StoreError:
         cache = {}  # only a cache: refetching costs a call, nothing is lost
-    base = {"symbol": inst["symbol"], "currency": inst["currency"], "source": prov.name,
-            "source_url": getattr(prov, "source_url", ""), "retrieved": now.isoformat(timespec="seconds")}
+    if not isinstance(cache, dict):
+        cache = {}
     old = cache.get(inst["symbol"])
-    if old and old.get("source") == prov.name and getattr(prov, "reuse_hours", 0):
-        age = now - dt.datetime.fromisoformat(old["retrieved"])
-        if dt.timedelta(0) <= age < dt.timedelta(hours=prov.reuse_hours):
-            return {**old, "status": prov.freshness, "reused": True}
+    retrieved = _when(old.get("retrieved")) if isinstance(old, dict) else None
+    if not (retrieved and retrieved <= now and old.get("symbol") == inst["symbol"]
+            and old.get("currency") == inst["currency"] and old.get("source") == prov.name):
+        old = None  # malformed, another provider or instrument, or "retrieved" in the future
+    if old and now - retrieved < dt.timedelta(hours=getattr(prov, "reuse_hours", 0)):
+        # Revalidated against today's clock, not trusted from when it was
+        # saved: a quote fetched at 23:00 can be stale by 01:00. Stale or
+        # invalid now -> ask the provider again.
+        q = _observe(inst, prov, old, now, old["retrieved"], prov.freshness)
+        if q["status"] != "unavailable" and not q.get("stale"):
+            return {**q, "reused": True}
     try:
-        q = prov.quote(inst["symbol"])
+        raw = prov.quote(inst["symbol"])
     except ProviderError as e:
         if old:
-            return {**old, "status": "cached", "problem": _clean(e)}
-        return {**base, "status": "unavailable", "problem": _clean(e), "price": None,
-                "previous_close": None, "change_percent": None, "market_date": None}
-    quote = {**base, "price": _price(q.get("price")), "previous_close": _price(q.get("previous_close")),
-             "change_percent": _num(q.get("change_percent")) if isinstance(q.get("change_percent"), (int, float)) else None,
-             "market_date": q.get("market_date"), "status": prov.freshness}
+            q = _observe(inst, prov, old, now, old["retrieved"], "cached")
+            if q["status"] == "cached":
+                return {**q, "problem": "; ".join([_clean(e)] + ([q["problem"]] if q.get("problem") else []))}
+        return {**_observe(inst, prov, {}, now, now.isoformat(timespec="seconds"), "unavailable"),
+                "problem": _clean(e)}
+    quote = _observe(inst, prov, raw if isinstance(raw, dict) else {}, now,
+                     now.isoformat(timespec="seconds"), prov.freshness)
+    if quote["status"] != "unavailable":
+        cache[inst["symbol"]] = {k: v for k, v in quote.items() if k not in ("status", "problem", "reused", "stale")}
+        with _locked():
+            _save("quotes_cache.json", cache)
+    return quote
+
+
+def _observe(inst, prov, raw, now, retrieved, status):
+    """One quote checked against the clock `now` -- the same checks for a
+    fresh response, a reused one and a cached fallback. Invalid ->
+    "unavailable" with its numbers removed; too old -> stale."""
+    quote = {"symbol": inst["symbol"], "currency": inst["currency"], "source": prov.name,
+             "source_url": getattr(prov, "source_url", ""), "retrieved": retrieved,
+             "price": _price(raw.get("price")), "previous_close": _price(raw.get("previous_close")),
+             "change_percent": float(raw["change_percent"]) if _finite(raw.get("change_percent")) else None,
+             "market_date": raw.get("market_date"), "status": status}
+    if status == "unavailable":
+        quote["price"] = quote["previous_close"] = quote["change_percent"] = quote["market_date"] = None
+        return quote
     problems = []
     if quote["price"] is None:
         quote["status"] = "unavailable"
-        problems.append("no valid price in the response" if q.get("price") is None else "the price in the response is invalid")
+        problems.append("no valid price in the response" if raw.get("price") is None else "the price in the response is invalid")
     # Exchange-local today, from the timezone the provider gave when it was
-    # added; unknown -> the latest date anywhere, so nothing real is refused.
-    # Unknown -> UTC+14 for "can't be in the future", UTC for staleness, so
-    # neither check is ever stricter than the truth.
+    # added. Unknown -> UTC+14 for "can't be in the future", UTC for
+    # staleness, so neither check is ever stricter than the truth.
     offset = inst.get("utc_offset")
     local_today = (now + dt.timedelta(hours=offset if offset is not None else LATEST_UTC_OFFSET)).date()
     stale_today = (now + dt.timedelta(hours=offset or 0)).date()
@@ -389,10 +485,6 @@ def fetch(inst, prov, now=None):
         quote["problem"] = "; ".join(problems)
     if quote["status"] == "unavailable":
         quote["price"] = quote["previous_close"] = quote["change_percent"] = None
-    else:
-        cache[inst["symbol"]] = {k: v for k, v in quote.items() if k not in ("status", "problem", "reused")}
-        with _locked():
-            _save("quotes_cache.json", cache)
     return quote
 
 
@@ -407,7 +499,7 @@ def evaluate(inst, quote, now=None):
     now = now or _now()
     if quote["status"] not in ("live", "delayed") or quote.get("stale") or quote.get("price") is None:
         return []  # never alert on old, cached or missing data
-    state = _load("alert_state.json", {})
+    state = _load_checked("alert_state.json", {}, _alert_state_shape)
     events = []
     for rule in inst.get("alerts", []):
         level = _num(rule.get("level"))
@@ -431,7 +523,7 @@ def _acknowledge(events, now, brief_path=""):
     if not events:
         return
     with _locked():
-        state = _load("alert_state.json", {})
+        state = _load_checked("alert_state.json", {}, _alert_state_shape)
         delivered = state.setdefault("delivered", [])
         for e in events:
             if e["id"] not in delivered:
@@ -526,7 +618,10 @@ def brief(prov=None, now=None, out_dir=None):
         return f"I can't brief your watchlist: {e}."
     recovered = _already_in_saved_brief(events, out_dir)
     if recovered:
-        _acknowledge(recovered, now)
+        try:
+            _acknowledge(recovered, now)
+        except StoreError as e:
+            return f"I can't brief your watchlist: {e}."
         events = [e for e in events if e not in recovered]
     last_observations = obs
     fixture = any(FIXTURE_LABEL in o["source"] for o in obs)
@@ -556,7 +651,10 @@ def brief(prov=None, now=None, out_dir=None):
         return (f"The brief at {path[:-3]}.failed.md didn't match what was fetched, so no alert was marked as "
                 "sent. The check found: " + "; ".join(problems) + ".")
     os.replace(path + ".pending", path)
-    _acknowledge(events, now, path)
+    try:
+        _acknowledge(events, now, path)
+    except StoreError as e:  # the saved brief carries the event ids; next run recovers them
+        return f"Watchlist brief saved to {path}, but I couldn't record its alerts as sent: {e}."
     summary = f" {len(items)} instrument(s), {len(events)} alert(s)."
     return (f"Watchlist brief saved to {path}." + summary
             + (" These are synthetic fixtures, not market data." if fixture else ""))
@@ -585,7 +683,7 @@ def cancel_alert(symbol, direction, level):
     lvl = _num(level)
     try:
         with _locked():
-            data = _load("watchlist.json", {"instruments": []})
+            data = _load_watchlist()
             inst = next((i for i in data["instruments"] if i["symbol"].upper() == (symbol or "").upper()), None)
             if inst is None:
                 return f"{symbol} isn't on your watchlist."
@@ -616,17 +714,28 @@ _CHAT = [
 PENDING_MINUTES = 10
 
 
-def _pending_choice(text, now):
+def _pending_choice(text, now, last_said=None):
+    """The symbol this message picks from the open question, or None.
+
+    Taken under the lock -- read and cleared in one step -- so whatever
+    this message says, and however many arrive at once, the choice answers
+    only one. `last_said` is her previous reply in this conversation: a
+    choice only answers the question she has just asked. Without that,
+    "thanks" -> "Any time." (a reply that never reaches chat()) left the
+    choice open, and a later "1" added an instrument (2026-10-30 review)."""
     try:
-        pending = _load("pending.json", None)
+        with _locked():
+            pending = _load_checked("pending.json", None, _pending_shape)
+            if not pending:
+                return None
+            _save("pending.json", {})  # one answer, whatever it is
     except StoreError:
         return None
-    if not pending:
+    age = now - _when(pending["at"])
+    if not dt.timedelta(0) <= age <= dt.timedelta(minutes=PENDING_MINUTES):
         return None
-    with _locked():
-        _save("pending.json", {})  # one answer, whatever it is
-    if now - dt.datetime.fromisoformat(pending["at"]) > dt.timedelta(minutes=PENDING_MINUTES):
-        return None
+    if last_said is not None and " ".join(last_said.split()) != " ".join(pending["question"].split()):
+        return None  # something else was said since she asked
     pick = text.strip().rstrip(".").upper()
     options = pending["options"]
     chosen = (options[int(pick) - 1] if pick.isdigit() and 1 <= int(pick) <= len(options)
@@ -634,10 +743,12 @@ def _pending_choice(text, now):
     return chosen
 
 
-def chat(text, prov=None, now=None):
-    """A reply for a watchlist command, or None if it isn't one."""
+def chat(text, prov=None, now=None, last_said=None):
+    """A reply for a watchlist command, or None if it isn't one.
+    `last_said`: her previous reply, so a pending choice answers only the
+    question just asked (the brain passes it; None skips that check)."""
     now = now or _now()
-    chosen = _pending_choice(text or "", now)
+    chosen = _pending_choice(text or "", now, last_said)
     if chosen:
         return add(chosen, prov)
     for kind, rx in _CHAT:
@@ -659,10 +770,16 @@ def chat(text, prov=None, now=None):
                     options = [f["symbol"].upper() for f in prov.search(m.group(1))][:5]
                 except ProviderError:
                     return reply
-                with _locked():
-                    _save("pending.json", {"request": text, "options": options, "at": now.isoformat(timespec="seconds")})
-                return (reply.replace(" Add the exact symbol you mean. Nothing added.", "") + " Which one? Say its symbol or "
-                        "number (" + ", ".join(f"{n} = {o}" for n, o in enumerate(options, 1)) + "). Nothing added yet.")
+                question = (reply.replace(" Add the exact symbol you mean. Nothing added.", "") + " Which one? Say its "
+                            "symbol or number (" + ", ".join(f"{n} = {o}" for n, o in enumerate(options, 1))
+                            + "). Nothing added yet.")
+                try:
+                    with _locked():  # replaces any earlier question
+                        _save("pending.json", {"request": text, "question": question, "options": options,
+                                               "at": now.isoformat(timespec="seconds")})
+                except StoreError:
+                    return reply
+                return question
             return reply
         if kind == "remove":
             return remove(m.group(1))

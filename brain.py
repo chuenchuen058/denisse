@@ -1812,7 +1812,11 @@ class Brain:
             elif _PLAN_STUDY.search(prev_user) or _PLAN_STUDY.search(last_said):
                 latest_user = "plan my study modules"
         import invest
-        said = invest.chat(latest_user.strip())  # exact watchlist commands only; None otherwise
+        # Her previous reply goes with it: a pending instrument choice answers
+        # only the question she has just asked, so an early reply above
+        # ("thanks" -> "Any time.") still closes it.
+        said = invest.chat(latest_user.strip(), last_said=next(
+            (m.get("content") or "" for m in reversed(messages[:-1]) if m.get("role") == "assistant"), ""))
         if said is not None:
             messages.append({"role": "assistant", "content": said})
             return said, messages
