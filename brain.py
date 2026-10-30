@@ -1198,6 +1198,21 @@ _PLAN_STUDY = re.compile(
     r"|revis(?:e|ing)|modules?|coursework|assignments?|semester|term|deadlines?)\b"
     r"|\b(?:study|revision)\s+(?:plan|schedule|timetable)\b",
     re.IGNORECASE)
+# A study brief for one module (study_brief.py). "prep me for signals" went
+# to the Claude hand-off and "brief me on electromagnetism" to the daily
+# briefing; a brief for a named module is local work from his own notes.
+# Without a module she asks which one -- study_brief.run does that.
+_NAMES_MODULE = (r"(?=[^.?!]*\b(?:signals?|electromag\w*|em|cm|cab|s&s|methods|biomath\w*"
+                 r"|5ccyb\d{3})\b)")
+_STUDY_BRIEF = re.compile(
+    r"\b(?:study|revision|coursework)\s+brief\b"
+    rf"|\b(?:prep|prepare|get\s+me\s+ready)\s+(?:me\s+)?(?:for|on)\b{_NAMES_MODULE}"
+    rf"|\bhelp\s+me\s+(?:study|revise|prepare)\b{_NAMES_MODULE}"
+    rf"|\brevise\s+for\b{_NAMES_MODULE}"
+    rf"|\bbrief\s+(?:me\s+)?(?:for|on)\b{_NAMES_MODULE}",
+    re.IGNORECASE)
+
+
 # "Go on, do that one" -- the job is named by the turn before. Live on 28-29
 # Oct, after she offered the briefing, "alright tell me" got her skills
 # list; after "plan my study modules", "i want you to plan it" got "use the
@@ -1610,6 +1625,20 @@ class Brain:
                 latest_user = "give me the briefing"
             elif _PLAN_STUDY.search(prev_user) or _PLAN_STUDY.search(last_said):
                 latest_user = "plan my study modules"
+        import study_brief
+        brief_module = study_brief.match_module(latest_user)
+        last_said = next((m.get("content") or "" for m in reversed(messages[:-1])
+                          if m.get("role") == "assistant"), "")
+        if (_STUDY_BRIEF.search(latest_user)
+                or (brief_module and _PLAN_STUDY.search(latest_user))
+                or (brief_module and last_said.startswith(study_brief.WHICH_MODULE))):
+            # One module, done as a job: notes read, brief written into his
+            # vault, read back and checked -- see study_brief.py. Before the
+            # daily briefing ("brief me on signals") and the hand-off ("prep
+            # me for...") so neither swallows it.
+            answer = study_brief.run(latest_user)
+            messages.append({"role": "assistant", "content": answer})
+            return answer, messages
         if _BRIEFING.search(latest_user):
             # Built from his tasks and coursework notes -- see planner.py.
             answer = planner.briefing()

@@ -537,6 +537,41 @@ CASES = [
         "why": "Live 29 Oct: 'use the list_skills tool'. Re-probed 30 Oct: "
                "'what subjects are you studying?' -- the planner already knows.",
     },
+    # --- added 2026-10-30: the study brief, the first multi-step job.
+    {
+        "id": "study_brief_signals",
+        "prompt": "prep me for signals and systems",
+        "expect": {"contains_any": ["study brief"], "must_contain": ["24 Nov"],
+                   "deny": ["claude", "what subjects", "which module"]},
+        "why": "A brief for a named module is local work from his notes. "
+               "'prep me for...' used to go to the Claude hand-off.",
+    },
+    {
+        "id": "study_brief_em",
+        "prompt": "brief me on electromagnetism",
+        "expect": {"contains_any": ["study brief"], "must_contain": ["Electromagnetism"],
+                   "deny": ["claude", "°f", "°c"]},
+        "why": "'brief me' alone is the daily briefing; on a module it is that "
+               "module's study brief.",
+    },
+    {
+        "id": "study_brief_which",
+        "prompt": "can you do me a study brief",
+        "expect": {"contains_any": ["which module"], "deny": ["claude"]},
+        "why": "No module named: ask, don't guess one.",
+    },
+    {
+        "id": "study_brief_answer",
+        "before": [
+            {"role": "user", "content": "can you do me a study brief"},
+            {"role": "assistant", "content": "Which module is the study brief for? I can do one for "
+             "Signals and Systems, Electromagnetism, Computational Methods or Computational "
+             "Applied Biomathematics."},
+        ],
+        "prompt": "signals",
+        "expect": {"contains_any": ["study brief"], "must_contain": ["Signals and Systems"]},
+        "why": "The answer to her own question finishes the job.",
+    },
     {
         # Keep last: it closes the seeded task, which the earlier task
         # cases in this condition still need open.

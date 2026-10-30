@@ -360,6 +360,11 @@ def main() -> int:
     delegate.DRY_RUN = True
     import planner
     planner.PENDING_FILE = str(scratch.with_name("pending_plan.json"))
+    # A study brief is written into his vault's Drafts and its progress into
+    # memory/jobs -- the suite's briefs go to scratch instead. (2026-10-30)
+    import study_brief
+    study_brief.DRAFTS = str(scratch.with_name("Drafts"))
+    study_brief.JOBS_DIR = str(scratch.with_name("jobs"))
 
     now = datetime.datetime.now()
     results = {"stamp": now.strftime("%Y-%m-%d %H:%M"), "date": now.strftime("%Y-%m-%d")}
