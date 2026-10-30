@@ -1232,6 +1232,15 @@ _PLAN_STUDY = re.compile(
 # Without a module she asks which one -- study_brief.run does that.
 _NAMES_MODULE = (r"(?=[^.?!]*\b(?:signals?|electromag\w*|em|cm|cab|s&s|methods|biomath\w*"
                  r"|5ccyb\d{3})\b)")
+# invest.py, 2026-10-30: read-only, no model call. Watching only -- there is
+# no trading tool, and adding/removing instruments is the CLI's job for now.
+_WATCHLIST_BRIEF = re.compile(
+    r"^\s*(?:(?:give|run|show)\s+(?:me\s+)?(?:my\s+|the\s+)?|brief\s+me\s+on\s+my\s+)"
+    r"(?:watchlist|market)(?:\s+brief(?:ing)?)?\s*[.!?]*\s*$"
+    r"|^\s*(?:my\s+)?(?:watchlist|market)\s+brief(?:ing)?\s*[.!?]*\s*$", re.I)
+_WATCHLIST_SHOW = re.compile(
+    r"^\s*(?:what'?s\s+on\s+|list\s+|show\s+)?my\s+watchlist\s*[.!?]*\s*$", re.I)
+
 _STUDY_BRIEF = re.compile(
     r"\b(?:study|revision|coursework)\s+brief\b"
     rf"|\b(?:prep|prepare|get\s+me\s+ready)\s+(?:me\s+)?(?:for|on)\b{_NAMES_MODULE}"
@@ -1675,6 +1684,16 @@ class Brain:
                 latest_user = "give me the briefing"
             elif _PLAN_STUDY.search(prev_user) or _PLAN_STUDY.search(last_said):
                 latest_user = "plan my study modules"
+        if _WATCHLIST_SHOW.fullmatch(latest_user.strip()) or _WATCHLIST_BRIEF.fullmatch(latest_user.strip()):
+            import invest
+            if _WATCHLIST_SHOW.fullmatch(latest_user.strip()):
+                items = invest.watchlist()
+                answer = ("Your watchlist is empty." if not items else "On your watchlist: " +
+                          "; ".join(f"{i['symbol']} ({i['name']}, {i['currency']})" for i in items) + ".")
+            else:
+                answer = invest.brief()
+            messages.append({"role": "assistant", "content": answer})
+            return answer, messages
         import study_brief
         brief_module = study_brief.match_module(latest_user)
         last_said = next((m.get("content") or "" for m in reversed(messages[:-1])

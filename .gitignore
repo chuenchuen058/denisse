@@ -39,3 +39,8 @@ logs/
 _*.py
 _*.ps1
 Claude outputs/
+
+# invest.py: his watchlist, alerts, cached quotes and briefs; and the
+# synthetic fixture store beside it. Private financial records. (2026-10-30)
+memory/invest/
+memory/invest-fixtures/
