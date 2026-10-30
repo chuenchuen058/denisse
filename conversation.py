@@ -32,8 +32,9 @@ So: `replay()` decides what the model *sees* (recent, and prose only),
 clobbered). Keeping those two separate is the whole point of the module.
 """
 
-import threading
 import logging
+import re
+import threading
 import uuid
 
 import brain_rules
@@ -97,19 +98,95 @@ def _prose_only(messages: list) -> list:
     return out
 
 
+# Replies that did nothing for him. Kept on disk (the learner and the eval
+# read them there), left out of what the model sees.
+_DEFLECTION = re.compile(
+    r"didn'?t\s+(?:quite\s+)?catch|\brephrase\b|say\s+that\s+again|ask\s+that\s+again"
+    r"|i\s+don'?t\s+have\s+(?:any\s+|enough\s+)?(?:information|info|details|access)"
+    r"|can\s+you\s+tell\s+me\s+(?:more|what)|i'?m\s+not\s+(?:actually\s+)?able\s+to"
+    r"|it\s+seems\s+(?:like\s+)?i\s+don'?t\s+have|i\s+got\s+stuck"
+    r"|i\s+haven'?t\s+confirmed\s+that\s+action|i\s+couldn'?t\s+complete"
+    r"|\b[a-z]+_[a-z_]+'?\s+tool\b",  # "use the 'list_skills' tool"
+    re.IGNORECASE)
+
+
+def _turns(history: list) -> list:
+    """Split a history into turns: each starts at a user message (feedback
+    included) and runs to the next. Anything before the first user message
+    is its own leading group."""
+    groups, cur = [], []
+    for m in history:
+        if m.get("role") == "user" and cur:
+            groups.append(cur)
+            cur = []
+        cur.append(m)
+    if cur:
+        groups.append(cur)
+    return groups
+
+
+def _reply_of(turn: list) -> str:
+    texts = [(m.get("content") or "") for m in turn
+             if m.get("role") == "assistant" and not m.get("tool_calls")]
+    return texts[-1] if texts else ""
+
+
+def _drop_failed(groups: list) -> list:
+    """Leave out the turns that went wrong, so the model doesn't build on them.
+
+    Traced 2026-10-30: "do you like rainy days?" got "I didn't catch that.
+    Could you rephrase?" 4/4 against the live replay and 0/4 with one bad
+    turn removed ("hows my internship tracker" -> "I don't have any
+    information about your internship tracker"). Three kinds go:
+
+    - a turn whose reply was a deflection (_DEFLECTION);
+    - a turn he complained about ("thats not what im asking"), and the
+      complaint turn itself -- its reply answers a request that's gone;
+    - a turn he marked /bad;
+    - her skills list given to something that wasn't a skills question
+      ("plan my internship applications", 2026-10-29) -- execute() refuses
+      that now, but the old turns are still on disk.
+    """
+    try:
+        from brain import _COMPLAINT, _SKILL_QUESTION
+    except Exception:  # never let a broken brain import stop the replay
+        _COMPLAINT = _SKILL_QUESTION = None
+    keep = [True] * len(groups)
+    for i, g in enumerate(groups):
+        first = g[0]
+        text = (first.get("content") or "").strip() if first.get("role") == "user" else ""
+        if text.lower() == "/bad" and i > 0:
+            keep[i - 1] = False
+        if text and _COMPLAINT is not None and _COMPLAINT.fullmatch(text):
+            keep[i] = False
+            if i > 0:
+                keep[i - 1] = False
+        reply = _reply_of(g)
+        if _DEFLECTION.search(reply):
+            keep[i] = False
+        if (_SKILL_QUESTION is not None and reply.startswith("Here's what I can help with")
+                and not _SKILL_QUESTION.search(text)):
+            keep[i] = False
+    return [g for g, k in zip(groups, keep) if k]
+
+
 def replay(turns: int | None = None) -> list:
     """The context to hand the brain for a new turn: the last `turns`
-    exchanges, prose only. Always a fresh list -- callers append their new
-    user message to it and hand it straight to Brain.respond()."""
+    exchanges that went right, prose only. Always a fresh list -- callers
+    append their new user message to it and hand it straight to
+    Brain.respond()."""
     if turns is None:
         turns = brain_rules.load().recent_turns
     with _lock:
         history = memory_store.load_history()
 
-    starts = [i for i, m in enumerate(history) if _is_turn_start(m)]
-    if len(starts) > turns:
-        history = history[starts[-turns]:]
-    return _prose_only(history)
+    # The window stays the last `turns` turns; failed ones inside it are
+    # dropped, not replaced. Refilling from further back pulled in older
+    # junk (an invented weather briefing, "use the list_skills tool").
+    groups = _turns(history)
+    good = {id(g) for g in _drop_failed(groups)}
+    recent = [g for g in groups if _is_turn_start(g[0])][-turns:]
+    return _prose_only([m for g in recent if id(g) in good for m in g])
 
 
 # Filler words a Vosk mis-transcription collapses into. Not a blocklist for

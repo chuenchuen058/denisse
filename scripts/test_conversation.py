@@ -66,6 +66,29 @@ print(f"[{'OK ' if before == after else 'FAIL'}] replay is read-only")
 if before != after:
     fails.append("replay-readonly")
 
+# 3b. Failed turns stay on disk but out of the replay (2026-10-30).
+def _t(user, reply, tool=False):
+    t = [{"role": "user", "content": user}]
+    if tool:
+        t += [{"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "x"}}]},
+              {"role": "tool", "content": "r"}]
+    return t + [{"role": "assistant", "content": reply}]
+
+hist = (_t("what do you know about my projects?", "BlueBand, the PCB one.")
+        + _t("hows my internship tracker", "I don't have any information about your internship tracker.", True)
+        + _t("whats the time", "It's 10:57.")
+        + _t("thats not what im asking", "It's 10:57.")
+        + _t("plan my internship applications", "Here's what I can help with:\n- daily_briefing")
+        + _t("what skills do you have?", "Here's what I can help with:\n- daily_briefing")
+        + _t("open my cv", "Opened it.") + _t("/bad", "")
+        + _t("do you like rainy days?", "I didn't catch that. Could you rephrase?")
+        + _t("what's 2+2", "4."))
+kept = [g[0]["content"] for g in conversation._drop_failed(conversation._turns(hist))]
+want = ["what do you know about my projects?", "what skills do you have?", "/bad", "what's 2+2"]
+print(f"[{'OK ' if kept == want else 'FAIL'}] failed turns dropped: {kept}")
+if kept != want:
+    fails.append("drop-failed")
+
 # 4. record() with a noise transcript writes nothing.
 n0 = len(memory_store.load_history())
 wrote = conversation.record([{"role": "user", "content": "the uh the"},

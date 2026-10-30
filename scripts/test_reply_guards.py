@@ -156,6 +156,25 @@ check("a greeting still answered after her question",
 for text in ("hey can you find my cv", "ok open the passport", "thanks, now add a task"):
     check(f"not a quick reply: {text!r}", brain._quick_reply(text, "", _am) is None)
 
+# 2026-10-30: "didn't catch that" to a clear question gets one clean retry.
+for text in ("I didn't catch that. Could you rephrase the question?",
+             "I didn't quite catch that.", "Can you ask that again?", "What do you mean?"):
+    check(f"didn't-catch: {text!r}", bool(brain._DIDNT_CATCH.search(text)))
+for text in ("I don't have personal preferences, but rainy days are cosy.",
+             "What do you mean by the second deadline -- coursework or exam?"):
+    check(f"not didn't-catch: {text!r}", not brain._DIDNT_CATCH.search(text))
+check("clear: 'do you like rainy days?'", brain._clear_message("do you like rainy days?"))
+for text in ("the uh", "what?", "hmm"):
+    check(f"too short for the retry: {text!r}", not brain._clear_message(text))
+
+# 2026-10-30: a weather follow-up names a place; the code fetches it.
+for text, want in (("and in Penang?", "Penang"), ("what about Kuala Lumpur?", "Kuala Lumpur"),
+                   ("how about tokyo", "tokyo"), ("and you?", None), ("and tomorrow?", None),
+                   ("can you play some music", None)):
+    got = brain._weather_place(text, ["weather"])
+    check(f"weather place {text!r}", got == want, got)
+check("no weather topic, no forced call", brain._weather_place("and in Penang?", ["music"]) is None)
+
 # The whole retry path through respond(): a complaint after a wrong answer
 # reruns the original request. Here that request is the briefing, which
 # needs no model, so no Ollama is touched.

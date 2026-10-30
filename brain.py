@@ -680,6 +680,46 @@ _TOOL_NARRATION = re.compile(
 # "json" since 2026-10-22: "No JSON response is needed for this one." --
 # all three greetings in one eval run once _STYLE_EXAMPLES were on.
 
+# "I didn't catch that. Could you rephrase?" to a clear, typed question.
+# Traced 2026-10-30: "do you like rainy days?" got it 4/4 against the live
+# history and 0/3 clean -- the history confused her, the question was fine.
+# conversation._drop_failed now keeps the worst turns out of the replay;
+# this is the backstop when it still happens: one retry with the history
+# left out. A message of under three words can still get "didn't catch".
+_DIDNT_CATCH = re.compile(
+    r"didn'?t\s+(?:quite\s+)?catch|\brephrase\b|say\s+that\s+again|ask\s+that\s+again"
+    r"|^\s*what\s+do\s+you\s+mean\??\s*$",
+    re.IGNORECASE,
+)
+
+
+def _clear_message(text: str) -> bool:
+    return len(re.findall(r"[A-Za-z][A-Za-z']*", text or "")) >= 3
+
+
+# "and in Penang?" after a weather question. The router carries the weather
+# tool over, but live the model called nothing and answered from memory --
+# 3/3 before the 2026-10-30 replay change, still 2/3 after. Only one right
+# thing to do, so the code asks for the place.
+_PLACE_FOLLOW_UP = re.compile(
+    r"^\s*(?:and|what\s+about|how\s+about)\s+(?:in\s+|for\s+|at\s+)?"
+    r"([A-Za-z][A-Za-z .'-]{1,40}?)\s*[?.!]*\s*$", re.IGNORECASE)
+_NOT_A_PLACE = re.compile(r"^(?:you|me|it|that|this|them|there|here|him|her|us)$", re.IGNORECASE)
+
+
+def _weather_place(text: str, request_groups) -> str | None:
+    """The place in a weather follow-up, or None."""
+    if "weather" not in (request_groups or ()):
+        return None
+    m = _PLACE_FOLLOW_UP.match(text or "")
+    if not m:
+        return None
+    place = m.group(1).strip()
+    if _NOT_A_PLACE.match(place) or _TIME_REQUEST.search(place):
+        return None
+    return place
+
+
 # A real answer wrapped in commentary on how she got it: "I called the
 # get_weather tool to get the current weather in London. According to the
 # tool, ..." and "The tool call returned a list of news headlines" (eval,
@@ -1560,6 +1600,7 @@ class Brain:
         tool_outputs = {}
         news_result = ""       # for _has_news_content
         honesty_nudged = False # that check sends her back at most once per turn
+        catch_retried = False  # the "didn't catch that" retry, also once
         # Only the tools this turn could plausibly need -- see tool_router.py
         # for why sending all of them costs reply quality on an 8B model.
         turn_tools = tool_router.select(TOOL_DEFINITIONS, messages)
@@ -1696,6 +1737,27 @@ class Brain:
                     # search above: look first, then answer from it.
                     fake_call = {"name": "search_vault", "arguments": {"query": vq}}
                     vault_forced = True
+                place = _weather_place(latest_user, request_groups)
+                if (fake_call is None and place and not last_round
+                        and "get_weather" in offered_names and "get_weather" not in tool_outputs):
+                    fake_call = {"name": "get_weather", "arguments": {"location": place}}
+                if (fake_call is None and not catch_retried and not turn_results
+                        and _DIDNT_CATCH.search(final_text) and _clear_message(latest_user)):
+                    catch_retried = True
+                    # Same question, history left out, no tools: the clean
+                    # condition, where this answer was fine. Kept only if
+                    # it's an actual answer.
+                    retry = ollama.chat(
+                        model=MODEL,
+                        messages=([full_messages[0]] + _style_examples()
+                                  + [{"role": "user", "content": latest_user}]),
+                        keep_alive=-1,
+                        options={"temperature": 0.2, "num_ctx": NUM_CTX},
+                    )
+                    retry_text = _strip_role_prefix(
+                        (_get(_get(retry, "message"), "content", "") or "").strip())
+                    if retry_text and not _DIDNT_CATCH.search(retry_text):
+                        final_text = retry_text
                 if fake_call is None and _TOOL_NARRATION.match(final_text):
                     # One retry, no tools, with the nudge as a system note
                     # for this call only -- never added to `messages`, so it
