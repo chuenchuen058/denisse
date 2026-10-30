@@ -190,6 +190,27 @@ before = read("watchlist.json")
 check("040f3cb-era entry (no utc_offset) still loads", "ACME.LON" in invest.list_text()
       and read("watchlist.json") == before)
 
+fresh()
+noname = invest.FixtureProvider(matches={"NONAME.FIX": [{"symbol": "NONAME.FIX", "name": "", "region": "",
+                                                          "type": "Equity", "currency": "XXX", "timezone": "UTC+00"}]})
+r = invest.add("NONAME.FIX", noname)
+check("an instrument without a name is added and the list still loads", r.startswith("Added NONAME.FIX")
+      and "NONAME.FIX" in invest.list_text(), f"{r} | {invest.list_text()}")
+fresh()
+write("watchlist.json", {"instruments": [ENTRY]})
+before = read("watchlist.json")
+try:
+    invest._save("watchlist.json", {"instruments": [{**ENTRY, "alerts": None}]})
+    refused = False
+except invest.StoreError:
+    refused = True
+check("a write that would leave the watchlist invalid is refused", refused and read("watchlist.json") == before)
+
+fresh()
+write("watchlist.json", {"instruments": [ENTRY]})
+r = invest.brief(P, dt.datetime(2026, 10, 30, 18, 0))  # naive clock: no crash in the chat summary
+check("brief with a naive clock still answers", "Full report saved to" in r, r[:200])
+
 for bad in ([], {"delivered": None}, {"delivered": [1]}, {"ACME.LON|above|300": "sent"},
             {"ACME.LON|above|300": {"at": "not a time"}}):
     fresh()

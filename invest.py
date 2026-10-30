@@ -93,9 +93,11 @@ def _watchlist_shape(data):
     for n, i in enumerate(data["instruments"], 1):
         if not isinstance(i, dict):
             return f"entry {n} isn't an instrument"
-        for k in ("symbol", "name", "currency"):
+        for k in ("symbol", "currency"):
             if not isinstance(i.get(k), str) or not i[k].strip():
                 return f"entry {n} has no {k}"
+        if not isinstance(i.get("name"), str):  # may be empty: the provider doesn't always give one
+            return f"entry {n} has no name"
         if i.get("utc_offset") is not None and not _finite(i["utc_offset"]):
             return f"{i['symbol']} has an invalid timezone offset"
         if not isinstance(i.get("alerts"), list):
@@ -143,6 +145,9 @@ def _load_watchlist():
 
 
 def _save(name, data):
+    if name == "watchlist.json" and _watchlist_shape(data):
+        # Never write what every later read would refuse.
+        raise StoreError(f"the change would leave watchlist.json invalid ({_watchlist_shape(data)}), so I didn't save it")
     os.makedirs(DATA_DIR, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=DATA_DIR)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -672,9 +677,10 @@ def _chat_summary(obs, events, fixture, limit=8):
             lines.append(f"- {o['symbol']}: no usable price ({_clean(o.get('problem') or o['status'], 100)}).")
             continue
         when = _when(o["retrieved"])
+        when = f"{when.astimezone(dt.timezone.utc):%Y-%m-%d %H:%M} UTC" if when else o["retrieved"]
         fresh = ("stale, " if o.get("stale") else "") + _FRESHNESS.get(o["status"], o["status"])
         lines.append(f"- {o['symbol']}: {_fmt(o['price'], o['currency'])}, market date {o['market_date']} "
-                     f"({fresh}; retrieved {when.astimezone(dt.timezone.utc):%Y-%m-%d %H:%M} UTC).")
+                     f"({fresh}; retrieved {when}).")
     if len(obs) > limit:
         lines.append(f"- ...and {len(obs) - limit} more in the full report.")
     if events:
