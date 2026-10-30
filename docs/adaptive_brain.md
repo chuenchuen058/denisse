@@ -30,6 +30,37 @@ flowchart LR
    not count twice. Multiple failed attempts before one accepted fix still
    count as **one** confirmation.
 
+### Feedback principles
+
+1. **Read feedback the way he gives it.** The detector is fitted to real
+   phrasing, not to the commands we wish he typed. `/good` and `/bad` work,
+   but so do "thats good", "still not what im asking" and "what?".
+2. **A complaint is a correction.** Anything Denisse reruns as a complaint
+   (`brain._COMPLAINT`) also marks the last reply wrong. One vocabulary,
+   tested in `scripts/test_feedback.py`, so the two can't drift.
+3. **Approval means the reply was right, not "yes" to her question.**
+   "yes please", "okay", "sure" and "alright" answer an offer and teach
+   nothing.
+4. **Silence is not approval**, and a tool succeeding is not approval.
+5. **Praise taken back at once doesn't count.** "thats good" followed by
+   "what?" is withdrawn, not counted as good.
+6. **A whole-message check for anything that can also open a question.**
+   "is there a problem?" is feedback; "is there a problem with my code?" is
+   a request.
+7. **A lesson needs its evidence in order:** a failure, then a corrected
+   request that worked, then his approval, twice, independently.
+
+### Rules
+
+| He says | Counts as |
+|---|---|
+| no / nope / wrong / `/bad` / i meant / i said / that's not (it) / not what i'm asking / still not / you didn't (answer/understand) / do you understand (what i said)? / what did i (just) say / you're not listening / you're still talking / it's too long / what? / huh / is there a problem? | **correction**: the last reply was wrong |
+| thanks / thank you / `/good` / that worked / it works / perfect / great / nice (one) / exactly / correct / spot on / well done / good / that's good, right, it, better, what i wanted (with or without a leading okay/yes) | **approval**, unless his next message is a correction |
+| okay / yes please / sure / alright / no thanks / no worries | neither |
+
+The patterns are `learning._CORRECTION` and `learning._THANKS`. Change the
+table and the tests together.
+
 Learning runs after saved turns and during nightly maintenance, without an
 extra model call. A tool call succeeding on its own is not enough; silence
 is not approval. At least 80% of the lesson's recorded feedback must be

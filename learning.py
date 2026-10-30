@@ -81,9 +81,26 @@ _ADMITS_FAILURE = re.compile(
 
 # The next user message telling her the last reply was wrong. Anchored at
 # the start: "no" inside a sentence ("no rush") is not a correction.
+#
+# 2026-10-30: widened to how he actually says it. Across 146 real turns the
+# first version caught "no i meant..." and missed "still not what im
+# asking", "bro you clearly did not understand me", "what?", "what did i
+# just say" and "its too long" -- so 10 bad turns were found where there
+# were nearer 20. Every complaint brain.py reruns (_COMPLAINT) must also
+# count here; scripts/test_feedback.py checks that.
 _CORRECTION = re.compile(
-    r"^\s*(/bad\b|no\b(?!\s+(?:worries|problem|rush|thanks))|nope\b|wrong\b|not that\b|that'?s (?:not|wrong)\b|i meant\b|"
-    r"i said\b|not what i\b|you didn'?t\b|that didn'?t\b|it didn'?t\b)",
+    r"^\s*(?:(?:bro|okay|ok|no|um+|but)[,!.]?\s+)*(?:"
+    r"/bad\b|no\b(?!\s+(?:worries|problem|rush|thanks))|nope\b|wrong\b|not that\b|that'?s (?:not|wrong)\b|i meant\b|"
+    r"i said\b|not what i\b|you didn'?t\b|that didn'?t\b|it didn'?t\b"
+    r"|still (?:not|wrong)\b"
+    r"|you (?:clearly |still )?(?:did not|didn'?t|do not|don'?t) (?:understand|get|listen|answer)\b"
+    r"|do you (?:even )?understand(?: me| what i (?:said|say|mean|meant|asked))?\s*\?*\s*$"
+    r"|what did i (?:just )?(?:say|ask)\b"
+    r"|you'?re not listening\b|you are not listening\b"
+    r"|(?:you'?re|you are) still talk\w*"
+    r"|(?:that'?s|it'?s|its|this is) (?:way )?too long\b"
+    r"|(?:what|huh)\s*\?*\s*$|is there a problem\s*\?*\s*$"
+    r")",
     re.IGNORECASE,
 )
 
@@ -103,9 +120,16 @@ CLAIMS_DONE = re.compile(
     re.IGNORECASE,
 )
 
+# Approval of the reply, not agreement to her question: "yes please" and a
+# bare "okay" answer an offer and stay unknown. 2026-10-30: his real praise
+# was "thats good" and "okay that good", and neither counted -- 0 good turns
+# in 146, so no lesson could ever be confirmed.
 _THANKS = re.compile(
-    r"^\s*(/good|thanks|thank you|thx|cheers|perfect|great|nice|awesome|good job|"
-    r"that work(?:s|ed)|that'?s right)\b",
+    r"^\s*(?:(?:okay|ok|yes|yeah|oh)[,!.]?\s+)?(?:"
+    r"/good|thanks|thank you|thx|ty\b|cheers|perfect|great|nice|awesome|good job|well done|"
+    r"that work(?:s|ed)|it work(?:s|ed)|that'?s right|exactly\b|correct\b|spot on|"
+    r"(?:that'?s|thats|that|this is|it'?s|its) (?:good|great|perfect|better|correct|it|right|"
+    r"what i (?:wanted|meant|asked))\b|good(?:\s+one)?\s*[.!]*\s*$|love it|nice one)",
     re.IGNORECASE,
 )
 
@@ -165,6 +189,13 @@ def label_turns(history: list) -> list:
         next_user = turns[i + 1]["user"] if i + 1 < len(turns) else None
         verdict, reason = label(turn, next_user)
         labelled.append({**turn, "label": verdict, "reason": reason, "next_user": next_user})
+    # Praise taken back on the very next message is not approval. Live on
+    # 29 Oct: a clock-only "briefing" got "thats good", then "what?" -- and
+    # counted as good, it proposed routing "alright tell me" to the clock.
+    for i, t in enumerate(labelled[:-1]):
+        if t["label"] == "good" and labelled[i + 1]["label"] == "bad" \
+                and labelled[i + 1]["reason"] == "corrected":
+            t["label"], t["reason"] = "unknown", "praise withdrawn"
     return labelled
 
 
