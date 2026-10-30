@@ -203,15 +203,26 @@ def last_attempt(user_text: str) -> list:
     {"name", "arguments", "result"}. replay() is prose only, so when he
     says "thats not what im asking" the failed calls exist only on disk --
     and a retry that can't see them can repeat them exactly."""
+    try:
+        from brain import _ACK, _COMPLAINT
+    except Exception:
+        _ACK = _COMPLAINT = None
     want = " ".join((user_text or "").lower().split())
     with _lock:
         history = memory_store.load_history()
     start = None
     for i in range(len(history) - 1, -1, -1):
         m = history[i]
-        if m.get("role") == "user" and " ".join((m.get("content") or "").lower().split()) == want:
+        if m.get("role") != "user":
+            continue
+        text = " ".join((m.get("content") or "").lower().split())
+        if _COMPLAINT is not None and (_COMPLAINT.fullmatch(text) or _ACK.fullmatch(text)):
+            continue  # his earlier complaints about this same request
+        # Only the latest real request: the same words asked last week
+        # are a different attempt, and its calls say nothing about this one.
+        if text == want:
             start = i
-            break
+        break
     if start is None:
         return []
     calls, results = [], []

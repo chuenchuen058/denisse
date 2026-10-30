@@ -1115,6 +1115,52 @@ def _call_key(name: str, args) -> str:
     return json.dumps([name, args or {}], sort_keys=True, default=str)
 
 
+# A lookup that ran but found nothing. These are the real tools' own words
+# (tools.recall, vault_search) and none of them is an "error", so until
+# 2026-10-30 _confirms_nothing missed them: live, a retry repeated
+# recall('exams') 3/3 against the real wording while the fixtures, which
+# said "Error: ...", passed.
+_FOUND_NOTHING = re.compile(
+    r"^(?:i don'?t have anything remembered|nothing in your notes mentions|nothing to search for"
+    r"|i can'?t reach the vault|vault lookups are disabled)", re.IGNORECASE)
+
+
+def _no_evidence(result: str) -> bool:
+    return _confirms_nothing(result) or bool(_FOUND_NOTHING.search((result or "").strip()))
+
+
+# Where else a lookup that found nothing can be checked. Read-only, and
+# only tools the original request was offered. One step, not a planner.
+_RECOVERY_SOURCES = {"recall": ("search_vault",), "list_known_facts": ("search_vault",),
+                     "search_vault": ("recall",)}
+_LOOKUP_FILLER = {"save", "saved", "about", "anything", "have", "got", "tell", "know", "note", "notes",
+                  "find", "look", "check", "remembered", "thing", "things", "stuff", "info", "information",
+                  "anywhere", "somewhere", "everything"}
+_SAYS_NOTHING = re.compile(r"\b(?:don'?t|do not|didn'?t|can'?t|couldn'?t) (?:have|find|see)\b"
+                           r"|\bnothing (?:saved|about|on)\b|\bno (?:notes|information)\b", re.IGNORECASE)
+
+
+def _lookup_terms(text: str) -> str:
+    """The subject of a lookup, from his own words -- never invented."""
+    import instincts
+    keep = instincts.keywords(text) - _LOOKUP_FILLER
+    return " ".join(dict.fromkeys(w for w in re.findall(r"[a-z][a-z']+", (text or "").lower()) if w in keep))
+
+
+def _blocked_reply(terms: str, checked: list) -> str:
+    """Nothing found anywhere: say where she looked, then one question."""
+    parts = []
+    for name, res in checked:
+        if name == "search_vault":
+            parts.append("I couldn't reach your notes" if re.search(r"can'?t reach|disabled", res, re.I)
+                         else f"no note mentions {terms}")
+        elif name in ("recall", "list_known_facts"):
+            parts.append(f"nothing is saved under {terms}" if name == "recall" else "none of your saved facts covers it")
+    where = "; ".join(dict.fromkeys(parts)) or "I had nowhere else to look"
+    return (f"I checked again: {where}. I haven't found it, and I won't guess. "
+            f"What did you file it under -- a note title or a word in it?")
+
+
 def _corrected_attempt(prev: str, messages: list, prev_i: int) -> list:
     """The calls the complained-about attempt made, with their results:
     from `messages` when they carry tool traffic (tests, the CLI), else
@@ -1630,20 +1676,102 @@ class Brain:
                 prev = (messages[prev_i].get("content") or "").strip()
                 wrong_reply = next((m.get("content") or "" for m in reversed(messages[prev_i + 1:-1])
                                     if m.get("role") == "assistant"), "")
+                shown = prev if len(prev) <= 80 else prev[:77].rstrip() + "..."
+                attempt = _corrected_attempt(prev, messages, prev_i)
+                # What kind of miss it was decides the repair (2026-10-30;
+                # live baseline: 3/9 recovered, 0/3 blocked said why, and
+                # 0/3 kept from adding the same task twice).
+                done = [c for c in attempt if c["name"] in brain_rules.MUTATING_TOOLS
+                        and not _confirms_nothing(c.get("result", ""))]
+                if done:
+                    # An action that already happened. The complaint may be
+                    # about the wording or the meaning; redoing it is never
+                    # the fix. Say what was done and ask -- no model call.
+                    what = "; ".join(str(c.get("result", ""))[:120] for c in done)
+                    answer = (f'You asked: "{shown}". That part is already done ({what}), and I haven\'t '
+                              "done it again. What did you want instead?")
+                    messages.append({"role": "assistant", "content": answer})
+                    return answer, messages
+                seeded, checked = [], []
+                terms = _lookup_terms(prev)
+
+                def irrelevant(c):
+                    # A lookup that returned something, none of it about his
+                    # subject (list_known_facts -> his coffee order, asked
+                    # about his gym), found nothing either.
+                    res = str(c.get("result", ""))
+                    # Substring, not tokens: "Note 'Sponsor meeting':" must
+                    # count as mentioning "meeting" (a token match missed it
+                    # and the reply then said no note mentioned it).
+                    return _no_evidence(res) or (c["name"] in _RECOVERY_SOURCES and terms != "" and
+                                                 not any(t in res.lower() for t in terms.split()))
+                if attempt and all(irrelevant(c) for c in attempt) \
+                        and any(c["name"] in _RECOVERY_SOURCES for c in attempt):
+                    # A lookup that found nothing: check one other permitted
+                    # read-only source for the same subject before the model
+                    # tries again. Another spelling of the same call is not
+                    # a new source, so tools already tried are skipped.
+                    # Permitted = defined, read-only and switched on. Not "what
+                    # the router offered": the router trims for the model's
+                    # attention, and live it hid search_vault from "do i have
+                    # anything saved about the dentist".
+                    rules = brain_rules.load()
+                    offered = {d["function"]["name"] for d in TOOL_DEFINITIONS
+                               if d["function"]["name"] not in brain_rules.MUTATING_TOOLS
+                               and (d["function"]["name"] != "search_vault" or rules.vault_search)}
+                    tried = {c["name"] for c in attempt}
+                    checked = [(c["name"], str(c.get("result", ""))) for c in attempt]
+                    for alt in dict.fromkeys(a for c in attempt for a in _RECOVERY_SOURCES.get(c["name"], ())):
+                        if alt in tried or alt not in offered or not terms:
+                            continue
+                        args = {"query": terms} if alt == "search_vault" else {"key": terms}
+                        res = str(_run_tool(alt, args, confirm, set()))
+                        seeded += [{"role": "assistant", "content": "",
+                                    "tool_calls": [{"function": {"name": alt, "arguments": args}}]},
+                                   {"role": "tool", "content": res}]
+                        checked.append((alt, res))
+                        if not _no_evidence(res):
+                            break
+                    if not seeded or _no_evidence(seeded[-1]["content"]):
+                        messages.extend(seeded)
+                        answer = f'You asked: "{shown}". ' + _blocked_reply(terms or "that", checked)
+                        messages.append({"role": "assistant", "content": answer})
+                        return answer, messages
                 # 2026-10-30: the retry got the same input as the miss, so it
                 # could make the very call that had just failed. A call
-                # that failed is refused if repeated unchanged; one that
-                # worked may run again (the complaint may be the wording).
+                # that found nothing is refused if repeated unchanged; one
+                # that worked may run again (the complaint may be the wording).
                 self._retry_avoid = {_call_key(c["name"], c["arguments"])
-                                     for c in _corrected_attempt(prev, messages, prev_i)
-                                     if _confirms_nothing(c.get("result", ""))}
+                                     for c in attempt if _no_evidence(c.get("result", ""))}
+                # A read that found something, and he still said no: the facts
+                # were there, the reading was wrong. Without them the retry
+                # answered "when is the meeting" with the clock (0/5 live).
+                # Hand back what was already read -- nothing is run again --
+                # and say which answer he rejected.
+                reread = []
+                reads = [c for c in attempt if c["name"] not in brain_rules.MUTATING_TOOLS
+                         and not _no_evidence(c.get("result", ""))]
+                if not seeded and reads and wrong_reply:
+                    for c in reads:
+                        reread += [{"role": "assistant", "content": "",
+                                    "tool_calls": [{"function": {"name": c["name"], "arguments": c["arguments"]}}]},
+                                   {"role": "tool", "content": str(c.get("result", ""))}]
+                    reread.append({"role": "system", "content":
+                                   f'He said your answer "{wrong_reply[:200]}" was not what he asked. Use the '
+                                   "results above. If more than one thing in them could be what he means, ask "
+                                   "which one in one short question. Don't repeat that answer."})
                 self._retrying = True
                 try:
-                    retry, retry_msgs = self.respond([dict(m) for m in messages[:prev_i + 1]],
+                    retry, retry_msgs = self.respond([dict(m) for m in messages[:prev_i + 1]] + seeded + reread,
                                                      confirm=confirm, extra_context=extra_context)
                 finally:
                     self._retrying = False
                     self._retry_avoid = set()
+                retry_msgs = retry_msgs[:prev_i + 1] + retry_msgs[prev_i + 1 + len(reread):] if reread else retry_msgs
+                if seeded and _SAYS_NOTHING.search(retry or ""):
+                    # Checked against the evidence: she found it, so "I don't
+                    # have anything" is wrong. Quote the source instead.
+                    retry = "Here's what your notes say: " + seeded[-1]["content"][:400].strip()
                 # Keep the repair's tool calls in this turn. They used to be
                 # dropped, so the stored repair looked like a bare claim
                 # ("claimed an action with no tool call") and his "thats it"
@@ -1656,7 +1784,6 @@ class Brain:
                     # not a repair, and saying it twice isn't honest.
                     retry = ("I got the same answer again, so I haven't fixed it: " + retry +
                              " Tell me what you meant and I'll do that instead.")
-                shown = prev if len(prev) <= 80 else prev[:77].rstrip() + "..."
                 answer = f'You asked: "{shown}". {retry}'.strip()
                 messages.append({"role": "assistant", "content": answer})
                 return answer, messages
