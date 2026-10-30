@@ -183,6 +183,49 @@ answer, _ = b.respond([dict(m) for m in convo])
 check("complaint reruns the briefing", answer.startswith('You asked: "tell me the briefing"')
       and "It's " in answer, answer[:100])
 
+# -- a date or time she never fetched (2026-10-30) -------------------------
+import datetime  # noqa: E402
+now = datetime.datetime(2026, 10, 30, 18, 48)
+for text in ("It's currently December 2023.", "The current time is 11:32 AM.",
+             "It's 7:00 PM, so you have time.", "Today is Monday, a good day to start."):
+    got = brain._correct_unfetched_clock(text, now)
+    check(f"clock corrected: {text!r}", got.startswith("It's Friday 30 October, 6:48 PM.")
+          and "2023" not in got and "11:32" not in got, got)
+check("rest of the reply kept",
+      brain._correct_unfetched_clock("It's currently December 2023. Want the briefing?", now)
+      .endswith("Want the briefing?"))
+for keep in ("It's 14°C and cloudy in London.", "It is 391.",
+             "It's Tuesday 24 November, 4 days from the brief.",
+             "Electromagnetism is due on Tuesday 24 November.",
+             "I don't really have preferences about rainy days."):
+    check(f"not a clock claim: {keep!r}", brain._correct_unfetched_clock(keep, now) == keep)
+
+# -- "go on, do that one": the job named by the turn before ---------------
+for text in ("alright tell me", "tell me", "i want you to plan it", "go ahead please",
+             "ok do it", "can you plan it for me", "just do it then"):
+    check(f"follow-on: {text!r}", bool(brain._FOLLOW_ON.fullmatch(text)))
+for text in ("tell me a joke", "tell me about signals and systems", "plan my week",
+             "do it later", "okay", "signals and system"):
+    check(f"not a follow-on: {text!r}", not brain._FOLLOW_ON.fullmatch(text))
+
+import tempfile  # noqa: E402
+import planner  # noqa: E402
+planner.PENDING_FILE = os.path.join(tempfile.mkdtemp(prefix="denisse-guards-"), "pending_plan.json")
+b = brain.Brain.__new__(brain.Brain)
+answer, _ = b.respond([
+    {"role": "user", "content": "whats your most important skill?"},
+    {"role": "assistant", "content": "My most important skill is probably the daily briefing."},
+    {"role": "user", "content": "alright tell me"}])
+check("'alright tell me' after offering the briefing gives it",
+      answer.startswith("It's ") and "2023" not in answer, answer[:100])
+answer, _ = b.respond([
+    {"role": "user", "content": "plan my study modules for me please"},
+    {"role": "assistant", "content": "You can use the 'list_skills' tool to see what skills are available."},
+    {"role": "user", "content": "i want you to plan it"}])
+check("'i want you to plan it' after a plan request plans",
+      "list_skills" not in answer and ("plan" in answer.lower() or "coursework" in answer.lower()),
+      answer[:100])
+
 print()
 print(f"{sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)

@@ -1150,6 +1150,32 @@ _WEATHER_LINE = re.compile(
     r"|temperature|wind|cloudy|overcast|sunny|showers?|drizzle|°|\bdegrees?\b", re.IGNORECASE)
 
 
+# The current date or time, said with no clock run. Live (2026-10-30 probe
+# of the 28 Oct "alright tell me"): "It's currently December 2023." -- her
+# training cutoff, stated as today. A bare number only counts with a clock
+# shape (18:48, 6 pm), so "it's 14°C" and "it is 391" are left alone. A day
+# or month only counts as "now" when she says so -- "It's Tuesday 24
+# November" can be a deadline read from his notes.
+_CLOCK_SHAPE = r"(?:\d{1,2}:\d{2}|\d{1,2}\s*[ap]\.?m\b)"
+_CALENDAR = (r"(?:(?:mon|tues|wednes|thurs|fri|satur|sun)day|january|february|march|april"
+             r"|june|july|august|september|october|november|december)")
+_CLOCK_CLAIM = re.compile(
+    rf"\b(?:it'?s|it\s+is)\s+(?:(?:currently|now|right\s+now)\s+)?{_CLOCK_SHAPE}"
+    rf"|\b(?:it'?s|it\s+is)\s+(?:currently|now|right\s+now)\s+{_CALENDAR}"
+    rf"|\b(?:today\s+is|the\s+(?:current\s+)?(?:time|date)\s+is)\s+(?:{_CLOCK_SHAPE}|{_CALENDAR})",
+    re.IGNORECASE)
+
+
+def _correct_unfetched_clock(text: str, now: datetime.datetime | None = None) -> str:
+    if not _CLOCK_CLAIM.search(text or ""):
+        return text
+    now = now or datetime.datetime.now()
+    real = f"It's {now:%A} {now.day} {now:%B}, {now.hour % 12 or 12}:{now:%M} {now:%p}."
+    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+    kept = [s for s in sentences if not _CLOCK_CLAIM.search(s)]
+    return " ".join([real] + kept)
+
+
 def _strip_unfetched_weather(text: str) -> str:
     if not _WEATHER_DATA.search(text or ""):
         return text
@@ -1171,6 +1197,18 @@ _PLAN_STUDY = re.compile(
     r"\b(?:plan|schedule|organi[sz]e|timetable)\b[^.?!]{0,40}?\b(?:stud(?:y|ies|ying)|revision"
     r"|revis(?:e|ing)|modules?|coursework|assignments?|semester|term|deadlines?)\b"
     r"|\b(?:study|revision)\s+(?:plan|schedule|timetable)\b",
+    re.IGNORECASE)
+# "Go on, do that one" -- the job is named by the turn before. Live on 28-29
+# Oct, after she offered the briefing, "alright tell me" got her skills
+# list; after "plan my study modules", "i want you to plan it" got "use the
+# list_skills tool". Re-probed 2026-10-30: the first invented "It's
+# currently December 2023", the second asked which subjects he studies.
+_FOLLOW_ON = re.compile(
+    r"^\s*(?:(?:alright|ok(?:ay)?|yes|yeah|sure|so|then|well)[,\s]+)*"
+    r"(?:tell\s+me|go\s+on|go\s+ahead|do\s+it|do\s+that|show\s+me|give\s+it\s+to\s+me"
+    r"|(?:i\s+want\s+you\s+to\s+|can\s+you\s+|could\s+you\s+|just\s+)?(?:do|plan|make)\s+(?:it|that|one)"
+    r"(?:\s+for\s+me)?)"
+    r"(?:[,\s]+(?:please|then|now|already))*[.!?\s]*$",
     re.IGNORECASE)
 _PLAN_YES = re.compile(
     r"^\s*(?:yes|yeah|yep|yup|sure|ok(?:ay)?|please|go\s+ahead|do\s+it|add\s+(?:them|it|those|all"
@@ -1561,6 +1599,17 @@ class Brain:
         if quick:
             messages.append({"role": "assistant", "content": quick})
             return quick, messages
+        if _FOLLOW_ON.fullmatch(latest_user.strip()):
+            # Carry the job over from the turn before -- his request or her
+            # offer -- so the checks below see what he means. See _FOLLOW_ON.
+            prev_i = _last_real_request(messages)
+            prev_user = (messages[prev_i].get("content") or "") if prev_i is not None else ""
+            last_said = next((m.get("content") or "" for m in reversed(messages[:-1])
+                              if m.get("role") == "assistant"), "")
+            if _BRIEFING.search(prev_user) or _BRIEFING.search(last_said):
+                latest_user = "give me the briefing"
+            elif _PLAN_STUDY.search(prev_user) or _PLAN_STUDY.search(last_said):
+                latest_user = "plan my study modules"
         if _BRIEFING.search(latest_user):
             # Built from his tasks and coursework notes -- see planner.py.
             answer = planner.briefing()
@@ -1882,6 +1931,8 @@ class Brain:
                         final_text = tool_outputs["get_brain_location"]
                     if "get_weather" not in successful_tools:
                         final_text = _strip_unfetched_weather(final_text)
+                    if "get_current_time" not in successful_tools:
+                        final_text = _correct_unfetched_clock(final_text)
                     messages.append({"role": "assistant", "content": final_text})
                     return final_text, messages
 

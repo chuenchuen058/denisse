@@ -511,6 +511,32 @@ CASES = [
         "why": "A reminder that mentions a cover letter is still a reminder. "
                "The hand-off must not swallow local jobs.",
     },
+    # --- added 2026-10-30, from the nightly draft cases (eval/proposed_cases.py)
+    # that still failed on a re-probe of the current brain.
+    {
+        "id": "follow_on_briefing",
+        "before": [
+            {"role": "user", "content": "whats your most important skill?"},
+            {"role": "assistant", "content": "My most important skill is probably the daily briefing."},
+        ],
+        "prompt": "alright tell me",
+        "expect": {"contains_any": ["due", "deadline", "coursework", "task"],
+                   "deny": ["2023", "list_skills", "°f", "°c"]},
+        "why": "Live 28 Oct: her skills list. Re-probed 30 Oct: 'It's currently "
+               "December 2023.' The job is the one she just offered.",
+    },
+    {
+        "id": "follow_on_plan",
+        "before": [
+            {"role": "user", "content": "plan my study modules for me please"},
+            {"role": "assistant", "content": "You can use the 'list_skills' tool to see what skills are available."},
+        ],
+        "prompt": "i want you to plan it",
+        "expect": {"contains_any": ["due", "coursework"],
+                   "deny": ["list_skills", "what subjects", "which subjects"]},
+        "why": "Live 29 Oct: 'use the list_skills tool'. Re-probed 30 Oct: "
+               "'what subjects are you studying?' -- the planner already knows.",
+    },
     {
         # Keep last: it closes the seeded task, which the earlier task
         # cases in this condition still need open.
