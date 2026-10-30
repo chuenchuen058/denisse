@@ -197,8 +197,12 @@ try:
     av.quote("DEMO.FIX")
 except invest.ProviderError as e:
     check("provider text is one short line of data", "\n" not in str(e) and len(str(e)) < 200, str(e))
-check("missing key says the exact setup step",
-      "ALPHAVANTAGE_API_KEY" in str(invest.ProviderError) or True)
+sent = []
+try:
+    invest.AlphaVantage(key="", get=lambda u, p: sent.append(p) or {}).quote("X")
+    check("missing key makes no request", False, "no ProviderError")
+except invest.ProviderError:
+    check("missing key makes no request", sent == [], str(sent))
 try:
     invest.AlphaVantage(key="").quote("X")
 except invest.ProviderError as e:
