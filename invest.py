@@ -756,6 +756,8 @@ def _pending_choice(text, now, last_said=None):
     choice only answers the question she has just asked. Without that,
     "thanks" -> "Any time." (a reply that never reaches chat()) left the
     choice open, and a later "1" added an instrument (2026-10-30 review)."""
+    if not os.path.exists(_path("pending.json")):
+        return None  # the usual case: no lock, and no store created for an ordinary message
     try:
         with _locked():
             pending = _load_checked("pending.json", None, _pending_shape)

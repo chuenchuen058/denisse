@@ -174,6 +174,10 @@ for bad in ({"options": None, "at": "x"}, ["ACME.LON"], {"question": "q", "optio
     check(f"invalid pending choice {json.dumps(bad)[:40]}: no crash, nothing added",
           symbols() == [] and r[0] == MODEL_REPLY, r[0])
 
+invest.DATA_DIR = str(TMP / "never-created")
+r, calls = conversation("tell me a joke", "1")
+check("ordinary messages create no store and take no lock", not os.path.exists(invest.DATA_DIR), invest.DATA_DIR)
+
 fresh()
 r, calls = conversation("hey", "thanks", "ok")
 check("greetings and acknowledgements unchanged, no model",
