@@ -8,6 +8,8 @@ memory/*.json
 # memory/real_prompts.jsonl and would NOT have been ignored -- this repo is
 # public. Caught before any commit; the extract now lives outside the repo.
 memory/*.jsonl
+# study_brief.py's saved progress: his task text and note paths. (2026-10-30)
+memory/jobs/
 !memory/.gitkeep
 memory/.spotify_cache
 
