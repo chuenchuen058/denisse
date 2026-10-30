@@ -1,8 +1,8 @@
 """The hand-off to Claude: where the line is, and what reaches Claude.
 
 No real Claude or Codex is run: shutil.which and subprocess.run are faked,
-DRAFTS points at a temp folder, so nothing is spent and nothing is written
-to his vault. The prompts below are shaped like his real ones, not copies.
+DRAFTS and the log point at a temp folder, so nothing is spent and nothing
+is written to his vault or his real delegate.log. The prompts below are shaped like his real ones, not copies.
 """
 import os
 import subprocess
@@ -49,6 +49,10 @@ for text in ("pull up my latest cv", "find my cv", "open a file called passport"
 # -- what Claude is allowed to do -------------------------------------------
 tmp = tempfile.mkdtemp(prefix="denisse-delegate-")
 delegate.DRAFTS = os.path.join(tmp, "Drafts")
+# The fake runs below log "rate limited" and "write me a cover letter" like
+# real ones, and until 2026-10-30 every test run appended them to his real
+# memory/delegate.log.
+delegate.LOG_FILE = os.path.join(tmp, "delegate.log")
 calls = []
 real_which, real_run = delegate.shutil.which, delegate.subprocess.run
 
