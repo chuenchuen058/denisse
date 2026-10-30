@@ -1781,6 +1781,8 @@ class Brain:
             if last_round or name not in offered_names:
                 result = f"Refused: '{name}' isn't available for this request. Answer the user's actual request."
             elif _call_key(name, args) in getattr(self, "_retry_avoid", ()):
+                # Naming alternatives here was tried live on 2026-10-30: 0/5
+                # found the answer (she offered to search instead), ~2x slower.
                 result = (f"Refused: this exact '{name}' call already failed and he said the answer "
                           "was wrong. Do something different, or tell him plainly what you can't do.")
             elif (name == "open_application" and file_request
