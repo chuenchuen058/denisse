@@ -656,8 +656,35 @@ def brief(prov=None, now=None, out_dir=None):
     except StoreError as e:  # the saved brief carries the event ids; next run recovers them
         return f"Watchlist brief saved to {path}, but I couldn't record its alerts as sent: {e}."
     summary = f" {len(items)} instrument(s), {len(events)} alert(s)."
-    return (f"Watchlist brief saved to {path}." + summary
+    return (_chat_summary(obs, events, fixture) + f"\nFull report saved to {path}." + summary
             + (" These are synthetic fixtures, not market data." if fixture else ""))
+
+
+_FRESHNESS = {"live": "live", "delayed": "end of day", "cached": "provider failed, last good quote"}
+
+
+def _chat_summary(obs, events, fixture, limit=8):
+    """The brief in chat, from the same observations the saved report was
+    verified against. Bounded, and it never gives a reason for a move."""
+    lines = ["Watchlist brief" + (f" ({FIXTURE_LABEL})" if fixture else "") + ":"]
+    for o in obs[:limit]:
+        if o.get("price") is None:
+            lines.append(f"- {o['symbol']}: no usable price ({_clean(o.get('problem') or o['status'], 100)}).")
+            continue
+        when = _when(o["retrieved"])
+        fresh = ("stale, " if o.get("stale") else "") + _FRESHNESS.get(o["status"], o["status"])
+        lines.append(f"- {o['symbol']}: {_fmt(o['price'], o['currency'])}, market date {o['market_date']} "
+                     f"({fresh}; retrieved {when.astimezone(dt.timezone.utc):%Y-%m-%d %H:%M} UTC).")
+    if len(obs) > limit:
+        lines.append(f"- ...and {len(obs) - limit} more in the full report.")
+    if events:
+        lines.append("Alerts: " + "; ".join(f"{e['symbol']} is {_fmt(e['price'], e['currency'])}, at or "
+                                            f"{e['direction']} your {e['level']:g} {e['currency']} level"
+                                            for e in events[:limit])
+                     + (f"; and {len(events) - limit} more" if len(events) > limit else "") + ".")
+    else:
+        lines.append("No alerts fired.")
+    return "\n".join(lines)
 
 
 def verify(path, obs, events=()):
