@@ -141,7 +141,8 @@ def _drop_failed(groups: list) -> list:
 
     - a turn whose reply was a deflection (_DEFLECTION);
     - a turn he complained about ("thats not what im asking"), and the
-      complaint turn itself -- its reply answers a request that's gone;
+      complaint turn itself -- its reply answers a request that's gone --
+      unless that reply asks which one he meant (2026-10-30);
     - a turn he marked /bad;
     - her skills list given to something that wasn't a skills question
       ("plan my internship applications", 2026-10-29) -- execute() refuses
@@ -158,7 +159,9 @@ def _drop_failed(groups: list) -> list:
         if text.lower() == "/bad" and i > 0:
             keep[i - 1] = False
         if text and _COMPLAINT is not None and _COMPLAINT.fullmatch(text):
-            keep[i] = False
+            # Kept only when her reply asks which one he meant (clarify.py):
+            # his next message answers that question, so it must be there.
+            keep[i] = any(m.get("clarify") for m in g if m.get("role") == "assistant")
             if i > 0:
                 keep[i - 1] = False
         reply = _reply_of(g)

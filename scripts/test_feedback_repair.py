@@ -168,16 +168,28 @@ check("rerun: unchanged failed call refused, not run",
       not ran and any((m.get("content") or "").startswith("Refused: this exact 'get_weather'")
                       for m in fake.sent[1]["messages"]), str(ran))
 
-# A read that found something, rejected: the evidence goes back, not a rerun.
+# A read that found two plausible answers, one rejected: ask which
+# (clarify.py) -- no model call, nothing re-run, the rejected one not repeated.
 meet = [user("when is the meeting", "m"), {"role": "assistant", "content": "", "tool_calls": [
     {"function": {"name": "search_vault", "arguments": {"query": "meeting"}}}]},
         {"role": "tool", "content": "Note 'Sponsor meeting': 3 Nov. Note 'Supervisor meeting': 10 Nov."},
         {"role": "assistant", "content": "Your sponsor meeting is on 3 Nov."}, user("thats not what im asking", "m2")]
 ran.clear()
-reply, out, fake = respond(meet, [{"content": "Your sponsor meeting is on 3 Nov."}])
+reply, out, fake = respond(meet, [])
+check("rejected read, two answers: asks about the other, no model call, nothing re-run",
+      reply == "Do you mean the supervisor meeting?" and not ran and not fake.sent, reply)
+
+# A rejected answer that shares nothing with the evidence: not a choice
+# between items, so the evidence goes back to the model, not a rerun.
+meet = [user("when is the meeting", "m"), {"role": "assistant", "content": "", "tool_calls": [
+    {"function": {"name": "search_vault", "arguments": {"query": "meeting"}}}]},
+        {"role": "tool", "content": "Note 'Sponsor meeting': 3 Nov."},
+        {"role": "assistant", "content": "Sounds busy!"}, user("thats not what im asking", "m2")]
+ran.clear()
+reply, out, fake = respond(meet, [{"content": "Sounds busy!"}])
 sent = fake.sent[0]["messages"]
 check("rejected read: evidence and the rejected answer handed back, nothing re-run",
-      not ran and any("Supervisor meeting" in (m.get("content") or "") for m in sent)
+      not ran and any("Sponsor meeting" in (m.get("content") or "") for m in sent)
       and any(m.get("role") == "system" and "was not what he asked" in m.get("content", "") for m in sent))
 check("rejected read: same answer again is reported as not fixed", "haven't fixed it" in reply, reply)
 check("rejected read: the handed-back note is not stored twice",

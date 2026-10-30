@@ -10,6 +10,7 @@ No API key, no internet required after the model is downloaded once.
 import datetime
 import inspect
 import json
+import logging
 import ntpath
 import os
 import platform
@@ -1147,6 +1148,14 @@ def _lookup_terms(text: str) -> str:
     return " ".join(dict.fromkeys(w for w in re.findall(r"[a-z][a-z']+", (text or "").lower()) if w in keep))
 
 
+def _permitted_reads() -> set:
+    """Read-only tools that are defined and switched on."""
+    rules = brain_rules.load()
+    return {d["function"]["name"] for d in TOOL_DEFINITIONS
+            if d["function"]["name"] not in brain_rules.MUTATING_TOOLS
+            and (d["function"]["name"] != "search_vault" or rules.vault_search)}
+
+
 def _blocked_reply(terms: str, checked: list) -> str:
     """Nothing found anywhere: say where she looked, then one question."""
     parts = []
@@ -1614,6 +1623,68 @@ class Brain:
                 f"Model '{MODEL}' isn't downloaded yet. Run: ollama pull {MODEL}"
             )
 
+    def _ask_which(self, request, terms, reads, wrong_reply, confirm, messages):
+        """The question to ask after a rejected read, or None to fall back
+        to the retry. Only when the rejected answer visibly came from the
+        evidence, or his words pick out several items in it."""
+        import clarify
+        cands, by_terms = clarify.candidates(reads, terms)
+        gone = clarify.rejected(cands, wrong_reply)
+        if not gone and not (by_terms and len(cands) >= 2):
+            return None
+        others = [c for c in cands if c not in gone]
+        if not others:
+            # Nothing else in what was read: one other permitted source for
+            # the same subject, as in the empty-lookup repair -- not more.
+            tried, offered = {c["name"] for c in reads}, _permitted_reads()
+            for alt in dict.fromkeys(a for c in reads for a in _RECOVERY_SOURCES.get(c["name"], ())):
+                if alt in tried or alt not in offered or not terms:
+                    continue
+                args = {"query": terms} if alt == "search_vault" else {"key": terms}
+                res = str(_run_tool(alt, args, confirm, set()))
+                messages += [{"role": "assistant", "content": "",
+                              "tool_calls": [{"function": {"name": alt, "arguments": args}}]},
+                             {"role": "tool", "content": res}]
+                if not _no_evidence(res):
+                    seen = {g["text"] for g in gone}
+                    others = [c for c in clarify.candidates([{"name": alt, "arguments": args, "result": res}],
+                                                            terms)[0] if c["text"] not in seen]
+                    cands = cands + others
+                break
+        if not others:
+            return clarify.missing(terms, gone or cands)
+        asked = clarify.question(others)
+        clarify.offer(request, asked, others, cands, terms)
+        return asked
+
+    def _settle_which(self, p, text):
+        """His answer to "which one?": the answer from the item he picked,
+        another question, or None when it's a new request."""
+        import clarify
+        kind, got = clarify.pick(text, p, complaint=bool(_COMPLAINT.fullmatch((text or "").strip())))
+        if kind == "unrelated":
+            return None
+        if kind == "none":
+            return clarify.missing(p["terms"], p["seen"])
+        if kind == "pick":
+            evidence = clarify.evidence(got)
+            reply = ""
+            try:  # one call, with only the item he picked: it can't repeat the rejected one
+                r = ollama.chat(model=MODEL, keep_alive=-1, options={"temperature": 0.2, "num_ctx": NUM_CTX},
+                                messages=[{"role": "system", "content": SYSTEM_PROMPT},
+                                          {"role": "user", "content": p["request"]},
+                                          {"role": "system", "content": f"He means {clarify.spoken(got)}. From his "
+                                           f"notes: {evidence}\nAnswer his question from this alone, in one or "
+                                           "two sentences. Don't add anything it doesn't say."}])
+                reply = _strip_role_prefix(_get(_get(r, "message"), "content", "") or "").strip()
+            except Exception as exc:
+                logging.warning("Clarified answer fell back to the evidence: %s", exc)
+            return reply if clarify.supported(reply, got, p["seen"]) else clarify.quote(got)
+        options = got if kind == "ambiguous" else p["options"]
+        asked = ("That isn't one I found. " if kind == "unsupported" else "") + clarify.question(options)
+        clarify.offer(p["request"], asked, options, p["seen"], p["terms"])
+        return asked
+
     def respond(self, messages: list, confirm=None, extra_context: str = "") -> tuple[str, list]:
         """
         Run one turn of the tool-use loop against `messages` (role/content
@@ -1668,6 +1739,17 @@ class Brain:
             answer = _model_identity()
             messages.append({"role": "assistant", "content": answer})
             return answer, messages
+        # An open "which one do you mean?" (clarify.py) is settled first, so
+        # no other path -- a quick "yes", a planner confirmation -- answers
+        # it, and it answers nothing else. Only her last reply can be it.
+        import clarify
+        open_q = None if getattr(self, "_retrying", False) else clarify.take(next(
+            (m.get("content") or "" for m in reversed(messages[:-1]) if m.get("role") == "assistant"), ""))
+        if open_q:
+            answer = self._settle_which(open_q, latest_user)
+            if answer is not None:
+                messages.append({"role": "assistant", "content": answer, "clarify": clarify.is_open(answer)})
+                return answer, messages
         if _COMPLAINT.fullmatch(latest_user.strip()) and not getattr(self, "_retrying", False):
             # Redo what he actually asked. The wrong answer and the complaint
             # are left out of the retry, so she can't imitate the miss.
@@ -1694,6 +1776,17 @@ class Brain:
                     return answer, messages
                 seeded, checked = [], []
                 terms = _lookup_terms(prev)
+                # The read found something and he rejected the answer: if the
+                # evidence holds other plausible answers, ask which one
+                # instead of answering again (0/5 live before; clarify.py).
+                reads = [c for c in attempt if c["name"] not in brain_rules.MUTATING_TOOLS
+                         and not _no_evidence(c.get("result", ""))]
+                asked = self._ask_which(prev, terms, reads, wrong_reply, confirm, messages) \
+                    if reads and wrong_reply else None
+                if asked:
+                    # Marked so replay() keeps this turn: his answer refers to it.
+                    messages.append({"role": "assistant", "content": asked, "clarify": asked.endswith("?")})
+                    return asked, messages
 
                 def irrelevant(c):
                     # A lookup that returned something, none of it about his
@@ -1715,10 +1808,7 @@ class Brain:
                     # the router offered": the router trims for the model's
                     # attention, and live it hid search_vault from "do i have
                     # anything saved about the dentist".
-                    rules = brain_rules.load()
-                    offered = {d["function"]["name"] for d in TOOL_DEFINITIONS
-                               if d["function"]["name"] not in brain_rules.MUTATING_TOOLS
-                               and (d["function"]["name"] != "search_vault" or rules.vault_search)}
+                    offered = _permitted_reads()
                     tried = {c["name"] for c in attempt}
                     checked = [(c["name"], str(c.get("result", ""))) for c in attempt]
                     for alt in dict.fromkeys(a for c in attempt for a in _RECOVERY_SOURCES.get(c["name"], ())):
