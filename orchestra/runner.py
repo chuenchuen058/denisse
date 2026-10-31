@@ -42,13 +42,23 @@ MAINT_SHARE = 0.20      # maintenance may use this share of the day's runtime...
 MAINT_FLOOR_S = 15 * 60  # ...but always gets this much, so it isn't starved at 00:01
 GIT_TIMEOUT_S = 120
 
+STALE_DAYS = int(os.environ.get("ORCHESTRA_STALE_DAYS", 7))  # older tasks assume code that has moved
+
 # Lanes: argv lists; the prompt goes in on stdin. Override in .review/lanes.json.
+# claude: --permission-prompts none makes anything outside the allow list fail at once
+# instead of waiting for a person who isn't there (Thomas, 6 Sep: headless Writes were
+# silently denied without it). --output-format json lets the runner record which tools
+# were denied, so the allow list can be widened from evidence, not guesses.
 DEFAULT_LANES = {
-    "claude": ["claude", "-p", "--permission-mode", "acceptEdits",
+    "claude": ["claude", "-p", "--permission-mode", "acceptEdits", "--permission-prompts", "none",
+               "--output-format", "json",
                "--allowedTools", "Read,Edit,Write,Glob,Grep,Bash(git:*),Bash(python:*),"
-               "Bash(.venv/Scripts/python.exe:*),Bash(.venv\\Scripts\\python.exe:*)"],
+               "Bash(.venv/Scripts/python.exe:*),Bash(.venv\\Scripts\\python.exe:*),"
+               "Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(grep:*),Bash(find:*),Bash(wc:*)",
+               "--disallowedTools", "Bash(git push:*),Bash(git push --force:*),Bash(gh:*),Bash(rm -rf:*)"],
     "codex": ["codex", "exec", "--full-auto", "-"],
 }
+VALID = {"priority": ("urgent", "normal"), "weight": ("light", "heavy"), "kind": ("work", "maintenance")}
 RESULTS = ("PASS", "PARTIAL", "FAIL")
 
 
@@ -154,9 +164,36 @@ def task_state(state: dict, slug: str) -> dict:
 
 # ---------------------------------------------------------------- picking
 
+def header_problem(task: Task) -> str | None:
+    """Refuse, don't coerce: a header the runner would silently reinterpret runs as
+    something the writer didn't ask for (Thomas, 9 Oct: 16 tasks with a date line first,
+    ~25 with no Queue line)."""
+    first = task.path.read_text(encoding="utf-8").lstrip().splitlines()[:1]
+    if not first or not first[0].startswith("# "):
+        return "first line must be '# <title>'"
+    if "queue" not in task.fields:
+        return "no Queue: line"
+    for key, allowed in VALID.items():
+        if key in task.fields and task.fields[key].lower() not in allowed:
+            return f"{key.title()}: {task.fields[key]!r} is not one of {'/'.join(allowed)}"
+    if task.lane not in lanes():
+        return f"Lane: {task.lane!r} is not a configured lane"
+    try:
+        dt.datetime.fromisoformat(task.fields.get("written", ""))
+    except ValueError:
+        return "Written: is missing or not YYYY-MM-DDTHH:MM"
+    return None
+
+
 def why_not_runnable(task: Task, state: dict) -> str | None:
+    bad = header_problem(task)
+    if bad:
+        return f"bad header: {bad}"
     if not task.auto:
         return "Queue is not auto"
+    age = now() - dt.datetime.fromisoformat(task.fields["written"])
+    if age.days > STALE_DAYS:
+        return f"stale: written {age.days} days ago (limit {STALE_DAYS}); re-date it if it still holds"
     if not task.gate:
         return "no ## Gate section"
     if task.gate.startswith("<"):
@@ -290,7 +327,11 @@ def run_lane(task: Task, wt: Path, report: Path) -> tuple[str, int]:
     shutil.copyfile(task.path, local / "task.md")
     local_report = local / "report.md"
     local_report.unlink(missing_ok=True)
-    env = dict(os.environ, ORCHESTRA_TASK=str(local / "task.md"), ORCHESTRA_REPORT=str(local_report),
+    # claude -p started from inside another Claude Code session returns nothing unless
+    # these are stripped (Thomas's notes); harmless when they aren't set.
+    env = {k: v for k, v in os.environ.items()
+           if k != "CLAUDECODE" and not k.startswith("CLAUDE_CODE_")}
+    env.update(ORCHESTRA_TASK=str(local / "task.md"), ORCHESTRA_REPORT=str(local_report),
                ORCHESTRA_WORKTREE=str(wt))
     out = (REPORTS / f"{task.slug}.lane.log").open("w", encoding="utf-8")
     kw = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
@@ -319,15 +360,37 @@ def run_lane(task: Task, wt: Path, report: Path) -> tuple[str, int]:
 
 def read_report(report: Path) -> dict:
     if not report.exists():
-        return {"result": "FAIL", "human": "none", "note": "no report written"}
+        return {"result": "FAIL", "human": "none", "note": "no report written", "premise": "not stated"}
     text = report.read_text(encoding="utf-8")
     first = text.lstrip().splitlines()[0] if text.strip() else ""
     m = re.match(r"RESULT:\s*(PASS|PARTIAL|FAIL)\b", first, re.I)
     result = m.group(1).upper() if m else "FAIL"
     h = re.search(r"^HUMAN:\s*(.+)$", text, re.M)
     human = h.group(1).strip() if h else "none"
+    p = re.search(r"^PREMISE:\s*(.+)$", text, re.M)
     note = "" if m else "first line is not RESULT: PASS|PARTIAL|FAIL"
-    return {"result": result, "human": human, "note": note}
+    return {"result": result, "human": human, "note": note,
+            "premise": p.group(1).strip() if p else "not stated"}
+
+
+def permission_denials(lane_log: Path) -> list[str]:
+    """Tool names the session was refused, from claude's --output-format json result."""
+    try:
+        text = lane_log.read_text(encoding="utf-8", errors="replace").strip()
+        data = json.loads(text[text.rfind("\n{") + 1:] if not text.startswith("{") else text)
+    except (OSError, ValueError):
+        return []
+    out = []
+    for d in data.get("permission_denials") or []:
+        name = d.get("tool_name", "?")
+        cmd = (d.get("tool_input") or {}).get("command")
+        out.append(f"{name}({cmd.split()[0]})" if name == "Bash" and cmd else name)
+    return out
+
+
+def main_checkout_status() -> set[str]:
+    r = git("status", "--porcelain", check=False)
+    return {l for l in r.stdout.splitlines() if l.strip() and ".review/" not in l}
 
 
 def needs_human(human: str) -> bool:
@@ -352,20 +415,26 @@ def park(task: Task, reason: str, report: Path | None) -> None:
 
 # ---------------------------------------------------------------- tick
 
-def finish(task: Task, state: dict, wt: Path, branch: str, outcome: str, seconds: int) -> str:
+def finish(task: Task, state: dict, wt: Path, branch: str, outcome: str, seconds: int,
+           before_status: set[str] = frozenset()) -> str:
     report = REPORTS / f"{task.slug}.md"
     ts = task_state(state, task.slug)
     u = today_usage(state)
     u["maint_s" if task.kind == "maintenance" else "work_s"] += seconds
 
     if outcome == "timeout":
-        info = {"result": "TIMEOUT", "human": "none",
+        info = {"result": "TIMEOUT", "human": "none", "premise": "not stated",
                 "note": f"killed after {TIMEOUT_S[task.weight]}s ({task.weight})"}
     else:
         info = read_report(report)
+    denied = permission_denials(REPORTS / f"{task.slug}.lane.log")
+    stray = sorted(main_checkout_status() - before_status)
+    if stray:
+        log(f"WARNING {task.slug}: main checkout changed during the run: {stray}")
     ts.update(last_end=now().isoformat(), last_result=info["result"])
     ts["history"].append({"end": ts["last_end"], "result": info["result"], "seconds": seconds,
-                          "lane": task.lane, "note": info["note"]})
+                          "lane": task.lane, "note": info["note"], "premise": info["premise"],
+                          "denied": denied, "main_checkout_changed": stray})
     log(f"{info['result']} {task.slug} after {seconds}s (attempt {ts['attempts']}) {info['note']}")
 
     if info["result"] == "PASS":
@@ -426,13 +495,14 @@ def tick(dry_run: bool = False) -> str:
             ts.update(last_end=now().isoformat(), last_result="FAIL")
             save_state(state)
             return "FAIL"
+        before = main_checkout_status()
         outcome, seconds = run_lane(task, wt, REPORTS / f"{task.slug}.md")
         if outcome.startswith("lane missing"):
             log(f"{task.slug}: {outcome}")
             ts.update(last_end=now().isoformat(), last_result="FAIL")
             save_state(state)
             return "FAIL"
-        result = finish(task, state, wt, branch, outcome, seconds)
+        result = finish(task, state, wt, branch, outcome, seconds, before)
         save_state(state)
         return result
     finally:

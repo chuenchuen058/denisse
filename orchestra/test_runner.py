@@ -3,6 +3,7 @@
     .venv\\Scripts\\python.exe orchestra\\test_runner.py
 Each test builds a throwaway git repo, so the real queue is never touched.
 """
+import datetime as dt
 import importlib
 import json
 import os
@@ -39,7 +40,7 @@ Priority: {priority}
 Weight: light
 Kind: {kind}
 Lane: fake
-Written: 2026-10-31T16:00
+Written: {written}
 
 Do the thing.
 
@@ -75,10 +76,11 @@ class RunnerTest(unittest.TestCase):
         subprocess.run(["git", "worktree", "prune"], cwd=self.repo, capture_output=True)
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def add(self, slug, title="t", queue="auto", priority="normal", kind="work"):
+    def add(self, slug, title="t", queue="auto", priority="normal", kind="work", written=None):
         p = self.R.QUEUE / f"{slug}.md"
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(TASK.format(title=title, queue=queue, priority=priority, kind=kind))
+        written = written or dt.datetime.now().strftime("%Y-%m-%dT%H:%M")
+        p.write_text(TASK.format(title=title, queue=queue, priority=priority, kind=kind, written=written))
         return p
 
     def state(self):
@@ -147,6 +149,44 @@ class RunnerTest(unittest.TestCase):
         p = self.add("g")
         p.write_text(p.read_text().replace("fake gate", "<Exactly how to tell>"))
         self.assertEqual(self.R.tick(), "idle")
+
+    def test_bad_header_is_refused_not_coerced(self):
+        self.add("x", priority="high")
+        why = self.R.why_not_runnable(self.R.load_queue()[0], self.R.load_state())
+        self.assertIn("bad header", why)
+        self.assertEqual(self.R.tick(), "idle")
+
+    def test_stale_task_is_skipped(self):
+        old = (dt.datetime.now() - dt.timedelta(days=10)).strftime("%Y-%m-%dT%H:%M")
+        self.add("old", written=old)
+        self.assertIn("stale", self.R.why_not_runnable(self.R.load_queue()[0], self.R.load_state()))
+
+    def test_premise_and_denials_recorded(self):
+        self.add("p")
+        fake = FAKE + textwrap.dedent("""
+            import json
+            pathlib.Path(os.environ["ORCHESTRA_REPORT"]).write_text(
+                "RESULT: PARTIAL\\nGATE: x\\nHUMAN: none\\nPREMISE: wrong: it was already fixed\\n")
+            print(json.dumps({"type": "result", "permission_denials": [
+                {"tool_name": "Bash", "tool_input": {"command": "npm test"}}]}))
+        """)
+        (self.R.REVIEW / "lanes.json").write_text(json.dumps({"fake": [sys.executable, "-c", fake]}))
+        self.R.tick()
+        h = self.state()["tasks"]["p"]["history"][-1]
+        self.assertEqual(h["premise"], "wrong: it was already fixed")
+        self.assertEqual(h["denied"], ["Bash(npm)"])
+        sn = (self.R.REVIEW / "STATE_NOW.md").read_text()
+        self.assertIn("refused Bash(npm)", sn)
+        self.assertIn("premise", sn)
+
+    def test_main_checkout_write_is_flagged(self):
+        self.add("w")
+        main = str(self.repo / "stray.txt").replace("\\", "/")
+        fake = FAKE + f"\npathlib.Path({main!r}).write_text('oops')\n"
+        (self.R.REVIEW / "lanes.json").write_text(json.dumps({"fake": [sys.executable, "-c", fake]}))
+        self.R.tick()
+        h = self.state()["tasks"]["w"]["history"][-1]
+        self.assertTrue(any("stray.txt" in x for x in h["main_checkout_changed"]))
 
     def test_busy_lock(self):
         self.add("h")

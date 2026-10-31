@@ -50,6 +50,16 @@ def build() -> str:
         m = ts.get("merge", "")
         if m and m not in ("merged", "no commits"):
             waiting.append(f"- merge `review/{slug}` — {m}")
+    for slug, ts in state.get("tasks", {}).items():
+        last = (ts.get("history") or [{}])[-1]
+        if last.get("denied"):
+            waiting.append(f"- `{slug}`: session was refused {', '.join(sorted(set(last['denied'])))}"
+                           " — widen the lane's allow list if that was needed (orchestra/runner.py, or .review/lanes.json)")
+        if last.get("main_checkout_changed"):
+            waiting.append(f"- `{slug}`: the main checkout changed during its run: "
+                           f"{', '.join(last['main_checkout_changed'])} — a session writing outside its worktree, or you editing")
+        if str(last.get("premise", "")).lower().startswith("wrong"):
+            waiting.append(f"- `{slug}`: report says the task's premise was {last['premise']}")
     out += ["**Waiting on Chuen:**"] + (waiting or ["- nothing"]) + [""]
 
     queue = R.load_queue() if R.QUEUE.exists() else []
