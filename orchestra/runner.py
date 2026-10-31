@@ -69,6 +69,22 @@ DEFAULT_LANES = {
                "--disallowedTools", "Bash(git push:*),Bash(gh:*)"],
     "codex": ["codex", "exec", "--full-auto", "-"],
 }
+def npm_bin(pkg: str, name: str) -> str | None:
+    """A global npm CLI's JS entry, run with node so long prompts never go through cmd.exe."""
+    root = Path(os.environ.get("APPDATA", "")) / "npm" / "node_modules" / pkg
+    try:
+        meta = json.loads((root / "package.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    rel = meta["bin"] if isinstance(meta.get("bin"), str) else (meta.get("bin") or {}).get(name)
+    return str(root / rel) if rel else None
+
+
+_gemini = npm_bin("@google/gemini-cli", "gemini")
+if _gemini:
+    # auto_edit: may edit files, may not run shell commands. The runner runs the gate itself.
+    DEFAULT_LANES["gemini"] = ["node", _gemini, "--approval-mode", "auto_edit", "-o", "text",
+                               "-p", "Do the task given above."]
 VALID = {"priority": ("urgent", "normal"), "weight": ("light", "heavy"), "kind": ("work", "maintenance")}
 
 

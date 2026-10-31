@@ -26,7 +26,9 @@ VAULT = r"C:\Users\Xichu\OneDrive - King's College London\Denisse"
 REPORT = os.path.join(VAULT, "Denisse", "Vault Health.md")
 REQUIRED = ("name", "description", "updated")  # tags are only a warning: Memory/ deliberately has none
 # Entry points: nothing needs to link to these for them to be found.
-ROOTS = {"README.md", "MEMORY.md", "Vault Health.md", "SEM 1 Modules.md", "Log.md", "AGENTS.md"}
+ROOTS = {"README.md", "MEMORY.md", "Vault Health.md", "SEM 1 Modules.md", "Log.md", "AGENTS.md",
+         # Atlas format (2026-10-31): router notes every agent opens first
+         "hot.md", "index.md", "AI-RULES.md", "CLAUDE.md", "GEMINI.md", "STATE NOW.md"}
 # Written by a machine, one per day, and never meant to be hand-curated.
 # They get the link checks (a broken link there still breaks) but not the
 # frontmatter contract or the orphan check -- holding a dated eval file to a
@@ -37,6 +39,8 @@ GENERATED = (
     "Denisse/Task Archive/",
     "Denisse/Tasks.md",
     "Templates/",
+    "Calendar/Handoff-",   # agent hub's daily log, one line per hand-off
+    "STATE NOW.md",        # Orchestra, rewritten every tick
 )
 ATTACH = (".pdf", ".m", ".png", ".jpg", ".jpeg", ".svg", ".xlsx", ".docx", ".pptx", ".csv", ".zip")
 

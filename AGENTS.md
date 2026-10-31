@@ -13,6 +13,9 @@ Durable context lives in Chuen's Obsidian vault, not in this repo:
 
 `C:\Users\Xichu\OneDrive - King's College London\Denisse\`
 
+- `hot.md` there — current state; read first, every session
+- `AI-RULES.md` there — Atlas-format filing rules for every agent (Claude,
+  Codex, Copilot, Gemini, Denisse); read before your first vault write
 - `AGENTS.md` there — the vault contract
 - `Memory\MEMORY.md` — who Chuen is, how he works, this machine
 - `Denisse\Denisse.md` — this project's index
@@ -22,6 +25,14 @@ Durable context lives in Chuen's Obsidian vault, not in this repo:
 Read `Denisse\denisse_conversation_memory.md` before touching conversation
 history, `replay()`, or the noise gate. It records a bug that took three
 hypotheses to pin down, and the two that were disproved.
+
+## Shared memory and other agents
+
+The vault is the one memory for every agent. Codex, Copilot and Gemini don't
+write to it directly: they end answers with `FOR MEMORY:` lines and
+`orchestra/agent_hub` files them into `Calendar/Handoff-<date>.md`. Orchestra
+(`orchestra/`, see `.review/README.md`) runs queued tasks; its limits live in
+`orchestra/config.json`.
 
 ## Ground rules
 
