@@ -139,6 +139,28 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(self.R.tick(), "PASS-REJECTED")
         self.assertIn("none", (self.R.PARKED / "c.why.txt").read_text())
 
+    def test_unrelated_dirty_file_does_not_block_merge(self):
+        (self.repo / "notes.txt").write_text("v1")
+        subprocess.run(["git", "add", "notes.txt"], cwd=self.repo, check=True)
+        subprocess.run(["git", "commit", "-qm", "notes"], cwd=self.repo, check=True)
+        (self.repo / "notes.txt").write_text("my own edit")  # Chuen's uncommitted, unrelated work
+        self.add("u")
+        os.environ["FAKE_COMMIT"] = "1"
+        self.assertEqual(self.R.tick(), "PASS")
+        self.assertTrue((self.repo / "done.txt").exists(), "merged despite the unrelated edit")
+        self.assertEqual((self.repo / "notes.txt").read_text(), "my own edit")
+
+    def test_dirty_file_the_branch_touches_blocks_merge(self):
+        (self.repo / "done.txt").write_text("v1")
+        subprocess.run(["git", "add", "done.txt"], cwd=self.repo, check=True)
+        subprocess.run(["git", "commit", "-qm", "done"], cwd=self.repo, check=True)
+        (self.repo / "done.txt").write_text("my own edit")
+        self.add("v")
+        os.environ["FAKE_COMMIT"] = "1"
+        self.assertEqual(self.R.tick(), "PASS")
+        self.assertIn("done.txt", self.state()["tasks"]["v"]["merge"])
+        self.assertEqual((self.repo / "done.txt").read_text(), "my own edit")
+
     def test_main_checkout_write_blocks_merge(self):
         self.add("w")
         os.environ["FAKE_STRAY"] = str(self.repo / "stray.txt")
@@ -285,6 +307,13 @@ class GuardTest(unittest.TestCase):
         why = self.d("Write", file_path=os.path.join(self.main, "a.py"))
         self.assertIn("instead", why)
         self.assertIsNotNone(self.d("Write", file_path=os.path.abspath("/elsewhere/x.txt")))
+
+    def test_push_only_counts_as_a_command(self):
+        self.assertIsNotNone(self.d("Bash", command="git status && git push"))
+        self.assertIsNotNone(self.d("Bash", command="git -c user.name=x push origin"))
+        self.assertIsNone(self.d("Bash", command="cat > r.md <<'EOF'\nNot pushed (the runner merges; git push is Chuen's)\ngit push stays with Chuen\nEOF\ngit status --short"))
+        self.assertIsNotNone(self.d("Bash", command="cat > r.md <<'EOF'\nx\nEOF\ngit push"))
+        self.assertIsNone(self.d("Bash", command="git commit -m 'never git push from a task'"))
 
     def test_bash(self):
         for cmd in ("git push origin master", "git -C ../denisse commit -m x", "git reset --hard HEAD~1",

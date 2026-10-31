@@ -378,8 +378,14 @@ def try_merge(branch: str) -> str:
     ahead = git("rev-list", "--count", f"HEAD..{branch}", check=False).stdout.strip()
     if ahead in ("", "0"):
         return "no commits"
-    if git("status", "--porcelain", "--untracked-files=no").stdout.strip():
-        return "main checkout has uncommitted changes; merge by hand"
+    # Uncommitted work in the main checkout only blocks the merge if the branch touches
+    # the same files; Chuen's own unrelated edits (e.g. eval/dataset.jsonl) don't.
+    dirty = {l[3:].strip().strip('"') for l in
+             git("status", "--porcelain", "--untracked-files=no").stdout.splitlines() if l.strip()}
+    touched = set(git("diff", "--name-only", f"HEAD...{branch}", check=False).stdout.split())
+    clash = sorted(dirty & touched)
+    if clash:
+        return f"main checkout has uncommitted changes to {', '.join(clash)}; merge by hand"
     r = git("merge", "--no-ff", "-m", f"orchestra: merge {branch}", branch, check=False)
     if r.returncode != 0:
         git("merge", "--abort", check=False)

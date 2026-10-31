@@ -18,16 +18,27 @@ import re
 import sys
 from pathlib import Path
 
+GIT = r"(^|[;&|(\n])\s*git\s+(?:-c\s+\S+\s+|--?[\w-]+(?:=\S+)?\s+)*"
 WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 BASH_DENY = [
-    (r"\bgit\b[^|;&]*\bpush\b", "pushing is Chuen's step"),
-    (r"\bgit\s+-C\b", "git -C can reach another checkout; run git inside this worktree"),
-    (r"\breset\s+--hard\b", "reset --hard throws work away"),
-    (r"\bclean\s+-\w*f", "git clean -f deletes untracked files"),
+    # git subcommands only count at a command position, so the word "push" inside a
+    # heredoc or commit message isn't a push (first real run, 31 Oct: a report was refused)
+    (GIT + r"push\b", "pushing is Chuen's step"),
+    (r"(^|[;&|(\n])\s*git\s+-C\b", "git -C can reach another checkout; run git inside this worktree"),
+    (GIT + r"reset\s+--hard\b", "reset --hard throws work away"),
+    (GIT + r"clean\s+-\w*f", "git clean -f deletes untracked files"),
     (r"(^|[\s;&|])gh\s", "the GitHub CLI acts on the public repo"),
     (r"\brm\s+-\w*r\w*f|\brm\s+-\w*f\w*r|\bRemove-Item\b[^|;&]*-Recurse|\brmdir\s+/s", "recursive delete"),
     (r"\bworktree\s+(remove|prune)\b", "the runner manages worktrees"),
 ]
+
+
+HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n.*?\n\s*\2\s*(?=\n|$)", re.S)
+
+
+def strip_heredocs(cmd: str) -> str:
+    """A heredoc body is text being written, not commands being run."""
+    return HEREDOC.sub("<<HEREDOC", cmd)
 
 
 def norm(p: str) -> str:
@@ -52,9 +63,9 @@ def decide(data: dict, worktree: str, main: str) -> str | None:
             hint = f" Write {os.path.join(worktree, target[len(m) + 1:])} instead."
         return f"Writes must stay inside this task's worktree {worktree}; {path} is outside it.{hint}"
     if tool == "Bash":
-        cmd = inp.get("command") or ""
+        cmd = strip_heredocs(inp.get("command") or "")
         for pat, why in BASH_DENY:
-            if re.search(pat, cmd, re.I):
+            if re.search(pat, cmd, re.I | re.M):
                 return f"Denied by the Orchestra guard ({why}). Finish the rest and note this under ODD."
         low = cmd.replace("\\", "/").lower()
         mains = {norm(main).lower(), str(main).replace("\\", "/").lower().rstrip("/")}
