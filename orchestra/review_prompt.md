@@ -35,10 +35,15 @@ in one line under ODD. Only four kinds of thing are Chuen's to decide:
   (deleting the only copy, rewriting git history).
 For those, do every other part of the task, then put ONE question on the
 HUMAN line: what's needed, the options, and the one you'd pick. Anything else
-on HUMAN is a decision you skipped. If a tool call is refused, don't retry it
-or route around it: finish the rest and note the refusal under ODD.
+on HUMAN is a decision you skipped. If a tool call is refused (a guard hook blocks
+pushes, `git -C`, `reset --hard`, recursive deletes and writes outside this
+worktree), don't retry it or route around it: finish the rest and note the
+refusal under ODD.
 
 ## The gate
+The runner re-runs every command in the gate's ``` block itself after you
+finish, and merges only if they all exit 0. Your RESULT doesn't merge anything
+on its own. `.venv` in this worktree is a link to the real one.
 6. Run the `## Gate` exactly as written. Never weaken, skip or rewrite a
    check, and never edit a test just to make it pass.
 7. A gate that exits 5 (pytest found no tests), exits 127 (command not

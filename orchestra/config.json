@@ -1,0 +1,36 @@
+{
+  "_about": "Orchestra limits, one place. Each has its reason. Env vars ORCHESTRA_<KEY> (upper case) override for a single run.",
+
+  "infra_retries": 1,
+  "_infra_retries": "Retries only for timeout / no report / lane missing. Thomas, 2,006 reports: a re-run FAIL never came back PASS (5 of 5 ended PARTIAL). PARTIAL/FAIL park and need a task edit.",
+
+  "backoff_min": 10,
+  "_backoff_min": "Wait before the one infra retry, so a transient outage can clear.",
+
+  "timeout_s": {"light": 1200, "heavy": 3600},
+  "_timeout_s": "Starting guess only. After timeout_min_runs finished runs of a weight, the timeout becomes timeout_p95_factor x p95 of those runs (never under timeout_floor_s).",
+  "timeout_min_runs": 20,
+  "timeout_p95_factor": 3,
+  "timeout_floor_s": 300,
+
+  "gate_timeout_s": 600,
+  "_gate_timeout_s": "The runner re-runs the task's gate before merging. A gate that times out is broken, not passed.",
+
+  "maint_share": 0.20,
+  "maint_floor_s": 900,
+  "_maint_share": "Maintenance tasks get at most this share of the day's runtime, plus the floor so they aren't starved at midnight. Atrium spent 72% on itself on 29 Oct.",
+
+  "stale_days": 7,
+  "_stale_days": "Older tasks assume code that has moved. Re-date the task if it still holds.",
+
+  "daily_spend_cap_usd": 5.0,
+  "_daily_spend_cap_usd": "Summed from claude -p total_cost_usd. Runs killed before reporting are charged an estimate from minutes x today's cost per minute. Thomas's ledger saw under half of a 20-hour spend.",
+  "unknown_cost_per_min_usd": 0.10,
+
+  "done_window_days": 14,
+  "_done_window_days": "A task whose exact content already PASSed within this window is not run again (content hash, not title: titles get reused).",
+
+  "git_timeout_s": 120,
+  "tick_watchdog_extra_s": 900,
+  "_tick_watchdog_extra_s": "The whole tick is killed this long after the longest possible lane timeout. Atrium hung 19 then 29 minutes on one call."
+}

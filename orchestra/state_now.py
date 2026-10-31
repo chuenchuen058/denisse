@@ -58,6 +58,8 @@ def build() -> str:
         if last.get("main_checkout_changed"):
             waiting.append(f"- `{slug}`: the main checkout changed during its run: "
                            f"{', '.join(last['main_checkout_changed'])} — a session writing outside its worktree, or you editing")
+        if last.get("hooks_loaded") is False:
+            waiting.append(f"- `{slug}`: the guard hook never fired in its run — check `claude --settings` still loads hooks")
         if str(last.get("premise", "")).lower().startswith("wrong"):
             waiting.append(f"- `{slug}`: report says the task's premise was {last['premise']}")
     out += ["**Waiting on Chuen:**"] + (waiting or ["- nothing"]) + [""]
@@ -78,13 +80,14 @@ def build() -> str:
                        if not p.name.endswith(".report.md") and _is_task(p)]
     out += ["**Closed (today + yesterday):**"] + (closed or ["- nothing"]) + [""]
 
-    u = state.get("days", {}).get(now.date().isoformat(), {"work_s": 0, "maint_s": 0})
+    u = R.today_usage(state)
     total = u["work_s"] + u["maint_s"]
     share = f"{100 * u['maint_s'] / total:.0f}%" if total else "n/a"
     out.append(f"**Today's runtime:** {u['work_s'] // 60} min his work, {u['maint_s'] // 60} min "
-               f"maintenance (maintenance share {share}, cap {int(R.MAINT_SHARE * 100)}%)")
-    out.append("**Spend:** check the real balance in the Anthropic / OpenAI dashboards — "
-               "this runner does not track money.")
+               f"maintenance (maintenance share {share}, cap {int(R.C['maint_share'] * 100)}%)")
+    est = f", {u['estimated_runs']} run(s) estimated because they were killed before reporting" if u["estimated_runs"] else ""
+    out.append(f"**Spend today:** ${u['cost_usd']:.2f} of the ${R.C['daily_spend_cap_usd']:.2f} cap{est}. "
+               "From claude's own cost figures; check the real balance in the dashboards now and then.")
     return "\n".join(out) + "\n"
 
 
