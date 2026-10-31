@@ -190,7 +190,8 @@ class AdaptiveTests(unittest.TestCase):
                         {'message':{'content':'BlueBand sensor testing happened last October.'}}])
         with patch.object(brain.ollama,'chat',side_effect=lambda **kwargs:next(responses)),patch.dict(brain.tools.TOOL_FUNCTIONS,{'search_vault':lambda query:result}):
             answer,_=brain.Brain.__new__(brain.Brain).respond([{'role':'user','content':'what am i working on'}])
-        self.assertEqual(answer,result)
+        # The model-facing header is tidied for him (2026-10-31); the dates stay.
+        self.assertEqual(answer,result.replace('From your notes (dated context only):','From your notes:'))
 
     def test_fact_questions_do_not_gain_write_permission(self):
         defs=[{'function':{'name':n}} for n in ('remember','recall','calculate')]

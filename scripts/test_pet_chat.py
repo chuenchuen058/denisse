@@ -191,10 +191,12 @@ class PetChatTests(unittest.TestCase):
             {'message': {'content': 'I found C:\\MadeUp\\Passport.pdf'}}])
         with patch.object(brain.ollama, 'chat', side_effect=lambda **kw: next(responses)), \
              patch.dict(brain.tools.TOOL_FUNCTIONS, {'find_files': lambda query: found}, clear=True):
-            answer, _ = brain.Brain.__new__(brain.Brain).respond([
-                {'role': 'user', 'content': 'find my passport file'}])
+            b = brain.Brain.__new__(brain.Brain)
+            answer, _ = b.respond([{'role': 'user', 'content': 'find my passport file'}])
         self.assertNotIn('MadeUp', answer)
-        self.assertIn('C:\\Test\\Passport.pdf', answer)
+        # Names in the reply since 2026-10-31; the real path is kept for "yes".
+        self.assertIn('Passport.pdf', answer)
+        self.assertIn('C:\\Test\\Passport.pdf', b._last_paths)
 
     def test_actual_read_result_is_not_replaced_by_search_status(self):
         responses = iter([

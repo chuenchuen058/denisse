@@ -72,12 +72,30 @@ def parse_due(text: str, now: datetime | None = None) -> datetime | None:
     try:
         import dateparser
 
-        return dateparser.parse(
+        when = dateparser.parse(
             cleaned,
             settings={"PREFER_DATES_FROM": "future", "RELATIVE_BASE": now},
         )
     except Exception:
         return None
+    if when is None or _HAS_TIME.search(cleaned):
+        return when
+    # A day with no time is the end of that day, like a bare "friday" above.
+    # dateparser keeps the clock instead: "tomorrow" said at 00:03 became a
+    # task due tomorrow 00:03 (2026-10-31). "before 2 Nov" is the end of
+    # the day before.
+    when = when.replace(hour=23, minute=59, second=0, microsecond=0)
+    if re.match(r"^\s*before\b", text, re.I):
+        when -= timedelta(days=1)
+    return when
+
+
+# Anything that says when in the day, or a span measured from now.
+_HAS_TIME = re.compile(
+    r"\d{1,2}\s*(?:am|pm)\b|\d{1,2}[:.h]\d{2}\b|\b(?:noon|midday|midnight|morning|afternoon"
+    r"|evening|tonight|night|lunch|now|hours?|hrs?|minutes?|mins?|seconds?|secs?)\b"
+    r"|^\s*\d{1,2}\s*$|\bat\s+\d{1,2}\b",
+    re.IGNORECASE)
 
 
 def due_from_text(text: str, now: datetime | None = None) -> datetime | None:

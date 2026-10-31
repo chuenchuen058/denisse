@@ -721,6 +721,218 @@ def _weather_place(text: str, request_groups) -> str | None:
     return place
 
 
+# His standing asks, 2026-10-31, each said more than once in one evening:
+# "you dont have to say the file path its too long and not great to hear",
+# "dont show the path at all ... ask if i want the file path", "you could
+# just say me instead of chuen", "keep it short and simple". The model
+# agreed every time and did it again in the next reply, so the code does it
+# to every reply instead. Paths become file names plus one question; the
+# full paths are kept (Brain._last_paths) for a "yes".
+_WIN_PATH = re.compile(
+    r"(?:[A-Za-z]:|\\\\)(?:[\\/][^\\/\r\n]+)*[\\/]"
+    r"(?P<name>[^\\/\r\n]*?\.[A-Za-z0-9]{2,5}(?=$|[\s,;:)\]'\"!?]|\.(?:\s|$))"
+    r"|[^\\/\s,;:)\]'\"]+)")
+_PATH_ASK = "Want the full path?"
+# Asking for it, not mentioning it: "you dont have to say the file path"
+# kept every path in the first version.
+_WANTS_PATH = re.compile(
+    r"\b(?:what'?s|whats|what\s+is|give|show|send|tell|copy)\b[^.?!]{0,25}\b(?:path|location)s?\b"
+    r"|\bfull\s+paths?\b|\b(?:which|what)\s+folder\b", re.IGNORECASE)
+_PATH_YES = re.compile(
+    r"^\s*(?:yes|yeah|yep|yup|sure|ok(?:ay)?|please|go\s+on|show\s+(?:me|it|them)"
+    r"|(?:what'?s|give\s+me|send\s+me|show\s+me)\s+(?:the\s+)?(?:full\s+)?paths?)"
+    r"(?:[\s,]+(?:please|thanks?|show\s+me|the\s+path))*[.!\s]*$", re.IGNORECASE)
+
+
+def _hide_paths(text: str) -> tuple[str, list]:
+    """Swap every Windows path in a reply for its file name. Returns the new
+    text and the paths taken out, in order, without repeats."""
+    taken = []
+    names = {}
+    for m in _WIN_PATH.finditer(text or ""):
+        names.setdefault(m.group("name").lower(), set()).add(m.group(0).rstrip(".").lower())
+
+    def where(full, others):
+        # The nearest folder that tells same-named files apart: "Resume\IUMC"
+        # and "Resume - Copy\IUMC" differ one level up, not at IUMC.
+        parts = re.split(r"[\\/]", full.lower())
+        rest = [re.split(r"[\\/]", o) for o in others if o != full.lower()]
+        for k in range(2, len(parts) + 1):
+            if all(len(o) < k or o[-k] != parts[-k] for o in rest):
+                return re.split(r"[\\/]", full)[-k]
+        return re.split(r"[\\/]", full)[-2]
+
+    def name_of(m):
+        full = m.group(0).rstrip(".")
+        if full not in taken:
+            taken.append(full)
+        name = m.group("name")
+        same = names.get(name.lower(), ())
+        if len(same) > 1:
+            # Two "Passport ctc.pdf"s read as a repeat; say where each is.
+            return f"{name} (in {where(full, same)})"
+        return name
+
+    out = _WIN_PATH.sub(name_of, text or "")
+    out = re.sub(r"(No files matching '[^']*' found) in [^.\n]*\.(?: That only covers the folders searched\.)?",
+                 r"\1 in the folders I search.", out)
+    return out, taken
+
+
+_YOU_VERB = {"is": "are", "has": "have", "was": "were", "does": "do"}
+
+
+def _second_person(text: str) -> str:
+    """Notes say "Chuen is a collaborator"; she reads that out to Chuen.
+    Talking about him to him, "Chuen" is "you". "Hey Chuen" and "Thanks,
+    Chuen" stay -- those are talking to him already."""
+    if "Chuen" not in (text or ""):
+        return text
+    sentences = re.split(r"(?<=[.!?\n])(\s+)", text)
+    out = []
+    for s in sentences:
+        if "Chuen" not in s:
+            out.append(s)
+            continue
+        before = s
+        s = re.sub(r"\bChuen'?s\b(?!\s+(?:is|has|was)\b)", "your", s)
+        s = re.sub(r"\bChuen\s+(is|has|was|does)\b", lambda m: "you " + _YOU_VERB[m.group(1)], s)
+        s = re.sub(r"\bChuen(?=\s+(?:\w+ed|can|could|will|would|should|did|had|also|said|told|"
+                   r"wants?|needs?|asked|chose|wrote|made|built|got|went|saw|kept|left)\b)",
+                   "you", s)
+        s = re.sub(r"(?<!, )(?<!Hey )(?<!hey )(?<!Hi )(?<!hi )\bChuen\b(?!,)(?![.!?]?\s*$)", "you", s)
+        if s != before:
+            s = re.sub(r"\bhis\b", "your", s)
+            s = re.sub(r"\bhimself\b", "yourself", s)
+            s = re.sub(r"\bhe\s+(is|has|was|does)\b", lambda m: "you " + _YOU_VERB[m.group(1)], s)
+            s = re.sub(r"\bhe\b", "you", s)
+            s = re.sub(r"(^|[.!?]\s+|\n)(you|your)\b", lambda m: m.group(1) + m.group(2).capitalize(), s)
+        out.append(s)
+    return "".join(out)
+
+
+_NOTES_HEADER = re.compile(r"^From your notes \([^)]*\):", re.MULTILINE)
+
+
+def _tidy_reply(text: str, latest_user: str) -> tuple[str, list]:
+    """The last step before a reply leaves: his standing style asks, done in
+    code. Returns (reply, paths hidden from it)."""
+    text = _NOTES_HEADER.sub("From your notes:", text or "")
+    text = _second_person(text)
+    if _WANTS_PATH.search(latest_user or ""):
+        return text, []
+    text, paths = _hide_paths(text)
+    if paths and _PATH_ASK not in text:
+        text = text.rstrip() + "\n\n" + _PATH_ASK
+    return text, paths
+
+
+# Writing a file is something he asks for. On 2026-10-31 nobody did, and she
+# wrote "yes delete them" to old_cvs.txt, made Documents\CVs and Notes, and
+# overwrote her own settings file with one of his sentences -- write_file is
+# auto-allowed (safety.py, his choice), so nothing stopped it.
+_WRITE_REQUEST = re.compile(
+    r"\b(?:write|save|create|make|draft|jot|type|put|store|export|copy)\b[^.?!]{0,60}?"
+    r"\b(?:files?|notes?|txt|text|docs?|documents?|lists?|csv|markdown|md|log|letter|draft"
+    r"|desktop|folder|downloads?|documents)\b"
+    r"|\b(?:save|write)\s+(?:it|this|that|them)\b",
+    re.IGNORECASE)
+_REPO_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _inside_denisse(path: str) -> bool:
+    try:
+        p = os.path.normcase(os.path.abspath(os.path.expanduser(path or "")))
+        return p == os.path.normcase(_REPO_DIR) or p.startswith(os.path.normcase(_REPO_DIR) + os.sep)
+    except Exception:
+        return True
+
+
+# A new task is something he asks for, too. "you also dont need to
+# pronounce the file path ... ask if i want the file path next time" became
+# the task "ask for file path next time" (2026-10-31).
+_TASK_REQUEST = re.compile(
+    r"\bremind|\breminders?\b|\btasks?\b|\bto-?do\b|\badd\b|\bdon'?t\s+(?:let\s+me\s+)?forget"
+    r"|(?<!don't )(?<!dont )(?<!do not )\b(?:need|have|got)\s+to\b|\bmust\b|\bdeadline\b|\bdue\b"
+    r"|\bschedule\b|\bput\s+(?:it|that|this)\s+(?:on|in)\b",
+    re.IGNORECASE)
+
+# How he wants her to talk, not a task: "you dont have to say the file
+# path", "from now on ...", "next time you could just ...", "keep it short".
+# On 2026-10-31 the model answered these with "I've moved the files to a
+# temporary folder", a junk task, and three junk files. He asked for
+# "alright noted"; the note is written to memory/style_notes.jsonl, so a
+# person can turn it into code the way paths and "Chuen" were.
+_STYLE_NOTE = re.compile(
+    r"^\s*(?:(?:okay|ok|also|and|great|alright|but|btw|nice)[,.!\s]+)*(?:"
+    r"you\s+(?:also\s+)?(?:don'?t|dont|do\s+not)\s+(?:have|need)\s+to\b"
+    r"|(?:i\s+)?(?:don'?t|dont|do\s+not)\s+need\s+you\s+to\b"
+    r"|from\s+now\s+on\b|next\s+time\b|in\s+(?:the\s+)?future\b|no\s+need\s+to\b"
+    r"|keep\s+it\s+(?:short|simple|brief)\b|stop\s+(?:saying|showing|reading|repeating)\b"
+    r"|you\s+(?:could|can|should)\s+just\s+(?:say|call|use|ask|add)\b)",
+    re.IGNORECASE)
+STYLE_NOTES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "memory", "style_notes.jsonl")
+
+
+def _style_note(text: str) -> bool:
+    t = (text or "").strip()
+    return (bool(_STYLE_NOTE.match(t)) and not re.search(r"\bremind\b", t, re.IGNORECASE)
+            # "..., but find my cv" carries a real request after the note.
+            and not re.search(r"\b(?:but|and|then|now)\s+(?:(?:can|could)\s+)?(?:you\s+)?(?:please\s+)?"
+                              r"(?:find|open|play|search|check|pull|show|get|delete|send|write|look)\b",
+                              t, re.IGNORECASE))
+
+
+def _write_style_note(text: str) -> None:
+    try:
+        with open(STYLE_NOTES_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"at": datetime.datetime.now().isoformat(timespec="minutes"),
+                                "text": text.strip()}, ensure_ascii=False) + "\n")
+    except OSError:
+        logging.warning("style note not saved")
+
+
+# Deleting or moving his files is never a side effect of a chat. On
+# 2026-10-31 "yes delete them" produced three Move-Item calls on his CVs
+# (stubbed in the replay; run_shell_command runs unasked, safety.py).
+_DESTRUCTIVE_SHELL = re.compile(
+    r"\b(?:Remove-Item|rm|rmdir|rd|del|erase|Move-Item|mv|move|ren|Rename-Item|Clear-Content"
+    r"|Set-Content|Out-File|Clear-RecycleBin|format|takeown|icacls|cipher)\b"
+    r"|(?<![2\d])>(?!\s*\$?null\b)\s*[^\s&|]",
+    re.IGNORECASE)
+
+# A deadline he never said. "remind me to submit the team sign up" became
+# "on the 6th of October at 2 PM" (2026-10-31). The words that pin a date
+# have to be his.
+_DUE_WORDS = re.compile(
+    r"\d+|\b(?:today|tonight|tomorrow|tmrw|tmr|tmw|yesterday|weekend|week|month|year|noon|midnight"
+    r"|morning|afternoon|evening|night|mon|tue|wed|thu|fri|sat|sun|jan|feb|mar|apr|may|jun|jul|aug"
+    r"|sep|oct|nov|dec)", re.IGNORECASE)
+_DUE_ALIAS = {"tmrw": "tomorrow", "tmr": "tomorrow", "tmw": "tomorrow", "tonight": "today"}
+
+
+def _due_said(due: str, text: str) -> bool:
+    def words(s):
+        out = set()
+        for w in _DUE_WORDS.findall((s or "").lower()):
+            if w.isdigit():
+                if int(w):
+                    out.add(str(int(w)))
+            else:
+                out.add(_DUE_ALIAS.get(w, w))
+        return out
+    return words(due) <= words(text) | {"today"} if words(due) else True
+
+
+# "before 2nd of november", said straight after she added a task: that's
+# the task's deadline. Live she said "I'll add that to your reminders" and
+# changed nothing.
+_DEADLINE_ONLY = re.compile(
+    r"^\s*(?:it'?s\s+|its\s+|make\s+it\s+|actually\s+|no,?\s+)?"
+    r"(?:by|before|due|on|for|until|till|at)\s+[\w\s.:'-]{2,40}?\s*[.!?]?\s*$",
+    re.IGNORECASE)
+
+
 # A real answer wrapped in commentary on how she got it: "I called the
 # get_weather tool to get the current weather in London. According to the
 # tool, ..." and "The tool call returned a list of news headlines" (eval,
@@ -919,9 +1131,26 @@ _CLAIM_NEEDS = (
      {"open_application"}),
 )
 _SET_FOR = re.compile(r"\b(?:set|started|running)\s+for\b", re.IGNORECASE)
+# "Deleted 280 old CVs." (2026-10-31) after three write_file calls and a
+# refused delete. She has no tool that deletes his files, so a claim that
+# files are gone is checked on its own, done-word or not.
+_DELETE_CLAIM = re.compile(
+    r"\b(?:i'?ve\s+|i\s+have\s+|i\s+)?(?:deleted|erased|trashed|got\s+rid\s+of|cleared\s+out|removed)\b"
+    r"(?![^.!?\n]{0,40}\btask)", re.IGNORECASE)
+_DELETE_TOOLS = {"remove_task", "clean_temp_files"}
+
+
+def _claims_deleted(text: str) -> bool:
+    for m in _DELETE_CLAIM.finditer(text or ""):
+        before = text[max(0, m.start() - 20):m.start()].lower()
+        if not re.search(r"\b(?:not|n't|never|no|nothing|haven'?t|hasn'?t)\b\W*(?:\w+\W+)?$", before):
+            return True
+    return False
 
 
 def _claim_without_its_tool(text: str, ran: set) -> bool:
+    if _claims_deleted(text) and not ran & _DELETE_TOOLS:
+        return True
     if not (_CLAIMS_DONE.search(text) or _SET_FOR.search(text)):
         return False
     return any(rx.search(text) and not (ran & needs) for rx, needs in _CLAIM_NEEDS)
@@ -1657,6 +1886,27 @@ class Brain:
         clarify.offer(request, asked, others, cands, terms)
         return asked
 
+    def _move_new_task(self, text, last_said):
+        """A bare deadline ("before 2nd of november") right after she added
+        a task sets that task's deadline. The reply, or None if it isn't one."""
+        if not _DEADLINE_ONLY.fullmatch((text or "").strip()):
+            return None
+        import tasks
+        if tasks.parse_due(text) is None:
+            return None
+        recent = [t for t in tasks.list_tasks() if not t.get("done_at")]
+        if not recent:
+            return None
+        newest = max(recent, key=lambda t: t.get("created") or "")
+        try:
+            age = datetime.datetime.now() - datetime.datetime.fromisoformat(newest["created"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        if age > datetime.timedelta(minutes=15) or newest["text"].lower()[:30] not in (last_said or "").lower():
+            return None
+        updated = tasks.update_task(newest["id"], due=text.strip())
+        return f"Moved: {tasks.describe(updated)}." if updated else None
+
     def _settle_which(self, p, text):
         """His answer to "which one?": the answer from the item he picked,
         another question, or None when it's a new request."""
@@ -1737,6 +1987,23 @@ class Brain:
             return answer, messages
         if _SELF_MODEL.search(latest_user):
             answer = _model_identity()
+            messages.append({"role": "assistant", "content": answer})
+            return answer, messages
+        last_said = next((m.get("content") or "" for m in reversed(messages[:-1])
+                          if m.get("role") == "assistant" and (m.get("content") or "").strip()), "")
+        if (last_said.rstrip().endswith(_PATH_ASK) and getattr(self, "_last_paths", None)
+                and _PATH_YES.fullmatch(latest_user.strip())):
+            answer = "\n".join(self._last_paths[:5])
+            messages.append({"role": "assistant", "content": answer})
+            return answer, messages
+        moved = None if getattr(self, "_retrying", False) else self._move_new_task(latest_user, last_said)
+        if moved:
+            messages.append({"role": "assistant", "content": moved})
+            return moved, messages
+        if _style_note(latest_user) and not getattr(self, "_retrying", False):
+            # His words: "just say 'alright noted'". See _STYLE_NOTE.
+            _write_style_note(latest_user)
+            answer = "Alright, noted."
             messages.append({"role": "assistant", "content": answer})
             return answer, messages
         # An open "which one do you mean?" (clarify.py) is settled first, so
@@ -2015,6 +2282,19 @@ class Brain:
             elif name == "get_current_time" and not _TIME_REQUEST.search(latest_user):
                 result = ("No tool needed here. Answer his question directly, in your "
                           "own words, from what you know.")
+            elif name == "write_file" and not _WRITE_REQUEST.search(latest_user):
+                result = ("Refused: he didn't ask you to write or save anything. Don't write a file; "
+                          "do what he said or answer him.")
+            elif name == "write_file" and _inside_denisse(args.get("path", "")):
+                result = ("Refused: that's your own program folder, and your settings there are his "
+                          "to edit. Don't write there.")
+            elif name == "add_task" and not _TASK_REQUEST.search(latest_user):
+                result = ("Refused: he didn't ask for a task or reminder. If he told you how to "
+                          "talk to him, just say you've got it.")
+            elif (name == "run_shell_command"
+                  and _DESTRUCTIVE_SHELL.search(str(args.get("command") or args.get("cmd") or ""))):
+                result = ("Refused: that command deletes, moves or overwrites his files, and you "
+                          "don't do that. Tell him plainly you can't, and name the files if that helps.")
             elif name == "list_skills" and not _SKILL_QUESTION.search(latest_user):
                 result = ("Not needed: he didn't ask about your skills. Do what he asked with "
                           "your other tools, or answer directly. Don't mention skills or tools.")
@@ -2033,7 +2313,16 @@ class Brain:
                     import instincts
                     if instincts.wants_vault_overview(latest_user):
                         args = {**args, "query": "current projects"}
+                if name == "add_task" and args.get("due") and not _due_said(str(args["due"]), latest_user):
+                    args = {**args, "due": ""}  # see _due_said
                 result = str(_run_tool(name, args, confirm, used_once))
+                q = str(args.get("query") or args.get("pattern") or "")
+                if name == "find_files" and result.startswith("No files matching") and re.search(r"[*?]", q):
+                    # "*.cv" found nothing on 2026-10-31; he has hundreds of
+                    # files with "cv" in the name. Try the plain word.
+                    plain = re.sub(r"[*?]+", " ", q).strip(" .")
+                    if plain and plain != q:
+                        result = str(_run_tool(name, {"query": plain}, confirm, used_once))
                 vq = _vault_query(latest_user)
                 if (name == "recall" and vq and "search_vault" in offered_names
                         and "search_vault" not in tool_outputs):
@@ -2231,8 +2520,12 @@ class Brain:
                         result = tool_outputs.get(name, "")
                         confirmed = re.split(
                             r"\.\s+(?:That was the last one|\d+ other tasks? still open)", result, maxsplit=1)[0]
+                        # A new task is always confirmed in the task list's own
+                        # words: "I'll remind you on the 6th of October at 2 PM"
+                        # named the task right and invented the date.
                         if (name in successful_tools and result.startswith(("Added:", "Done:", "Marked done:", "Removed:"))
-                                and not _has_task_content(final_text, "- " + confirmed.partition(":")[2])):
+                                and (name == "add_task"
+                                     or not _has_task_content(final_text, "- " + confirmed.partition(":")[2]))):
                             final_text = confirmed
                     vault_result = tool_outputs.get("search_vault", "")
                     if vault_result.startswith("From your notes (dated context"):
@@ -2259,6 +2552,10 @@ class Brain:
                         final_text = _strip_unfetched_weather(final_text)
                     if "get_current_time" not in successful_tools:
                         final_text = _correct_unfetched_clock(final_text)
+                    # Last, after every check above has compared paths.
+                    final_text, hidden = _tidy_reply(final_text, latest_user)
+                    if hidden:
+                        self._last_paths = hidden
                     messages.append({"role": "assistant", "content": final_text})
                     return final_text, messages
 
@@ -2313,5 +2610,8 @@ class Brain:
         lookup = tool_outputs.get("find_files", "")
         if lookup.startswith(("Found ", "No files matching")):
             give_up = lookup
+        give_up, hidden = _tidy_reply(give_up, latest_user)
+        if hidden:
+            self._last_paths = hidden
         messages.append({"role": "assistant", "content": give_up})
         return give_up, messages

@@ -360,6 +360,8 @@ def main() -> int:
     delegate.DRY_RUN = True
     import planner
     planner.PENDING_FILE = str(scratch.with_name("pending_plan.json"))
+    import brain as _brain_notes  # his "from now on ..." notes (2026-10-31)
+    _brain_notes.STYLE_NOTES_FILE = str(scratch.with_name("style_notes.jsonl"))
     # A study brief is written into his vault's Drafts and its progress into
     # memory/jobs -- the suite's briefs go to scratch instead. (2026-10-30)
     import study_brief

@@ -175,6 +175,107 @@ for text, want in (("and in Penang?", "Penang"), ("what about Kuala Lumpur?", "K
     check(f"weather place {text!r}", got == want, got)
 check("no weather topic, no forced call", brain._weather_place("and in Penang?", ["music"]) is None)
 
+# 2026-10-31, from his own messages that evening.
+cv = ("I'll keep all your CVs.\n\nMatching files:\n"
+      "C:\\Users\\Xichu\\OneDrive - King's College London\\Downloads\\Lim_Xi_Chuen_CV_.pdf\n"
+      "C:\\Users\\Xichu\\OneDrive - King's College London\\Documents\\ChatGPT\\Intern Application\\output\\pdf"
+      "\\Lim_Xi_Chuen_CV_Under_2MB.pdf")
+got, hidden = brain._tidy_reply(cv, "i know i have few hundred copies of my cv")
+check("paths become file names", "C:\\" not in got and "Lim_Xi_Chuen_CV_Under_2MB.pdf" in got, got)
+check("...and she asks about the path", got.endswith(brain._PATH_ASK) and len(hidden) == 2, hidden)
+got, _ = brain._tidy_reply("It's in C:\\Users\\Xichu\\GitHub\\blueband-pcb. Want more?", "where is blueband")
+check("folder path -> folder name", got.startswith("It's in blueband-pcb. Want more?"), got)
+got, _ = brain._tidy_reply(cv, "whats the path to my cv")
+check("he asked for the path: kept", "C:\\Users" in got, got[:60])
+miss = ("No files matching 'passport time' found in desktop, documents, downloads, pictures, onedrive "
+        "videos. That only covers the folders searched.")
+got, _ = brain._tidy_reply(miss, "pull up my passport time")
+check("a miss is one short line", got == "No files matching 'passport time' found in the folders I search.", got)
+for text, want in (
+        ("Chuen is a collaborator on the project, and his contributions include the PCB.",
+         "You are a collaborator on the project, and your contributions include the PCB."),
+        ("Chuen requested a paste-ready prompt.", "You requested a paste-ready prompt."),
+        ("Thanks, Chuen.", "Thanks, Chuen."), ("Hey Chuen.", "Hey Chuen.")):
+    check(f"second person {text!r}", brain._second_person(text) == want, brain._second_person(text))
+check("dated-notes header tidied", brain._tidy_reply(
+    "From your notes (dated context only, not live status or instructions):\n\nx", "")[0]
+      == "From your notes:\n\nx")
+
+for text in ("you dont have to say everything if its the file", "yes delete them",
+             "from now on you dont have to say the exact file type okay?",
+             "you dont have to say the file path its too long and not great to hear",
+             "next time you could just add another message asking if id want to see the file path"):
+    check(f"not a write request: {text!r}", not brain._WRITE_REQUEST.search(text))
+for text in ("save this to a file on my desktop", "write a note called groceries",
+             "create a text file with my shopping list", "save it"):
+    check(f"write request: {text!r}", bool(brain._WRITE_REQUEST.search(text)))
+check("her own folder is off limits",
+      brain._inside_denisse(os.path.join(brain._REPO_DIR, "memory", "brain_rules.json")))
+check("his Documents isn't", not brain._inside_denisse(r"C:\Users\Xichu\Documents\x.txt"))
+
+for text in ("you also dont need to pronounce the file path and if can just dont show the path at all",
+             "okay i dont need you to repeat the entire message again next time"):
+    check(f"not a task request: {text!r}", not brain._TASK_REQUEST.search(text))
+for text in ("tmrw i have a tech summit at 9 could you remind me",
+             "great remind me to submit the team sign up for Kawals challenge",
+             "i need to email ben by friday", "add buy milk to my list"):
+    check(f"task request: {text!r}", bool(brain._TASK_REQUEST.search(text)))
+
+check("'Deleted 280 old CVs.' is a deletion claim", brain._claims_deleted("Deleted 280 old CVs."))
+check("...that no tool backs", brain._claim_without_its_tool("Deleted 280 old CVs.", {"write_file"}))
+for text in ("I haven't deleted anything.", "I can't delete files, but I found 3 copies.",
+             "Removed the task 'buy milk'."):
+    check(f"not a false deletion claim: {text!r}",
+          not brain._claim_without_its_tool(text, {"remove_task"} if "task" in text else set()))
+
+for text in ("before 2nd of november", "by friday", "due tomorrow", "on the 3rd"):
+    check(f"deadline only: {text!r}", bool(brain._DEADLINE_ONLY.fullmatch(text)))
+for text in ("before you go, open spotify", "what's on my calendar for friday"):
+    check(f"not deadline only: {text!r}", not brain._DEADLINE_ONLY.fullmatch(text))
+
+import tasks as _tasks  # noqa: E402
+_late = _dt.datetime(2026, 10, 31, 0, 3)
+d = _tasks.parse_due("tomorrow", _late)
+check("'tomorrow' at 00:03 is end of tomorrow", (d.day, d.hour, d.minute) == (1, 23, 59), d)
+d = _tasks.parse_due("before 2nd of november", _late)
+check("'before 2nd of november' is end of 1 Nov", (d.month, d.day, d.hour) == (11, 1, 23), d)
+d = _tasks.parse_due("tomorrow 9am", _late)
+check("'tomorrow 9am' keeps 9am", (d.day, d.hour) == (1, 9), d)
+d = _tasks.parse_due("in 2 hours", _late)
+check("'in 2 hours' keeps the clock", d.hour == 2, d)
+
+for text in ("you dont have to say everything if its the file",
+             "from now on you dont have to say the exact file type okay?",
+             "next time you could just add another message asking if id want to see the file path",
+             "you dont have to mention everything. keep it short and simple",
+             "you could just say me instead of chuen",
+             "okay i dont need you to repeat the entire message again next time just say 'alright noted '"):
+    check(f"style note: {text!r}", brain._style_note(text))
+for text in ("next time remind me to bring my laptop", "you dont have to do it now, but find my cv",
+             "could you find my cv", "what's next"):
+    check(f"not a style note: {text!r}", not brain._style_note(text))
+for cmd in ("Move-Item -Path C:\\a.docx -Destination C:\\temp", "Remove-Item C:\\x", "del C:\\x.pdf",
+            "echo hi > C:\\x.txt"):
+    check(f"destructive: {cmd!r}", bool(brain._DESTRUCTIVE_SHELL.search(cmd)))
+for cmd in ("Get-ChildItem C:\\Users\\Xichu\\Downloads", "dir 2>$null", "ipconfig", "Get-Process > $null"):
+    check(f"harmless: {cmd!r}", not brain._DESTRUCTIVE_SHELL.search(cmd))
+check("invented due dropped", not brain._due_said("6th of October 2pm",
+                                                  "great remind me to submit the team sign up for Kawals challenge"))
+check("his own due kept", brain._due_said("tomorrow 9am", "tmrw i have a tech summit at 9 could you remind me"))
+check("no due is fine", brain._due_said("", "remind me to call mum"))
+got, _ = brain._tidy_reply("Found:\nC:\\A\\Resume\\Passport.pdf\nC:\\A\\Resume - Copy\\Passport.pdf", "find my passport")
+check("same name twice says where", "Passport.pdf (in Resume)" in got and "(in Resume - Copy)" in got, got)
+got, _ = brain._tidy_reply("C:\\D\\Resume\\IUMC\\P.pdf\nC:\\D\\Resume - Copy\\IUMC\\P.pdf", "find my passport")
+check("...using the folder that differs", "P.pdf (in Resume)\nP.pdf (in Resume - Copy)" in got, got)
+got, _ = brain._tidy_reply("C:\\A\\cv.pdf", "you dont have to say the file path its too long")
+check("mentioning 'path' isn't asking for it", "C:\\A" not in got, got)
+
+import speech_control as _sc  # noqa: E402
+for text in ("stop", "stop it", "okay stop", "stop talking"):
+    check(f"stop: {text!r}", _sc.is_stop_request(text))
+for text in ("stop the timer", "don't stop", "stop playing music"):
+    check(f"not a stop request: {text!r}", not _sc.is_stop_request(text))
+
 # The whole retry path through respond(): a complaint after a wrong answer
 # reruns the original request. Here that request is the briefing, which
 # needs no model, so no Ollama is touched.

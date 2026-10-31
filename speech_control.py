@@ -34,6 +34,8 @@ def is_stop_request(text):
     return bool(re.fullmatch(
         r"(?:(?:hey|okay|ok|please|denisse|no|can you|could you) )*"
         r"(?:(?:it is|its|it s) too long )?"
-        r"(?:shush|hush|be quiet|quiet|stop (?:talking|speaking|speech)|"
+        # A bare "stop" too: typed mid-ramble on 2026-10-31, it went to the
+        # model, which carried on with the CV clean-up he was stopping.
+        r"(?:shush|hush|be quiet|quiet|stop|stop it|stop (?:talking|speaking|speech)|"
         r"(?:you are|you re|youre) still (?:talking|speaking))"
         r"(?: (?:now|please|denisse))*", text))

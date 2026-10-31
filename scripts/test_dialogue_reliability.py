@@ -149,7 +149,7 @@ class DialogueTests(unittest.TestCase):
     def test_empty_search_is_scoped_to_searched_folders(self):
         result=self.run_turn('find my cv',[call('find_files',{'query':'cv'}),reply('The file does not exist.')],
                              {'find_files':lambda query:"No files matching 'cv' found in documents."})
-        self.assertIn('folders searched',result)
+        self.assertRegex(result,'folders (?:searched|I search)')  # short since 2026-10-31
 
     def test_unrelated_write_does_not_confirm_file_open(self):
         result=self.run_turn('open my cv',[call('remember',{'key':'request','value':'cv'}),reply('Done.')],
@@ -165,7 +165,8 @@ class DialogueTests(unittest.TestCase):
     def test_file_search_relay_preserves_the_actual_path(self):
         result=self.run_turn('find my cv',[call('find_files',{'query':'cv'}),reply('It is in your Test folder.')],
                              {'find_files':lambda query:'Found 1 match: C:/test/cv.pdf'})
-        self.assertIn('C:/test/cv.pdf',result)
+        # 2026-10-31: he asked for names, not paths, with an offer of the path.
+        self.assertIn('cv.pdf',result);self.assertTrue(result.endswith(brain._PATH_ASK),result)
 
     def test_completed_task_is_named(self):
         result=self.run_turn('tick off the paperwork',[call('complete_task',{'task':'paperwork'}),reply('All set.')],
