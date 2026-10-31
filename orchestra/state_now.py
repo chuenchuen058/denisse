@@ -1,0 +1,99 @@
+"""Generate the STATE NOW block from the runner's own files (queue, parked,
+archive, state.json) so a new chat starts from live state, not from memory.
+
+    .venv\\Scripts\\python.exe orchestra\\state_now.py          # print + write
+Writes .review/STATE_NOW.md, and also "<vault>/STATE NOW.md" when the
+DENISSE_VAULT environment variable points at the Obsidian vault.
+
+Only facts the files prove go in. Calendar / mail sources can be added later as
+extra sections, each read live from its real app, never copied by hand.
+"""
+from __future__ import annotations
+
+import datetime as dt
+import json
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import runner as R  # noqa: E402
+
+
+def _title(p: Path) -> str:
+    try:
+        return R.parse_task(p).title
+    except Exception:
+        return p.stem
+
+
+def build() -> str:
+    state = R.load_state()
+    now = R.now()
+    out = [f"## STATE NOW", f"_generated {now.isoformat(sep=' ', timespec='minutes')} by orchestra/state_now.py — do not edit by hand_", ""]
+
+    running = "nothing"
+    if R.LOCK_FILE.exists():
+        try:
+            lk = json.loads(R.LOCK_FILE.read_text(encoding="utf-8"))
+            running = f"{lk.get('task', '(starting)')} since {lk.get('since', '?')}"
+        except json.JSONDecodeError:
+            running = "(lock file unreadable)"
+    out += ["**Running:** " + running, ""]
+
+    waiting = []
+    for why in sorted(R.PARKED.glob("*.why.txt")) if R.PARKED.exists() else []:
+        slug = why.name[: -len(".why.txt")]
+        reason = why.read_text(encoding="utf-8").strip().split(" ", 1)[-1]
+        waiting.append(f"- {_title(R.PARKED / (slug + '.md'))} — {reason}")
+    for slug, ts in state.get("tasks", {}).items():
+        m = ts.get("merge", "")
+        if m and m not in ("merged", "no commits"):
+            waiting.append(f"- merge `review/{slug}` — {m}")
+    out += ["**Waiting on Chuen:**"] + (waiting or ["- nothing"]) + [""]
+
+    queue = R.load_queue() if R.QUEUE.exists() else []
+    out.append(f"**Open queue:** {len(queue)} task(s)")
+    for t in queue[:10]:
+        ts = state.get("tasks", {}).get(t.slug, {})
+        why = R.why_not_runnable(t, state) or "runnable"
+        out.append(f"- [{t.priority}/{t.kind}] {t.title} — attempts {ts.get('attempts', 0)}, {why}")
+    out.append("")
+
+    closed = []
+    for day in (now.date(), now.date() - dt.timedelta(days=1)):
+        d = R.ARCHIVE / day.isoformat()
+        if d.exists():
+            closed += [f"- {day.isoformat()}: {_title(p)}" for p in sorted(d.glob("*.md"))
+                       if not p.name.endswith(".report.md") and _is_task(p)]
+    out += ["**Closed (today + yesterday):**"] + (closed or ["- nothing"]) + [""]
+
+    u = state.get("days", {}).get(now.date().isoformat(), {"work_s": 0, "maint_s": 0})
+    total = u["work_s"] + u["maint_s"]
+    share = f"{100 * u['maint_s'] / total:.0f}%" if total else "n/a"
+    out.append(f"**Today's runtime:** {u['work_s'] // 60} min his work, {u['maint_s'] // 60} min "
+               f"maintenance (maintenance share {share}, cap {int(R.MAINT_SHARE * 100)}%)")
+    out.append("**Spend:** check the real balance in the Anthropic / OpenAI dashboards — "
+               "this runner does not track money.")
+    return "\n".join(out) + "\n"
+
+
+def _is_task(p: Path) -> bool:
+    try:
+        return p.read_text(encoding="utf-8").lstrip().startswith("# ")
+    except OSError:
+        return False
+
+
+def write() -> str:
+    text = build()
+    R.REVIEW.mkdir(parents=True, exist_ok=True)
+    (R.REVIEW / "STATE_NOW.md").write_text(text, encoding="utf-8")
+    vault = os.environ.get("DENISSE_VAULT")
+    if vault and Path(vault).is_dir():
+        (Path(vault) / "STATE NOW.md").write_text(text, encoding="utf-8")
+    return text
+
+
+if __name__ == "__main__":
+    print(write())
