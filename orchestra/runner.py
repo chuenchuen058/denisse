@@ -99,9 +99,14 @@ if _gemini:
                                "-p", "Do the task given above."]
 # The scheduled task's PATH has no %APPDATA%\npm, so give codex its full path (2 Nov 2026).
 # The prompt goes in on stdin, so running the .cmd shim is safe for long prompts.
-_codex_cmd = Path(os.environ.get("APPDATA", "")) / "npm" / "codex.cmd"
-if not shutil.which("codex") and _codex_cmd.exists():
-    DEFAULT_LANES["codex"][0] = str(_codex_cmd)
+# Always prefer the npm shim: under Task Scheduler `which("codex")` can find a Windows app
+# alias that then fails to run. Try the home folder too in case APPDATA is unset.
+if True:
+    for _codex_cmd in (Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming") / "npm" / "codex.cmd",
+                       Path.home() / "AppData" / "Roaming" / "npm" / "codex.cmd"):
+        if _codex_cmd.exists():
+            DEFAULT_LANES["codex"][0] = str(_codex_cmd)
+            break
 VALID = {"priority": ("urgent", "normal"), "weight": ("light", "heavy"), "kind": ("work", "maintenance")}
 
 
@@ -456,7 +461,7 @@ def run_lane(task: Task, wt: Path, report: Path, timeout: int) -> tuple[str, int
         return f"LANE_MISSING: no lane called {task.lane!r}", 0
     exe = shutil.which(argv[0]) or argv[0]
     if not Path(exe).exists() and not shutil.which(exe):
-        return f"LANE_MISSING: {argv[0]} not on PATH", 0
+        return f"LANE_MISSING: {argv[0]} not on PATH (APPDATA={os.environ.get('APPDATA')!r})", 0
     local = wt / ".review"
     local.mkdir(exist_ok=True)
     shutil.copyfile(task.path, local / "task.md")
@@ -629,6 +634,14 @@ def finish(task: Task, state: dict, wt: Path, branch: str, outcome: str, seconds
         merge = try_merge(branch)
         ts["merge"] = merge
         log(f"merge {branch}: {merge}")
+        ts.pop("push", None)
+        if merge == "merged" and C.get("auto_push") and aftercare_on():
+            try:
+                import aftercare
+                ts["push"] = aftercare.push(REPO)
+            except Exception as e:  # a push problem must never lose the merge
+                ts["push"] = f"push step crashed: {e}"
+            log(f"push {task.slug}: {ts['push']}")
         state["done"][task.digest] = now().isoformat()
         day = ARCHIVE / now().date().isoformat()
         move(task.path, day)
@@ -645,6 +658,40 @@ def finish(task: Task, state: dict, wt: Path, branch: str, outcome: str, seconds
     elif report.exists():
         os.replace(report, REPORTS / f"{task.slug}.attempt{ts['attempts']}.md")
     return info["result"]
+
+
+def aftercare_on() -> bool:
+    """Vault notes and pushes are for the real repo only, never a test's temp repo."""
+    return os.environ.get("ORCHESTRA_AFTERCARE") == "1" or "ORCHESTRA_REPO" not in os.environ
+
+
+def write_vault_note(task: Task, ts: dict, result: str) -> None:
+    """One section per finished task in <vault>/Calendar/Orchestra/<date>.md (Chuen, 2 Nov 2026)."""
+    vault = Path(os.path.expandvars(os.path.expanduser(C.get("vault_dir", ""))))
+    if not C.get("vault_dir") or not aftercare_on() or not vault.is_dir():
+        return
+    try:
+        import aftercare
+        h = ts["history"][-1] if ts.get("history") else {}
+        day = ARCHIVE / now().date().isoformat()
+        where = day if result == "PASS" else PARKED
+        task_file = where / f"{task.slug}.md"
+        report_file = where / f"{task.slug}.report.md"
+        why_file = PARKED / f"{task.slug}.why.txt"
+        why = ""
+        if result != "PASS" and why_file.exists():
+            why = why_file.read_text(encoding="utf-8").splitlines()[0].split(" ", 1)[-1]
+        read = lambda p: p.read_text(encoding="utf-8", errors="replace") if p.exists() else ""
+        task_text = read(task_file) or read(task.path)
+        title = (task_text.splitlines() or [task.slug])[0].lstrip("# ").strip() or task.slug
+        aftercare.vault_note(
+            vault, slug=task.slug, title=title, result=result, lane=task.lane,
+            seconds=h.get("seconds", 0), spent=h.get("spent", "?"), merge=ts.get("merge", "") if result == "PASS" else "",
+            pushed=ts.get("push", "") if result == "PASS" else "", why=why, task_text=task_text,
+            report_text=read(report_file),
+            report_path=str(report_file.relative_to(REPO)) if report_file.exists() else "")
+    except Exception as e:  # the vault note must never break the runner
+        log(f"vault note failed for {task.slug}: {e}")
 
 
 def tick(dry_run: bool = False) -> str:
@@ -694,6 +741,7 @@ def tick(dry_run: bool = False) -> str:
             return "LANE_MISSING"
         result = finish(task, state, wt, branch, outcome, seconds, before)
         save_state(state)
+        write_vault_note(task, ts, result)
         return result
     finally:
         release_lock()

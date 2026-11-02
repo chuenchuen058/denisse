@@ -30,6 +30,12 @@
   "done_window_days": 14,
   "_done_window_days": "A task whose exact content already PASSed within this window is not run again (content hash, not title: titles get reused).",
 
+  "vault_dir": "~/OneDrive - King's College London/Denisse",
+  "_vault_dir": "Each finished task gets a section in <vault>/Calendar/Orchestra/<date>.md, committed in the vault repo (Chuen, 2 Nov 2026). Empty string turns it off.",
+
+  "auto_push": true,
+  "_auto_push": "After a merge the runner (never the task session) pushes the default branch, unless the checkout is mid-merge, origin is ahead, or the commits touch private-looking paths or add key-like strings. The repo is public. false turns it off.",
+
   "git_timeout_s": 120,
   "tick_watchdog_extra_s": 900,
   "_tick_watchdog_extra_s": "The whole tick is killed this long after the longest possible lane timeout. Atrium hung 19 then 29 minutes on one call."
