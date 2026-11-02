@@ -60,9 +60,10 @@ import conversation
 import stt_vosk
 import study_mode
 import voice_mode
+import voice_pipeline
 from brain import Brain
 from safety import confirm_risky_tool
-from voice_output import synthesize_inworld, prepare_audio
+from voice_output import synthesize_inworld, prepare_audio, speak_streaming
 
 # Matches her name anywhere in the transcript -- "hey denisse", "denisse",
 # "can you help me denisse", "denisse what's the weather" all trigger.
@@ -407,6 +408,13 @@ def _process_command(command: str, gen: int, brain: Brain, tts_engine, on_exchan
         interrupt()
         return
     speech_epoch = speech_control.capture()
+    # Vosk's own endpointing has already fired and its transcript is final
+    # by the time a command gets here, so "speech_end" and "stt_done" are
+    # the same instant (give or take this thread's start-up).
+    trace = voice_pipeline.LatencyTrace()
+    trace.mark("speech_end")
+    trace.mark("stt_done", trace.marks["speech_end"])
+    trace.extra["source"] = "wake_word"
     print(f"you> {command}", flush=True)
 
     # Ephemeral only -- see brain.py's extra_context param and the module
@@ -430,18 +438,41 @@ def _process_command(command: str, gen: int, brain: Brain, tts_engine, on_exchan
         except Exception:
             pass
 
+    thinking_stopped = []
+
     def _stop_thinking():
+        if thinking_stopped:
+            return
+        thinking_stopped.append(True)
         if on_thinking:
             try:
                 on_thinking(False)
             except Exception:
                 pass
 
+    revealed = []
+
+    def _reveal():
+        """The reply text appears (and the thinking bubble goes) as she
+        starts talking -- once, whichever voice path gets there."""
+        if revealed:
+            return
+        revealed.append(True)
+        if on_reply:
+            try:
+                on_reply(reply)
+            except Exception:
+                pass
+        _stop_thinking()
+
     # The thinking indicator now stays up until she starts speaking, not
     # just until the reply is composed: on_reply (tray.py turns the "• • •"
     # bubble into the reply text) fires right before playback, so the text
     # appears as she talks (asked 2026-10-14). The finally covers every
     # early return and error on the way there.
+    reply = ""
+    path = None
+    streamed = False
     try:
         try:
             reply, messages = brain.respond(messages, confirm=_make_voice_confirm(tts_engine, gen), extra_context=extra_context)
@@ -460,35 +491,61 @@ def _process_command(command: str, gen: int, brain: Brain, tts_engine, on_exchan
         # seems like you're trying to say something..." -- see conversation.py.
         if not conversation.record(turn_tail, source="voice"):
             print("(not recorded: transcript looks like a mishearing)", flush=True)
+        trace.mark("first_token")  # brain.respond() isn't streamed: the whole reply
 
-        path = synthesize_inworld(reply)
-        if not _is_current(gen):
+        # Local Kokoro: sentence by sentence through one open stream, the
+        # text revealed at first audio. A newer request (generation), the
+        # stop word / stop button (speech_control) and this reply's own
+        # interrupt event all stop it between ~50 ms blocks.
+        interrupt_event = threading.Event()
+        _register_playing(interrupt_event)
+        try:
+            streamed = speak_streaming(
+                reply,
+                should_stop=lambda: (interrupt_event.is_set() or speech_control.cancelled(speech_epoch)
+                                     or not _is_current(gen)),
+                on_start=_reveal, trace=trace)
+        finally:
+            _unregister_playing(interrupt_event)
+        if streamed:
+            if not _is_current(gen):
+                trace.write()
+                print("(superseded while speaking -- stopped)", flush=True)
+                return
+            if not revealed:
+                _reveal()  # stopped before the first sentence was ready
+        else:
+            path = synthesize_inworld(reply)
+            if not _is_current(gen):
+                if path:
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+                print("(superseded while synthesizing speech -- not playing)", flush=True)
+                return
             if path:
-                try:
-                    os.remove(path)
-                except OSError:
-                    pass
-            print("(superseded while synthesizing speech -- not playing)", flush=True)
-            return
-
-        if on_reply:
-            try:
-                on_reply(reply)
-            except Exception:
-                pass
+                trace.mark("tts_first_chunk")
+            _reveal()
     finally:
         _stop_thinking()
 
-    if path:
+    if streamed:
+        trace.write()
+    elif path:
         audio = prepare_audio(path)
         if audio is not None:
             interrupt_event = threading.Event()
             _register_playing(interrupt_event)
             try:
+                if not speech_control.cancelled(speech_epoch):
+                    trace.mark("playback_start")
+                trace.extra["tts"] = "mci"
                 audio.play(interrupt_event=interrupt_event, speech_epoch=speech_epoch)
             finally:
                 audio.close()
                 _unregister_playing(interrupt_event)
+                trace.write()
     elif tts_engine is not None:
         try:
             from voice_output import speak_local

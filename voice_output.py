@@ -9,6 +9,7 @@ tray.py (the chat popup) so the logic isn't duplicated between them.
 import ctypes
 import os
 import tempfile
+import threading
 import time
 import wave
 import speech_control
@@ -70,6 +71,75 @@ def synthesize_inworld(text: str) -> str | None:
     if path or TTS_ENGINE == "kokoro":
         return path
     return _kokoro(text)
+
+
+# -- streamed local voice (tray + wake word) --
+#
+# With Kokoro, a reply is spoken sentence by sentence through one open
+# PyAudio stream (voice_pipeline.StreamingSpeaker): sentence 1 plays while
+# sentence 2 is synthesized, instead of synthesizing the whole reply to a
+# wav and playing it through MCI. DENISSE_TTS_STREAM=0 turns it off and
+# keeps the old whole-reply path. Inworld always uses the old path.
+
+_stream_lock = threading.Lock()
+_stream_sink = None
+
+
+def stream_enabled() -> bool:
+    if TTS_ENGINE != "kokoro":
+        return False
+    if os.environ.get("DENISSE_TTS_STREAM", "1").strip().lower() in ("0", "false", "no", "off"):
+        return False
+    try:
+        import tts_kokoro
+        return bool(tts_kokoro.available())
+    except Exception:
+        return False
+
+
+def speak_streaming(text: str, should_stop=None, on_start=None, trace=None) -> bool:
+    """Speak `text` with streamed Kokoro, blocking until it has played or
+    `should_stop()` turned true. `on_start()` fires once, on this thread,
+    right before the first audio is written (the tray's bubble reveal).
+
+    Returns True if this path handled the reply -- spoke it, or was stopped --
+    and False if the caller should fall back to synthesize_inworld() + MCI
+    (streaming off, Kokoro missing, nothing synthesized, no output device).
+    Never False once on_start has fired, so a reply is never revealed or
+    spoken twice.
+
+    Replies are serialized on one lock: the PyAudio instance is shared, and
+    each stream is opened, written and closed on the thread that holds it
+    (the sink's single-thread rule). A newer reply only waits for an older
+    one that wasn't stopped, and every new request stops the old one first
+    (speech_control.stop())."""
+    global _stream_sink
+    if not text or not stream_enabled():
+        return False
+    started = threading.Event()
+
+    def first_audio():
+        started.set()
+        if on_start is not None:
+            on_start()
+
+    try:
+        import tts_kokoro
+        import voice_pipeline
+        with _stream_lock:
+            if _stream_sink is None:
+                _stream_sink = voice_pipeline.PyAudioSink()
+            speaker = voice_pipeline.StreamingSpeaker(
+                tts_kokoro.synthesize_samples, _stream_sink, trace=trace,
+                should_stop=should_stop, on_start=first_audio)
+            ok = bool(speaker.speak([text]) or started.is_set())
+        if trace is not None and ok:
+            trace.extra.update(tts="kokoro-stream", sentences=len(speaker.spoken),
+                               interrupted=speaker.interrupted)
+        return ok
+    except Exception as e:  # no output device, pyaudio trouble
+        _safe_print(f"(streaming voice unavailable: {e})")
+        return started.is_set()
 
 
 def _synthesize_inworld_only(text: str) -> str | None:

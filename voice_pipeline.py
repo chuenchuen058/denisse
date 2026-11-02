@@ -67,7 +67,12 @@ class LatencyTrace:
                 self.marks[stage] = self._clock() if t is None else t
 
     def origin(self) -> float | None:
-        return self.marks.get("speech_last_voice", self.marks.get("speech_end"))
+        """t = 0 for the deltas: when he stopped talking or, for a typed
+        turn in the tray chat, when he pressed send ("input_end")."""
+        for stage in ("speech_last_voice", "speech_end", "input_end"):
+            if stage in self.marks:
+                return self.marks[stage]
+        return None
 
     def deltas(self) -> dict[str, float]:
         """Seconds from end of speech to each stage that was reached."""
@@ -77,7 +82,8 @@ class LatencyTrace:
         return {s: round(self.marks[s] - t0, 3) for s in STAGES if s in self.marks}
 
     def to_record(self) -> dict:
-        return {"at": round(self.marks.get("speech_end", self._clock()), 3),
+        at = self.marks.get("speech_end", self.marks.get("input_end", self._clock()))
+        return {"at": round(at, 3),
                 "marks": {k: round(v, 3) for k, v in self.marks.items()},
                 "deltas": self.deltas(), **self.extra}
 
@@ -122,8 +128,17 @@ def percentile(values: list[float], p: float) -> float | None:
     return xs[lo] + (xs[hi] - xs[lo]) * (k - lo)
 
 
-def breakdown(rows: list[dict]) -> dict[str, dict]:
-    """{stage: {"n", "p50", "p95"}} of seconds-since-end-of-speech."""
+def row_source(row: dict) -> str:
+    """Which path spoke the turn. Rows from before the tag are voice_mode's."""
+    return row.get("source", "voice_mode")
+
+
+def breakdown(rows: list[dict], source: str | None = None) -> dict[str, dict]:
+    """{stage: {"n", "p50", "p95"}} of seconds-since-end-of-speech, over all
+    rows or only one `source` (voice_mode / wake_word / tray_chat): a typed
+    tray turn has no endpoint or STT, so mixing them blurs the voice numbers."""
+    if source is not None:
+        rows = [r for r in rows if row_source(r) == source]
     out = {}
     for stage in STAGES:
         vals = [r["deltas"][stage] for r in rows if stage in r.get("deltas", {})]
@@ -447,13 +462,18 @@ class StreamingSpeaker:
     `sink` has open(rate) / write(samples) / finish() / abort().
     `should_stop()` is polled between ~50 ms blocks; when it turns true,
     playback stops at once and no further sentence is synthesized.
+    `on_start()` runs once, on the playback thread, when the first
+    sentence's audio is ready and the stream is open -- just before its
+    first block is written. The tray reveals the reply bubble there, so the
+    text appears as she starts talking.
 
     A synthesis thread runs at most `ahead` sentences in front of playback,
     so a stop never leaves the GPU busy on text nobody will hear."""
 
     def __init__(self, synthesize, sink, trace: LatencyTrace | None = None,
                  should_stop: Callable[[], bool] | None = None, ahead: int = 2,
-                 lead_in_s: float = LEAD_IN_S, block_s: float = BLOCK_S):
+                 lead_in_s: float = LEAD_IN_S, block_s: float = BLOCK_S,
+                 on_start: Callable[[], None] | None = None):
         self.synthesize = synthesize
         self.sink = sink
         self.trace = trace or LatencyTrace()
@@ -461,6 +481,8 @@ class StreamingSpeaker:
         self.ahead = max(1, ahead)
         self.lead_in_s = lead_in_s
         self.block_s = block_s
+        self.on_start = on_start
+        self.started = False
         self.spoken: list[str] = []
         self.interrupted = False
         self.errors: list[str] = []
@@ -537,6 +559,15 @@ class StreamingSpeaker:
                 if not opened:
                     self.sink.open(rate)
                     opened = True
+                    self.started = True
+                    if self.on_start is not None:
+                        try:
+                            self.on_start()
+                        except Exception as e:  # a UI hiccup mustn't silence her
+                            self.errors.append(f"on_start: {e}")
+                        if self.should_stop():
+                            self.interrupted = True
+                            break
                     if self.lead_in_s > 0:
                         # A few ms of silence so the device's start-up can't
                         # eat the first phoneme.
