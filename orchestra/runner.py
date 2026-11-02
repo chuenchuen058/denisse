@@ -462,12 +462,38 @@ def header_problem(task: Task) -> str | None:
     return None
 
 
+def premise_moved(task: Task) -> str | None:
+    """A local-team task (one with an admission sidecar in .review/local_team/packets/) whose
+    evidence file changed since admission. Each file's first `size` bytes must still hash the
+    same (same rule as admission.file_print: appending to a log is fine, editing or truncating
+    it is not). Tasks without a sidecar, or a sidecar without evidence_files, aren't checked."""
+    side = REVIEW / "local_team" / "packets" / f"{task.slug}.json"
+    try:
+        files = json.loads(side.read_text(encoding="utf-8")).get("evidence_files") or {}
+    except (OSError, ValueError, AttributeError):
+        return None
+    for rel, fp in sorted(files.items()):
+        size, want = int(fp.get("size", 0)), fp.get("sha1")
+        try:
+            with open(REPO / rel, "rb") as f:
+                data = f.read(size)
+        except OSError:
+            return f"premise moved, re-check: evidence {rel} is gone since admission"
+        if len(data) < size or want is None or hashlib.sha1(data).hexdigest() != want:
+            return (f"premise moved, re-check: evidence {rel} changed since admission "
+                    f"(then delete {side.relative_to(REPO).as_posix()} to release it)")
+    return None
+
+
 def why_not_runnable(task: Task, state: dict) -> str | None:
     bad = header_problem(task)
     if bad:
         return f"bad header: {bad}"
     if not task.auto:
         return "Queue is not auto"
+    moved = premise_moved(task)
+    if moved:
+        return moved
     age = now() - dt.datetime.fromisoformat(task.fields["written"])
     if age.days > C["stale_days"]:
         return f"stale: written {age.days} days ago (limit {C['stale_days']}); re-date it if it still holds"

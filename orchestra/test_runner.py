@@ -125,6 +125,49 @@ class RunnerTest(unittest.TestCase):
         t = next(t for t in self.R.load_queue() if t.slug == slug)
         return self.R.why_not_runnable(t, self.R.load_state())
 
+    # --- local-team tasks: re-check the premise before dispatch
+
+    def _sidecar(self, slug, evidence):
+        import hashlib
+        files = {}
+        for rel in evidence:
+            data = (self.repo / rel).read_bytes()
+            files[rel] = {"size": len(data), "sha1": hashlib.sha1(data).hexdigest()}
+        side = self.R.REVIEW / "local_team" / "packets" / f"{slug}.json"
+        side.parent.mkdir(parents=True, exist_ok=True)
+        side.write_text(json.dumps({"evidence_files": files}), encoding="utf-8")
+        return side
+
+    def test_local_team_task_with_unchanged_evidence_runs(self):
+        log = self.R.REVIEW / "evidence.log"
+        log.write_text("PARKED widget: timeout\n", encoding="utf-8")
+        self.add("lt")
+        self._sidecar("lt", [".review/evidence.log"])
+        self.assertIsNone(self.why("lt"))
+        with log.open("a", encoding="utf-8") as f:  # appending to a log isn't a moved premise
+            f.write("START other\n")
+        self.assertIsNone(self.why("lt"))
+
+    def test_local_team_task_whose_evidence_changed_is_refused(self):
+        log = self.R.REVIEW / "evidence.log"
+        log.write_text("PARKED widget: timeout\n", encoding="utf-8")
+        self.add("lt")
+        side = self._sidecar("lt", [".review/evidence.log"])
+        log.write_text("PARKED widget: fixed by hand\n", encoding="utf-8")
+        self.assertIn("premise moved, re-check", self.why("lt"))
+        self.assertIsNone(self.R.pick(self.R.load_queue(), self.R.load_state()))
+        log.unlink()
+        self.assertIn("is gone", self.why("lt"))
+        side.unlink()  # a human re-checked it and released it
+        self.assertIsNone(self.why("lt"))
+
+    def test_task_without_sidecar_is_not_premise_checked(self):
+        self.add("plain")
+        side = self.R.REVIEW / "local_team" / "packets" / "other.json"
+        side.parent.mkdir(parents=True, exist_ok=True)
+        side.write_text(json.dumps({"evidence_files": {"nope.txt": {"size": 3, "sha1": "x"}}}))
+        self.assertIsNone(self.why("plain"))
+
     # --- PASS is checked, not trusted
 
     def test_pass_with_green_runner_gate_merges_and_archives(self):
