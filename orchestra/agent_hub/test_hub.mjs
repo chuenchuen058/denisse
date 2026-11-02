@@ -13,9 +13,46 @@ process.env.AGENT_HUB_VAULT = vault;
 process.env.AGENT_HUB_JOBS_DIR = jobsDir;
 process.env.AGENT_HUB_FAKE = "1";
 process.env.AGENT_HUB_CONTEXT = "0";
+// Real exam scores in the checkout must not steer these tests; the scored tests write their own.
+process.env.AGENT_HUB_EXAM_SCORES = join(vault, "no-scores.json");
 const hub = await import("./server.mjs");
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FAKE_CMD = join(HERE, "fake_agent.mjs");
+const REPO_PY = join(HERE, "..", "..", ".venv", process.platform === "win32" ? "Scripts\\python.exe" : "bin/python");
+
+test("exam scores: route_task picks the best working agent, and falls back to the rules without scores", async () => {
+  const at = new Date().toISOString();
+  const row = (ok, seconds) => ({ at, exam: "x", ok, seconds, answered: true });
+  const scores = { agents: {
+    codex: { writing: [row(true, 40), row(true, 50), row(true, 45)] },
+    copilot: { writing: [row(true, 10), row(true, 12), row(false, 9)] },
+    gemini: { writing: [row(false, 5), row(false, 5), row(false, 5)] },  // Not working
+  } };
+  const file = join(vault, "scores.json");
+  writeFileSync(file, JSON.stringify(scores), "utf8");
+  const oldPy = process.env.AGENT_HUB_PYTHON;
+  process.env.AGENT_HUB_PYTHON = REPO_PY;
+  try {
+    assert.equal(hub.pickRoute("summarise this", "summarise").agent, "gemini", "no scores file: today's rules");
+    process.env.AGENT_HUB_EXAM_SCORES = file;
+    const r = hub.pickRoute("summarise the lecture notes", "summarise");
+    assert.equal(r.agent, "codex");  // 100% beats copilot's 67%; gemini is not working
+    assert.equal(r.scored, true);
+    assert.match(r.why, /writing: 3\/3 passed/);
+    assert.equal(r.write, false, "the kind's write flag is kept");
+    // a kind with no exam category keeps the fixed rule
+    assert.equal(hub.pickRoute("list my PRs", "github").agent, "copilot");
+    const out = await hub.callTool("route_task", { prompt: "summarise the scored notes", kind: "summarise" });
+    assert.match(out, /### codex — summarise: best exam score/);
+    assert.match(readFileSync(hub.handoffPath(), "utf8"), /routed summarise \(scored\) → codex/);
+    // python missing: today's rules, no crash
+    process.env.AGENT_HUB_PYTHON = join(vault, "no-python.exe");
+    assert.equal(hub.pickRoute("summarise", "summarise").agent, "gemini");
+  } finally {
+    process.env.AGENT_HUB_EXAM_SCORES = join(vault, "no-scores.json");
+    if (oldPy === undefined) delete process.env.AGENT_HUB_PYTHON; else process.env.AGENT_HUB_PYTHON = oldPy;
+  }
+});
 
 test("routing picks the agent from the kind, or guesses from the words", () => {
   assert.equal(hub.chooseRoute("anything", "long_read").agent, "gemini");
