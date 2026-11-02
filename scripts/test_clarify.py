@@ -31,6 +31,7 @@ instincts.INSTINCTS_FILE = str(TMP / "instincts.json")
 instincts.INSTINCTS_MD = str(TMP / "instincts.md")
 memory_store.MEMORY_DIR = str(TMP)
 memory_store.MEMORY_FILE = str(TMP / "conversation.json")
+planner.PENDING_FILE = str(TMP / "pending_plan.json")
 SCHEMA = {d["function"]["name"]: d["function"]["parameters"] for d in brain.TOOL_DEFINITIONS}
 results = []
 

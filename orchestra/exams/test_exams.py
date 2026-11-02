@@ -181,8 +181,9 @@ class TestRun(Base):
         with mock.patch.object(agents, "OLLAMA", "http://127.0.0.1:9"):
             self.assertEqual(agents.ollama_models(timeout=1), [])
             found = agents.available()
+            with_claude = agents.available(include_claude=True)  # inside the patch: no real Ollama
         self.assertEqual(sorted(found), ["codex", "copilot", "gemini"])  # claude only on request
-        self.assertIn("claude", agents.available(include_claude=True))
+        self.assertIn("claude", with_claude)
 
     def test_refusal_text_marks_an_agent_unavailable(self):
         r = agents._refused(Reply(text="IneligibleTierError: This client is no longer supported", error="exit 1"))

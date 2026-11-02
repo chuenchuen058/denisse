@@ -15,15 +15,32 @@ Three separate faults, none of them the model being stupid:
      useful.
 
 Run after touching _default_search_dirs, _rescue_arg_names or _run_tool.
+
+Runs against a fake home that rebuilds that machine's layout (an empty
+Documents stub beside OneDrive\\Documents\\Resume\\IUMC), never the real
+one: it used to search Chuen's own folders, vault included.
 """
 import os
 import sys
+import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+TMP = tempfile.mkdtemp(prefix="denisse-toolargs-")
+os.environ.setdefault("DENISSE_VAULT", os.path.join(TMP, "vault"))
 
 import brain  # noqa: E402
+import tasks  # noqa: E402
 import tools  # noqa: E402
+
+tasks.TASKS_FILE = os.path.join(TMP, "tasks.json")
+FAKE_HOME = os.path.join(TMP, "home")
+for rel in ("Documents", "Desktop", "Downloads", os.path.join("OneDrive", "Desktop"),
+            os.path.join("OneDrive", "Documents", "Resume", "IUMC")):
+    os.makedirs(os.path.join(FAKE_HOME, rel), exist_ok=True)
+with open(os.path.join(FAKE_HOME, "OneDrive", "Documents", "Resume", "IUMC", "Passport scan.pdf"), "wb") as f:
+    f.write(b"%PDF-1.4 synthetic")
+os.environ["USERPROFILE"] = os.environ["HOME"] = FAKE_HOME
 
 results = []
 
