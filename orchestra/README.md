@@ -57,7 +57,15 @@ Admitted tasks are written as **`Queue: draft`**, with `Source:`, `Area:` and
 `Evidence-Fp:` header lines. A Claude chat or check-in promotes one by reading it and
 changing the line to `Queue: auto`. **To auto-admit an area** (skip the draft step),
 add it to `auto_admit_areas` in `config.json`, e.g. `"auto_admit_areas": ["orchestra"]`
-(area names and their gates are in `gates.json`). It starts empty.
+(area names and their gates are in `gates.json`). It starts empty; see
+`orchestra/local_team/BASELINE.md` for what the local model's proposals measured.
+
+**Premise re-check before dispatch.** The sidecar `packets/<slug>.json` records a
+fingerprint of each evidence file at admission (`evidence_files`: size + sha1 of those
+bytes). The runner's `why_not_runnable` refuses a task with a sidecar if any of those
+files is gone or its first `size` bytes changed: `premise moved, re-check`. Appending to
+a log is not a move. After re-checking the task by hand, delete its sidecar to release it.
+Tasks without a sidecar are not affected.
 
 **GPU.** One local inference at a time: each model call takes `.review/gpu.lease` in the
 main checkout (worktrees share it) and *skips* if it is held. `eval/run_eval.py` takes the
