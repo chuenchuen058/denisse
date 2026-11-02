@@ -490,9 +490,12 @@ def why_not_runnable(task: Task, state: dict) -> str | None:
     if task.kind == "maintenance" and not maintenance_allowed(state):
         return f"maintenance cap ({int(C['maint_share'] * 100)}%) reached today"
     # The cap is Claude Code's cost figure; Codex/Gemini runs aren't priced, so it never blocks them.
-    if task.lane == "claude" and spend_left(state) <= 0:
+    if task.lane not in UNPRICED_LANES and spend_left(state) <= 0:
         return f"daily spend cap ${C['daily_spend_cap_usd']:.2f} reached"
     return None
+
+
+UNPRICED_LANES = ("codex", "gemini", "copilot")  # report no cost, so the spend cap can't apply
 
 
 def pick(tasks: list[Task], state: dict) -> Task | None:
