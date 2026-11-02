@@ -9,6 +9,11 @@ What a tick does with a session's result (after Thomas's review, 31 Oct 2026):
   * PASS is not taken on the session's word: the runner re-runs the task's gate
     commands in the worktree and merges only if they exit 0, the hooks loaded,
     and nothing was written into the main checkout
+  * a risky diff (orchestra/, atrium/hook.py, git hooks, install_*.ps1, >400 lines) first
+    goes to a fresh read-only reviewer lane; VERDICT: block parks it (2 Nov 2026)
+  * the branch is then merged onto *current* master in an integration worktree, the gate
+    (plus run_checks --fast if it exists) re-runs there, and master is fast-forwarded to
+    that exact tested commit; a red combined tree parks it, master moving twice parks it
   * HUMAN line, PARTIAL or FAIL -> parked; editing the task (new content) re-queues it
   * timeout / no report / lane missing -> one retry in a fresh worktree, then parked
   * a task whose exact content already PASSed recently is not run again
@@ -698,23 +703,214 @@ def main_checkout_status() -> set[str]:
     return {l for l in r.stdout.splitlines() if l.strip() and ".review/" not in l}
 
 
-def try_merge(branch: str) -> str:
-    ahead = git("rev-list", "--count", f"HEAD..{branch}", check=False).stdout.strip()
-    if ahead in ("", "0"):
-        return "no commits"
-    # Uncommitted work in the main checkout only blocks the merge if the branch touches
-    # the same files; Chuen's own unrelated edits (e.g. eval/dataset.jsonl) don't.
+# ---------------------------------------------------------------- combined-tree integration
+# Two branches can each pass their own gate and still break master together (3 Claude slots
+# + Codex at once, 2 Nov 2026). So the runner merges the branch onto *current* master in a
+# separate integration worktree, re-runs the gate there, and only then fast-forwards master
+# to that exact tested commit (master prompt section 14).
+
+def dirty_clash(branch: str) -> list[str]:
+    """Files with uncommitted changes in the main checkout that the branch also touches.
+    Chuen's own unrelated edits (e.g. eval/dataset.jsonl) don't block a merge."""
     dirty = {l[3:].strip().strip('"') for l in
              git("status", "--porcelain", "--untracked-files=no").stdout.splitlines() if l.strip()}
     touched = set(git("diff", "--name-only", f"HEAD...{branch}", check=False).stdout.split())
-    clash = sorted(dirty & touched)
+    return sorted(dirty & touched)
+
+
+def fast_checks(wt: Path) -> tuple[str, str]:
+    """scripts/run_checks.py --fast in the integration tree, if the script supports it.
+    Returns (verdict, detail) like run_gate; 'skipped' when there is nothing to run."""
+    script = wt / "scripts" / "run_checks.py"
+    if not script.exists():
+        return "skipped", "no scripts/run_checks.py"
+    if "--fast" not in script.read_text(encoding="utf-8", errors="replace"):
+        return "skipped", "scripts/run_checks.py has no --fast option"
+    venv_py = wt / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    py = str(venv_py) if venv_py.exists() else sys.executable
+    try:
+        r = subprocess.run([py, str(script), "--fast"], cwd=wt, capture_output=True, text=True,
+                           timeout=C["gate_timeout_s"], encoding="utf-8", errors="replace")
+    except subprocess.TimeoutExpired:
+        return "broken", f"run_checks.py --fast timed out after {C['gate_timeout_s']}s"
+    if r.returncode != 0:
+        tail = (r.stdout + r.stderr).strip().splitlines()[-3:]
+        return "fail", f"run_checks.py --fast exited {r.returncode}: {' | '.join(tail)}"
+    return "pass", "run_checks.py --fast exited 0"
+
+
+def check_combined(task: Task, wt: Path) -> tuple[bool, list[str]]:
+    """The task's gate plus run_checks --fast, in the integration tree. (ok, checks run)."""
+    verdict, detail = run_gate(task, wt)
+    checks = [f"gate: {verdict}: {detail}"]
+    if verdict != "pass":
+        return False, checks
+    verdict, detail = fast_checks(wt)
+    checks.append(f"run_checks --fast: {verdict}: {detail}")
+    return verdict in ("pass", "skipped"), checks
+
+
+def integration_tree(task: Task, base: str, branch: str) -> tuple[Path, str | None, str]:
+    """A fresh detached worktree at `base` with `branch` merged in (--no-ff).
+    Returns (path, merge commit or None, detail)."""
+    wt = WORKTREES / f"{task.slug}--integration"
+    if wt.exists():
+        remove_worktree(wt, "", delete_branch=False)
+    git("worktree", "prune", check=False)
+    WORKTREES.mkdir(parents=True, exist_ok=True)
+    git("worktree", "add", "--detach", str(wt), base)
+    link_venv(wt)
+    r = git("merge", "--no-ff", "-m", f"orchestra: merge {branch}", branch, cwd=wt, check=False)
+    if r.returncode != 0:
+        git("merge", "--abort", cwd=wt, check=False)
+        return wt, None, "merge conflict; merge by hand"
+    return wt, git("rev-parse", "HEAD", cwd=wt).stdout.strip(), "merged in the integration tree"
+
+
+def integrate(task: Task, branch: str, rec: dict, on_merged=None) -> str:
+    """Test branch + current master together, then fast-forward master to that tested commit.
+    Fills `rec` (stored in state) with base, commit, checks and tries. Returns the merge
+    outcome: 'merged', 'no commits', a merge-by-hand note, or one starting with 'parked:'.
+    `on_merged` runs inside the merge lock right after a fast-forward (the aftercare push)."""
+    ahead = git("rev-list", "--count", f"HEAD..{branch}", check=False).stdout.strip()
+    if ahead in ("", "0"):
+        return "no commits"
+    clash = dirty_clash(branch)
     if clash:
         return f"main checkout has uncommitted changes to {', '.join(clash)}; merge by hand"
-    r = git("merge", "--no-ff", "-m", f"orchestra: merge {branch}", branch, check=False)
-    if r.returncode != 0:
-        git("merge", "--abort", check=False)
-        return "merge conflict; merge by hand"
-    return "merged"
+    rec["tries"] = 0
+    for _ in range(2):  # master moved while testing -> redo once, then park
+        rec["tries"] += 1
+        base = git("rev-parse", "HEAD").stdout.strip()
+        rec.update(base=base, commit=None, checks=[])
+        try:
+            wt, commit, detail = integration_tree(task, base, branch)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+            return f"parked: could not build the integration tree: {(getattr(e, 'stderr', '') or str(e)).strip()[:200]}"
+        rec["commit"] = commit
+        try:
+            if commit is None:
+                return detail
+            ok, rec["checks"] = check_combined(task, wt)
+            log(f"integration {task.slug} on {base[:8]}: {'pass' if ok else 'FAIL'}: {'; '.join(rec['checks'])}")
+            if not ok:
+                return ("parked: the combined tree (this branch merged onto current master "
+                        f"{base[:8]}) fails: {rec['checks'][-1]}")  # the failing check is the last
+        finally:
+            remove_worktree(wt, "", delete_branch=False)
+        with _FileLock(REVIEW / "merge.lock", wait=600, stale=900):  # two lanes may finish together
+            if git("rev-parse", "HEAD").stdout.strip() != base:
+                log(f"integration {task.slug}: master moved while testing (was {base[:8]})")
+                continue
+            clash = dirty_clash(branch)
+            if clash:
+                return f"main checkout has uncommitted changes to {', '.join(clash)}; merge by hand"
+            r = git("merge", "--ff-only", commit, check=False)
+            if r.returncode != 0:
+                return f"fast-forward to the tested merge failed: {(r.stderr or r.stdout).strip()[:200]}; merge by hand"
+            if on_merged:
+                on_merged()
+            return "merged"
+    return "parked: master moved twice, retry"
+
+
+# ---------------------------------------------------------------- reviewer lane
+# Nothing reviewed a diff except the session that wrote it. Risky diffs get a fresh, read-only
+# claude -p before integration; its `VERDICT: block` parks the task.
+
+REVIEW_DIFF_PROMPT = HERE / "review_diff_prompt.md"
+DEFAULT_REVIEWER = ["claude", "-p", "--permission-mode", "default", "--permission-prompts", "none",
+                    "--output-format", "json",
+                    "--allowedTools", "Read,Glob,Grep,Bash(git diff:*),Bash(git log:*)",
+                    "--disallowedTools", "Edit,Write,MultiEdit,NotebookEdit,Bash(git push:*),Bash(gh:*)"]
+RISKY_LINES = 400
+REVIEW_DIFF_MAX_CHARS = 150_000
+
+
+def risk(branch: str) -> str | None:
+    """Why this branch's diff (vs master) needs a reviewer, or None if it doesn't."""
+    files = git("diff", "--name-only", f"HEAD...{branch}", check=False).stdout.split()
+    hits = [f for f in files if f.startswith("orchestra/") or f == "atrium/hook.py"
+            or ".git/hooks" in f or re.fullmatch(r"install_[^/]*\.ps1", f.rsplit("/", 1)[-1])]
+    lines = 0
+    for row in git("diff", "--numstat", f"HEAD...{branch}", check=False).stdout.splitlines():
+        a, d, *_ = row.split("\t") + ["", ""]
+        lines += (int(a) if a.isdigit() else 0) + (int(d) if d.isdigit() else 0)
+    why = []
+    if hits:
+        why.append("touches " + ", ".join(hits[:8]) + (" ..." if len(hits) > 8 else ""))
+    if lines > int(C.get("review_max_lines", RISKY_LINES)):
+        why.append(f"{lines} changed lines (over {int(C.get('review_max_lines', RISKY_LINES))})")
+    return "; ".join(why) or None
+
+
+def parse_verdict(text: str) -> tuple[str | None, str]:
+    """('ok'|'block'|None, reasons) from the reviewer's output (claude json or plain text)."""
+    s = text.strip()
+    try:
+        data = json.loads(s if s.startswith("{") else s[s.rfind("\n{") + 1:])
+        if isinstance(data, dict) and isinstance(data.get("result"), str):
+            s = data["result"]
+    except ValueError:
+        pass
+    m = re.search(r"^\W*VERDICT:\W*(ok|block)\b(.*)", s, re.I | re.M | re.S)
+    if not m:
+        return None, s[-500:]
+    return m.group(1).lower(), m.group(2).strip()[:2000]
+
+
+def run_reviewer(task: Task, wt: Path, branch: str, report: Path, why: str) -> dict:
+    """A fresh read-only reviewer lane on the actual diff. Returns {verdict, reasons, seconds,
+    cost_usd, log}. Fails closed: no verdict, a timeout or a missing lane is a block."""
+    argv = list(lanes().get("reviewer") or DEFAULT_REVIEWER)
+    exe = shutil.which(argv[0]) or argv[0]
+    if not Path(exe).exists() and not shutil.which(exe):
+        return {"verdict": "block", "reasons": f"reviewer lane missing: {argv[0]} not on PATH",
+                "seconds": 0, "cost_usd": None}
+    base = git("merge-base", "HEAD", branch, check=False).stdout.strip() or "HEAD"
+    diff = git("diff", f"{base}...{branch}", check=False).stdout
+    if len(diff) > REVIEW_DIFF_MAX_CHARS:
+        diff = diff[:REVIEW_DIFF_MAX_CHARS] + f"\n[... diff cut at {REVIEW_DIFF_MAX_CHARS} chars; run `git diff {base[:12]}...HEAD` for the rest]\n"
+    read = lambda p: p.read_text(encoding="utf-8", errors="replace") if p.exists() else "(none)"
+    prompt = REVIEW_DIFF_PROMPT.read_text(encoding="utf-8")
+    for k, v in (("TASK", read(task.path)), ("REPORT", read(report)), ("BRANCH", branch),
+                 ("BASE", base), ("WHY", why), ("DIFF", diff)):  # DIFF last: it may contain {{...}}
+        prompt = prompt.replace("{{" + k + "}}", v)
+    if Path(argv[0]).stem.lower() == "claude":
+        (wt / ".review").mkdir(exist_ok=True)
+        argv += ["--settings", str(hook_settings(wt))]
+    env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE" and not k.startswith("CLAUDE_CODE_")
+           and k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")}
+    env.update(ORCHESTRA_WORKTREE=str(wt), ORCHESTRA_MAIN=str(REPO), ORCHESTRA_REVIEW="1")
+    log_path = REPORTS / f"{task.slug}.review.log"
+    timeout = int(C.get("review_timeout_s", 900))
+    start = time.time()
+    kw = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
+    with log_path.open("w", encoding="utf-8") as out:
+        proc = subprocess.Popen([exe, *argv[1:]], cwd=wt, env=env, stdin=subprocess.PIPE, stdout=out,
+                                stderr=subprocess.STDOUT, text=True, encoding="utf-8", **kw)
+        try:
+            proc.stdin.write(prompt)
+            proc.stdin.close()
+        except OSError:
+            pass
+        try:
+            proc.wait(timeout=timeout)
+            timed_out = False
+        except subprocess.TimeoutExpired:
+            kill_tree(proc)
+            timed_out = True
+    seconds = int(time.time() - start)
+    text = log_path.read_text(encoding="utf-8", errors="replace")
+    cost = lane_result(log_path).get("cost_usd")
+    if timed_out:
+        return {"verdict": "block", "reasons": f"reviewer timed out after {timeout}s", "seconds": seconds,
+                "cost_usd": cost}
+    verdict, reasons = parse_verdict(text)
+    if verdict is None:
+        return {"verdict": "block", "reasons": "reviewer gave no VERDICT line: " + reasons[-300:],
+                "seconds": seconds, "cost_usd": cost}
+    return {"verdict": verdict, "reasons": reasons, "seconds": seconds, "cost_usd": cost}
 
 
 # ---------------------------------------------------------------- lanes
@@ -884,14 +1080,15 @@ def park(task: Task, reason: str, report: Path | None) -> None:
     log(f"PARKED {task.slug}: {reason}")
 
 
-def charge(state: dict, task: Task, seconds: int, cost: float | None) -> str:
+def charge(state: dict, task: Task, seconds: int, cost: float | None, lane: str | None = None) -> str:
+    """Add a lane run's time and cost to today's usage. `lane` overrides task.lane (the reviewer)."""
     u = today_usage(state)
     u["maint_s" if task.kind == "maintenance" else "work_s"] += seconds
     if cost is not None:
         u["cost_usd"] += cost
         u["known_cost_s"] += seconds
         return f"${cost:.2f}"
-    if task.lane != "codex" and seconds:  # codex reports no cost; it runs on its own plan
+    if (lane or task.lane) != "codex" and seconds:  # codex reports no cost; it runs on its own plan
         rate = (u["cost_usd"] / (u["known_cost_s"] / 60)) if u["known_cost_s"] >= 60 else C["unknown_cost_per_min_usd"]
         est = rate * seconds / 60
         u["cost_usd"] += est
@@ -946,18 +1143,47 @@ def finish(task: Task, state: dict, wt: Path, branch: str, outcome: str, seconds
         if problems:
             park(task, "session said PASS, but " + "; ".join(problems) + f". Branch {branch} kept.", report)
             return "PASS-REJECTED"
-        with _FileLock(REVIEW / "merge.lock", wait=600, stale=900):  # two lanes may finish together
-            merge = try_merge(branch)
-            ts["merge"] = merge
-            log(f"merge {branch}: {merge}")
-            ts.pop("push", None)
-            if merge == "merged" and C.get("auto_push") and aftercare_on():
+
+        # Reviewer lane: risky diffs get a fresh read-only reviewer before integration.
+        why_risky = risk(branch) if C.get("review_risky", True) else None
+        if why_risky:
+            log(f"review {task.slug}: {why_risky}")
+            rv = run_reviewer(task, wt, branch, report, why_risky)
+            rv["spent"] = charge(state, task, rv["seconds"], rv.pop("cost_usd", None), lane="claude")
+            rv["why"] = why_risky
+            log(f"review {task.slug}: {rv['verdict']} after {rv['seconds']}s ({rv['spent']})")
+        else:
+            rv = {"verdict": "skipped", "why": "review_risky is off" if not C.get("review_risky", True)
+                  else "not risky"}
+        ts["review"] = entry["review"] = rv
+        if rv["verdict"] == "block":
+            PARKED.mkdir(parents=True, exist_ok=True)
+            (PARKED / f"{task.slug}.review.md").write_text(
+                f"# Reviewer: VERDICT: block\nWhy reviewed: {why_risky}\n\n{rv['reasons']}\n", encoding="utf-8")
+            park(task, f"reviewer blocked it ({rv['reasons'].splitlines()[0][:200] if rv['reasons'] else 'no reason'});"
+                       f" review in {task.slug}.review.md. Branch {branch} kept.", report)
+            return "REVIEW-BLOCKED"
+
+        ts.pop("push", None)
+
+        def push():
+            if C.get("auto_push") and aftercare_on():
                 try:
                     import aftercare
                     ts["push"] = aftercare.push(REPO)
                 except Exception as e:  # a push problem must never lose the merge
                     ts["push"] = f"push step crashed: {e}"
                 log(f"push {task.slug}: {ts['push']}")
+
+        integ: dict = {}
+        merge = integrate(task, branch, integ, on_merged=push)
+        ts["integration"] = entry["integration"] = integ
+        log(f"merge {branch}: {merge}")
+        if merge.startswith("parked:"):
+            ts.pop("merge", None)  # the park reason already says it; STATE NOW would list it twice
+            park(task, f"integration: {merge[len('parked:'):].strip()}. Master untouched; branch {branch} kept.", report)
+            return "INTEGRATION-REJECTED"
+        ts["merge"] = merge
         state["done"][task.digest] = now().isoformat()
         day = ARCHIVE / now().date().isoformat()
         move(task.path, day)

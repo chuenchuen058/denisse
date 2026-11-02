@@ -46,6 +46,11 @@
   "auto_push": true,
   "_auto_push": "After a merge the runner (never the task session) pushes the default branch, unless the checkout is mid-merge, origin is ahead, or the commits touch private-looking paths or add key-like strings. The repo is public. false turns it off.",
 
+  "review_risky": true,
+  "review_max_lines": 400,
+  "review_timeout_s": 900,
+  "_review_risky": "Before integration, a diff touching orchestra/, atrium/hook.py, .git/hooks, an install_*.ps1, or over review_max_lines changed lines gets a fresh read-only claude -p reviewer (prompt: orchestra/review_diff_prompt.md). VERDICT: block, no verdict, a timeout or a missing lane parks the task. Its cost counts like any lane. false turns it off.",
+
   "git_timeout_s": 120,
   "tick_watchdog_extra_s": 900,
   "_tick_watchdog_extra_s": "The whole tick is killed this long after the longest possible lane timeout. Atrium hung 19 then 29 minutes on one call."
