@@ -143,7 +143,9 @@ def jsonl_chat(source: str, path: Path) -> Chat:
     return Chat(identity, day(started, path), "", asks, answers, str(path.resolve()))
 
 
-def conversations(source: str, path: Path):
+def conversations(source: str, path: Path, settled_before: float | None = None):
+    """Yield chats; JSONL files modified at/after settled_before are skipped
+    (a session still being written), so a later run picks them up whole."""
     if source not in SOURCES:
         raise ValueError("unknown chat source")
     if source != "claude-export":
@@ -156,6 +158,8 @@ def conversations(source: str, path: Path):
         else:
             raise ValueError("session input does not exist")
         for file in paths:
+            if settled_before is not None and file.stat().st_mtime >= settled_before:
+                continue
             yield jsonl_chat(source, file)
         return
     file = path / "conversations.json" if path.is_dir() else path
@@ -209,7 +213,10 @@ def checked(vault: Path, relative: Path) -> Path:
     return path
 
 
-def import_chats(source: str, path: Path, vault: Path, *, apply: bool = False) -> list[Path]:
+def import_chats(source: str, path: Path, vault: Path, *, apply: bool = False,
+                 limit: int | None = None, settled_before: float | None = None) -> list[Path]:
+    """limit caps the notes written this run; the rest stay unrecorded in the
+    state, so the next run continues where this one stopped."""
     vault = Path(vault).expanduser().resolve()
     path = Path(path).expanduser()
     state_path = checked(vault, STATE)
@@ -219,7 +226,9 @@ def import_chats(source: str, path: Path, vault: Path, *, apply: bool = False) -
                                              for k, v in state.items()):
         raise ValueError("invalid chat import state; refusing to overwrite it")
     written, reserved = [], set()
-    for chat in conversations(source, path):
+    for chat in conversations(source, path, settled_before):
+        if limit is not None and len(written) >= limit:
+            break
         identity = chat.id
         if clean(identity) != identity:
             identity = hashlib.sha256(identity.encode("utf-8")).hexdigest()
