@@ -1,6 +1,7 @@
 """python -m unittest atrium.test_atrium -v  (temp vault)"""
 import datetime as dt
 import importlib
+import json
 import os
 import tempfile
 import unittest
@@ -60,6 +61,32 @@ class AtriumTest(unittest.TestCase):
         os.environ["DENISSE_VAULT"] = str(self.v / "nope")
         importlib.reload(self.ctx); h = importlib.reload(handoff)
         self.assertFalse(h.remember("denisse", ["x"]))
+
+    def test_capture_waits_for_the_threshold_then_saves_and_logs(self):
+        from atrium import capture, handoff
+        importlib.reload(handoff); cap = importlib.reload(capture)
+        cap.CAPTURE_EVERY_TOKENS = 100  # 400 bytes
+        t = self.v / "t.jsonl"
+        def say(n):
+            with t.open("a", encoding="utf-8") as f:
+                for i in range(n):
+                    f.write(json.dumps({"type": "user", "message": {"role": "user", "content": f"please fix the tray bug number {i}"}}) + "\n")
+                    f.write(json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
+                        {"type": "text", "text": f"Fixed bug {i}."},
+                        {"type": "tool_use", "name": "Edit", "input": {"file_path": "C:/x/tray.py"}}]}}) + "\n")
+        ev = {"session_id": "abcdef1234", "transcript_path": str(t), "cwd": "C:/Users/Xichu/GitHub/denisse", "hook_event_name": "Stop"}
+        say(1)
+        self.assertEqual(cap.handle(ev), "below threshold")
+        say(5)
+        self.assertTrue(cap.handle(ev).startswith("saved"))
+        note = next((self.v / "Calendar" / "Sessions").glob("*abcdef12.md")).read_text(encoding="utf-8")
+        self.assertTrue(note.startswith("---\nname: Session-abcdef12\ndescription: "))
+        self.assertIn("please fix the tray bug number 4", note)
+        self.assertIn("`C:/x/tray.py`", note)
+        self.assertEqual(cap.handle(ev), "below threshold")  # nothing new since
+        self.assertTrue(cap.handle(dict(ev, hook_event_name="PreCompact")).startswith("saved"))  # always
+        self.assertEqual(len(list((self.v / "Calendar" / "Sessions").glob("*.md"))), 1)  # one note per session
+        self.assertIn("session abcdef12 in denisse saved", handoff.path().read_text(encoding="utf-8"))
 
     def test_credits_flags_untagged_decisions(self):
         bad = self.cr.check()

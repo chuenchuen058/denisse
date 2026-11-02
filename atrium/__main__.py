@@ -3,6 +3,7 @@
   context [--lane claude|codex|gemini|copilot|denisse]   print the shared context pack
   credits [--days 7]     list decision lines in the vault that don't say who decided (exit 1 if any)
   snapshot [--out DIR]   write the Atrium Hub page's tables (default .review/hub)
+  capture                Claude Code hook (stdin): save the session into the vault
 """
 import argparse
 import sys
@@ -17,11 +18,15 @@ def main(argv=None) -> int:
     c = sub.add_parser("context"); c.add_argument("--lane", default="claude", choices=context.LANES)
     k = sub.add_parser("credits"); k.add_argument("--days", type=int, default=7)
     sn = sub.add_parser("snapshot"); sn.add_argument("--out", default=None)
+    sub.add_parser("capture")
     a = ap.parse_args(argv)
     if a.cmd == "context":
         sys.stdout.reconfigure(encoding="utf-8")
         print(context.show(a.lane))
         return 0
+    if a.cmd == "capture":
+        from . import capture
+        return capture.main()
     if a.cmd == "snapshot":
         from pathlib import Path
         print(snapshot.write(Path(a.out) if a.out else None))
