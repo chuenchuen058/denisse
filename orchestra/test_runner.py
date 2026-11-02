@@ -86,6 +86,7 @@ class RunnerTest(unittest.TestCase):
         (self.repo / ".review" / "lanes.json").write_text(json.dumps({"fake": [sys.executable, "-c", FAKE]}))
         os.environ["ORCHESTRA_REPO"] = str(self.repo)
         os.environ["ORCHESTRA_BACKOFF_MIN"] = "0"
+        os.environ["ORCHESTRA_DAILY_SPEND_CAP_USD"] = "5"  # the spend test is written for a $5 cap
         os.environ["ORCHESTRA_TIMEOUT_S"] = json.dumps({"light": 3, "heavy": 6})
         for k in FAKE_ENV:
             os.environ.pop(k, None)

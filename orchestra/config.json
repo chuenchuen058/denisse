@@ -23,7 +23,11 @@
   "stale_days": 7,
   "_stale_days": "Older tasks assume code that has moved. Re-date the task if it still holds.",
 
-  "daily_spend_cap_usd": 5.0,
+  "parallel_lanes": true,
+  "_parallel_lanes": "One task per lane at the same time (claude + codex + gemini), each with its own lock; state saves merge and merges/pushes take turns. Task Scheduler must allow parallel instances. false = one task at a time.",
+
+  "daily_spend_cap_usd": 40.0,
+  "_daily_spend_cap_usd_note": "Raised from 5 on 2 Nov 2026: Chuen has spare Claude allowance to use before it resets. claude -p's total_cost_usd is a notional figure on his plan.",
   "_daily_spend_cap_usd": "Summed from claude -p total_cost_usd. Runs killed before reporting are charged an estimate from minutes x today's cost per minute. Thomas's ledger saw under half of a 20-hour spend.",
   "unknown_cost_per_min_usd": 0.10,
 

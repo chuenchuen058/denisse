@@ -80,5 +80,21 @@ class TestAftercare(unittest.TestCase):
         self.assertIn("key or token", p)
 
 
+class TestParallelState(unittest.TestCase):
+    def test_two_lanes_merge_their_changes(self):
+        import runner
+        base = {"tasks": {"a": {"attempts": 0}}, "done": {}, "durations": {"light": [5], "heavy": []},
+                "days": {"d": {"work_s": 100, "cost_usd": 1.0}}}
+        other = {"tasks": {"a": {"attempts": 0}, "b": {"attempts": 1}}, "done": {"hb": "t"},
+                 "durations": {"light": [5, 7], "heavy": []}, "days": {"d": {"work_s": 160, "cost_usd": 1.5}}}
+        mine = {"tasks": {"a": {"attempts": 1}}, "done": {"ha": "t"},
+                "durations": {"light": [5], "heavy": [900]}, "days": {"d": {"work_s": 400, "cost_usd": 3.0}}}
+        out = runner._merge_into(other, mine, base)
+        self.assertEqual(out["tasks"], {"a": {"attempts": 1}, "b": {"attempts": 1}})
+        self.assertEqual(out["done"], {"hb": "t", "ha": "t"})
+        self.assertEqual(out["durations"], {"light": [5, 7], "heavy": [900]})
+        self.assertEqual(out["days"]["d"], {"work_s": 460, "cost_usd": 3.5})
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

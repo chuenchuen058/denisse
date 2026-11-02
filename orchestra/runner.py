@@ -205,7 +205,65 @@ def load_state() -> dict:
     return st
 
 
+_BASE: dict | None = None  # state as this process loaded it; set by tick() when lanes run in parallel
+
+
+class _FileLock:
+    """Spin on an O_EXCL file; a lock older than `stale` seconds is taken over."""
+    def __init__(self, path: Path, wait: float = 300, stale: float = 900):
+        self.path, self.wait, self.stale = path, wait, stale
+
+    def __enter__(self):
+        end = time.time() + self.wait
+        while True:
+            try:
+                os.close(os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+                return self
+            except FileExistsError:
+                try:
+                    if time.time() - self.path.stat().st_mtime > self.stale:
+                        self.path.unlink(missing_ok=True)
+                        continue
+                except FileNotFoundError:
+                    continue
+                if time.time() > end:
+                    raise TimeoutError(f"{self.path.name} held too long")
+                time.sleep(0.5)
+
+    def __exit__(self, *exc):
+        self.path.unlink(missing_ok=True)
+
+
+def _merge_into(fresh: dict, state: dict, base: dict) -> dict:
+    """Apply what this process changed (state vs base) onto the state another runner saved."""
+    for slug, ts in state["tasks"].items():
+        if base["tasks"].get(slug) != ts:
+            fresh["tasks"][slug] = ts
+    for k, v in state["done"].items():
+        if base["done"].get(k) != v:
+            fresh["done"][k] = v
+    for w, runs in state["durations"].items():
+        fresh["durations"].setdefault(w, []).extend(runs[len(base["durations"].get(w, [])):])
+    for day, u in state["days"].items():
+        fu, bu = fresh["days"].setdefault(day, {}), base["days"].get(day, {})
+        for k, v in u.items():
+            if isinstance(v, (int, float)):
+                fu[k] = fu.get(k, 0) + v - bu.get(k, 0)
+            elif bu.get(k) != v:
+                fu[k] = v
+    return fresh
+
+
 def save_state(state: dict) -> None:
+    global _BASE
+    if _BASE is not None:  # another lane's runner may have saved since we loaded
+        with _FileLock(REVIEW / "state.lock", wait=60, stale=120):
+            out = _merge_into(load_state(), state, _BASE)
+            tmp = STATE_FILE.with_suffix(".tmp")
+            tmp.write_text(json.dumps(out, indent=2), encoding="utf-8")
+            os.replace(tmp, STATE_FILE)
+            _BASE = json.loads(json.dumps(state))
+        return
     tmp = STATE_FILE.with_suffix(".tmp")
     tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
     os.replace(tmp, STATE_FILE)
@@ -637,17 +695,18 @@ def finish(task: Task, state: dict, wt: Path, branch: str, outcome: str, seconds
         if problems:
             park(task, "session said PASS, but " + "; ".join(problems) + f". Branch {branch} kept.", report)
             return "PASS-REJECTED"
-        merge = try_merge(branch)
-        ts["merge"] = merge
-        log(f"merge {branch}: {merge}")
-        ts.pop("push", None)
-        if merge == "merged" and C.get("auto_push") and aftercare_on():
-            try:
-                import aftercare
-                ts["push"] = aftercare.push(REPO)
-            except Exception as e:  # a push problem must never lose the merge
-                ts["push"] = f"push step crashed: {e}"
-            log(f"push {task.slug}: {ts['push']}")
+        with _FileLock(REVIEW / "merge.lock", wait=600, stale=900):  # two lanes may finish together
+            merge = try_merge(branch)
+            ts["merge"] = merge
+            log(f"merge {branch}: {merge}")
+            ts.pop("push", None)
+            if merge == "merged" and C.get("auto_push") and aftercare_on():
+                try:
+                    import aftercare
+                    ts["push"] = aftercare.push(REPO)
+                except Exception as e:  # a push problem must never lose the merge
+                    ts["push"] = f"push step crashed: {e}"
+                log(f"push {task.slug}: {ts['push']}")
         state["done"][task.digest] = now().isoformat()
         day = ARCHIVE / now().date().isoformat()
         move(task.path, day)
@@ -712,7 +771,24 @@ def tick(dry_run: bool = False) -> str:
         t = pick(tasks, state)
         print(f"would run: {t.slug if t else 'nothing'}; spend left today ${spend_left(state):.2f}")
         return "dry-run"
-    if not take_lock(state):
+    global LOCK_FILE, _BASE
+    if C.get("parallel_lanes") and aftercare_on():
+        # One runner per lane at a time (Chuen, 2 Nov 2026: use Claude and Codex together).
+        # Each lane has its own lock; state saves merge, and merges are serialised.
+        _BASE = json.loads(json.dumps(state))
+        order = []
+        for t in sorted((t for t in tasks if why_not_runnable(t, state) is None),
+                        key=lambda t: (t.priority != "urgent", t.kind == "maintenance", t.slug)):
+            if t.lane not in order:
+                order.append(t.lane)
+        for lane in order:
+            LOCK_FILE = REVIEW / f"runner.{lane}.lock"
+            if take_lock(state):
+                tasks = [t for t in tasks if t.lane == lane]
+                break
+        else:
+            return "busy" if order else "idle"
+    elif not take_lock(state):
         return "busy"
     try:
         task = pick(tasks, state)
