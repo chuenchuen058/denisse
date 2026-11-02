@@ -493,47 +493,118 @@ def pick(tasks: list[Task], state: dict) -> Task | None:
 
 # ---------------------------------------------------------------- lock + watchdog
 
-def _pid_alive(pid: int) -> bool:
-    """True if a process with this PID exists. Never signals it (os.kill would terminate on Windows)."""
+ALIVE_UNVERIFIED = 0  # proc_created(): the process exists but its creation time can't be read
+
+
+def proc_created(pid: int) -> int | None:
+    """The process's creation time (Windows FILETIME ticks; Linux start time in clock ticks),
+    ALIVE_UNVERIFIED if it exists but we can't read that, None if no such process is running.
+    Never signals it (os.kill would terminate on Windows)."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return None
+    if pid <= 0:
+        return None
     if os.name == "nt":
         import ctypes
-        k = ctypes.windll.kernel32
-        h = k.OpenProcess(0x1000, False, int(pid))  # PROCESS_QUERY_LIMITED_INFORMATION
+        from ctypes import wintypes
+        k = ctypes.WinDLL("kernel32", use_last_error=True)  # own instance: argtypes stay local
+        k.OpenProcess.restype = wintypes.HANDLE
+        k.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        k.GetExitCodeProcess.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+        k.GetProcessTimes.argtypes = (wintypes.HANDLE,) + (ctypes.POINTER(wintypes.FILETIME),) * 4
+        k.CloseHandle.argtypes = (wintypes.HANDLE,)
+        h = k.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
         if not h:
-            return ctypes.GetLastError() == 5  # access denied = exists but not ours
-        code = ctypes.c_ulong()
-        k.GetExitCodeProcess(h, ctypes.byref(code))
-        k.CloseHandle(h)
-        return code.value == 259  # STILL_ACTIVE
+            return ALIVE_UNVERIFIED if ctypes.get_last_error() == 5 else None  # 5: exists, not ours
+        try:
+            code = wintypes.DWORD()
+            if k.GetExitCodeProcess(h, ctypes.byref(code)) and code.value != 259:  # STILL_ACTIVE
+                return None
+            t = [wintypes.FILETIME() for _ in range(4)]
+            if not k.GetProcessTimes(h, *(ctypes.byref(x) for x in t)):
+                return ALIVE_UNVERIFIED
+            return (t[0].dwHighDateTime << 32) | t[0].dwLowDateTime
+        finally:
+            k.CloseHandle(h)
     try:
-        os.kill(int(pid), 0)
-        return True
+        stat = Path(f"/proc/{pid}/stat").read_text()
+        return int(stat.rsplit(")", 1)[1].split()[19])  # field 22: starttime
+    except (OSError, IndexError, ValueError):
+        pass
+    try:
+        os.kill(pid, 0)
+        return ALIVE_UNVERIFIED
     except ProcessLookupError:
-        return False
+        return None
     except PermissionError:
+        return ALIVE_UNVERIFIED
+
+
+def _alive(pid, created) -> bool:
+    """The liveness check: a process with this pid exists AND it is the one the lock names.
+    A reused pid (same number, different creation time) is not the old worker. A lock written
+    before creation times were recorded (created missing) is judged by the pid alone."""
+    got = proc_created(pid)
+    if got is None:
+        return False
+    if not created or got == ALIVE_UNVERIFIED:
         return True
+    return got == created
+
+
+def read_lock(path: Path) -> dict | None:
+    """The lock's JSON, or None if it can't be read or parsed (then only the age rule applies)."""
+    try:
+        info = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return info if isinstance(info, dict) else None
+
+
+def lock_status(info: dict | None) -> str:
+    """'unknown' (unparseable / no pid / ours: age rule only), 'live' (owner running),
+    'orphan' (owner gone, its lane child still running) or 'dead' (both gone)."""
+    if not info or not info.get("pid") or info.get("pid") == os.getpid():
+        return "unknown"
+    if _alive(info["pid"], info.get("created")):
+        return "live"
+    if info.get("lane_pid") and _alive(info["lane_pid"], info.get("lane_created")):
+        return "orphan"
+    return "dead"
+
+
+def _my_lock(**extra) -> dict:
+    return {"pid": os.getpid(), "created": proc_created(os.getpid()), "since": now().isoformat(), **extra}
 
 
 def take_lock(state: dict) -> bool:
-    """Atomic create; a lock older than the longest possible run is stale."""
+    """Atomic create. A lock whose owner (pid + creation time) is gone is stale at once, unless
+    its lane child is still running; an unreadable lock is stale only once it is older than
+    the longest possible run."""
     max_age = max(timeout_for(w, state) for w in ("light", "heavy")) + C["tick_watchdog_extra_s"]
     for _ in range(2):
         try:
             fd = os.open(LOCK_FILE, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump({"pid": os.getpid(), "since": now().isoformat()}, f)
+                json.dump(_my_lock(), f)
             return True
         except FileExistsError:
-            try:
-                owner = json.loads(LOCK_FILE.read_text(encoding="utf-8")).get("pid")
-            except (OSError, ValueError):
-                owner = None
-            if owner and owner != os.getpid() and not _pid_alive(owner):
-                # e.g. Task Scheduler killed the tick when the laptop went onto battery (2 Nov)
-                log(f"lock {LOCK_FILE.name} held by dead pid {owner}; removed")
+            info = read_lock(LOCK_FILE)
+            status = lock_status(info)
+            if status in ("live", "orphan"):
+                return False
+            if status == "dead":
+                # e.g. Task Scheduler killed the tick when the laptop went onto battery (2 Nov).
+                # reconcile() has already collected a task the lock named.
+                log(f"RECONCILE dead owner {info['pid']} for {info.get('task') or '-'} ({LOCK_FILE.name})")
                 LOCK_FILE.unlink(missing_ok=True)
                 continue
-            age = time.time() - LOCK_FILE.stat().st_mtime
+            try:
+                age = time.time() - LOCK_FILE.stat().st_mtime
+            except FileNotFoundError:
+                continue
             if age < max_age:
                 return False
             log(f"stale lock ({int(age)}s old) removed")
@@ -541,9 +612,16 @@ def take_lock(state: dict) -> bool:
     return False
 
 
-def set_lock_task(slug: str) -> None:
-    LOCK_FILE.write_text(json.dumps({"pid": os.getpid(), "since": now().isoformat(), "task": slug}),
-                         encoding="utf-8")
+def set_lock_task(slug: str, lane: str = "") -> None:
+    LOCK_FILE.write_text(json.dumps(_my_lock(task=slug, lane=lane)), encoding="utf-8")
+
+
+def update_lock(**extra) -> None:
+    """Add fields (the lane child's pid and creation time) to this tick's lock."""
+    info = read_lock(LOCK_FILE)
+    if info is not None and info.get("pid") == os.getpid():
+        info.update(extra)
+        LOCK_FILE.write_text(json.dumps(info), encoding="utf-8")
 
 
 def release_lock() -> None:
@@ -709,6 +787,8 @@ def run_lane(task: Task, wt: Path, report: Path, timeout: int) -> tuple[str, int
     start = time.time()
     proc = subprocess.Popen([exe, *argv[1:]], cwd=wt, env=env, stdin=subprocess.PIPE,
                             stdout=out, stderr=subprocess.STDOUT, text=True, encoding="utf-8", **kw)
+    # So a later tick can tell an orphaned lane (this runner killed, the child not) from a dead one.
+    update_lock(lane_pid=proc.pid, lane_created=proc_created(proc.pid), lane_since=now().isoformat())
     try:
         proc.stdin.write(build_prompt(".review/task.md", ".review/report.md"))
         proc.stdin.close()
@@ -951,6 +1031,75 @@ def write_vault_note(task: Task, ts: dict, result: str) -> None:
         log(f"vault note failed for {task.slug}: {e}")
 
 
+def reconcile(state: dict) -> dict:
+    """Before dispatching: collect what a killed tick left behind (2 Nov 2026: on battery, Task
+    Scheduler ended both runner ticks but not their claude -p children). For each slot lock whose
+    owner is gone and which names a task:
+      * its lane child still runs -> leave the slot occupied; the task isn't dispatched again
+      * child gone, worktree has .review/report.md -> finish() it as if the lane had exited
+      * child gone, no report -> finish() records NO_REPORT under the INFRA retry rule
+    Worktrees are kept; unreadable locks are left to take_lock's age rule.
+    Returns {slug: outcome}."""
+    out: dict = {}
+    for lf in sorted(REVIEW.glob("runner*.lock")):
+        info = read_lock(lf)
+        status = lock_status(info)
+        slug = (info or {}).get("task")
+        if status == "orphan":
+            log(f"RECONCILE orphan lane {info['lane_pid']} still running {slug or '-'}")
+            out[slug or lf.name] = "orphan running"
+            continue
+        if status != "dead" or not slug:
+            continue  # live, unreadable, or no task named (take_lock just removes those)
+        try:  # claim it: one reconciler per lock; our live pid then keeps other ticks off the slot
+            with _FileLock(REVIEW / "reconcile.lock", wait=30, stale=120):
+                if read_lock(lf) != info:
+                    continue
+                log(f"RECONCILE dead owner {info['pid']} for {slug}")
+                lf.write_text(json.dumps(_my_lock(task=slug, lane=info.get("lane", ""), reconciling=True)),
+                              encoding="utf-8")
+        except TimeoutError:
+            continue
+        try:
+            out[slug] = _collect(state, info, slug)
+        except Exception as e:  # never let one bad leftover stop the tick
+            log(f"RECONCILE {slug} failed: {e!r}; worktree kept")
+            out[slug] = f"error: {e}"
+        finally:
+            lf.unlink(missing_ok=True)
+    return out
+
+
+def _collect(state: dict, info: dict, slug: str) -> str:
+    path = QUEUE / f"{slug}.md"
+    if not path.exists():
+        log(f"RECONCILE {slug}: task no longer in the queue; nothing to collect, worktree kept")
+        return "not queued"
+    task = parse_task(path)
+    if info.get("lane") and info["lane"] != task.lane:  # it ran on a fallback lane
+        task.fields["lane-from"], task.fields["lane"] = task.lane, info["lane"]
+    wt, branch = WORKTREES / slug, f"review/{slug}"
+    local_report, report = wt / ".review" / "report.md", REPORTS / f"{slug}.md"
+    report.unlink(missing_ok=True)
+    if local_report.exists():
+        shutil.copyfile(local_report, report)
+    try:
+        started = dt.datetime.fromisoformat(info.get("lane_since") or info.get("since"))
+        seconds = max(0, int((now() - started).total_seconds()))
+    except (TypeError, ValueError):
+        seconds = 0
+    before = set(info["before"]) if isinstance(info.get("before"), list) else main_checkout_status()
+    log(f"RECONCILE collecting {slug}: lane gone, report {'found' if local_report.exists() else 'missing'}")
+    ts = task_state(state, task)
+    n = len(ts["history"])
+    result = finish(task, state, wt, branch, "ran", seconds, before)
+    for entry in ts["history"][n:]:
+        entry["recovered"] = True
+    save_state(state)
+    write_vault_note(task, ts, result)
+    return result
+
+
 def tick(dry_run: bool = False) -> str:
     for d in (QUEUE, REPORTS, ARCHIVE, PARKED):
         d.mkdir(parents=True, exist_ok=True)
@@ -964,10 +1113,15 @@ def tick(dry_run: bool = False) -> str:
         print(f"would run: {t.slug if t else 'nothing'}; spend left today ${spend_left(state):.2f}")
         return "dry-run"
     global LOCK_FILE, _BASE
-    if C.get("parallel_lanes") and aftercare_on():
+    parallel = bool(C.get("parallel_lanes") and aftercare_on())
+    if parallel:
+        _BASE = json.loads(json.dumps(state))
+    # Reconcile before dispatching: a killed tick's orphaned lane or leftover report.
+    orphans = {s for s, r in reconcile(state).items() if r == "orphan running"}
+    tasks = [t for t in route(load_queue(), state) if t.slug not in orphans]
+    if parallel:
         # One runner per lane at a time (Chuen, 2 Nov 2026: use Claude and Codex together).
         # Each lane has its own lock; state saves merge, and merges are serialised.
-        _BASE = json.loads(json.dumps(state))
         order = []
         for t in sorted((t for t in tasks if why_not_runnable(t, state) is None),
                         key=lambda t: (t.priority != "urgent", t.kind == "maintenance", t.slug)):
@@ -1006,7 +1160,7 @@ def tick(dry_run: bool = False) -> str:
         ts["attempts"] += 1
         ts["last_start"] = now().isoformat()
         save_state(state)  # count the attempt before running, so a crash still counts
-        set_lock_task(task.slug)
+        set_lock_task(task.slug, task.lane)
         fb = ""
         if task.fields.get("lane-from"):
             fb = (f" (fallback: lane {task.fields['lane-from']} limited until "
@@ -1022,6 +1176,7 @@ def tick(dry_run: bool = False) -> str:
             save_state(state)
             return "WORKTREE_FAILED"
         before = main_checkout_status()
+        update_lock(before=sorted(before))  # reconcile() needs it to judge stray writes
         outcome, seconds = run_lane(task, wt, REPORTS / f"{task.slug}.md", timeout)
         if outcome.startswith("LANE_MISSING"):
             log(f"{task.slug}: {outcome}")
