@@ -41,6 +41,14 @@ registers it at 07:10 alongside the runner. Tests:
 Each slot lock (`.review/runner*.lock`) records the runner's and its lane child's pid and process creation time; before picking, every tick checks them: a dead (or pid-reused) owner frees the slot at once, a still-running orphaned lane keeps its slot and its task isn't re-dispatched, and a finished orphan is collected through the normal `finish()` path (its report → gate re-run, merge, push; no report → NO_REPORT, one counted attempt), with `recovered: true` in the history and the worktree kept.
 Log lines: `RECONCILE dead owner <pid> for <slug>`, `RECONCILE orphan lane <pid> still running <slug>`, `RECONCILE collecting <slug>: lane gone, report found|missing`; an unreadable lock is never deleted for that alone and falls back to the old age rule.
 
+## On battery
+
+The runner decides about battery, not Task Scheduler (`power.py`, `GetSystemPowerStatus` via ctypes; unknown, e.g. a desktop, counts as AC). With `dispatch_on_battery: false` (default) a tick on battery still reconciles, so a finished lane is gated, merged and pushed, but starts no new lane; it logs `ON BATTERY: no new dispatch (n%)` at most once per 30 min and `POWER: AC; dispatching again` when plugged back in. With `dispatch_on_battery: true` it dispatches until `battery_floor_percent` (default 30). Running lanes are never killed for power. `status.py` and STATE NOW show `power: AC` or `power: battery 87% (dispatch paused)`. `ORCHESTRA_POWER=ac|battery|battery:42` fakes the reading (tests).
+
+`install_task.ps1` now registers the task with `-DontStopIfGoingOnBatteries -AllowStartIfOnBatteries`, so Windows no longer kills a tick on unplug. An already-registered task keeps its old settings until re-registered; to apply (re-registers "Denisse Orchestra" in place, `-Force`):
+`powershell -ExecutionPolicy Bypass -File orchestra\install_task.ps1`
+(add `-Canary` if the daily canary task is registered too, so it is kept current).
+
 ## Review and combined-tree integration
 
 After the runner's own gate re-run passes, two more steps stand between a PASS and master:

@@ -13,8 +13,11 @@ $python = Join-Path $repo ".venv\Scripts\pythonw.exe"
 $runner = Join-Path $repo "orchestra\runner.py"
 $action  = New-ScheduledTaskAction -Execute $python -Argument "`"$runner`"" -WorkingDirectory $repo
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 2)
+# Battery: Windows must not decide. It used to refuse ticks on battery and kill running ones on
+# unplug, orphaning their claude -p lanes (2 Nov 2026). The runner now decides: config
+# dispatch_on_battery / battery_floor_percent in orchestra/config.json (orchestra/power.py).
 $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable `
-    -DontStopIfGoingOnBatteries:$false -AllowStartIfOnBatteries:$false `
+    -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries `
     -ExecutionTimeLimit (New-TimeSpan -Hours 2)
 Register-ScheduledTask -TaskName "Denisse Orchestra" -Action $action -Trigger $trigger `
     -Settings $settings -Description "Runs one .review/queue task per tick (orchestra/runner.py)" -Force
