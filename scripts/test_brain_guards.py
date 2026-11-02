@@ -150,4 +150,18 @@ for text, want in [
         print("      got:", got)
 
 print("\n" + ("ALL PASS" if not fails else "FAILED: " + ", ".join(fails)))
-sys.exit(1 if fails else 0)
+
+
+# The orchestra gate runs this file through `unittest discover`. A bare
+# sys.exit() at import made discover report an import error even on ALL PASS,
+# so that gate could never pass. Same checks, now reported both ways.
+import unittest  # noqa: E402
+
+
+class BrainGuardChecks(unittest.TestCase):
+    def test_all_checks_pass(self):
+        self.assertEqual(fails, [])
+
+
+if __name__ == "__main__":
+    sys.exit(1 if fails else 0)
