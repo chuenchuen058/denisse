@@ -298,13 +298,16 @@ def run(rounds: int = 3, only: list[str] | None = None, plans: int = 2, ollama: 
     tmp = Path(tempfile.mkdtemp(prefix="lt-baseline-"))
     lease_path = GpuLease.for_repo(SRC_REPO, "baseline").path
     rec = Recorder(lease_path)
-    runs, probes = [], []
+    runs, probes, skips = [], [], []
     started = core.now().isoformat()
     try:
         with rec.installed():
             for rnd in range(1, rounds + 1):
                 for fx in fixtures:
-                    for attempt in range(1, 4):
+                    give_up = time.monotonic() + wait_gpu_s
+                    attempt = 0
+                    while time.monotonic() < give_up:  # a skip waits and retries, within the GPU budget
+                        attempt += 1
                         repo = build_repo(fx, tmp / f"r{rnd}-{fx['name']}-{attempt}", files=files)
                         ctx = Ctx(repo, ollama=ollama)
                         wait_ready(ctx, wait_gpu_s, log=log)
@@ -315,6 +318,8 @@ def run(rounds: int = 3, only: list[str] | None = None, plans: int = 2, ollama: 
                         except Skip as e:
                             log(f"  r{rnd} {fx['name']}: skipped mid-run ({e}); retrying")
                             del rec.calls[before:]
+                            skips.append({"round": rnd, "fixture": fx["name"], "why": str(e)[:160]})
+                            time.sleep(20)
                             continue
                         except BadOutput as e:  # the scout's answer didn't fit its schema
                             r = {"fixture": fx["name"], "candidates": [], "plans": [], "scout_bad_output": str(e)[:300]}
@@ -325,7 +330,7 @@ def run(rounds: int = 3, only: list[str] | None = None, plans: int = 2, ollama: 
                             f"({r['seconds']}s)")
                         break
                     else:
-                        raise Skip(f"{fx['name']}: skipped 3 times")
+                        raise Skip(f"{fx['name']}: GPU still busy after {wait_gpu_s:.0f}s of retries")
                 probe_repo = build_repo(fixtures[0], tmp / f"r{rnd}-probe", files=files)
                 probes.append(probe_lease(fixtures[0], probe_repo, ollama=ollama))
     finally:
@@ -333,7 +338,7 @@ def run(rounds: int = 3, only: list[str] | None = None, plans: int = 2, ollama: 
     result = {"started": started, "finished": core.now().isoformat(), "rounds": rounds, "plans_per_fixture": plans,
               "model": core.load_config(SRC_REPO)["local_team_model"],
               "roles": {n: core.load_role(n).version for n in ("scout", "planner")},
-              "score": score(runs, fixtures), "lease_probes": probes, "runs": runs}
+              "score": score(runs, fixtures), "lease_probes": probes, "skips": skips, "runs": runs}
     if out_dir is not None:
         out_dir.mkdir(parents=True, exist_ok=True)
         path = out_dir / f"{core.now().strftime('%Y-%m-%dT%H%M%S')}.json"
