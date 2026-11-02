@@ -164,6 +164,27 @@ def robotic(reply: str) -> list:
     return [s for s in ROBOTIC if s in low]
 
 
+def _fake_desktop(desk):
+    """A case's `desktop` dict ({title, process, selection, clipboard})
+    stands in for the real front window and clipboard, so "explain this"
+    cases are repeatable and the nightly run never sends Ctrl+C. Cases
+    without one get an empty desktop, not whatever is on screen at 3am."""
+    import contextlib
+    from unittest.mock import patch
+    import desktop_context
+    desk = desk or {}
+    stack = contextlib.ExitStack()
+    stack.enter_context(patch.object(desktop_context, "_w32_foreground",
+                                     lambda: (desk["title"], 1) if desk.get("title") else None))
+    stack.enter_context(patch.object(desktop_context, "_w32_process_name",
+                                     lambda pid: desk.get("process", "")))
+    stack.enter_context(patch.object(desktop_context, "selected_text",
+                                     lambda *a, **k: desk.get("selection")))
+    stack.enter_context(patch.object(desktop_context, "_w32_read_unicode",
+                                     lambda: desk.get("clipboard")))
+    return stack
+
+
 def run_case(brain, case: dict, history: list) -> dict:
     """One prompt through the real brain. Tool calls are allowed to run --
     they're read-only in this suite, and a mocked tool wouldn't tell us
@@ -197,7 +218,8 @@ def run_case(brain, case: dict, history: list) -> dict:
     started = time.monotonic()
     out_msgs = []
     try:
-        reply, out_msgs = brain.respond(messages, confirm=spy)
+        with _fake_desktop(case.get("desktop")):
+            reply, out_msgs = brain.respond(messages, confirm=spy)
         error = None
     except Exception as exc:
         reply, error = "", f"{type(exc).__name__}: {exc}"
