@@ -13,9 +13,11 @@ Copied from Thomas van Pul's Atrium core loop (31 Oct 2026), rebuilt for Windows
   in the worktree and merges only if it exits 0, the guard hook
   (`orchestra/hooks/guard.py`) fired, and nothing was written into the main
   checkout. Then the task goes to `archive/<date>/`.
-- HUMAN line, PARTIAL or FAIL -> `parked/`. Edit the task and move it back
-  to `queue/` to run it again. Timeout / no report -> one retry in a fresh
-  worktree, then parked.
+- HUMAN line, PARTIAL or FAIL -> `parked/`. To run it again:
+  `python orchestra\requeue.py <slug> --note "why"` (don't edit state.json
+  by hand). Timeout / no report -> one retry in a fresh worktree, then parked.
+- `python orchestra\status.py` shows running, queued, parked, today's spend.
+  Commands are documented in `orchestra/README.md`.
 - Limits (timeouts, caps, spend) are in `orchestra/config.json`, each with
   its reason.
 - `STATE_NOW.md` is regenerated after every tick.
