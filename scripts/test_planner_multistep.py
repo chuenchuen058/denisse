@@ -121,6 +121,14 @@ class PlanSchema(unittest.TestCase):
                     json.dumps({"steps": ["ok", "x" * 201]}), "[]", None]:
             self.assertIsNone(multistep.parse_plan(raw), raw)
 
+    def test_checked_against_his_request(self):
+        good = {"steps": ["Find my signals coursework", "Make a revision list from my signals coursework",
+                          "Remind me about my signals coursework on Thursday"]}
+        self.assertEqual(multistep.parse_plan(json.dumps(good), SIGNALS), good["steps"])
+        self.assertIsNone(multistep.parse_plan(json.dumps({"steps": good["steps"][:2]}), SIGNALS))
+        self.assertIsNone(multistep.parse_plan(json.dumps(
+            {"steps": good["steps"][:2] + ["Book a dentist appointment for next week"]}), SIGNALS))
+
     def test_schema_caps_at_five(self):
         self.assertEqual(multistep._PLAN_SCHEMA["properties"]["steps"]["maxItems"], 5)
 
@@ -165,23 +173,46 @@ class Execution(unittest.TestCase):
 
     def test_step_never_gets_a_tool_the_request_did_not_route(self):
         # "Play some music" as a step of a request that never mentioned music.
-        script = Script({"steps": ["Play some music", "List my tasks"]},
-                        {"Play some music": [call("play_song", {"query": "lofi"}), reply("Playing.")]})
-        played = []
-        answer, _ = run("list my tasks and then start a 25 minute timer", script, {
-            "play_song": lambda **kw: played.append(kw) or "Playing lofi.",
-            "list_tasks": lambda **kw: "1 open: - file the Spritzer paperwork",
-        })
-        offered = script.calls[1][1]
-        self.assertNotIn("play_song", offered)
-        self.assertEqual(played, [])
+        request = [{"role": "user", "content": "list my tasks and then start a 25 minute timer"}]
+        ceiling = {d["function"]["name"] for d in brain.tool_router.select(brain.TOOL_DEFINITIONS, request)}
+        self.assertNotIn("play_song", multistep.step_tools("Play some music", None, ceiling))
+        self.assertIn("set_timer", multistep.step_tools("start a 25 minute timer", "list my tasks", ceiling))
 
-    def test_bad_plan_falls_back_to_one_turn(self):
+    def test_a_step_that_refers_back_gets_the_earlier_steps_tools(self):
+        ceiling = {d["function"]["name"] for d in brain.TOOL_DEFINITIONS}
+        alone = multistep.step_tools("make a revision list from it", None, ceiling)
+        after = multistep.step_tools("make a revision list from it", "find my signals coursework", ceiling)
+        self.assertNotIn("read_file", alone)
+        self.assertIn("read_file", after)
+        self.assertIn("search_vault", after)
+
+    def test_bad_plan_falls_back_to_his_own_parts(self):
         script = Script("not a plan", {})
-        script.steps[SIGNALS] = [reply("Here's what I can do.")]
-        answer, _ = run(SIGNALS, script, {})
-        self.assertEqual(answer, "Here's what I can do.")
-        self.assertEqual([c[0] for c in script.calls], ["<plan>", SIGNALS])
+        run(SIGNALS, script, {})
+        self.assertEqual([c[0] for c in script.calls],
+                         ["<plan>", "find my signals coursework", "make a revision list from it",
+                          "remind me on Thursday"])
+
+    def test_invented_step_falls_back_to_his_own_parts(self):
+        script = Script({"steps": ["Open the computer and navigate to the folder where the Japan "
+                                   "flight documents are stored", "Search for the Japan flight PDF"]}, {})
+        run("find my japan flight pdf and then add a task to check in on friday", script, {})
+        self.assertEqual([c[0] for c in script.calls][1:],
+                         ["find my japan flight pdf", "add a task to check in on friday"])
+
+    def test_unreachable_model_answers_as_one_turn(self):
+        script = Script({}, {SIGNALS: [reply("One turn.")]})
+
+        def chat(**kw):
+            if "format" in kw:
+                raise ConnectionError("ollama down")
+            return script(**kw)
+        answer, _ = run(SIGNALS, chat, {})
+        self.assertEqual(answer, "One turn.")
+
+    def test_path_offer_moves_to_the_end(self):
+        self.assertEqual(multistep._compose(["It's in Coursework.md. " + brain._PATH_ASK, "Added: revise."]),
+                         "It's in Coursework.md.\n\nAdded: revise. " + brain._PATH_ASK)
 
     def test_switch_off(self):
         script = Script({"steps": [STEP1, STEP3]}, {SIGNALS: [reply("One turn.")]})
@@ -260,8 +291,40 @@ class Retry(unittest.TestCase):
         answer, _ = run("remind me on Thursday to revise and start a 25 minute timer", script,
                         {"add_task": lambda **kw: "Added: revise"}, confirm=lambda n, a: False)
         self.assertIn("I stopped at step 1", answer)
-        self.assertIn("declined", answer)
+        self.assertIn("you said no", answer)
         self.assertEqual(len([c for c in script.calls if c[0] == a]), 2)  # one attempt only
+
+    def test_retry_that_repeats_the_banned_call_reports_the_first_error(self):
+        q = {"query": "japan flight"}
+        a, b = "Find my japan flight pdf", "Add a task to check in on Friday"
+        script = Script({"steps": [a, b]}, {a: [call("find_files", q), reply("Hmm."),
+                                                call("find_files", q), reply("Hmm.")]})
+        answer, _ = run("find my japan flight pdf and then add a task to check in on friday", script, {
+            "find_files": lambda **kw: "Error running 'find_files': the search index is unavailable. "
+                                       "Tell the user this failed. Do not invent a result."})
+        self.assertIn("the search index is unavailable.", answer)
+        self.assertNotIn("Tell the user", answer)
+        self.assertNotIn("find_files", answer)
+        self.assertIn("Not done: Add a task to check in on Friday", answer)
+
+    def test_policy_refusal_is_a_reply_not_a_failure(self):
+        a, b = "Make a revision list from my signals coursework", "Tell me what's on my plate"
+        script = Script({"steps": [a, b]}, {
+            a: [call("list_directory", {"path": "."}), reply("Revision list: Fourier series, convolution.")],
+            b: [call("list_tasks"), reply("One task: file the Spritzer paperwork.")]})
+        answer, _ = run("make a revision list from my signals coursework and tell me what's on my plate",
+                        script, {"list_tasks": lambda **kw: "1 open: - file the Spritzer paperwork"})
+        self.assertNotIn("stopped", answer)
+        self.assertIn("Fourier", answer)
+        self.assertIn("Spritzer", answer)
+
+
+class Plain(unittest.TestCase):
+    def test_strips_model_instructions_and_tool_names(self):
+        self.assertEqual(multistep.plain("Error running 'find_files': drive offline. Tell the user this "
+                                         "failed. Do not invent a result."), "drive offline")
+        self.assertEqual(multistep.plain("User declined to run 'add_task'."), "you said no to it")
+        self.assertNotIn("set_timer", multistep.plain("Error: set_timer crashed"))
 
 
 if __name__ == "__main__":

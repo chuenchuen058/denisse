@@ -70,14 +70,19 @@ _PLAN_SCHEMA = {
                              "items": {"type": "string", "maxLength": 200}}},
 }
 
+# No example wording in here. Live on 2026-11-02, an example step ("Find my
+# signals coursework notes") was planned for a weather request, and quoting
+# "remind me"/"tell me" gave "Remind me to find my Japan flight PDF". The
+# code's own split of his sentence goes in the user message instead, so
+# the model's job is small: make each part stand alone.
 _PLAN_PROMPT = (
-    "Split Chuen's request into the separate actions it asks for, in the order "
-    "he said them. One short instruction per step, in his own words, as if he "
-    "had asked for that step alone (\"Find my signals coursework notes\", "
-    "\"Remind me on Thursday to revise signals\"). At most 5 steps. Don't add "
-    "steps he didn't ask for and don't answer anything yet. Reply with JSON "
-    "only: {\"steps\": [\"...\", \"...\"]}"
+    "Chuen asked for several things at once. Write the plan: one step for each "
+    "thing he asked for, in his order, 2 to 5 steps. Each step must make sense "
+    "on its own: keep his words, and replace words like \"it\" or \"them\" with "
+    "what they refer to. Only what he asked for. Don't answer anything. Reply "
+    "with JSON only: {\"steps\": [\"...\", \"...\"]}"
 )
+_STOP = {"this", "that", "them", "then", "with", "from", "into", "what", "have", "about", "your", "please"}
 
 
 def enabled() -> bool:
@@ -111,8 +116,22 @@ def is_multistep(text: str) -> bool:
     return bool(tool_router._groups_in(text))
 
 
-def parse_plan(raw) -> list | None:
-    """The steps, or None for anything that isn't a 2-5 step plan."""
+def _words(text: str) -> set:
+    return {w for w in re.findall(r"[a-z]{4,}", (text or "").lower()) if w not in _STOP}
+
+
+def _his_words(step: str, request: str) -> bool:
+    """Mostly his words. Live, "find my japan flight pdf and then add a
+    task..." was planned as "Open the computer and navigate to the folder
+    where the Japan flight documents are stored" -- 2 of 8 words his."""
+    own = _words(step)
+    return bool(own) and len(own & _words(request)) * 5 >= len(own) * 3
+
+
+def parse_plan(raw, request: str | None = None) -> list | None:
+    """The steps, or None for anything that isn't a 2-5 step plan. With
+    `request`, there must be one step per part the detector found, each
+    mostly in his words: anything else is invented, and the plan dropped."""
     try:
         data = json.loads(raw) if isinstance(raw, str) else raw
     except (TypeError, ValueError):
@@ -122,22 +141,37 @@ def parse_plan(raw) -> list | None:
         return None
     if any(not isinstance(s, str) or not s.strip() or len(s) > 200 for s in steps):
         return None
-    return [" ".join(s.split()) for s in steps]
+    steps = [" ".join(s.split()).rstrip(" .") for s in steps]
+    if request is not None and (len(steps) != len(action_parts(request))
+                                or not all(_his_words(s, request) for s in steps)):
+        return None
+    return steps
 
 
 def make_plan(request: str, chat=None) -> list | None:
-    """One JSON-constrained model call. Never raises."""
+    """One JSON-constrained model call. A plan that fails parse_plan is
+    replaced by the detector's own parts -- his words, split where he split
+    them; a later step's "it" is resolved by step_tools and the summaries.
+    None (answer as one turn) only if the model can't be reached or there
+    are not 2-5 parts. Never raises."""
     import brain
     chat = chat or brain.ollama.chat
+    parts = action_parts(request)
+    numbered = "\n".join(f"{i}. {p}" for i, p in enumerate(parts, 1))
     try:
         r = chat(model=brain.MODEL, keep_alive=-1, format=_PLAN_SCHEMA,
                  options={"temperature": 0, "num_ctx": brain.NUM_CTX, "num_predict": 256},
                  messages=[{"role": "system", "content": _PLAN_PROMPT},
-                           {"role": "user", "content": request}])
-        return parse_plan(brain._get(brain._get(r, "message"), "content", "") or "")
+                           {"role": "user", "content": f"His request: {request}\nThe parts:\n{numbered}"}])
+        raw = brain._get(brain._get(r, "message"), "content", "") or ""
     except Exception as exc:
         logging.warning("Multi-step plan failed, answering as one turn: %s", exc)
         return None
+    steps = parse_plan(raw, request)
+    if steps is None and 2 <= len(parts) <= MAX_STEPS:
+        logging.info("Model plan rejected (%r); using the request's own parts", raw[:200])
+        steps = parts
+    return steps
 
 
 def _calls(new_messages: list) -> list:
@@ -153,16 +187,51 @@ def _calls(new_messages: list) -> list:
     return out
 
 
+BANNED_PREFIX = "Refused: this exact '"
+
+
+def _tool_error(result: str) -> bool:
+    """The tool itself failed, or he said no. Not a policy refusal ("isn't
+    available", "you don't move files"): the model was told why and answers
+    from that, which is a reply, not a failure. The first live run counted
+    those, and stopped a plan because a no-tool step reached for a tool."""
+    import learning
+    r = (result or "").strip()
+    return (r.startswith("User declined") or r.startswith(BANNED_PREFIX)
+            or (learning.tool_failed(r) and not r.startswith("Refused")))
+
+
 def failure(reply: str, calls: list) -> str | None:
-    """Why a step failed, or None. A tool error/refusal that nothing after
-    it in the step made good, or the honesty net replacing a done-claim."""
+    """The raw result that made a step fail, or None: a tool error that
+    nothing later in the step made good, or the honesty net replacing a
+    done-claim."""
     import brain
     if (reply or "").strip() in (brain.UNCONFIRMED_REPLY, brain.FAILED_REPLY):
         bad = [c for c in calls if brain._confirms_nothing(c["result"])]
-        return (bad[-1]["result"] if bad else "nothing actually ran, so it isn't done")[:200]
-    if calls and brain._confirms_nothing(calls[-1]["result"]):
-        return calls[-1]["result"][:200] or "the tool returned nothing"
+        return bad[-1]["result"] if bad else "nothing actually ran, so it isn't done"
+    if calls and _tool_error(calls[-1]["result"]):
+        return calls[-1]["result"] or "the tool returned nothing"
     return None
+
+
+_FOR_THE_MODEL = re.compile(
+    r"\s*\b(?:Tell (?:the user|him)|Do not|Don'?t|Call '|Answer the|Use )\b.*$", re.I | re.S)
+
+
+def plain(result: str) -> str:
+    """A tool result as something to say to Chuen: no instructions meant
+    for the model, no tool names."""
+    import brain
+    r = " ".join((result or "").split())
+    if r.startswith("User declined"):
+        return "you said no to it"
+    if r.startswith(BANNED_PREFIX):
+        return "the second try repeated the call that had already failed"
+    r = re.sub(r"^Error running '[^']+':\s*|^Error:\s*|^Refused:\s*", "", r)
+    r = _FOR_THE_MODEL.sub("", r)
+    for name in sorted(brain._TOOL_NAMES, key=len, reverse=True):
+        r = r.replace(f"'{name}'", "that").replace(name, "that")
+    return r.strip(" .")[:200] or "the tool failed"
 
 
 def _summary(i: int, step: str, reply: str, calls: list) -> str:
@@ -184,6 +253,31 @@ def _step_note(i: int, n: int, request: str, done: list, error: str | None) -> s
     return note
 
 
+def _compose(replies: list) -> str:
+    """The step replies as one answer. brain's "Want the full path?" offer
+    only works as the last thing said, so it moves to the end, once."""
+    import brain
+    ask, body = False, []
+    for r in replies:
+        r = (r or "").strip()
+        if r.endswith(brain._PATH_ASK):
+            ask, r = True, r[:-len(brain._PATH_ASK)].rstrip()
+        if r:
+            body.append(r)
+    return "\n\n".join(body) + (" " + brain._PATH_ASK if ask else "")
+
+
+def step_tools(step: str, previous: str | None, ceiling: set) -> set:
+    """The tools one step is offered: routed on the step itself, through
+    tool_router's follow-up rule, so "make a revision list from it" gets
+    the tools of the step it refers to -- live, without this, it could not
+    read the file the step before had just found. Never more than `ceiling`."""
+    import brain
+    import tool_router
+    msgs = ([{"role": "user", "content": previous}] if previous else []) + [{"role": "user", "content": step}]
+    return {d["function"]["name"] for d in tool_router.select(brain.TOOL_DEFINITIONS, msgs)} & ceiling
+
+
 def run(bot, messages: list, confirm, extra_context: str, request: str):
     """(answer, messages) for a planned multi-step turn, or None to let the
     ordinary single turn handle it."""
@@ -196,13 +290,14 @@ def run(bot, messages: list, confirm, extra_context: str, request: str):
     ceiling = {d["function"]["name"] for d in tool_router.select(brain.TOOL_DEFINITIONS, messages)}
     done, replies, made = [], [], set()   # made: mutating calls that worked
     saved = {k: getattr(bot, k, None) for k in ("_in_plan", "_plan_tools", "_plan_request", "_step_banned")}
-    bot._in_plan, bot._plan_tools, bot._plan_request = True, ceiling, request
+    bot._in_plan, bot._plan_request = True, request
     try:
         for i, step in enumerate(steps, 1):
-            error, banned = None, set(made)
+            bot._plan_tools = step_tools(step, steps[i - 2] if i > 1 else None, ceiling)
+            error, shown, banned = None, None, set(made)
             for attempt in (1, 2):
                 bot._step_banned = banned
-                extra = "\n\n".join(x for x in (extra_context, _step_note(i, len(steps), request, done, error)) if x)
+                extra = "\n\n".join(x for x in (extra_context, _step_note(i, len(steps), request, done, shown)) if x)
                 reply, out = bot.respond([{"role": "user", "content": step}], confirm=confirm, extra_context=extra)
                 new = out[1:]
                 messages.extend(dict(m) for m in new
@@ -211,9 +306,14 @@ def run(bot, messages: list, confirm, extra_context: str, request: str):
                 for c in calls:
                     if c["name"] in brain.brain_rules.MUTATING_TOOLS and not brain._confirms_nothing(c["result"]):
                         made.add(brain._call_key(c["name"], c["arguments"]))
-                error = failure(reply, calls)
-                if not error:
+                why = failure(reply, calls)
+                if why is None:
+                    error = None
                     break
+                # A retry that only hit the ban says nothing new: keep the
+                # first reason, the one worth telling him.
+                if not (error and why.startswith(BANNED_PREFIX)):
+                    error, shown = plain(why), " ".join(why.split())[:200]
                 if attempt == 1 and any(c["result"].startswith("User declined") for c in calls):
                     break  # he said no; trying again isn't a different approach
                 banned = set(made) | {brain._call_key(c["name"], c["arguments"])
@@ -221,7 +321,7 @@ def run(bot, messages: list, confirm, extra_context: str, request: str):
             if error:
                 answer = f"I stopped at step {i} ({step}): it didn't work -- {error.rstrip('.')}."
                 if replies:
-                    answer = "\n\n".join(replies) + "\n\n" + answer
+                    answer = _compose(replies + [answer])
                 left = steps[i:]
                 if left:
                     answer += " Not done: " + "; ".join(left) + "."
@@ -232,6 +332,6 @@ def run(bot, messages: list, confirm, extra_context: str, request: str):
     finally:
         for k, v in saved.items():
             setattr(bot, k, v)
-    answer = "\n\n".join(r for r in replies if r) or "I went through each step but have nothing to report."
+    answer = _compose(replies) or "I went through each step but have nothing to report."
     messages.append({"role": "assistant", "content": answer})
     return answer, messages

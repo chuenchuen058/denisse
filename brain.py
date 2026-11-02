@@ -2258,7 +2258,9 @@ class Brain:
         turn_tools = tool_router.select(TOOL_DEFINITIONS, messages)
         plan_tools = getattr(self, "_plan_tools", None)
         if plan_tools is not None:
-            turn_tools = [d for d in turn_tools if d["function"]["name"] in plan_tools]
+            # A plan step: multistep.py routed it (with the step before it,
+            # for "...from it"), capped at what the whole request routes to.
+            turn_tools = [d for d in TOOL_DEFINITIONS if d["function"]["name"] in plan_tools]
         offered_names = {d["function"]["name"] for d in turn_tools}
         request_text, request_groups = tool_router.request_context(messages)
         file_request = ("files" in request_groups

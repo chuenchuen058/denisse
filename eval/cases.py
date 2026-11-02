@@ -581,11 +581,18 @@ CASES = [
     {
         "id": "multi_signals_revision",
         "prompt": "find my signals coursework, make a revision list from it and remind me on Thursday",
-        "fixtures": {"search_vault": (
-            "From your notes (Atlas/Academic/SEM 1 Modules/5CCYB020 Signals and Systems/Coursework.md): "
-            "Signals coursework, 25%, due Tuesday 24 November 2026. It covers Fourier series, "
-            "convolution, the Laplace transform and LTI system stability.")},
-        "expect": {"all_tools_of": {"search_vault", "add_task"},
+        # The same note whichever way she looks it up: the case is about doing
+        # all three things from real data, not about which lookup she picks.
+        "fixtures": {
+            "search_vault": (
+                "From your notes (Atlas/Academic/SEM 1 Modules/5CCYB020 Signals and Systems/Coursework.md): "
+                "Signals coursework, 25%, due Tuesday 24 November 2026. It covers Fourier series, "
+                "convolution, the Laplace transform and LTI system stability."),
+            "find_files": ("Found 1 file:\nC:\\Users\\Xichu\\OneDrive - King's College London\\Denisse\\Atlas"
+                           "\\Academic\\SEM 1 Modules\\5CCYB020 Signals and Systems\\Coursework\\Coursework.md"),
+            "read_file": ("# Signals coursework\n25%, due Tuesday 24 November 2026.\nCovers: Fourier series, "
+                          "convolution, the Laplace transform, LTI system stability.")},
+        "expect": {"any_tool_of": {"search_vault", "read_file"}, "all_tools_of": {"add_task"},
                    "contains_any": ["fourier", "convolution", "laplace"],
                    "deny": ["claude"]},
         "why": "Roadmap 'honest gap' example: three actions in one sentence. As one "
