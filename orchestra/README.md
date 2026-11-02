@@ -40,6 +40,34 @@ registers it at 07:10 alongside the runner. Tests:
 
 Each slot lock (`.review/runner*.lock`) records the runner's and its lane child's pid and process creation time; before picking, every tick checks them: a dead (or pid-reused) owner frees the slot at once, a still-running orphaned lane keeps its slot and its task isn't re-dispatched, and a finished orphan is collected through the normal `finish()` path (its report → gate re-run, merge, push; no report → NO_REPORT, one counted attempt), with `recovered: true` in the history and the worktree kept.
 Log lines: `RECONCILE dead owner <pid> for <slug>`, `RECONCILE orphan lane <pid> still running <slug>`, `RECONCILE collecting <slug>: lane gone, report found|missing`; an unreadable lock is never deleted for that alone and falls back to the old age rule.
+With the job object below, an orphan only arises if the job couldn't be made (`lane_job: null` in the lock) or off Windows. Otherwise the lane dies with its runner, and reconcile finds a dead lock to collect.
+
+## Process supervision (Windows Job Object)
+
+Every lane and reviewer process starts through `runner.spawn_lane()`. It is created **suspended**, put in a fresh Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` (ctypes, no dependency), and only then resumed (`NtResumeProcess`), so there is no window in which it can start a child outside the job. Only the runner holds the job handle (it is not inheritable). Closing it kills everything the lane started, including grandchildren whose parent already exited. `taskkill /T` walks parent pids and misses those.
+
+The job closes:
+- on **timeout** (`kill_tree` → `TerminateJobObject`),
+- when the lane **exits normally**: any background children it left are killed too,
+- when the **watchdog** fires (`close_all_jobs()` before `os._exit`),
+- when the **runner dies** for any reason (crash, Task Scheduler ending it, its 2 h execution limit). Windows closes the handle and the job kills the tree.
+
+The slot lock records `lane_pid`, `lane_created` and `lane_job` (the job's name, `orchestra-lane-<runner pid>-<n>`). If Windows refuses the job (create, set-limit or assign fails), the run goes ahead without one. The log says `job object …: … taskkill fallback`, `lane_job` is `null`, and a timeout falls back to `taskkill /T /F`. Lanes never ask for `CREATE_BREAKAWAY_FROM_JOB` (node/libuv deliberately doesn't), and breakaway isn't allowed. Tests: `python -m unittest orchestra.test_supervision -v` (Windows only). It covers a grandchild on timeout, an orphaned grandchild, a crashed runner, the watchdog, and the lock fields.
+
+## When it runs: Task Scheduler, lock, sleep, logoff
+
+Orchestra is **not a 24/7 service**. Checked on 2 Nov 2026 with `Get-ScheduledTask "Denisse Orchestra"`: principal `Xichu`, **LogonType Interactive**, RunLevel Limited, every 2 min, `StartWhenAvailable`, `DisallowStartIfOnBatteries`, `WakeToRun` off, `ExecutionTimeLimit` 2 h. No password is stored, so:
+
+| Situation | What happens |
+|---|---|
+| Logged on, screen **locked** | Runs normally: the session still exists, and Interactive tasks run while it is locked. |
+| **Logged off** | No ticks. Logoff ends the session's processes, so the runner dies, its job closes and the lane tree goes with it. The next tick after logon reconciles the dead lock (report → collected, none → NO_REPORT, one infra attempt). |
+| **Sleep / hibernate** | No ticks (no wake-to-run). Processes are frozen, not killed, and resume where they were. Not measured: whether the lane's timeout and the watchdog count time spent asleep. A lane can be killed early after a long sleep. |
+| **Resume / logon** | `StartWhenAvailable` runs one missed tick soon after. Reconcile runs before any dispatch. |
+| **On battery** | No new ticks start. The installed task has `StopIfGoingOnBatteries` = False, so a running tick continues. If Task Scheduler does end a tick, the job takes its lane down with it. Before the job object, the lane survived that (the 2 Nov orphans). |
+| **Offline** | Ticks run. Cloud lanes fail or time out and count under the infra retry rule. |
+
+`install_task.ps1` doesn't match the installed task. The script says `-MultipleInstances IgnoreNew` and stop-on-battery; the live task is `Parallel` (needed for `parallel_lanes`) and doesn't stop on battery. Re-running the script as it is would bring back IgnoreNew.
 
 ## Review and combined-tree integration
 

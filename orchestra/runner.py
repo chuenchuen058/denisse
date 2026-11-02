@@ -638,6 +638,7 @@ def release_lock() -> None:
 def start_watchdog(seconds: int) -> threading.Timer:
     def fire():
         log(f"WATCHDOG: tick still running after {seconds}s; exiting so the next tick can run")
+        close_all_jobs()  # the lane tree goes with us (os._exit would close the handles anyway)
         release_lock()
         os._exit(3)
     t = threading.Timer(seconds, fire)
@@ -887,10 +888,9 @@ def run_reviewer(task: Task, wt: Path, branch: str, report: Path, why: str) -> d
     log_path = REPORTS / f"{task.slug}.review.log"
     timeout = int(C.get("review_timeout_s", 900))
     start = time.time()
-    kw = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
     with log_path.open("w", encoding="utf-8") as out:
-        proc = subprocess.Popen([exe, *argv[1:]], cwd=wt, env=env, stdin=subprocess.PIPE, stdout=out,
-                                stderr=subprocess.STDOUT, text=True, encoding="utf-8", **kw)
+        proc, _job = spawn_lane([exe, *argv[1:]], cwd=wt, env=env, stdin=subprocess.PIPE, stdout=out,
+                                stderr=subprocess.STDOUT, text=True, encoding="utf-8")
         try:
             proc.stdin.write(prompt)
             proc.stdin.close()
@@ -902,6 +902,7 @@ def run_reviewer(task: Task, wt: Path, branch: str, report: Path, why: str) -> d
         except subprocess.TimeoutExpired:
             kill_tree(proc)
             timed_out = True
+        close_job(proc)
     seconds = int(time.time() - start)
     text = log_path.read_text(encoding="utf-8", errors="replace")
     cost = lane_result(log_path).get("cost_usd")
@@ -941,8 +942,135 @@ def hook_settings(wt: Path) -> Path:
     return path
 
 
+# ---------------------------------------------------------------- process supervision
+# Every lane (and reviewer) process runs in a Windows Job Object with KILL_ON_JOB_CLOSE. Only
+# this runner holds the job handle (not inheritable), so closing it -- on a timeout, on the
+# watchdog's exit, or by Windows when the runner itself dies -- kills every process the lane
+# started, including grandchildren whose parent already exited (taskkill /T can't find those:
+# it walks parent pids). The child is created suspended, put in the job, then resumed, so it
+# can't start anything before it is inside. If the job can't be made, the lane still runs and
+# kill_tree() falls back to taskkill /T /F; the lock then has lane_job: null.
+
+CREATE_SUSPENDED = 0x00000004
+_JOB_KILL_ON_CLOSE = 0x2000          # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+_JOBS: dict[int, tuple[int, str]] = {}  # lane pid -> (job handle, job name), all open jobs
+_JOB_SEQ = iter(range(1, 1 << 30))
+
+
+def _kernel32():
+    import ctypes
+    from ctypes import wintypes
+    k = ctypes.WinDLL("kernel32", use_last_error=True)  # own instance: argtypes stay local
+    k.CreateJobObjectW.restype = wintypes.HANDLE
+    k.CreateJobObjectW.argtypes = (ctypes.c_void_p, wintypes.LPCWSTR)
+    k.SetInformationJobObject.argtypes = (wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD)
+    k.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
+    k.TerminateJobObject.argtypes = (wintypes.HANDLE, wintypes.UINT)
+    k.CloseHandle.argtypes = (wintypes.HANDLE,)
+    return k
+
+
+def _job_create(name: str) -> int | None:
+    """A new kill-on-close job, or None (logged) if Windows wouldn't make one."""
+    import ctypes
+    from ctypes import wintypes
+
+    class Basic(ctypes.Structure):
+        _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64), ("PerJobUserTimeLimit", ctypes.c_int64),
+                    ("LimitFlags", wintypes.DWORD), ("MinimumWorkingSetSize", ctypes.c_size_t),
+                    ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", wintypes.DWORD),
+                    ("Affinity", ctypes.c_size_t), ("PriorityClass", wintypes.DWORD),
+                    ("SchedulingClass", wintypes.DWORD)]
+
+    class Extended(ctypes.Structure):
+        _fields_ = [("BasicLimitInformation", Basic), ("IoInfo", ctypes.c_uint64 * 6),
+                    ("ProcessMemoryLimit", ctypes.c_size_t), ("JobMemoryLimit", ctypes.c_size_t),
+                    ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+    k = _kernel32()
+    h = k.CreateJobObjectW(None, name)  # default security: the handle is NOT inherited by the lane
+    if not h:
+        log(f"job object {name}: CreateJobObject failed ({ctypes.get_last_error()}); taskkill fallback")
+        return None
+    if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS: someone else's job, don't use it
+        k.CloseHandle(h)
+        log(f"job object {name} already exists; taskkill fallback")
+        return None
+    info = Extended()
+    info.BasicLimitInformation.LimitFlags = _JOB_KILL_ON_CLOSE
+    if not k.SetInformationJobObject(h, 9, ctypes.byref(info), ctypes.sizeof(info)):  # ExtendedLimitInformation
+        log(f"job object {name}: SetInformationJobObject failed ({ctypes.get_last_error()}); taskkill fallback")
+        k.CloseHandle(h)
+        return None
+    return h
+
+
+def _resume(proc: subprocess.Popen) -> bool:
+    """Resume a CREATE_SUSPENDED child. Popen closes the main-thread handle, so this resumes
+    the whole process through ntdll's NtResumeProcess (present since XP)."""
+    import ctypes
+    from ctypes import wintypes
+    nt = ctypes.WinDLL("ntdll")
+    nt.NtResumeProcess.argtypes = (wintypes.HANDLE,)
+    nt.NtResumeProcess.restype = ctypes.c_long
+    return nt.NtResumeProcess(int(proc._handle)) == 0
+
+
+def spawn_lane(argv: list[str], **kw) -> tuple[subprocess.Popen, str | None]:
+    """Popen for a lane: its own process group/session and, on Windows, a kill-on-close job.
+    Returns (proc, job name or None when there is no job)."""
+    if os.name != "nt":
+        return subprocess.Popen(argv, start_new_session=True, **kw), None
+    name = f"orchestra-lane-{os.getpid()}-{next(_JOB_SEQ)}"
+    job = _job_create(name)
+    if job is None:
+        return subprocess.Popen(argv, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP, **kw), None
+    k = _kernel32()
+    proc = subprocess.Popen(argv, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | CREATE_SUSPENDED, **kw)
+    assigned = bool(k.AssignProcessToJobObject(job, int(proc._handle)))
+    if not assigned:
+        import ctypes
+        log(f"job object {name}: AssignProcessToJobObject failed ({ctypes.get_last_error()}); taskkill fallback")
+        k.CloseHandle(job)
+    if not _resume(proc):
+        # A child left suspended would sit there until the timeout; kill it and run it plainly.
+        log(f"job object {name}: could not resume the suspended lane; restarting it without a job")
+        proc.kill()
+        proc.wait()
+        if assigned:
+            k.CloseHandle(job)
+        return subprocess.Popen(argv, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP, **kw), None
+    if not assigned:
+        return proc, None
+    _JOBS[proc.pid] = (job, name)
+    return proc, name
+
+
+def close_job(proc: subprocess.Popen) -> bool:
+    """Kill everything in proc's job and close it. False if proc has no job."""
+    entry = _JOBS.pop(proc.pid, None)
+    if entry is None:
+        return False
+    k = _kernel32()
+    k.TerminateJobObject(entry[0], 1)
+    k.CloseHandle(entry[0])  # KILL_ON_JOB_CLOSE: this alone would do it too
+    return True
+
+
+def close_all_jobs() -> None:
+    """The watchdog's last act before os._exit: take every lane tree this runner owns with it."""
+    for pid in list(_JOBS):
+        entry = _JOBS.pop(pid, None)
+        if entry:
+            k = _kernel32()
+            k.TerminateJobObject(entry[0], 1)
+            k.CloseHandle(entry[0])
+
+
 def kill_tree(proc: subprocess.Popen) -> None:
     if os.name == "nt":
+        if close_job(proc):
+            return
         subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True, timeout=60)
     else:
         import signal
@@ -981,12 +1109,13 @@ def run_lane(task: Task, wt: Path, report: Path, timeout: int) -> tuple[str, int
     env.update(ORCHESTRA_TASK=str(local / "task.md"), ORCHESTRA_REPORT=str(local_report),
                ORCHESTRA_WORKTREE=str(wt), ORCHESTRA_MAIN=str(REPO))
     out = (REPORTS / f"{task.slug}.lane.log").open("w", encoding="utf-8")
-    kw = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
     start = time.time()
-    proc = subprocess.Popen([exe, *argv[1:]], cwd=wt, env=env, stdin=subprocess.PIPE,
-                            stdout=out, stderr=subprocess.STDOUT, text=True, encoding="utf-8", **kw)
+    proc, job = spawn_lane([exe, *argv[1:]], cwd=wt, env=env, stdin=subprocess.PIPE,
+                           stdout=out, stderr=subprocess.STDOUT, text=True, encoding="utf-8")
     # So a later tick can tell an orphaned lane (this runner killed, the child not) from a dead one.
-    update_lock(lane_pid=proc.pid, lane_created=proc_created(proc.pid), lane_since=now().isoformat())
+    # lane_job names the kill-on-close job (null: no job, taskkill fallback; orphans then possible).
+    update_lock(lane_pid=proc.pid, lane_created=proc_created(proc.pid), lane_since=now().isoformat(),
+                lane_job=job)
     try:
         proc.stdin.write(build_prompt(".review/task.md", ".review/report.md"))
         proc.stdin.close()
@@ -1002,6 +1131,8 @@ def run_lane(task: Task, wt: Path, report: Path, timeout: int) -> tuple[str, int
         except subprocess.TimeoutExpired:
             pass
         outcome = "TIMEOUT"
+    # A lane that exited normally may still have left background children in its job: they go too.
+    close_job(proc)
     out.close()
     if local_report.exists():
         shutil.copyfile(local_report, report)
