@@ -188,6 +188,8 @@ off switches and the limits of this learning mechanism.
   to its results JSON in `demo/results/`.
 - [Architecture](docs/architecture.md): one page on the request path,
   honesty checks, learning, voice, and how Orchestra and Atrium build and test it.
+- [Operator's guide](docs/operator_guide.md): running Orchestra and Atrium day to
+  day: schedule, commands, where results land, safety layers, troubleshooting.
 
 ## Verification
 
