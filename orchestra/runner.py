@@ -41,6 +41,24 @@ PROMPT_FILE = REPO / "orchestra" / "review_prompt.md"  # also usable as .claude/
 GUARD = HERE / "hooks" / "guard.py"
 WORKTREES = REPO.parent / f"{REPO.name}-wt"
 INFRA = ("TIMEOUT", "NO_REPORT", "LANE_MISSING", "WORKTREE_FAILED")
+
+# A lane's usage limit is "come back later", not a failed attempt (2 Nov 2026: Codex printed
+# the line below, the runner logged NO_REPORT, spent the retry and parked the task).
+# One table: lane -> patterns, checked against the tail of <slug>.lane.log after a run with
+# no report. A lane not in the table (e.g. a custom wrapper in lanes.json) is checked
+# against every pattern.
+CODEX_LIMIT_FIXTURE = ("ERROR: You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), "
+                       "visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 10:55 PM.")
+LIMIT_PATTERNS = {
+    "codex": [r"you've hit your usage limit", r"usage limit", r"rate limit(ed)? (reached|exceeded)",
+              r"429 too many requests"],
+    "claude": [r"usage limit reached", r"you've hit your (usage )?limit", r"\b\d+-hour limit reached",
+               r"weekly limit reached", r"rate limit (reached|exceeded)", r"rate_limit_error"],
+    "gemini": [r"IneligibleTierError", r"quota exceeded", r"exceeded your current quota",
+               r"RESOURCE_EXHAUSTED", r"rate limit (reached|exceeded)"],
+}
+LIMIT_TAIL_LINES = 40
+LIMIT_DEFAULT_MIN = 60  # when the message names no time
 BROKEN_GATE_CODES = {5, 127, 9009}  # pytest: no tests; command not found (sh / cmd)
 
 
@@ -172,7 +190,7 @@ class Task:
         return cmds
 
 
-HEADER = re.compile(r"^([A-Za-z]+):\s*(.*?)\s*$")
+HEADER = re.compile(r"^([A-Za-z][A-Za-z-]*):\s*(.*?)\s*$")  # hyphen: Lane-Fixed:
 
 
 def parse_task(path: Path) -> Task:
@@ -202,7 +220,7 @@ def load_state() -> dict:
         st = json.loads(STATE_FILE.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError):
         st = {}
-    for k in ("tasks", "days", "done"):
+    for k in ("tasks", "days", "done", "lanes"):
         st.setdefault(k, {})
     st.setdefault("durations", {"light": [], "heavy": []})
     return st
@@ -245,6 +263,9 @@ def _merge_into(fresh: dict, state: dict, base: dict) -> dict:
     for k, v in state["done"].items():
         if base["done"].get(k) != v:
             fresh["done"][k] = v
+    for k, v in state.get("lanes", {}).items():
+        if base.get("lanes", {}).get(k) != v:
+            fresh.setdefault("lanes", {})[k] = v
     for w, runs in state["durations"].items():
         fresh["durations"].setdefault(w, []).extend(runs[len(base["durations"].get(w, [])):])
     for day, u in state["days"].items():
@@ -306,6 +327,111 @@ def task_state(state: dict, task: Task) -> dict:
     return ts
 
 
+# ---------------------------------------------------------------- lane limits
+
+def _limit_text(lane_log: Path) -> str:
+    """The tail of a lane log as plain text. In claude's stream-json only result/error events
+    count, so a session that merely *read* about limits (a tool result) doesn't trip it."""
+    try:
+        lines = lane_log.read_text(encoding="utf-8", errors="replace").splitlines()[-LIMIT_TAIL_LINES:]
+    except OSError:
+        return ""
+    out = []
+    for line in lines:
+        s = line.strip()
+        if s.startswith("{"):
+            try:
+                data = json.loads(s)
+            except ValueError:
+                out.append(s)
+                continue
+            if isinstance(data, dict) and data.get("type") in ("result", "error"):
+                out.append(str(data.get("result") or data.get("error") or data.get("message") or ""))
+            continue
+        out.append(s)
+    return "\n".join(out)
+
+
+def detect_limit(lane: str, lane_log: Path) -> str | None:
+    """The matching line if the tail of the lane log shows a usage/rate limit, else None."""
+    pats = LIMIT_PATTERNS.get(lane) or [p for ps in LIMIT_PATTERNS.values() for p in ps]
+    for line in reversed(_limit_text(lane_log).splitlines()):
+        if any(re.search(p, line, re.I) for p in pats):
+            return line.strip()
+    return None
+
+
+_MONTHS = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug",
+                                       "sep", "oct", "nov", "dec"), 1)}
+_WHEN = r"(?:try again|resets?|available again)\s*(?:at|after|on)?\s*"
+_DATE = r"(?:([A-Za-z]{3})[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s*(?:(\d{4}),?)?\s*(?:at\s+)?)?"
+
+
+def parse_limit_until(text: str, at: dt.datetime | None = None) -> dt.datetime | None:
+    """Local time a limit message says to come back: 'try again at 10:55 PM', 'resets at 3am',
+    'resets 3am (Europe/London)', 'try again in 20 minutes', 'Nov 3rd, 2026 10:55 PM', claude's
+    old 'usage limit reached|<epoch>'. None if it names no usable time. A time zone in the
+    message is ignored: the time is read as local."""
+    at = at or now()
+    m = re.search(r"\|(\d{10})\b", text)
+    if m:
+        return dt.datetime.fromtimestamp(int(m.group(1))).replace(microsecond=0)
+    m = re.search(r"(?:try again|resets?|available again)\s+in\s+(\d+)\s*(hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b",
+                  text, re.I)
+    if m:
+        n, unit = int(m.group(1)), m.group(2).lower()
+        return at + dt.timedelta(seconds=n * (3600 if unit[0] == "h" else 1 if unit[0] == "s" else 60))
+    m = (re.search(_WHEN + _DATE + r"(\d{1,2})(?::(\d{2}))?\s*([ap])\.?\s*m\b", text, re.I)
+         or re.search(_WHEN + _DATE + r"(\d{1,2}):(\d{2})()", text, re.I))
+    if not m:
+        return None
+    mon, day, year, hh, mm, ampm = m.groups()
+    h, mi = int(hh), int(mm or 0)
+    if ampm:
+        if not 1 <= h <= 12:
+            return None
+        h = h % 12 + (12 if ampm.lower() == "p" else 0)
+    if h > 23 or mi > 59:
+        return None
+    if mon and mon.lower() in _MONTHS:
+        try:
+            when = dt.datetime(int(year) if year else at.year, _MONTHS[mon.lower()], int(day), h, mi)
+        except ValueError:
+            return None
+        return when if when > at else None
+    when = at.replace(hour=h, minute=mi, second=0, microsecond=0)
+    return when if when > at else when + dt.timedelta(days=1)
+
+
+def lane_limited(state: dict, lane: str) -> dt.datetime | None:
+    """When a limited lane may run again, or None if it isn't limited (any more)."""
+    until = (state.get("lanes", {}).get(lane) or {}).get("limited_until")
+    if not until:
+        return None
+    when = dt.datetime.fromisoformat(until)
+    return when if now() < when else None
+
+
+def fallback_lane(task: Task, state: dict) -> str | None:
+    """The lane to run on while the task's own lane is limited, if config and header allow."""
+    if task.fields.get("lane-fixed", "").lower() in ("yes", "true", "1"):
+        return None
+    fb = (C.get("lane_fallback", {"codex": "claude"}) or {}).get(task.lane)
+    if not fb or fb == task.lane or fb not in lanes() or lane_limited(state, fb):
+        return None
+    return fb
+
+
+def route(tasks: list[Task], state: dict) -> list[Task]:
+    """Move tasks off a limited lane onto its fallback; the header's lane is kept as lane-from."""
+    for t in tasks:
+        if "lane-from" not in t.fields and lane_limited(state, t.lane):
+            fb = fallback_lane(t, state)
+            if fb:
+                t.fields["lane-from"], t.fields["lane"] = t.lane, fb
+    return tasks
+
+
 # ---------------------------------------------------------------- picking
 
 def header_problem(task: Task) -> str | None:
@@ -349,6 +475,9 @@ def why_not_runnable(task: Task, state: dict) -> str | None:
     if ts.get("last_end") and ts.get("last_result") in INFRA:
         if now() < dt.datetime.fromisoformat(ts["last_end"]) + dt.timedelta(minutes=C["backoff_min"]):
             return "waiting before its retry"
+    until = lane_limited(state, task.lane)
+    if until and not fallback_lane(task, state):
+        return f"lane {task.lane} limited until {until:%H:%M}"
     if task.kind == "maintenance" and not maintenance_allowed(state):
         return f"maintenance cap ({int(C['maint_share'] * 100)}%) reached today"
     if spend_left(state) <= 0:
@@ -706,6 +835,10 @@ def finish(task: Task, state: dict, wt: Path, branch: str, outcome: str, seconds
         info = read_report(report)
         if info["result"] != "NO_REPORT":
             state["durations"].setdefault(task.weight, []).append(seconds)
+    if info["result"] in ("NO_REPORT", "TIMEOUT"):
+        hit = detect_limit(task.lane, REPORTS / f"{task.slug}.lane.log")
+        if hit:
+            return _limited(task, state, ts, hit, seconds, spent)
     stray = sorted(main_checkout_status() - before_status)
     hooks_loaded = task.lane != "claude" or (wt / ".review" / "hook.log").exists()
 
@@ -713,6 +846,8 @@ def finish(task: Task, state: dict, wt: Path, branch: str, outcome: str, seconds
              "weight": task.weight, "note": info["note"], "premise": info["premise"], "spent": spent,
              "denied": lane_info.get("denied", []), "main_checkout_changed": stray,
              "hooks_loaded": hooks_loaded}
+    if task.fields.get("lane-from"):
+        entry["fallback_from"] = task.fields["lane-from"]
     ts["history"].append(entry)
     ts.update(last_end=entry["end"], last_result=info["result"])
     log(f"{info['result']} {task.slug} after {seconds}s (attempt {ts['attempts']}, {spent}) {info['note']}")
@@ -761,6 +896,22 @@ def finish(task: Task, state: dict, wt: Path, branch: str, outcome: str, seconds
     return info["result"]
 
 
+def _limited(task: Task, state: dict, ts: dict, hit: str, seconds: int, spent: str) -> str:
+    """The lane hit its usage limit: not an attempt. Record when the lane may run again."""
+    until = parse_limit_until(hit) or now() + dt.timedelta(minutes=LIMIT_DEFAULT_MIN)
+    state.setdefault("lanes", {})[task.lane] = {"limited_until": until.isoformat(),
+                                                "since": now().isoformat(), "message": hit[:300]}
+    ts["attempts"] = max(0, ts["attempts"] - 1)
+    note = f"lane {task.lane} limited until {until:%Y-%m-%d %H:%M}: {hit[:200]}"
+    entry = {"end": now().isoformat(), "result": "LIMITED", "seconds": seconds, "lane": task.lane,
+             "weight": task.weight, "note": note, "premise": "not stated", "spent": spent}
+    ts["history"].append(entry)
+    ts.update(last_end=entry["end"], last_result="LIMITED")
+    log(f"LIMITED {task.slug} lane={task.lane} until {until.isoformat(sep=' ', timespec='minutes')}"
+        f" (attempt not counted): {hit[:200]}")
+    return "LIMITED"
+
+
 def aftercare_on() -> bool:
     """Vault notes and pushes are for the real repo only, never a test's temp repo."""
     return os.environ.get("ORCHESTRA_AFTERCARE") == "1" or "ORCHESTRA_REPO" not in os.environ
@@ -780,13 +931,18 @@ def write_vault_note(task: Task, ts: dict, result: str) -> None:
         report_file = where / f"{task.slug}.report.md"
         why_file = PARKED / f"{task.slug}.why.txt"
         why = ""
-        if result != "PASS" and why_file.exists():
+        if result == "LIMITED":
+            why = h.get("note", "")
+        elif result != "PASS" and why_file.exists():
             why = why_file.read_text(encoding="utf-8").splitlines()[0].split(" ", 1)[-1]
+        lane = task.lane
+        if task.fields.get("lane-from"):
+            lane += f" (fallback: lane {task.fields['lane-from']} was limited)"
         read = lambda p: p.read_text(encoding="utf-8", errors="replace") if p.exists() else ""
         task_text = read(task_file) or read(task.path)
         title = (task_text.splitlines() or [task.slug])[0].lstrip("# ").strip() or task.slug
         aftercare.vault_note(
-            vault, slug=task.slug, title=title, result=result, lane=task.lane,
+            vault, slug=task.slug, title=title, result=result, lane=lane,
             seconds=h.get("seconds", 0), spent=h.get("spent", "?"), merge=ts.get("merge", "") if result == "PASS" else "",
             pushed=ts.get("push", "") if result == "PASS" else "", why=why, task_text=task_text,
             report_text=read(report_file),
@@ -799,7 +955,7 @@ def tick(dry_run: bool = False) -> str:
     for d in (QUEUE, REPORTS, ARCHIVE, PARKED):
         d.mkdir(parents=True, exist_ok=True)
     state = load_state()
-    tasks = load_queue()
+    tasks = route(load_queue(), state)  # off a limited lane onto its fallback, if allowed
     if dry_run:
         for t in tasks:
             print(f"{t.slug}: {why_not_runnable(t, state) or 'runnable'}"
@@ -851,7 +1007,11 @@ def tick(dry_run: bool = False) -> str:
         ts["last_start"] = now().isoformat()
         save_state(state)  # count the attempt before running, so a crash still counts
         set_lock_task(task.slug)
-        log(f"START {task.slug} lane={task.lane} weight={task.weight} timeout={timeout}s attempt={ts['attempts']}")
+        fb = ""
+        if task.fields.get("lane-from"):
+            fb = (f" (fallback: lane {task.fields['lane-from']} limited until "
+                  f"{lane_limited(state, task.fields['lane-from']):%H:%M})")
+        log(f"START {task.slug} lane={task.lane}{fb} weight={task.weight} timeout={timeout}s attempt={ts['attempts']}")
         try:
             wt, branch = fresh_worktree(task)
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:

@@ -21,7 +21,8 @@ sys.path.insert(0, str(HERE / "hooks"))
 import guard  # noqa: E402
 
 # Fake lane, steered by env vars: FAKE_RESULT (PASS/PARTIAL/FAIL/NONE), FAKE_HUMAN,
-# FAKE_SLEEP, FAKE_COMMIT, FAKE_STRAY (a path to write outside the worktree), FAKE_JUNK.
+# FAKE_SLEEP, FAKE_COMMIT, FAKE_STRAY (a path to write outside the worktree), FAKE_JUNK,
+# FAKE_LIMIT (print this and exit with no report), FAKE_HOOKLOG (pretend the guard hook fired).
 FAKE = textwrap.dedent("""
     import os, sys, time, subprocess, pathlib, json
     sys.stdin.read()
@@ -30,6 +31,11 @@ FAKE = textwrap.dedent("""
     if os.environ.get("FAKE_JUNK"):
         pathlib.Path("junk.txt").write_text("leftover")
     time.sleep(float(os.environ.get("FAKE_SLEEP", "0")))
+    if os.environ.get("FAKE_HOOKLOG"):
+        pathlib.Path(".review", "hook.log").write_text("fake hook")
+    if os.environ.get("FAKE_LIMIT"):
+        print(os.environ["FAKE_LIMIT"])
+        sys.exit(1)
     if os.environ.get("FAKE_COMMIT"):
         pathlib.Path("done.txt").write_text("x")
         subprocess.run(["git", "add", "done.txt"], check=True)
@@ -65,7 +71,8 @@ It works.
 ```
 """
 FAKE_ENV = ("FAKE_RESULT", "FAKE_HUMAN", "FAKE_SLEEP", "FAKE_COMMIT", "FAKE_STRAY", "FAKE_JUNK",
-            "FAKE_JUNK_CHECK", "FAKE_PREMISE", "FAKE_DENIED", "FAKE_COST")
+            "FAKE_JUNK_CHECK", "FAKE_PREMISE", "FAKE_DENIED", "FAKE_COST", "FAKE_LIMIT", "FAKE_HOOKLOG",
+            "ORCHESTRA_LANE_FALLBACK")
 
 
 class RunnerTest(unittest.TestCase):
@@ -100,12 +107,13 @@ class RunnerTest(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def add(self, slug, title="t", queue="auto", priority="normal", kind="work", written=None,
-            gate=GATE_OK, extra=""):
+            gate=GATE_OK, extra="", lane="fake", headers=""):
         p = self.R.QUEUE / f"{slug}.md"
         p.parent.mkdir(parents=True, exist_ok=True)
         written = written or dt.datetime.now().strftime("%Y-%m-%dT%H:%M")
         p.write_text(TASK.format(title=title, queue=queue, priority=priority, kind=kind,
-                                 written=written, gate=gate, extra=extra))
+                                 written=written, gate=gate, extra=extra)
+                     .replace("Lane: fake\n", f"Lane: {lane}\n{headers}"))
         return p
 
     def state(self):
@@ -293,6 +301,108 @@ class RunnerTest(unittest.TestCase):
         s = json.loads(self.R.hook_settings(wt).read_text())
         cmd = s["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
         self.assertIn("guard.py", cmd)
+
+
+    # --- usage limits: come back later, not a failed attempt
+
+    def lanes_with(self, *names, fallback=None):
+        """Real lane names (codex, claude) backed by the fake lane; fallback=None keeps the config's."""
+        lanes = {n: [sys.executable, "-c", FAKE] for n in ("fake", *names)}
+        (self.R.REVIEW / "lanes.json").write_text(json.dumps(lanes))
+        if fallback is not None:
+            os.environ["ORCHESTRA_LANE_FALLBACK"] = json.dumps(fallback)  # setUp clears it
+            self.R = importlib.reload(self.R)
+
+    def test_codex_limit_is_not_an_attempt(self):
+        self.lanes_with("codex", fallback={})
+        self.add("lim", lane="codex")
+        os.environ["FAKE_LIMIT"] = self.R.CODEX_LIMIT_FIXTURE
+        self.assertEqual(self.R.tick(), "LIMITED")
+        st = self.state()
+        self.assertEqual(st["tasks"]["lim"]["attempts"], 0, "a limit must not use up the retry")
+        self.assertTrue((self.R.QUEUE / "lim.md").exists(), "stays queued, not parked")
+        self.assertFalse((self.R.PARKED / "lim.md").exists())
+        until = dt.datetime.fromisoformat(st["lanes"]["codex"]["limited_until"])
+        self.assertEqual((until.hour, until.minute), (22, 55))
+        self.assertGreater(until, dt.datetime.now())
+        self.assertIn("LIMITED lim lane=codex until", self.R.LOG_FILE.read_text(encoding="utf-8"))
+        self.assertEqual(self.why("lim"), "lane codex limited until 22:55")
+        self.assertEqual(self.R.tick(), "idle")
+        self.assertIn("**Limited lanes:** codex until", (self.R.REVIEW / "STATE_NOW.md").read_text(encoding="utf-8"))
+
+    def test_limit_falls_back_to_claude_unless_lane_fixed(self):
+        self.lanes_with("codex", "claude")  # config default: codex -> claude
+        self.add("fb", lane="codex", extra=" fb")
+        self.add("fixed", lane="codex", headers="Lane-Fixed: yes\n", extra=" fixed")
+        st = self.R.load_state()
+        st["lanes"]["codex"] = {"limited_until": (dt.datetime.now() + dt.timedelta(hours=1)).isoformat()}
+        self.R.save_state(st)
+        self.assertIsNone(self.why("fb"), "a fallback exists, so it may run")
+        self.assertIn("lane codex limited until", self.why("fixed"))
+        os.environ["FAKE_COMMIT"] = "1"
+        os.environ["FAKE_HOOKLOG"] = "1"
+        self.assertEqual(self.R.tick(), "PASS")
+        h = self.state()["tasks"]["fb"]["history"][-1]
+        self.assertEqual((h["lane"], h["fallback_from"]), ("claude", "codex"))
+        self.assertIn("START fb lane=claude (fallback: lane codex limited until",
+                      self.R.LOG_FILE.read_text(encoding="utf-8"))
+        self.assertEqual(self.R.tick(), "idle", "the Lane-Fixed task waits for codex")
+
+    def test_unrelated_no_report_is_still_infra(self):
+        self.lanes_with("codex")
+        self.add("nr", lane="codex")
+        os.environ["FAKE_RESULT"] = "NONE"
+        self.assertEqual(self.R.tick(), "NO_REPORT")
+        st = self.state()
+        self.assertEqual(st["tasks"]["nr"]["attempts"], 1)
+        self.assertNotIn("codex", st["lanes"])
+
+    def test_limit_patterns_per_lane(self):
+        log = self.tmp / "x.lane.log"
+        cases = [
+            ("codex", "some output\n" + self.R.CODEX_LIMIT_FIXTURE + "\n", True),
+            ("claude", json.dumps({"type": "result", "is_error": True,
+                                   "result": "Claude AI usage limit reached|1893456000"}) + "\n", True),
+            ("claude", "5-hour limit reached - resets 3am (Europe/London)\n", True),
+            ("gemini", "Error: IneligibleTierError: not eligible\n", True),
+            ("gemini", "Quota exceeded for quota metric 'Requests per day'\n", True),
+            # a session that only *read* about limits in a tool result is not limited
+            ("claude", json.dumps({"type": "user", "message": {"content": "usage limit reached"}}) + "\n"
+                       + json.dumps({"type": "result", "result": "done"}) + "\n", False),
+            ("codex", "all fine, no report though\n", False),
+        ]
+        for lane, text, hit in cases:
+            log.write_text(text, encoding="utf-8")
+            self.assertEqual(bool(self.R.detect_limit(lane, log)), hit, (lane, text))
+
+    def test_parse_limit_until(self):
+        at = dt.datetime(2026, 11, 2, 20, 0)
+        P = lambda s: self.R.parse_limit_until(s, at)
+        self.assertEqual(P(self.R.CODEX_LIMIT_FIXTURE), dt.datetime(2026, 11, 2, 22, 55))
+        self.assertEqual(P("limit reached, resets at 3am"), dt.datetime(2026, 11, 3, 3, 0))
+        self.assertEqual(P("5-hour limit reached - resets 3am (Europe/London)"), dt.datetime(2026, 11, 3, 3, 0))
+        self.assertEqual(P("try again at 12:30 AM"), dt.datetime(2026, 11, 3, 0, 30))
+        self.assertEqual(P("try again at 21:15"), dt.datetime(2026, 11, 2, 21, 15))
+        self.assertEqual(P("try again in 20 minutes"), dt.datetime(2026, 11, 2, 20, 20))
+        self.assertEqual(P("or try again at Nov 4th, 2026 9:05 AM."), dt.datetime(2026, 11, 4, 9, 5))
+        self.assertIsNone(P("ERROR: usage limit hit."))
+        self.assertIsNone(P("IneligibleTierError"))
+
+    def test_unparseable_limit_waits_an_hour(self):
+        self.lanes_with("codex", fallback={})
+        self.add("lim2", lane="codex")
+        os.environ["FAKE_LIMIT"] = "ERROR: usage limit hit, come back later."
+        before = dt.datetime.now()
+        self.assertEqual(self.R.tick(), "LIMITED")
+        until = dt.datetime.fromisoformat(self.state()["lanes"]["codex"]["limited_until"])
+        self.assertAlmostEqual((until - before).total_seconds(), 3600, delta=120)
+
+    def test_parallel_state_saves_keep_lane_limits(self):
+        base = self.R.load_state()
+        mine = json.loads(json.dumps(base))
+        mine["lanes"]["codex"] = {"limited_until": "2026-11-02T22:55:00"}
+        out = self.R._merge_into(self.R.load_state(), mine, base)
+        self.assertEqual(out["lanes"]["codex"]["limited_until"], "2026-11-02T22:55:00")
 
 
 class GuardTest(unittest.TestCase):
