@@ -489,7 +489,8 @@ def why_not_runnable(task: Task, state: dict) -> str | None:
         return f"lane {task.lane} limited until {until:%H:%M}"
     if task.kind == "maintenance" and not maintenance_allowed(state):
         return f"maintenance cap ({int(C['maint_share'] * 100)}%) reached today"
-    if spend_left(state) <= 0:
+    # The cap is Claude Code's cost figure; Codex/Gemini runs aren't priced, so it never blocks them.
+    if task.lane == "claude" and spend_left(state) <= 0:
         return f"daily spend cap ${C['daily_spend_cap_usd']:.2f} reached"
     return None
 
@@ -1182,7 +1183,22 @@ def lane_result(lane_log: Path) -> dict:
     timeout writes none, so its cost is estimated and its refusals are lost."""
     try:
         text = lane_log.read_text(encoding="utf-8", errors="replace").strip()
-        data = json.loads(text if text.startswith("{") else text[text.rfind("\n{") + 1:])
+        # stream-json: one event per line, the result is the last line that parses as JSON with a
+        # cost (2 Nov: reading the whole log as one document failed and runs were "estimated" at
+        # $289 instead of their real $1.48, which tripped the daily cap).
+        data = None
+        for line in reversed(text.splitlines()):
+            line = line.strip()
+            if line.startswith("{"):
+                try:
+                    cand = json.loads(line)
+                except ValueError:
+                    continue
+                if "total_cost_usd" in cand or cand.get("type") == "result":
+                    data = cand
+                    break
+        if data is None:
+            data = json.loads(text if text.startswith("{") else text[text.rfind("\n{") + 1:])
     except (OSError, ValueError):
         return {}
     denied = []
