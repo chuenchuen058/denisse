@@ -72,6 +72,9 @@ def speak(engine, text: str) -> None:
         print(f"(couldn't speak the reply out loud: {e})")
 
 
+STT_ENGINE = os.environ.get("DENISSE_STT", "whisper").lower()
+
+
 def listen() -> str:
     """Records until a pause, transcribing live via the offline Vosk model
     (stt_vosk.py) -- no audio leaves the machine, no account needed.
@@ -82,11 +85,27 @@ def listen() -> str:
     load (see stt_vosk.preload()), printing it any earlier would have you
     talking into a mic that isn't listening yet, and the whole thing gets
     silently missed rather than just misheard."""
-    if not stt_vosk.is_ready():
-        print("(loading voice model, one moment...)")
-
     def _announce_ready():
         print("listening...")
+
+    # Whisper (stt_whisper.py) is more accurate on a whole utterance; Vosk
+    # stays the fallback and keeps the hands-free wake-word path. Pick with
+    # DENISSE_STT=whisper|vosk.
+    if STT_ENGINE == "whisper":
+        try:
+            import stt_whisper
+            if not stt_whisper.is_ready():
+                print("(loading Whisper, one moment...)")
+            return stt_whisper.transcribe_once(
+                timeout=8, phrase_time_limit=15, on_ready=_announce_ready
+            ).strip()
+        except ImportError:
+            pass
+        except Exception as e:  # model can't load, CUDA trouble, mic error
+            print(f"(Whisper unavailable, using Vosk: {e})")
+
+    if not stt_vosk.is_ready():
+        print("(loading voice model, one moment...)")
 
     try:
         return stt_vosk.transcribe_once(
@@ -104,7 +123,14 @@ def main() -> None:
     # already loaded by the time you press Enter to talk the first time --
     # see stt_vosk.preload()'s docstring for why this matters a lot more
     # than it sounds like it should.
-    threading.Thread(target=stt_vosk.preload, daemon=True).start()
+    if STT_ENGINE == "whisper":
+        try:
+            import stt_whisper
+            threading.Thread(target=stt_whisper.preload, daemon=True).start()
+        except ImportError:
+            threading.Thread(target=stt_vosk.preload, daemon=True).start()
+    else:
+        threading.Thread(target=stt_vosk.preload, daemon=True).start()
 
     try:
         brain = conversation.get_brain()

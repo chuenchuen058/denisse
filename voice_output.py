@@ -39,13 +39,41 @@ def _safe_print(msg: str) -> None:
         pass
 
 
+# Local neural voice (tts_kokoro.py): free and offline. DENISSE_TTS picks the
+# order: "kokoro" (default when its model files exist) speaks with Kokoro and
+# only uses Inworld if Kokoro fails; "inworld" keeps Inworld first and falls
+# back to Kokoro. Either way pyttsx3 stays the last resort in the callers.
+TTS_ENGINE = os.environ.get("DENISSE_TTS", "kokoro").lower()
+
+
+def _kokoro(text: str) -> str | None:
+    try:
+        import tts_kokoro
+    except ImportError:
+        return None
+    return tts_kokoro.synthesize(text)
+
+
 def synthesize_inworld(text: str) -> str | None:
-    """Generate speech audio for `text` with Inworld's neural voice and
-    return a temp mp3 path -- the slow, network-bound half of speaking
-    (~1-2s). Returns None on anything going wrong (no API key, offline,
-    package missing, quota), so the caller can fall back to something else.
-    Caller owns the returned file: play it with play_audio(), which also
-    deletes it afterward."""
+    """Generate speech audio for `text` with the neural voice and return a
+    temp audio path (Kokoro wav or Inworld mp3; name kept so tray.py and
+    wake_word.py need no change). Returns None on anything going wrong, so
+    the caller can fall back to pyttsx3. Caller owns the returned file: play
+    it with play_audio(), which also deletes it afterward."""
+    if not text:
+        return None
+    if TTS_ENGINE == "kokoro":
+        path = _kokoro(text)
+        if path:
+            return path
+    path = _synthesize_inworld_only(text)
+    if path or TTS_ENGINE == "kokoro":
+        return path
+    return _kokoro(text)
+
+
+def _synthesize_inworld_only(text: str) -> str | None:
+    """Inworld's paid cloud voice (~1-2 s, network-bound). None without a key."""
     if not text or not os.environ.get("INWORLD_API_KEY"):
         return None
     try:
@@ -204,6 +232,15 @@ def warm_up_audio() -> None:
         audio.close()
     except Exception as e:
         _safe_print(f"(audio warm-up skipped: {e})")
+    # Kokoro's first sentence in a process takes ~5-6 s on the GPU (CUDA
+    # warm-up; ~2 min the very first time on a new GPU while kernels compile),
+    # then ~1 s. Pay that here, at startup, not on the first real reply.
+    if TTS_ENGINE == "kokoro":
+        try:
+            import tts_kokoro
+            tts_kokoro.warm_up()
+        except Exception as e:
+            _safe_print(f"(Kokoro warm-up skipped: {e})")
 
 
 def play_audio(path: str) -> None:

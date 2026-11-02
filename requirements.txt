@@ -10,6 +10,20 @@ tzdata>=2024.1  # offline IANA timezone database (Windows has none built in)
 srt==3.5.3
 vosk>=0.3.45  # offline speech-to-text -- see stt_vosk.py, scripts/download_vosk_model.py
 pyttsx3>=2.90
+
+# Local neural voice + Whisper (see tts_kokoro.py, stt_whisper.py,
+# scripts/eval_local_voice.py). Kokoro's model files go in models/kokoro/.
+# GPU: onnxruntime-gpu is pinned to 1.22 because later builds need CUDA 13;
+# the nvidia-* wheels supply CUDA 12 / cuDNN 9 DLLs to both libraries.
+faster-whisper>=1.2
+kokoro-onnx>=0.4
+soundfile>=0.12
+onnxruntime-gpu==1.22.0
+nvidia-cublas-cu12
+nvidia-cudnn-cu12==9.*
+nvidia-cuda-runtime-cu12
+nvidia-cufft-cu12
+nvidia-curand-cu12
 PyAudio>=0.2.14
 inworld-tts>=1.2.1
 playsound==1.2.2
