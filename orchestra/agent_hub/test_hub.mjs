@@ -67,6 +67,15 @@ test("context pack is skipped cleanly when turned off or python is missing", () 
   process.env.AGENT_HUB_CONTEXT = "0";
 });
 
+test("an agent that can't take work falls back to Codex, and the log says so", async () => {
+  process.env.AGENT_HUB_FAKE_FAIL = "gemini";
+  const out = await hub.callTool("ask_gemini", { prompt: "summarise the reading list" });
+  delete process.env.AGENT_HUB_FAKE_FAIL;
+  assert.match(out, /gemini unavailable: IneligibleTier/);
+  assert.match(out, /\[codex\]/);
+  assert.match(readFileSync(hub.handoffPath(), "utf8"), /\[claude\] gemini couldn't take "summarise the reading list" \(IneligibleTier/);
+});
+
 test("speaks MCP over stdio: initialize + tools/list", async () => {
   const child = spawn(process.execPath, [join(HERE, "server.mjs")], { env: process.env });
   const lines = [];

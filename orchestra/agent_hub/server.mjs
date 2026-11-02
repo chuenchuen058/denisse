@@ -108,6 +108,8 @@ function preamble(agent) {
 function run(exe, args, { cwd, stdin, env }) {
   return new Promise((resolve) => {
     if (FAKE) {
+      if ((process.env.AGENT_HUB_FAKE_FAIL || "").split(",").includes(exe))
+        return resolve({ code: 1, out: "IneligibleTierError: This client is no longer supported", ms: 1 });
       const fake = JSON.parse(process.env.AGENT_HUB_FAKE_ANSWERS || "{}");
       return resolve({ code: 0, out: fake[exe] ?? `fake ${exe} answer\nFOR MEMORY:\n- fake fact from ${exe}`, ms: 1 });
     }
@@ -199,10 +201,22 @@ export function chooseRoute(task, kind) {
   return { kind: "quick_code", ...ROUTES.quick_code, guessed: true };
 }
 
+// When an agent can't take work (signed out, quota, service refused), its job goes to
+// the next one here instead of failing. 2 Nov 2026: Google stopped serving the free
+// "Gemini Code Assist for individuals" tier to Gemini CLI, so Gemini falls back to Codex.
+const FALLBACK = { gemini: "codex", copilot: "codex" };
+
 async function dispatch(agent, args, label) {
   const fn = AGENTS[agent];
   if (!fn) return `Unknown agent: ${agent}`;
   const r = await fn(args);
+  const fb = FALLBACK[agent];
+  if (r.code !== 0 && fb && !args._fellBack) {
+    const why = oneLine(String(r.out).match(/(IneligibleTier|not (signed|logged) in|login|quota|rate limit|unauthori[sz]ed)[^\n]*/i)?.[0] || `exit ${r.code}`, 140);
+    remember("claude", [`${agent} couldn't take "${oneLine(args.prompt, 80)}" (${why}); sent to ${fb} instead`]);
+    const out = await dispatch(fb, { ...args, _fellBack: true }, `${label || "task"} (fallback from ${agent})`);
+    return `(${agent} unavailable: ${why}. ${fb} did it instead.)\n${out}`;
+  }
   const ok = r.code === 0;
   const answer = String(r.out || "").trim() || `${agent} returned nothing (exit ${r.code}).`;
   const mem = ok ? memoryLines(answer) : [];
