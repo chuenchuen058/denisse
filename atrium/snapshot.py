@@ -140,12 +140,198 @@ def _spend() -> list[dict]:
              "maint_min": round(u.get("maint_s", 0) / 60)}]
 
 
+def _state() -> dict:
+    try:
+        return json.loads((REVIEW / "state.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"tasks": {}, "days": {}}
+
+
+def _config() -> dict:
+    try:
+        return json.loads((REPO / "orchestra" / "config.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _running() -> list[dict]:
+    """Tasks the runner's slots hold right now (from .review/runner.*.lock)."""
+    rows, now = [], dt.datetime.now()
+    for lf in sorted(REVIEW.glob("runner.*.lock")):
+        try:
+            j = json.loads(lf.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not j.get("task"):
+            continue
+        parts = lf.stem.split(".")  # runner.claude.2
+        lane = parts[1] if len(parts) > 1 else "?"
+        slot = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 1
+        try:
+            mins = round((now - dt.datetime.fromisoformat(j["since"])).total_seconds() / 60)
+        except (KeyError, ValueError):
+            mins = 0
+        title = j["task"]
+        q = REVIEW / "queue" / f"{j['task']}.md"
+        if q.exists():
+            title = next((l[2:].strip() for l in q.read_text(encoding="utf-8", errors="replace").splitlines()
+                          if l.startswith("# ")), title)
+        rows.append({"id": j["task"], "task": title[:90], "lane": lane, "slot": slot,
+                     "since": j.get("since", "")[11:16], "minutes": mins})
+    return rows
+
+
+_LIMIT = re.compile(r"(usage limit|rate limit|try again at ([0-9: ]+[AP]M)|IneligibleTierError|quota)", re.I)
+
+
+def _cost_num(spent: str) -> float:
+    m = re.search(r"\$([0-9.]+)", spent or "")
+    return float(m.group(1)) if m else 0.0
+
+
+def _usage(running: list[dict]) -> list[dict]:
+    """One row per model: can it take work now, and what it did today. Claude Max does not
+    expose a remaining-allowance figure to the CLI, so its row shows activity, not a %."""
+    st, cfg = _state(), _config()
+    today = dt.date.today().isoformat()
+    slots = cfg.get("lane_slots", {})
+    campaign = {}
+    try:
+        campaign = json.loads((REVIEW / "campaign.json").read_text(encoding="utf-8"))
+        if campaign.get("enabled") and campaign.get("overrides", {}).get("lane_slots"):
+            slots = campaign["overrides"]["lane_slots"]
+    except (OSError, ValueError):
+        pass
+    per = {}
+    for ts in st.get("tasks", {}).values():
+        for h in ts.get("history", []):
+            if not str(h.get("end", "")).startswith(today):
+                continue
+            p = per.setdefault(h.get("lane", "?"), {"runs": 0, "pass": 0, "minutes": 0.0, "cost": 0.0, "last": ""})
+            p["runs"] += 1
+            p["pass"] += h.get("result") == "PASS"
+            p["minutes"] += h.get("seconds", 0) / 60
+            p["cost"] += _cost_num(h.get("spent", ""))
+            p["last"] = max(p["last"], str(h.get("end", ""))[11:16])
+    # last limit message seen in each lane's most recent logs
+    limits = {}
+    for log in sorted((REVIEW / "reports").glob("*.lane.log"), key=lambda p: p.stat().st_mtime)[-15:]:
+        try:
+            tail = log.read_text(encoding="utf-8", errors="replace")[-4000:]
+        except OSError:
+            continue
+        slug = log.name[: -len(".lane.log")]
+        last = (st.get("tasks", {}).get(slug, {}).get("history") or [{}])[-1]
+        # only a run that died without a report (or the runner marked LIMITED) counts, and only
+        # the end of its log: task text that merely talks about limits must not trip this
+        if last.get("result") not in ("NO_REPORT", "LIMITED"):
+            continue
+        m = _LIMIT.search(tail[-800:])
+        if m and (dt.datetime.now().timestamp() - log.stat().st_mtime) < 6 * 3600:
+            lane = last.get("lane")
+            if lane:
+                limits[lane] = ("until " + m.group(2).strip()) if m.group(2) else m.group(1)
+    # the runner's own record (orchestra: "LIMITED <slug> lane=<lane> until <time>")
+    try:
+        for l in (REVIEW / "runner.log").read_text(encoding="utf-8", errors="replace").splitlines()[-300:]:
+            m = re.match(r"^(\S+) LIMITED \S+ lane=(\w+) until (.+)$", l)
+            if m and m.group(1)[:10] == today:
+                limits[m.group(2)] = "until " + m.group(3).strip()
+    except OSError:
+        pass
+    busy = {}
+    for r in running:
+        busy[r["lane"]] = busy.get(r["lane"], 0) + 1
+    try:
+        import urllib.request
+        with urllib.request.urlopen("http://127.0.0.1:11434/api/ps", timeout=2) as resp:
+            loaded = [m.get("name") for m in json.loads(resp.read()).get("models", [])]
+        local = "ready, loaded: " + ", ".join(loaded) if loaded else "ready, no model loaded"
+    except Exception:
+        local = "Ollama not running"
+    rows = []
+    for lane, label, plan in (("claude", "Claude", "Max plan (allowance not exposed to the CLI)"),
+                              ("codex", "Codex", "ChatGPT plan"), ("gemini", "Gemini", "free tier blocked"),
+                              ("copilot", "Copilot", "GitHub Copilot"), ("local", "Local (Ollama)", "on this laptop")):
+        p = per.get(lane, {"runs": 0, "pass": 0, "minutes": 0.0, "cost": 0.0, "last": ""})
+        n_slots = int(slots.get(lane, 0)) if lane in ("claude", "codex", "gemini") else 0
+        if lane == "local":
+            status = local
+        elif lane == "gemini":
+            status = "blocked by Google"
+        elif lane in limits:
+            status = "limited " + limits[lane]
+        elif busy.get(lane):
+            status = f"working ({busy[lane]} of {n_slots})"
+        else:
+            status = "available"
+        rows.append({"model": label, "lane": lane, "status": status, "plan": plan,
+                     "busy": busy.get(lane, 0), "slots": n_slots, "runs_today": p["runs"],
+                     "passed_today": p["pass"], "minutes_today": round(p["minutes"]),
+                     "est_cost_today": round(p["cost"], 2), "last_run": p["last"],
+                     "state": ("bad" if status.startswith(("limited", "blocked", "Ollama not"))
+                               else "busy" if busy.get(lane) else "ok")})
+    return rows
+
+
+def _outputs() -> list[dict]:
+    """Finished tasks of the last 3 days, newest first, with one line of what changed."""
+    st = _state()
+    rows = []
+    cutoff = (dt.date.today() - dt.timedelta(days=2)).isoformat()
+    for slug, ts in st.get("tasks", {}).items():
+        for h in ts.get("history", []):
+            end = str(h.get("end", ""))
+            if end[:10] < cutoff or h.get("result") in (None, "NO_REPORT"):
+                continue
+            report = None
+            for cand in [*(REVIEW / "archive").glob(f"*/{slug}.report.md"), REVIEW / "parked" / f"{slug}.report.md",
+                         REVIEW / "reports" / f"{slug}.attempt-parked.md"]:
+                if cand.exists():
+                    report = cand
+                    break
+            done, title = "", slug
+            if report:
+                text = report.read_text(encoding="utf-8", errors="replace")
+                m = re.search(r"^DONE:\s*\n((?:\s*-.*\n?)+)", text, re.M)
+                if m:
+                    done = re.sub(r"^\s*-\s*", "", m.group(1).strip().splitlines()[0])[:220]
+            for cand in [*(REVIEW / "archive").glob(f"*/{slug}.md"), REVIEW / "queue" / f"{slug}.md",
+                         REVIEW / "parked" / f"{slug}.md"]:
+                if cand.exists():
+                    title = next((l[2:].strip() for l in cand.read_text(encoding="utf-8", errors="replace")
+                                  .splitlines() if l.startswith("# ")), slug)
+                    break
+            push = ts.get("push", "") if h.get("result") == "PASS" else ""
+            rows.append({"id": f"{slug}@{end}", "when": end[5:16].replace("T", " "), "end": end,
+                         "task": title[:90], "result": h.get("result"), "lane": h.get("lane", "?"),
+                         "minutes": round(h.get("seconds", 0) / 60), "pushed": "yes" if push.startswith("pushed") else "no",
+                         "summary": done})
+    rows.sort(key=lambda r: r["end"], reverse=True)
+    return rows[:40]
+
+
+def _activity() -> list[dict]:
+    """Minutes of agent work per day and lane, last 7 days (for the bar chart)."""
+    st = _state()
+    days = [(dt.date.today() - dt.timedelta(days=i)).isoformat() for i in range(6, -1, -1)]
+    acc = {(d, l): 0.0 for d in days for l in ("claude", "codex")}
+    for ts in st.get("tasks", {}).values():
+        for h in ts.get("history", []):
+            key = (str(h.get("end", ""))[:10], h.get("lane"))
+            if key in acc:
+                acc[key] += h.get("seconds", 0) / 60
+    return [{"day": d, "lane": l, "minutes": round(acc[(d, l)])} for d in days for l in ("claude", "codex")]
+
+
 def write(out: Path | None = None) -> Path:
     out = out or REVIEW / "hub"
     out.mkdir(parents=True, exist_ok=True)
     tasks = _task_rows()
+    running = _running()
     tables = {"agents": _agents(), "tasks": tasks, "waiting": _waiting(tasks), "log": _log(),
-              "learner": _learner(), "spend": _spend()}
+              "learner": _learner(), "spend": _spend(), "running": running, "usage": _usage(running),
+              "outputs": _outputs(), "activity": _activity()}
     for name, rows in tables.items():
         (out / f"{name}.json").write_text(json.dumps(rows, indent=1, ensure_ascii=False), encoding="utf-8")
     return out
