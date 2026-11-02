@@ -675,6 +675,91 @@ CASES = [
                    "must_contain": ["spritzer"], "contains_any": ["storm", "rail", "chip"]},
         "why": "Two reads; the answer has to carry both, not just the first.",
     },
+    # look_at_this reflex (2026-11-02). The cue rule offers the tool on any
+    # "this"/"that"/"here", so everyday remarks get it too. These four are
+    # casual uses where reaching for the selection is wrong -- each one has
+    # a real-looking front window and selection, so a misfire would read
+    # text he never pointed at. docs/look_at_this_eval.md has the runs.
+    {
+        "id": "look_not_thats_great",
+        "prompt": "that's great, thanks!",
+        "desktop": {"title": "train.py - Visual Studio Code", "process": "Code.exe",
+                    "selection": "for epoch in range(10):"},
+        "expect": {"none_of": {"look_at_this"}, "deny": POSIX_LEAKS},
+        "why": "Thanks for the last answer, not a pointer at the screen.",
+    },
+    {
+        "id": "look_not_this_is_fine",
+        "prompt": "this is fine, no need to change anything",
+        "desktop": {"title": "Lab report draft.docx - Word", "process": "WINWORD.EXE",
+                    "selection": "The results were consistent with the model."},
+        "expect": {"none_of": {"look_at_this"}, "deny": POSIX_LEAKS},
+        "why": "'this is fine' approves what was said; nothing to read.",
+    },
+    {
+        "id": "look_not_do_that_again",
+        "before": [
+            {"role": "user", "content": "tell me a short joke"},
+            {"role": "assistant", "content": "Why did the scarecrow win an award? "
+             "He was outstanding in his field."},
+        ],
+        "prompt": "ha, do that again",
+        "desktop": {"title": "Inbox - Outlook", "process": "OUTLOOK.EXE",
+                    "selection": "Meeting moved to Thursday."},
+        "expect": {"none_of": {"look_at_this"}, "min_words": 5, "deny": POSIX_LEAKS},
+        "why": "'that' is her own last joke, not the selection.",
+    },
+    {
+        "id": "look_not_here",
+        "prompt": "I'm here now, just got home",
+        "desktop": {"title": "YouTube - Google Chrome", "process": "chrome.exe",
+                    "selection": "Subscribe for more videos"},
+        "expect": {"none_of": {"look_at_this"}, "deny": POSIX_LEAKS},
+        "why": "'here' is where he is, not something on screen.",
+    },
+    # ...and four where it is right, beyond explain_this_*: rewrite,
+    # translate, a clipboard with nothing selected, and a bare "that".
+    {
+        "id": "look_rewrite_this",
+        "prompt": "rewrite this shorter",
+        "desktop": {"title": "Cover letter.docx - Word", "process": "WINWORD.EXE",
+                    "selection": "I am writing to you today in order to express my very "
+                                 "strong and genuine interest in the summer internship "
+                                 "position that your company has advertised."},
+        "expect": {"any_tool_of": {"look_at_this"},
+                   "contains_any": ["intern"], "deny": POSIX_LEAKS},
+        "why": "Rewriting needs the selected sentence.",
+    },
+    {
+        "id": "look_translate_selected",
+        "prompt": "translate the selected text into English",
+        "desktop": {"title": "Le Monde - Google Chrome", "process": "chrome.exe",
+                    "selection": "Le chat dort sur le canapé."},
+        "expect": {"any_tool_of": {"look_at_this"},
+                   "contains_any": ["cat"], "deny": POSIX_LEAKS},
+        "why": "'the selected text' names the selection outright.",
+    },
+    {
+        "id": "look_summarise_copied",
+        "prompt": "summarise what I copied",
+        "desktop": {"title": "Windows PowerShell", "process": "powershell.exe",
+                    "clipboard": "Photosynthesis converts light energy into chemical "
+                                 "energy. Plants take in carbon dioxide and water and "
+                                 "release oxygen, storing energy as glucose."},
+        "expect": {"any_tool_of": {"look_at_this"},
+                   "contains_any": ["light", "glucose", "oxygen", "energy"],
+                   "deny": POSIX_LEAKS},
+        "why": "A terminal in front means no Ctrl+C, so this is the clipboard path.",
+    },
+    {
+        "id": "look_what_does_that_mean",
+        "prompt": "what does that mean?",
+        "desktop": {"title": "Algorithms notes.pdf - Adobe Acrobat", "process": "Acrobat.exe",
+                    "selection": "Merge sort runs in O(n log n) time."},
+        "expect": {"any_tool_of": {"look_at_this"},
+                   "contains_any": ["log", "merge", "sort"], "deny": POSIX_LEAKS},
+        "why": "A bare 'that' with no earlier turn can only mean the selection.",
+    },
     {
         # Keep last: it closes the seeded task, which the earlier task
         # cases in this condition still need open.
