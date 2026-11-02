@@ -122,7 +122,7 @@ class HarnessTest(unittest.TestCase):
         self.assertEqual(s["fixture_accuracy_pct"], 100)
         self.assertEqual(s["admission_pass_pct"], 50)
         self.assertEqual(s["candidate_precision_pct"], 100)
-        self.assertEqual((s["duplicate_fixture_packets"], s["duplicates_caught"]), (1, 1))
+        self.assertEqual((s["duplicate_fixture_packets"], s["duplicate_packets_reaching_dedupe"], s["duplicates_caught"]), (1, 1, 1))
         self.assertEqual(s["gate_expected"], 2)
         self.assertEqual(s["false_admissions"], 0)
         self.assertEqual(s["per_fixture"], {"03-orphan-lane-timeout": ["hit"], "02-hub-jobs-pruning": ["hit"],
@@ -171,6 +171,24 @@ class HarnessTest(unittest.TestCase):
         self.assertGreaterEqual(call["lease_samples"], 2)
         self.assertTrue(call["lease_held"])
         self.assertTrue(call["released"])
+
+    def test_recorder_checks_the_lease_at_the_real_chat_request(self):
+        fx = self.fixture("03-orphan-lane-timeout")
+        repo = baseline.build_repo(fx, self.tmp / "q", files=self.files)
+        self.fake.answers["scout"] = [{"candidates": [], "nothing_because": "x"}]
+        rec = baseline.Recorder(self.tmp / "gpu.lease")
+        real_urlopen = core.urllib.request.urlopen
+        with rec.installed():
+            baseline.roles.scout(core.Ctx(repo, ollama=self.fake.url))
+        self.assertIs(core.urllib.request.urlopen, real_urlopen)
+        [call] = rec.calls
+        self.assertTrue(call["lease_at_inference"], call)
+        self.assertTrue(call["released"])
+
+    def test_contiguous_lease_allows_a_late_take_but_not_a_gap(self):
+        self.assertTrue(baseline.Recorder.contiguous([False, False, True, True, False]))
+        self.assertFalse(baseline.Recorder.contiguous([True, False, True]))
+        self.assertIsNone(baseline.Recorder.contiguous([False, False]))
 
     def test_probe_skips_without_calling_the_model_while_the_lease_is_held(self):
         fx = self.fixture("03-orphan-lane-timeout")

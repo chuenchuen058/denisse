@@ -94,28 +94,56 @@ def build_repo(fixture: dict, dest: Path, src: Path = SRC_REPO, files: list[str]
 # ---------------------------------------------------------------- instrumented calls
 
 class Recorder:
-    """Wraps core.ask: latency per call, and whether the GPU lease file named this process
-    every time it was sampled (every 0.2 s) while the call was in flight."""
+    """Wraps core.ask: latency per call, and the GPU lease. Two checks:
+    - at the /api/chat request itself (sent and answered), the lease file must name this
+      process (`lease_at_inference`);
+    - sampled every 0.2 s through the call, once taken the lease must stay ours until it is
+      released, with no gap (`lease_held`). Samples before the take are expected: ask()
+      runs ready() first, which may re-sample nvidia-smi for 2 s."""
 
     def __init__(self, lease_path: Path):
         self.lease_path = lease_path
         self.calls: list[dict] = []
         self._orig = core.ask
 
+    def _ours(self) -> bool:
+        try:
+            data = json.loads(self.lease_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        return data.get("pid") == os.getpid() and str(data.get("holder", "")).startswith("orchestra.local_team")
+
     def _sample(self, stop: threading.Event, seen: list):
         while not stop.wait(0.2):
-            try:
-                data = json.loads(self.lease_path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                data = {}
-            seen.append(data.get("pid") == os.getpid() and str(data.get("holder", "")).startswith("orchestra.local_team"))
+            seen.append(self._ours())
+
+    @staticmethod
+    def contiguous(seen: list) -> bool | None:
+        """True if the held samples form one unbroken run (F* T+ F*)."""
+        if not any(seen):
+            return None
+        first = seen.index(True)
+        last = len(seen) - 1 - seen[::-1].index(True)
+        return all(seen[first:last + 1])
 
     def ask(self, ctx, role, payload):
-        stop, seen = threading.Event(), []
+        stop, seen, at_http = threading.Event(), [], []
         t = threading.Thread(target=self._sample, args=(stop, seen), daemon=True)
         start = time.monotonic()
         t.start()
         rec = {"role": role.name}
+        real_urlopen = core.urllib.request.urlopen
+
+        def urlopen(req, *a, **kw):
+            chat = getattr(req, "full_url", str(req)).endswith("/api/chat")
+            if chat:
+                at_http.append(self._ours())
+            try:
+                return real_urlopen(req, *a, **kw)
+            finally:
+                if chat:
+                    at_http.append(self._ours())
+        core.urllib.request.urlopen = urlopen
         try:
             out = self._orig(ctx, role, payload)
             rec["ok"] = True
@@ -127,11 +155,13 @@ class Recorder:
             rec.update(ok=False, bad=str(e)[:200])
             raise
         finally:
+            core.urllib.request.urlopen = real_urlopen
             stop.set()
             t.join()
             rec["seconds"] = round(time.monotonic() - start, 2)
             rec["lease_samples"] = len(seen)
-            rec["lease_held"] = all(seen) if seen else None
+            rec["lease_held"] = self.contiguous(seen)
+            rec["lease_at_inference"] = all(at_http) if at_http else None
             try:
                 after = json.loads(self.lease_path.read_text(encoding="utf-8"))
                 rec["released"] = after.get("pid") != os.getpid()
@@ -235,7 +265,9 @@ def _on_target(cand: dict, plan: dict | None, exp: dict) -> bool:
 def score(runs: list[dict], fixtures: list[dict]) -> dict:
     exp = {f["name"]: f["expected"] for f in fixtures}
     fx_right = cand_n = cand_ok = planned = admitted = bad_out = 0
-    dup_planned = dup_caught = gate_refused = gate_expected = gate_valid = false_admits = 0
+    dup_planned = dup_caught = dup_reached = gate_refused = gate_expected = gate_valid = false_admits = 0
+    ghost_scope = 0
+    kinds: dict[str, int] = {}
     per_fixture: dict[str, list[str]] = {}
     for r in runs:
         e = exp[r["fixture"]]
@@ -253,15 +285,19 @@ def score(runs: list[dict], fixtures: list[dict]) -> dict:
                 continue
             planned += 1
             kind = p["admission"]["kind"]
+            kinds[kind] = kinds.get(kind, 0) + 1
             admitted += kind == "admitted"
             if kind == "admitted" and not e["candidate"]:
                 false_admits += 1
+            if kind == "admitted":  # admission checks the folder exists, not the file
+                ghost_scope += any(not (SRC_REPO / sp).exists() for sp in p["scope_paths"])
             if e.get("duplicate"):
                 dup_planned += 1
                 dup_caught += kind == "duplicate"
+                dup_reached += kind in ("duplicate", "admitted", "queue-full", "rate")  # got past path/gate/premise
             if kind == "gate":
                 gate_refused += 1
-            elif kind != "invalid":
+            elif kind not in ("invalid", "path"):  # the gate is only checked after the scope
                 gate_valid += 1
             gate_expected += {"id": p["gate"].get("id"), "arg": str(p["gate"].get("arg", "")).replace("\\", "/")} in e["gates"]
     calls = [c for r in runs for c in r.get("calls", [])]
@@ -279,11 +315,14 @@ def score(runs: list[dict], fixtures: list[dict]) -> dict:
         "planned": planned, "planner_bad_output": bad_out,
         "admitted": admitted, "admission_pass_pct": pct(admitted, planned),
         "false_admissions": false_admits,
-        "duplicate_fixture_packets": dup_planned, "duplicates_caught": dup_caught,
-        "gate_refused": gate_refused, "gate_valid_passed": gate_valid,
+        "admission_kinds": dict(sorted(kinds.items())), "admitted_with_missing_scope_file": ghost_scope,
+        "duplicate_fixture_packets": dup_planned, "duplicate_packets_reaching_dedupe": dup_reached,
+        "duplicates_caught": dup_caught,
+        "gate_refused": gate_refused, "gate_checked_and_passed": gate_valid,
         "gate_expected": gate_expected, "gate_expected_pct": pct(gate_expected, planned),
         "latency": lat,
         "lease_sampled_calls": len(sampled), "lease_held_all_sampled": all(c["lease_held"] for c in sampled) if sampled else None,
+        "lease_held_at_every_inference": all(c.get("lease_at_inference") for c in calls) if calls else None,
         "lease_released_every_call": all(c.get("released", True) for c in calls) if calls else None,
         "per_fixture": per_fixture,
     }
