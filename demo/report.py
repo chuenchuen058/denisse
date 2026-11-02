@@ -20,7 +20,8 @@ AREAS = [
      "Each case is one prompt through the real brain on the local model, with an empty "
      "history. Checks are deterministic: which tools ran, required/forbidden reply text, "
      "invented file paths, leaked tool names. Tools that change the machine are vetoed; "
-     "task, fact and plan stores are scratch copies."),
+     "task and plan stores are scratch copies, and remembered facts are a synthetic fixture "
+     "(`DEMO_FACTS` in demo/suite_rounds.py), so no personal data is needed or read."),
     ("dialogue", "Dialogue reliability (scripts/eval_dialogue_reliability.py)",
      "Short multi-turn scenarios (retry, correction, feedback, greeting) on the real model. "
      "Every tool is replaced by a fixture, so this measures the model's decisions, not the tools."),
@@ -71,6 +72,11 @@ def render(data: dict, results_path: Path, doc_path: Path = DOC) -> str:
         if s and s.get("cases"):
             bits.append(f"{ln(s['cases_all_pass'])} of {ln(s['cases'])} {label} passed all {ln(s['k'])} "
                         f"attempts (pass@1 {ln(_pct(s['pass_at_1']))})")
+    lr = parts.get("learning", {}).get("summary", {})
+    if lr.get("learning_on", {}).get("attempts") and lr.get("learning_off", {}).get("attempts"):
+        bits.append(f"with feedback learning on, {ln(lr['learning_on']['passes'])}/{ln(lr['learning_on']['attempts'])} "
+                    f"learning-eval attempts passed against {ln(lr['learning_off']['passes'])}/"
+                    f"{ln(lr['learning_off']['attempts'])} with it off")
     v = parts.get("voice", {}).get("summary")
     if v and "whisper_mean_wer" in v:
         bits.append(f"Whisper transcribed synthetic speech at {ln(_pct(v['whisper_mean_wer']))} mean word error rate")

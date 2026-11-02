@@ -5,9 +5,14 @@ nightly eval (eval.run_eval.isolate_state): scratch tasks, facts, plans and
 notes; machine-changing tools vetoed; desktop faked. The live condition is
 not run, because it replays Chuen's real conversation history.
 
-Writes one JSON list of per-attempt records. Reply text is NOT written: the
-recall cases answer from his real facts, and the results are committed to a
-public repo. Only ids, pass/fail, tools called, timings and failure reasons
+Remembered facts are a synthetic fixture (DEMO_FACTS), not Chuen's
+memory/facts.json: that file is private and git-ignored, so a fresh clone or
+an Orchestra worktree has none and the recall cases would fail for a reason
+that has nothing to do with the model. The values are the ones the recall
+cases in eval/cases.py already name.
+
+Writes one JSON list of per-attempt records. Reply text is NOT written, and
+the results are committed to a public repo. Only ids, pass/fail, tools called, timings and failure reasons
 (with any file paths redacted) are kept.
 
     .venv\\Scripts\\python.exe demo\\suite_rounds.py --rounds 3 --out logs\\suite.json
@@ -23,6 +28,11 @@ sys.path.insert(0, str(ROOT / "demo"))
 
 from evidence import redact  # noqa: E402
 
+DEMO_FACTS = {
+    "favorite_programming_language": "Python",
+    "favorite_editor": "Neovim",
+}
+
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
@@ -36,7 +46,10 @@ def main() -> int:
     from eval.cases import CASES
     import conversation
 
+    import tools
     scratch = run_eval.isolate_state()
+    # isolate_state copies the real facts into scratch; replace them.
+    Path(tools.FACTS_FILE).write_text(json.dumps(DEMO_FACTS, indent=2), encoding="utf-8")
     brain = conversation.get_brain()
     cases = [c for c in CASES if not args.only or c["id"] in args.only]
     records = []
