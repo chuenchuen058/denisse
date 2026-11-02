@@ -3,6 +3,7 @@
     .venv\\Scripts\\python.exe orchestra\\test_runner.py
 Each test builds a throwaway git repo, so the real queue is never touched.
 """
+# checks: slow  (~29s: builds real git repos and runs fake lanes)
 import datetime as dt
 import importlib
 import json

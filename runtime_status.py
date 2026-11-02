@@ -31,16 +31,28 @@ def code_version(root=BASE_DIR):
     subprocess. The tray calls it once at startup: what it loaded."""
     try:
         git = os.path.join(root, ".git")
+        if os.path.isfile(git):  # a linked worktree: ".git" is "gitdir: <path>"
+            with open(git, encoding="utf-8") as f:
+                line = f.read().strip()
+            if not line.startswith("gitdir: "):
+                return "unknown"
+            git = os.path.normpath(os.path.join(root, line[8:]))
+        common = git  # branch refs live in the main repo's .git for worktrees
+        try:
+            with open(os.path.join(git, "commondir"), encoding="utf-8") as f:
+                common = os.path.normpath(os.path.join(git, f.read().strip()))
+        except FileNotFoundError:
+            pass
         with open(os.path.join(git, "HEAD"), encoding="utf-8") as f:
             head = f.read().strip()
         if not head.startswith("ref: "):
             return head[:12]
         ref = head[5:]
         try:
-            with open(os.path.join(git, *ref.split("/")), encoding="utf-8") as f:
+            with open(os.path.join(common, *ref.split("/")), encoding="utf-8") as f:
                 return f.read().strip()[:12]
         except FileNotFoundError:
-            with open(os.path.join(git, "packed-refs"), encoding="utf-8") as f:
+            with open(os.path.join(common, "packed-refs"), encoding="utf-8") as f:
                 for line in f:
                     if line.rstrip().endswith(" " + ref):
                         return line.split()[0][:12]

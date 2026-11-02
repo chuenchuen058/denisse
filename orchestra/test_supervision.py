@@ -4,6 +4,7 @@
 Each test spawns real processes (a fake lane, its grandchild `sleep 60`) and checks the
 grandchild is gone afterwards. Windows only: the job object is the thing under test.
 """
+# checks: slow  (~11s: spawns real process trees and waits them out)
 import importlib
 import json
 import os

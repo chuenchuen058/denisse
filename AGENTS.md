@@ -42,6 +42,8 @@ write to it directly: they end answers with `FOR MEMORY:` lines and
 - **Orchestra sessions** (a task from `.review/queue/`, in a `denisse-wt`
   worktree): commit, but never push or merge. The runner checks the gate and
   merges; pushing stays with Chuen or the main chat.
+- **Orchestra task gates include `.venv\Scripts\python.exe scripts\run_checks.py --fast`** (every
+  test module, in parallel, real vault/memory/Ollama/network refused); drop `--fast` when touching `orchestra/`.
 - **Commit and push as work is completed.** Chuen requested this on
   2026-10-27. Make a focused commit after each meaningful, coherent change
   and its relevant checks, then push it; don't batch an entire session

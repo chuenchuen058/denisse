@@ -3,6 +3,7 @@
     .venv\\Scripts\\python.exe -m unittest orchestra.test_integration -v
 Each test builds a throwaway git repo with fake lanes, so the real queue is never touched.
 """
+# checks: slow  (~18s: real git repos, fake lanes, combined-tree merges)
 import datetime as dt
 import importlib
 import json

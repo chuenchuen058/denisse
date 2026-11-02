@@ -28,9 +28,11 @@ os.environ.setdefault("DENISSE_VAULT", str(TMP / "vault"))
 import brain  # noqa: E402
 import invest  # noqa: E402
 import memory_store  # noqa: E402
+import planner  # noqa: E402
 
 memory_store.MEMORY_DIR = str(TMP)
 memory_store.MEMORY_FILE = str(TMP / "conversation.json")
+planner.PENDING_FILE = str(TMP / "pending_plan.json")
 results = []
 
 
