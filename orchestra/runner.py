@@ -1163,6 +1163,11 @@ def run_lane(task: Task, wt: Path, report: Path, timeout: int, prov: dict | None
     argv = list(argv)
     if task.lane == "claude":
         argv += ["--settings", str(hook_settings(wt))]
+        # "Model: fable" (or any alias/id `claude --model` takes) in a task header picks the
+        # model for that one task. Chuen, 2 Nov 2026: Fable for really hard tasks, Claude decides.
+        model = task.fields.get("model", "").strip()
+        if model and re.fullmatch(r"[A-Za-z0-9._-]{2,64}", model):
+            argv += ["--model", model]
     # claude -p started from inside another Claude Code session returns nothing unless these
     # are stripped (Thomas's notes); harmless when they aren't set.
     # ANTHROPIC_API_KEY / AUTH_TOKEN would make claude bill the API instead of Chuen's Max plan
