@@ -31,8 +31,9 @@ hypotheses to pin down, and the two that were disproved.
 The vault is the one memory for every agent. Codex, Copilot and Gemini don't
 write to it directly: they end answers with `FOR MEMORY:` lines and
 `orchestra/agent_hub` files them into `Calendar/Handoff-<date>.md`. Orchestra
-(`orchestra/`, see `.review/README.md`) runs queued tasks; its limits live in
-`orchestra/config.json`.
+(`orchestra/`) runs queued tasks; its limits live in `orchestra/config.json`.
+How to operate it (schedule, commands, results, safety layers, troubleshooting):
+`docs/operator_guide.md`.
 
 ## Ground rules
 

@@ -1,7 +1,9 @@
 # orchestra — the task runner
 
-How the queue works is in `.review/README.md`; limits are in `config.json`,
-each with its reason. This file covers the commands.
+Day-to-day operation (schedule, results, safety layers, troubleshooting) is in
+`docs/operator_guide.md`; the queue folders in `.review/README.md`; limits in
+`config.json`, each with its reason. This file is the reference for every
+command and mechanism.
 
 | Command | What it does |
 |---|---|

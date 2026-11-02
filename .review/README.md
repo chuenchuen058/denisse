@@ -2,25 +2,19 @@
 
 Copied from Thomas van Pul's Atrium core loop (31 Oct 2026), rebuilt for Windows.
 
-- `queue/` one Markdown file per job, named `YYYY-MM-DDTHHMM-slug.md`. Copy
-  `TEMPLATE.md`, or run `python orchestra\new_task.py "title"`.
-- `orchestra/runner.py` picks the top runnable task (urgent first, his work
-  before maintenance), makes a worktree at `..\denisse-wt\<slug>` on branch
-  `review/<slug>`, runs the lane (Claude Code or Codex) with
-  `orchestra/review_prompt.md`, and reads the report. Copy that file to
+- `queue/` one Markdown file per job, named `YYYY-MM-DDTHHMM-slug.md`, from
+  `TEMPLATE.md`. `parked/` holds tasks that need a person, with a `.why.txt`;
+  `archive/<date>/` holds finished ones; `reports/` the lane logs.
+- `orchestra/runner.py` makes a worktree at `..\denisse-wt\<slug>` on branch
+  `review/<slug>`, runs the lane with `orchestra/review_prompt.md`, and merges
+  a PASS only after re-running its gate. Copy that prompt to
   `.claude/commands/review.md` if you want `/review` in interactive sessions too.
-- The session's PASS is a claim. The runner re-runs the gate's command block
-  in the worktree and merges only if it exits 0, the guard hook
-  (`orchestra/hooks/guard.py`) fired, and nothing was written into the main
-  checkout. Then the task goes to `archive/<date>/`.
-- HUMAN line, PARTIAL or FAIL -> `parked/`. To run it again:
-  `python orchestra\requeue.py <slug> --note "why"` (don't edit state.json
-  by hand). Timeout / no report -> one retry in a fresh worktree, then parked.
-- `python orchestra\status.py` shows running, queued, parked, today's spend.
-  Commands are documented in `orchestra/README.md`.
-- Limits (timeouts, caps, spend) are in `orchestra/config.json`, each with
-  its reason.
-- `STATE_NOW.md` is regenerated after every tick.
+- `STATE_NOW.md` is regenerated after every tick; `runner.log` has one line
+  per event.
+
+**How to run it day to day** (writing a task, status, requeue, pause, what
+each log line means): `docs/operator_guide.md`. Every command:
+`orchestra/README.md`. Limits: `orchestra/config.json`.
 
 Everything here except this README and TEMPLATE.md is git-ignored: tasks
 and reports can hold private details and this repo is public.
