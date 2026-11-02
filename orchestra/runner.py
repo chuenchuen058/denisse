@@ -70,13 +70,16 @@ DEFAULT_LANES = {
     # Codex 0.162 dropped --full-auto: workspace-write = edit inside the worktree and
     # run commands there, no network (found 2 Nov 2026, the first Orchestra task on Codex).
     # MCP servers off: with approval "never" Chuen's Desktop Commander etc. fail and the run
-    # dies. Keep the user config, though: it holds windows.sandbox = "elevated", without
-    # which workspace-write silently falls back to read-only (2 Nov 2026).
+    # dies. Full access because Codex's Windows sandbox can't start a shell when launched in
+    # the background ("setup refresh had errors"), so workspace-write could only read.
+    # Chuen chose this (2 Nov 2026). What still holds: the worktree, the runner's own gate
+    # re-run, PASS-only merge, the main-checkout dirty check, and .git/hooks/pre-push,
+    # which refuses any push while ORCHESTRA_WORKTREE is set.
     "codex": ["codex", "exec", "--skip-git-repo-check", "--color", "never",
               "-c", "mcp_servers.node_repl.enabled=false",
               "-c", "mcp_servers.desktop-commander.enabled=false",
               "-c", "mcp_servers.obsidian.enabled=false",
-              "-s", "workspace-write", "-"],
+              "-s", "danger-full-access", "-"],
 }
 def npm_bin(pkg: str, name: str) -> str | None:
     """A global npm CLI's JS entry, run with node so long prompts never go through cmd.exe."""
