@@ -31,7 +31,9 @@ AREAS = [
      "and (where set) chose the urgent task."),
     ("learning", "Feedback learning on vs off (scripts/eval_adaptive_brain.py)",
      "Synthetic corrected episodes build a lesson in a scratch vault; the same prompts are then "
-     "asked with learning off and on. The script fixes 3 trials."),
+     "asked with learning off and on. The script fixes 3 trials. Failures with learning off "
+     "are the control arm: they show what the lesson changes, and only learning-on is the "
+     "script's own pass condition."),
     ("voice", "Local voice stack (scripts/eval_local_voice.py)",
      "Kokoro speaks fixed sentences to a WAV; Whisper and Vosk transcribe them. No microphone. "
      "Times are per sentence for synthesis and for transcription, not end-to-end reply latency."),
