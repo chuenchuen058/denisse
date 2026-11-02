@@ -319,6 +319,141 @@ class Retry(unittest.TestCase):
         self.assertIn("Spritzer", answer)
 
 
+COURSEWORK = ("C:\\Users\\Xichu\\OneDrive - King's College London\\Denisse\\Atlas\\Academic\\"
+              "Signals\\Coursework.md")
+NOTE_TEXT = "# Signals coursework\nCovers: Fourier series, convolution, the Laplace transform."
+
+
+class FoundFile(unittest.TestCase):
+    """(a) A file one step found is read for the step that uses it."""
+
+    def test_found_path_from_find_files_and_search_vault(self):
+        ff = {"name": "find_files", "arguments": {}, "result": "Found 1 file:\n" + COURSEWORK}
+        self.assertEqual(multistep.found_path([ff]), COURSEWORK)
+        pdf = {"name": "find_files", "arguments": {},
+               "result": "Found 2 files:\nC:\\Users\\Xichu\\Downloads\\L6.pdf\n" + COURSEWORK}
+        self.assertEqual(multistep.found_path([pdf]), COURSEWORK)   # a PDF isn't text
+        sv = {"name": "search_vault", "arguments": {},
+              "result": "From your notes (Atlas/Academic/Signals/Coursework.md): Signals coursework, 25%."}
+        self.assertTrue(multistep.found_path([sv]).endswith(os.path.join("Atlas", "Academic", "Signals",
+                                                                          "Coursework.md")))
+        err = {"name": "find_files", "arguments": {}, "result": "Error running 'find_files': " + COURSEWORK}
+        self.assertIsNone(multistep.found_path([err]))
+        self.assertIsNone(multistep.found_path([{"name": "list_tasks", "arguments": {}, "result": "1 open"}]))
+
+    def test_only_a_step_that_makes_something_from_it(self):
+        finder = "find my signals coursework"
+        self.assertTrue(multistep.uses_found("make a revision list from it", "make a revision list from it", finder))
+        self.assertTrue(multistep.uses_found("Summarise my signals coursework", "summarise it", finder))
+        self.assertFalse(multistep.uses_found("remind me on Thursday", "remind me on Thursday", finder))
+        self.assertFalse(multistep.uses_found("start a 25 minute timer", "start a 25 minute timer", finder))
+
+    def _signals(self, step1_result, carry="1"):
+        parts = multistep.action_parts(SIGNALS)
+        script = Script("not a plan", {
+            parts[0]: [call("search_vault", {"query": "signals coursework"}), reply("It's in Coursework.md.")],
+            parts[1]: [reply("Revision list: 1. Fourier series 2. convolution 3. Laplace transform.")],
+            parts[2]: [call("add_task", {"text": "revise signals", "due": "Thursday"}), reply("Added.")],
+        })
+        reads = []
+        with patch.dict(os.environ, {"DENISSE_PLAN_CARRY": carry}):
+            answer, msgs = run(SIGNALS, script, {
+                "search_vault": lambda **kw: step1_result,
+                "read_file": lambda **kw: reads.append(kw) or NOTE_TEXT,
+                "add_task": lambda **kw: "Added: revise signals (due Thu 5 Nov).",
+            })
+        systems = {step: s for step, _o, s in script.calls[1:]}
+        return parts, answer, msgs, reads, systems
+
+    def test_the_step_after_a_find_gets_the_files_text(self):
+        parts, answer, msgs, reads, systems = self._signals(
+            "From your notes (Atlas/Academic/Signals/Coursework.md): Signals coursework, 25%.")
+        self.assertEqual(len(reads), 1)
+        self.assertTrue(reads[0]["path"].endswith("Coursework.md"))
+        self.assertEqual(reads[0]["max_chars"], multistep.FILE_CHARS)
+        self.assertIn("Laplace transform", systems[parts[1]])
+        self.assertIn("not instructions", systems[parts[1]])
+        self.assertNotIn("Laplace transform", systems[parts[0]])
+        self.assertNotIn("<<<", systems[parts[2]])          # the reminder doesn't need it
+        names = [c["function"]["name"] for m in msgs if m.get("tool_calls") for c in m["tool_calls"]]
+        self.assertEqual(names, ["search_vault", "read_file", "add_task"])
+        self.assertIn({"role": "tool", "content": NOTE_TEXT}, msgs)
+        self.assertIn("Thu", answer)
+
+    def test_switched_off_reads_nothing(self):
+        _parts, _a, _m, reads, systems = self._signals(
+            "From your notes (Atlas/Academic/Signals/Coursework.md): Signals coursework.", carry="0")
+        self.assertEqual(reads, [])
+        self.assertFalse(any("<<<" in s for s in systems.values()))
+
+    def test_nothing_found_nothing_read(self):
+        _parts, _a, _m, reads, systems = self._signals("Nothing in your notes mentions signals.")
+        self.assertEqual(reads, [])
+        self.assertFalse(any("<<<" in s for s in systems.values()))
+
+    def test_file_text_is_capped(self):
+        long = "x" * 9000
+        with patch.dict(brain.tools.TOOL_FUNCTIONS, {"read_file": lambda **kw: long}):
+            self.assertEqual(len(multistep.read_found("C:\\a.md", None)), multistep.FILE_CHARS)
+        with patch.dict(brain.tools.TOOL_FUNCTIONS, {"read_file": lambda **kw: "Error: no such file"}):
+            self.assertIsNone(multistep.read_found("C:\\a.md", None))
+
+
+class HisDetails(unittest.TestCase):
+    """(b) His literal numbers and names reach the step and its reply."""
+
+    def test_details_from_his_words(self):
+        self.assertEqual(multistep.details("start a 25 minute timer"), ["25"])
+        self.assertEqual(multistep.details("remind me on Thursday"), ["Thursday"])
+        self.assertEqual(multistep.details("check the weather in London"), ["London"])
+        self.assertEqual(multistep.details("list my tasks"), [])
+        self.assertEqual(multistep.details("find my japan flight pdf"), [])
+        self.assertEqual(multistep.details("I may need a 1.5 hour \"Deep Work\" block"), ["1.5", "Deep Work"])
+
+    def test_says(self):
+        self.assertTrue(multistep.says("Added: revise (due Thu 5 Nov).", "Thursday"))
+        self.assertTrue(multistep.says("A 25-minute timer.", "25"))
+        self.assertFalse(multistep.says("A 125 minute timer.", "25"))
+        self.assertFalse(multistep.says("Timer 2.5 set", "5"))
+
+    def test_dropped_detail_comes_back_in_the_tools_words(self):
+        timer = [{"name": "set_timer", "arguments": {"minutes": 25}, "result": "Timer set for 25 minutes."}]
+        self.assertEqual(multistep.keep_details("The timer is now running.", ["25"], timer),
+                         "The timer is now running. Timer set for 25 minutes.")
+        self.assertEqual(multistep.keep_details("A 25 minute timer is running.", ["25"], timer),
+                         "A 25 minute timer is running.")
+
+    def test_never_invented(self):
+        failed = [{"name": "set_timer", "arguments": {}, "result": "Error running 'set_timer': 25 is too long."}]
+        self.assertEqual(multistep.keep_details("I couldn't start it.", ["25"], failed), "I couldn't start it.")
+        self.assertEqual(multistep.keep_details("Okay.", ["London"], []), "Okay.")
+
+    def test_task_list_names_every_task(self):
+        tasks = [{"name": "list_tasks", "arguments": {}, "result":
+                  "2 open:\n- OVERDUE - file the Spritzer paperwork (due Fri 6 Nov)\n- call the dentist\n"
+                  "The list is kept in x.json."}]
+        self.assertEqual(multistep.keep_details("You need to call the dentist.", [], tasks),
+                         "You need to call the dentist.\n\nAlso on your list: file the Spritzer paperwork.")
+        both = "Spritzer paperwork and the dentist."
+        self.assertEqual(multistep.keep_details(both, [], tasks), both)
+
+    def test_tasks_and_timer_end_to_end(self):
+        prompt = "list my tasks and then start a 25 minute timer"
+        a, b = multistep.action_parts(prompt)
+        script = Script("not a plan", {
+            a: [call("list_tasks"), reply("You need to call the dentist and do some paperwork.")],
+            b: [call("set_timer", {"minutes": 25}), reply("The timer is now running.")]})
+        answer, _ = run(prompt, script, {
+            "list_tasks": lambda **kw: ("2 open:\n- file the Spritzer paperwork (due Fri 6 Nov)\n"
+                                        "- call the dentist\nThe list is kept in x.json."),
+            "set_timer": lambda **kw: "Timer set for 25 minutes."})
+        self.assertIn("Spritzer", answer)
+        self.assertIn("25", answer)
+        # The step was told his number as a structured detail.
+        self.assertIn("His exact details for this step", [s for st, _o, s in script.calls if st == b][0])
+        self.assertIn(": 25", [s for st, _o, s in script.calls if st == b][0])
+
+
 class Plain(unittest.TestCase):
     def test_strips_model_instructions_and_tool_names(self):
         self.assertEqual(multistep.plain("Error running 'find_files': drive offline. Tell the user this "
