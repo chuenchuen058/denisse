@@ -62,6 +62,7 @@ import obsidian_sync
 import optimize
 import wake_word
 import speech_control
+import hotkey
 from floating_orb import FloatingOrb
 from orb_controls import OrbControls
 from reminder_card import TYPING_MS, ReminderCard, ThinkingBubble, _place, _work_area
@@ -1032,6 +1033,8 @@ def _quit(icon, item):
     _stop_optimizing()
     _stop_wake_word_listening()
     _stop_news_briefing()
+    if _global_hotkey is not None:
+        _global_hotkey.stop()
     icon.stop()
     root.after(0, root.quit)
 
@@ -1676,6 +1679,32 @@ def _open_chat(icon=None, item=None):
     root.after(0, _do)
 
 
+_global_hotkey = None  # hotkey.GlobalHotkey once registered in main()
+
+
+def _on_global_hotkey():
+    """DENISSE_HOTKEY pressed (already on the Tk thread): open + focus the
+    chat input from whatever app is in front, or fold it away if the chat
+    is the window he's already typing in."""
+    if _chat_popup is not None:
+        try:
+            if hotkey.is_foreground(_chat_popup.win.winfo_id()):
+                _chat_popup.close()
+                return
+        except tk.TclError:
+            pass
+    _open_chat()
+
+    def _focus_input():
+        # A freshly built popup only focus_set()s its entry, which does
+        # nothing while another app is in front -- force it here.
+        if _chat_popup is not None:
+            try:
+                _chat_popup.focus()
+            except tk.TclError:
+                pass
+
+    root.after(50, _focus_input)  # after _open_chat's own root.after(0, ...)
 
 
 def _toggle_pet_motion(icon=None, item=None):
@@ -1695,8 +1724,18 @@ def main():
     # background, instead of on the first real reply (see voice_output.py).
     threading.Thread(target=warm_up_audio, daemon=True).start()
 
+    # System-wide summon key (DENISSE_HOTKEY, default Ctrl+Alt+D; "off"
+    # disables). A combo another app owns is logged and skipped.
+    global _global_hotkey
+    try:
+        _global_hotkey = hotkey.start_from_env(_on_global_hotkey, lambda fn: root.after(0, fn))
+    except Exception:
+        _global_hotkey = None
+    hotkey_label = hotkey.describe() if _global_hotkey is not None else ""
+
     menu = pystray.Menu(
-        pystray.MenuItem("Talk to Denisse", _open_chat, default=True),
+        pystray.MenuItem(f"Talk to Denisse ({hotkey_label})" if hotkey_label else "Talk to Denisse",
+                         _open_chat, default=True),
         pystray.MenuItem("Reminders", _open_reminders),
         pystray.MenuItem(
             "Pet movement", _toggle_pet_motion,
@@ -1728,7 +1767,10 @@ def main():
         pystray.MenuItem("Quit", _quit),
     )
     global _tray_icon
-    _tray_icon = pystray.Icon("denisse", _make_icon_image(), "Denisse", menu)
+    _tray_icon = pystray.Icon(
+        "denisse", _make_icon_image(),
+        f"Denisse -- {hotkey_label} to chat" if hotkey_label else "Denisse", menu,
+    )
     _start_optimizing()
     if news.briefing_enabled():
         _start_news_briefing()

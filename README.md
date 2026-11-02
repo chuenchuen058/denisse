@@ -88,6 +88,15 @@ Type or say **shush** or **stop talking** to silence current and pending
 tray speech without another spoken acknowledgement. Spoken controls require
 wake-word listening to be enabled and remain dependent on recognition quality.
 
+### Global hotkey
+
+Press **Ctrl+Alt+D** in any application to open the chat with the caret in
+its input box; press it again while the chat is focused to fold it away.
+Choose another combo with `DENISSE_HOTKEY` (for example `ctrl+alt+space`,
+`win+shift+f9`), or set `DENISSE_HOTKEY=off` to disable it. If another app
+already owns the combo, the tray logs one line and starts without it. The
+tray tooltip and the **Talk to Denisse** menu item show the active hotkey.
+
 For offline recognition, download the Vosk model once:
 
 ```powershell
