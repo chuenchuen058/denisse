@@ -65,7 +65,10 @@ C = load_config()
 # runner passes with --settings (Thomas: a prefix allow list mostly buys refusals).
 DEFAULT_LANES = {
     "claude": ["claude", "-p", "--permission-mode", "acceptEdits", "--permission-prompts", "none",
-               "--output-format", "json", "--allowedTools", "Read,Edit,Write,Glob,Grep,Bash",
+               # stream-json: the lane log fills as the session works, so orchestra/watch.py can
+               # show it live (Chuen, 2 Nov); the last line is still the result JSON lane_result reads.
+               "--output-format", "stream-json", "--verbose",
+               "--allowedTools", "Read,Edit,Write,Glob,Grep,Bash",
                "--disallowedTools", "Bash(git push:*),Bash(gh:*)"],
     # Codex 0.162 dropped --full-auto: workspace-write = edit inside the worktree and
     # run commands there, no network (found 2 Nov 2026, the first Orchestra task on Codex).
