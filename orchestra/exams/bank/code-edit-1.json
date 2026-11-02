@@ -1,0 +1,17 @@
+{
+  "id": "code-edit-1",
+  "category": "code-edit",
+  "timeout_s": 180,
+  "prompt": "The current folder has sums.py and test_sums.py. sum_to(4) returns 6 instead of 10. Fix the bug in sums.py (do not change the test) so that `python test_sums.py` passes. If you cannot edit files, reply instead with the whole corrected sums.py in one ```python code block.",
+  "files": {
+    "sums.py": "def sum_to(n):\n    \"\"\"1 + 2 + ... + n\"\"\"\n    total = 0\n    for i in range(n):\n        total += i\n    return total\n",
+    "test_sums.py": "import unittest\nfrom sums import sum_to\n\n\nclass T(unittest.TestCase):\n    def test(self):\n        self.assertEqual(sum_to(1), 1)\n        self.assertEqual(sum_to(4), 10)\n        self.assertEqual(sum_to(0), 0)\n\n\nunittest.main()\n"
+  },
+  "grader": {
+    "type": "test",
+    "cmd": [
+      "test_sums.py"
+    ],
+    "target": "sums.py"
+  }
+}

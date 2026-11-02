@@ -1,0 +1,16 @@
+{
+  "id": "extract-1",
+  "category": "extract",
+  "timeout_s": 30,
+  "prompt": "Pull these fields out of the text below into one JSON object: name (string, the person, without title), room (string), date (string, YYYY-MM-DD), time (string, HH:MM)\n\nText:\nhi!! fwd from reception ->  meeting w/ Dr. Ana Ruiz moved to room B12 (NOT b21), on 2026-11-09 at 14:00. pls bring laptop. thx\n\nReply with only the JSON object in a ```json code block.",
+  "grader": {
+    "type": "json",
+    "answer": {
+      "name": "Ana Ruiz",
+      "room": "B12",
+      "date": "2026-11-09",
+      "time": "14:00"
+    }
+  },
+  "canary": true
+}

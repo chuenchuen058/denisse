@@ -1,0 +1,12 @@
+{
+  "id": "debug-1",
+  "category": "debug",
+  "timeout_s": 120,
+  "prompt": "Here is a traceback:\n\nTraceback (most recent call last):\n  File \"main.py\", line 12, in <module>\n    report(load(\"data.csv\"))\n  File \"main.py\", line 8, in report\n    print(total / count)\nZeroDivisionError: division by zero\n\nWhich line number of main.py raised the exception? Reply with the answer on the last line as `ANSWER: <line number>`.",
+  "grader": {
+    "type": "exact",
+    "answer": [
+      "8"
+    ]
+  }
+}

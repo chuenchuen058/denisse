@@ -1,0 +1,27 @@
+{
+  "id": "writing-1",
+  "category": "writing",
+  "timeout_s": 120,
+  "prompt": "Rewrite this paragraph in at most 35 words. Keep these facts: library; 24 hours; 4 May.\n\nFollowing a lengthy period of consideration that involved many members of staff across several departments, the university has finally decided that the main library, which has served students for decades, will from now on remain open for twenty-four hours a day during the exam season, which starts on 4 May, and this change has been made possible because of a donation of 2 million pounds from a former student.\n\nPut the rewrite after a line `ANSWER:` and write nothing after it.",
+  "grader": {
+    "type": "writing",
+    "max_words": 35,
+    "facts": [
+      [
+        "library"
+      ],
+      [
+        "24 hours",
+        "twenty-four hours",
+        "24-hour",
+        "24 hour",
+        "twenty-four-hour",
+        "around the clock"
+      ],
+      [
+        "4 May",
+        "May 4"
+      ]
+    ]
+  }
+}

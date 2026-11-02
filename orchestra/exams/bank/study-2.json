@@ -1,0 +1,11 @@
+{
+  "id": "study-2",
+  "category": "study",
+  "timeout_s": 180,
+  "prompt": "The 4-point DFT of x[n] = [1, 0, -1, 0] is X[k] = sum_{n=0}^{3} x[n] e^{-j 2 pi k n / 4}. What is |X[1]|? Give the answer as a decimal number on the last line as `ANSWER: <number>`.",
+  "grader": {
+    "type": "numeric",
+    "answer": 2.0,
+    "tol": 0.001
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "debug-3",
+  "category": "debug",
+  "timeout_s": 120,
+  "prompt": "This file, shop.py, is shown with line numbers:\n\n 1  def price(item):\n 2      return item[\"price\"]\n 3\n 4  def total(items):\n 5      s = 0\n 6      for it in items:\n 7          s += price(it) * it[\"qty\"]\n 8      return s\n 9\n10  print(total([{\"price\": 2, \"qty\": 1}, {\"price\": 3}]))\n\nRunning it gives:\n\nTraceback (most recent call last):\n  File \"shop.py\", line 10, in <module>\n  File \"shop.py\", line X, in total\nKeyError: 'qty'\n\nThe line number X was lost. Which line of shop.py raised the KeyError? Reply with the answer on the last line as `ANSWER: <line number>`.",
+  "grader": {
+    "type": "exact",
+    "answer": [
+      "7"
+    ]
+  }
+}

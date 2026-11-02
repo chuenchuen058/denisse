@@ -1,0 +1,11 @@
+{
+  "id": "study-1",
+  "category": "study",
+  "timeout_s": 180,
+  "prompt": "A square wave x(t) has period 2*pi, x(t) = 1 for 0 < t < pi and x(t) = -1 for pi < t < 2*pi. Its Fourier series is the sum over n of b_n sin(n t). What is b_1, to 4 decimal places? Give the answer as a decimal number on the last line as `ANSWER: <number>`.",
+  "grader": {
+    "type": "numeric",
+    "answer": 1.2732,
+    "tol": 0.002
+  }
+}

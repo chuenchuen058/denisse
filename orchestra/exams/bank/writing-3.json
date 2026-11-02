@@ -1,0 +1,24 @@
+{
+  "id": "writing-3",
+  "category": "writing",
+  "timeout_s": 120,
+  "prompt": "Rewrite this paragraph in at most 25 words. Keep these facts: Leeds; 1,200; maths.\n\nIn a study that was carried out over a period of three years, a team of researchers based in Leeds monitored the sleep of some 1,200 teenagers and found, perhaps unsurprisingly to many parents, that those who used their phones after midnight tended to get noticeably lower marks in mathematics than those who did not.\n\nPut the rewrite after a line `ANSWER:` and write nothing after it.",
+  "grader": {
+    "type": "writing",
+    "max_words": 25,
+    "facts": [
+      [
+        "Leeds"
+      ],
+      [
+        "1,200",
+        "1200"
+      ],
+      [
+        "maths",
+        "mathematics",
+        "math"
+      ]
+    ]
+  }
+}

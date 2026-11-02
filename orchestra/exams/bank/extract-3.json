@@ -1,0 +1,15 @@
+{
+  "id": "extract-3",
+  "category": "extract",
+  "timeout_s": 120,
+  "prompt": "Pull these fields out of the text below into one JSON object: module (string), coursework (integer, which coursework), due (string, YYYY-MM-DD), weight_percent (integer)\n\nText:\nFrom: noreply@example.ac.uk | Subj: ELEC301 deadline   >> coursework 2 for module ELEC301 is now due Friday 2026-12-04 at noon, worth 40% of the module. Late = capped at 40 marks.\n\nReply with only the JSON object in a ```json code block.",
+  "grader": {
+    "type": "json",
+    "answer": {
+      "module": "ELEC301",
+      "coursework": 2,
+      "due": "2026-12-04",
+      "weight_percent": 40
+    }
+  }
+}

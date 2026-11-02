@@ -1,0 +1,22 @@
+{
+  "id": "writing-2",
+  "category": "writing",
+  "timeout_s": 120,
+  "prompt": "Rewrite this paragraph in at most 30 words. Keep these facts: sports centre; 10:30; 3D printer.\n\nIt is with some regret that the organising committee must inform all participants that the robotics competition, which had originally been planned to take place in the main hall on Saturday, has had to be moved, owing to unexpected building works, to the sports centre, and that it will now begin at 10:30 rather than at the previously announced time, although the prize remains a 3D printer.\n\nPut the rewrite after a line `ANSWER:` and write nothing after it.",
+  "grader": {
+    "type": "writing",
+    "max_words": 30,
+    "facts": [
+      [
+        "sports centre",
+        "sports center"
+      ],
+      [
+        "10:30"
+      ],
+      [
+        "3D printer"
+      ]
+    ]
+  }
+}
