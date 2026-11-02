@@ -4,7 +4,7 @@ Six stages, in this order:
 
   1. contract   -- runs vault_contract.py, which rewrites Denisse/Vault Health.md
   2. naming     -- names inside every Week N/ folder, against the convention
-                   recorded in SEM 1 Modules/.keats-manifest.json
+                   recorded in Atlas/Academic/SEM 1 Modules/.keats-manifest.json
   3. flag       -- one open task per week note still at 'status: files-only',
                    so a missing write-up turns up on the reminder card
   4. propose    -- runs scripts/propose_cases.py, which turns yesterday's live
@@ -18,7 +18,7 @@ What it deliberately does NOT do:
 
   * fetch from KEATS. Denisse does not sign in to KEATS at all -- the weekly
     pull is a scheduled Claude session driving Chuen's own browser session
-    (Memory/decisions.md, 2026-10-19). Nothing here needs a Moodle token, and
+    (Dev/Memory/decisions.md, 2026-10-19). Nothing here needs a Moodle token, and
     keats_login.py is not authorised; see the 2026-10-08 entry.
   * move or rename anything. Guessing which week a PDF belongs to, and what
     kind of file it is, is what produced the week-3 mess; this job reports
@@ -43,7 +43,7 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="repla
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 VAULT = r"C:\Users\Xichu\OneDrive - King's College London\Denisse"
-MODULES = os.path.join(VAULT, "SEM 1 Modules")
+MODULES = os.path.join(VAULT, "Atlas", "Academic", "SEM 1 Modules")
 LOG = os.path.join(REPO, "logs", "nightly.log")
 DRY = "--dry" in sys.argv
 
@@ -205,7 +205,7 @@ else:
 # -- the stage that isn't running -------------------------------------------
 say("== keats ==")
 say("  not this job's work: the weekly pull is a scheduled Claude session")
-say("  driving Chuen's own browser (Memory/decisions.md, 2026-10-19).")
+say("  driving Chuen's own browser (Dev/Memory/decisions.md, 2026-10-19).")
 say("  Nothing here fetches, and no Moodle token is involved.")
 
 # -- 5. commit, narrowly ----------------------------------------------------

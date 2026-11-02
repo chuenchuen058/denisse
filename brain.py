@@ -594,7 +594,7 @@ TOOL_DEFINITIONS = [
 ]
 
 # Second attempt at letting Denisse see the Obsidian vault. The first one
-# (the disabled block in respond() below) pasted Memory/ into the system
+# (the disabled block in respond() below) pasted Dev/Memory/ into the system
 # prompt and measured 0/4 clean against 4/4 with it off. This one is a tool
 # she calls, so an unrelated question pays only for this description -- and
 # ALL of its guidance lives here rather than in SYSTEM_PROMPT, for the
@@ -1954,7 +1954,7 @@ class Brain:
         system_content = SYSTEM_PROMPT
         if extra_context:
             system_content += "\n\n" + extra_context
-        # Disabled (2026-09-02): injecting the shared Obsidian Memory/
+        # Disabled (2026-09-02): injecting the shared Obsidian Dev/Memory/
         # folder here measurably broke reply quality -- tested directly
         # against a real question (news summarization): 0/4 clean even
         # trimmed to 600 chars (one run hallucinated a fake save action),

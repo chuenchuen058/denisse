@@ -39,7 +39,7 @@ def main():
       'list_tasks':'2 open:\n- call the dentist\n- file the paperwork',
       'cancel_timer':'Cancelled: study timer.',
       'list_timers':'study timer: 4 minutes remaining',
-      'search_vault':'From your notes (quote these):\n\nDenisse/Project Log/Vault Search.md\n- Vault read-back was tried on 2026-09-02 and disabled the same day.\nMemory/STATE.md\n- Current project: BlueBand movement tracker.',
+      'search_vault':'From your notes (quote these):\n\nDenisse/Project Log/Vault Search.md\n- Vault read-back was tried on 2026-09-02 and disabled the same day.\nDev/Memory/STATE.md\n- Current project: BlueBand movement tracker.',
       'get_current_time':'2026-10-26 18:00',
       'list_skills':'math: calculations\ntake_notes: save a note',
       'read_skill':'Use verified data and report what happened.',

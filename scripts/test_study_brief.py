@@ -35,7 +35,7 @@ def note(rel, text):
     open(p, "w", encoding="utf-8").write(text)
 
 
-SS = r"SEM 1 Modules\5CCYB020 Signals and Systems"
+SS = r"Atlas\Academic\SEM 1 Modules\5CCYB020 Signals and Systems"
 note(SS + r"\Coursework\Coursework.md", """---
 description: "5CCYB020 summative coursework (30%)"
 ---
@@ -57,7 +57,7 @@ description: "5CCYB020 summative coursework (30%)"
 for n, status in ((1, ""), (3, ""), (4, "scaffolded")):
     note(SS + rf"\Week {n}\Signals and Systems Week {n}.md",
          f"---\nweek: {n}\ntopic: Topic {n}\n" + (f"status: {status}\n" if status else "") + "---\n")
-EM = r"SEM 1 Modules\5CCYB010 Electromagnetism"
+EM = r"Atlas\Academic\SEM 1 Modules\5CCYB010 Electromagnetism"
 note(EM + r"\Coursework.md", """---
 description: "5CCYB010 coursework, 30%, due 24 Nov 2026 — brief not yet read"
 ---
@@ -129,6 +129,8 @@ check("brief written into Drafts", os.path.exists(path), reply[:120])
 text = open(path, encoding="utf-8").read()
 check("brief has the due date and the unticked items",
       "Tue 24 Nov 2026" in text and "Q2 three plots" in text and "Q3 (i)-(iv)" in text)
+check("coursework link uses the Atlas academic path",
+      "[[Atlas/Academic/SEM 1 Modules/5CCYB020 Signals and Systems/Coursework/Coursework.md|" in text)
 check("a ticked item is not in what's left", "| Q1 sketches |" not in text)
 check("week 4 written up before Q2",
       text.index("Write up Week 4") < text.index("— Q2 three plots"))

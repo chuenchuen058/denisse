@@ -28,7 +28,7 @@ Three things make that one work, and only one of them is the hue:
    designed sidebar. `color-folders-files` supports `backgroundColor` --
    checked in its main.js, which assigns element.style.backgroundColor.
 
-2. ONE RAMP, NOT TEN CHOICES. Every chip is the same saturation and the same
+2. ONE RAMP, NOT SIX CHOICES. Every chip is the same saturation and the same
    lightness; only the hue moves, by a fixed step, in sidebar order. That is
    what makes it look deliberate. Hand-picking ten hex codes never does.
 
@@ -39,7 +39,7 @@ Three things make that one work, and only one of them is the hue:
    minority colours scattered through it.
 
 So: a full-wheel ramp built in OKLab, starting at violet. Every chip the same
-perceived lightness and chroma, 36 degrees of hue apart -- as separable as ten
+perceived lightness and chroma, 60 degrees of hue apart -- as separable as six
 colours can be while still looking like one set. The graph reads purple
 regardless, because that comes from ACCENT.
 """
@@ -69,8 +69,8 @@ INK = "#1c1130"         # near-black violet for text on a chip -- not pure black
 # back to ACCENT, not because of these. So the sidebar gets the whole
 # spectrum for maximum separation and the graph stays purple regardless.
 # NOTE these are OKLCH hue angles, which are NOT the HSL ones: 270 here is a
-# periwinkle blue, not violet. The ramp lands Denisse (306) on lavender, which
-# happens to be the orb's own colour, and SEM 1 Modules on cyan. Shift
+# periwinkle blue, not violet. The ramp lands Denisse (390) on peach; the
+# graph's unmatched nodes keep the orb's violet accent. Shift
 # HUE_FROM to rotate which folder gets which; the spacing stays even.
 HUE_FROM, HUE_SPAN = 270, 360   # blue -> violet -> pink -> warm -> green -> back
 
@@ -80,7 +80,7 @@ HUE_FROM, HUE_SPAN = 270, 360   # blue -> violet -> pink -> warm -> green -> bac
 #   * equal HSL lightness  -> yellows blinding, blues muddy;
 #   * equal WCAG luminance -> greens driven to #13e428, electric, not pastel.
 # OKLab is built so that equal L and equal C LOOK equal at any hue, which is
-# exactly the property a ten-hue pastel ramp needs. L and C below are read off
+# exactly the property a six-hue pastel ramp needs. L and C below are read off
 # the kind of chip Chuen liked in the reference vault.
 OK_L, OK_C = 0.845, 0.105        # lightness, chroma
 SUB_L, SUB_C = 0.845, 0.105      # subfolders override these per entry
@@ -91,15 +91,11 @@ SUB_L, SUB_C = 0.845, 0.105      # subfolders override these per entry
 #
 # (path, apply_to_subfolders)
 AREAS = [
-    ("AKC", True),
+    ("Atlas", True),
+    ("Calendar", True),
     ("Denisse", True),
-    ("GitHub", True),
-    ("KCLMSoc", True),
-    ("Log", True),
-    ("Memory", True),
-    ("Projects", True),
-    ("Robotic Tail", True),
-    ("SEM 1 Modules", True),
+    ("Dev", True),
+    ("Efforts", True),
     ("Templates", True),
 ]
 

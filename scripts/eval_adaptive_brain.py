@@ -24,9 +24,9 @@ def main():
     sys.stdout.reconfigure(encoding='utf-8',errors='replace')
     results=[]
     with tempfile.TemporaryDirectory(prefix='denisse-learning-eval-') as tmp:
-        root=Path(tmp);(root/'Memory').mkdir()
+        root=Path(tmp);(root/'Dev/Memory').mkdir(parents=True)
         today=vault_search.datetime.date.today().isoformat()
-        (root/'Memory/STATE.md').write_text(f'---\nupdated: {today}\n---\n# State\n## {today} - BlueBand\nBlueBand: test the movement sensor prototype.\n',encoding='utf-8')
+        (root/'Dev/Memory/STATE.md').write_text(f'---\nupdated: {today}\n---\n# State\n## {today} - BlueBand\nBlueBand: test the movement sensor prototype.\n',encoding='utf-8')
         rules=root/'rules.json';rules.write_text('{}')
         with patch.dict(os.environ,{'DENISSE_RULES_FILE':str(rules),'DENISSE_INSTINCTS':'1','DENISSE_VAULT_SEARCH':'1'}), \
              patch.object(instincts,'BRAIN_DIR',str(root)), \
