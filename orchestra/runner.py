@@ -536,7 +536,10 @@ def run_lane(task: Task, wt: Path, report: Path, timeout: int) -> tuple[str, int
         argv += ["--settings", str(hook_settings(wt))]
     # claude -p started from inside another Claude Code session returns nothing unless these
     # are stripped (Thomas's notes); harmless when they aren't set.
-    env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE" and not k.startswith("CLAUDE_CODE_")}
+    # ANTHROPIC_API_KEY / AUTH_TOKEN would make claude bill the API instead of Chuen's Max plan
+    # (his .env holds a key for Denisse's own code); never pass them to a lane (2 Nov 2026).
+    env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE" and not k.startswith("CLAUDE_CODE_")
+           and k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")}
     env.update(ORCHESTRA_TASK=str(local / "task.md"), ORCHESTRA_REPORT=str(local_report),
                ORCHESTRA_WORKTREE=str(wt), ORCHESTRA_MAIN=str(REPO))
     out = (REPORTS / f"{task.slug}.lane.log").open("w", encoding="utf-8")
