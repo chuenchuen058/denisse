@@ -3,7 +3,9 @@
 Real limits live here, not in the allow list (Thomas, 31 Oct: `Bash(python:*)` and
 `Bash(git:*)` already allow pushing, `git -C ../denisse commit`, `reset --hard`...).
 
-  * Write/Edit outside this session's worktree -> denied, with the worktree path to use
+  * Write/Edit outside this session's worktree -> denied, with the worktree path to use.
+    Paths are resolved with realpath first: the worktree's .venv is a junction to the main
+    checkout's venv, so <worktree>/.venv/... looks inside but lands in the main checkout.
   * Bash: git push, git -C, reset --hard, clean -f, gh, recursive deletes, or any
     command naming the main checkout -> denied
 Every call appends to <worktree>/.review/hook.log, so the runner can tell the hook loaded.
@@ -41,8 +43,15 @@ def strip_heredocs(cmd: str) -> str:
     return HEREDOC.sub("<<HEREDOC", cmd)
 
 
-def norm(p: str) -> str:
-    return os.path.normcase(os.path.abspath(p)).replace("\\", "/").rstrip("/")
+def norm(p: str, real: bool = False) -> str:
+    """Compare-ready path: absolute, case-folded, forward slashes. real=True also follows
+    symlinks and junctions, so the check is on where a write actually lands."""
+    p = os.path.realpath(p) if real else os.path.abspath(p)
+    return os.path.normcase(p).replace("\\", "/").rstrip("/")
+
+
+def inside(path: str, root: str) -> bool:
+    return path == root or path.startswith(root + "/")
 
 
 def decide(data: dict, worktree: str, main: str) -> str | None:
@@ -53,13 +62,17 @@ def decide(data: dict, worktree: str, main: str) -> str | None:
         if not path:
             return None
         cwd = data.get("cwd") or worktree
-        target = norm(path if os.path.isabs(path) else os.path.join(cwd, path))
-        wt = norm(worktree)
-        if target == wt or target.startswith(wt + "/"):
+        full = path if os.path.isabs(path) else os.path.join(cwd, path)
+        target, wt = norm(full, real=True), norm(worktree, real=True)
+        if inside(target, wt):
             return None
+        if inside(norm(full), norm(worktree)):
+            # looks inside, resolves outside: a link such as the .venv junction
+            return (f"Writes must stay inside this task's worktree {worktree}; {path} goes through "
+                    f"a link and really lands in {os.path.realpath(full)}. Don't write through links.")
         hint = ""
-        m = norm(main)
-        if target.startswith(m + "/"):
+        m = norm(main, real=True)
+        if inside(target, m):
             hint = f" Write {os.path.join(worktree, target[len(m) + 1:])} instead."
         return f"Writes must stay inside this task's worktree {worktree}; {path} is outside it.{hint}"
     if tool == "Bash":

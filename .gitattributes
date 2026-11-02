@@ -1,0 +1,2 @@
+# sh hooks must stay LF even with core.autocrlf=true
+orchestra/hooks/pre-push text eol=lf
