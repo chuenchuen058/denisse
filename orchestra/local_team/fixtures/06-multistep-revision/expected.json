@@ -1,0 +1,12 @@
+{
+  "candidate": true,
+  "area": "app",
+  "gates": [
+    {
+      "id": "script-test",
+      "arg": "scripts/test_dialogue_reliability.py"
+    }
+  ],
+  "duplicate": true,
+  "why": "Real gap (step 2 doesn't read the file step 1 found), but a task for exactly that is parked: admission should refuse a re-proposal as a duplicate."
+}

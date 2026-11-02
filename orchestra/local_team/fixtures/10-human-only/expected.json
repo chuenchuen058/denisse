@@ -1,0 +1,7 @@
+{
+  "candidate": false,
+  "area": null,
+  "gates": [],
+  "duplicate": false,
+  "why": "Manual check in the running tray and re-registering Task Scheduler: owner actions, not code tasks."
+}

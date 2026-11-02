@@ -1,0 +1,7 @@
+{
+  "candidate": false,
+  "area": null,
+  "gates": [],
+  "duplicate": false,
+  "why": "The why file's first line ('FAIL: a blind re-run won't change it') says a task failed, not what is wrong. Nothing to propose without inventing a cause."
+}
