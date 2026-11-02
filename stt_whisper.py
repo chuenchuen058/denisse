@@ -28,14 +28,16 @@ import time
 import numpy as np
 
 import stt_vosk  # reuse its mic-picking and downmix/resample (see its 48 kHz note)
+import voice_pipeline
 
 SAMPLE_RATE = stt_vosk.SAMPLE_RATE  # 16 kHz, what Whisper expects
 MODEL_NAME = os.environ.get("DENISSE_WHISPER_MODEL", "small.en")
 DEVICE = os.environ.get("DENISSE_WHISPER_DEVICE", "auto")  # auto | cuda | cpu
 CHUNK_FRAMES = 1024
-CALIBRATE_S = 0.4
-END_SILENCE_S = 0.9  # this much quiet after speech ends the clip
-MIN_SPEECH_RMS = 300
+# Endpointing lives in voice_pipeline.Endpointer: DENISSE_END_SILENCE_S is
+# how much quiet after speech ends the clip (docs/voice_latency.md has the
+# measurements behind its default).
+END_SILENCE_S = voice_pipeline.END_SILENCE_S
 
 _model = None
 _model_device = None
@@ -119,7 +121,7 @@ def transcribe_file(path: str) -> str:
     return " ".join(s.text.strip() for s in segments).strip()
 
 
-def _record(timeout: float, phrase_time_limit: float, on_ready) -> bytes:
+def _record(timeout: float, phrase_time_limit: float, on_ready, trace=None) -> bytes:
     import pyaudio
     pa = pyaudio.PyAudio()
     try:
@@ -134,35 +136,29 @@ def _record(timeout: float, phrase_time_limit: float, on_ready) -> bytes:
                 on_ready()
             except Exception:
                 pass
-        chunk_s = CHUNK_FRAMES / SAMPLE_RATE
-        noise, n_cal = [], max(1, int(CALIBRATE_S / chunk_s))
-        started_at = None
-        last_voice = None
-        start_deadline = time.time() + timeout
+        ep = voice_pipeline.Endpointer(chunk_s=CHUNK_FRAMES / SAMPLE_RATE, timeout=timeout,
+                                       phrase_time_limit=phrase_time_limit)
         try:
             while True:
                 raw = stream.read(native_chunk, exception_on_overflow=False)
                 mono = stt_vosk._first_channel(raw, channels)
                 if native_rate != SAMPLE_RATE:
                     mono, state = audioop.ratecv(mono, 2, 1, native_rate, SAMPLE_RATE, state)
-                rms = audioop.rms(mono, 2)
                 now = time.time()
-                if len(noise) < n_cal:
-                    noise.append(rms)
+                calibrating = ep.calibrating()
+                verdict = ep.push(audioop.rms(mono, 2), now)
+                if calibrating:
                     continue
-                gate = max(MIN_SPEECH_RMS, 3 * (sum(noise) / len(noise)))
-                loud = rms > gate
-                if started_at is None:
+                if verdict == "timeout":
+                    return b""
+                if ep.started_at is None:
                     frames = (frames + [mono])[-4:]  # keep ~0.25 s of lead-in
-                    if loud:
-                        started_at = last_voice = now
-                    elif now > start_deadline:
-                        return b""
                     continue
                 frames.append(mono)
-                if loud:
-                    last_voice = now
-                if now - last_voice > END_SILENCE_S or now - started_at > phrase_time_limit:
+                if verdict in ("end", "limit"):
+                    if trace is not None:
+                        trace.mark("speech_last_voice", ep.last_voice)
+                        trace.mark("speech_end", now)
                     return b"".join(frames)
         finally:
             stream.stop_stream()
@@ -171,13 +167,17 @@ def _record(timeout: float, phrase_time_limit: float, on_ready) -> bytes:
         pa.terminate()
 
 
-def transcribe_once(timeout: float = 8.0, phrase_time_limit: float = 15.0, on_ready=None) -> str:
+def transcribe_once(timeout: float = 8.0, phrase_time_limit: float = 15.0, on_ready=None,
+                    trace=None) -> str:
     """Blocking push-to-talk: waits up to `timeout` s for speech, records until
     END_SILENCE_S of quiet (or `phrase_time_limit`), returns the transcript or ''.
     Loads the model BEFORE opening the mic, so on_ready() means really listening."""
     get_model()
-    pcm = _record(timeout, phrase_time_limit, on_ready)
+    pcm = _record(timeout, phrase_time_limit, on_ready, trace)
     if not pcm:
         return ""
     audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
-    return transcribe_array(audio)
+    text = transcribe_array(audio)
+    if trace is not None:
+        trace.mark("stt_done")
+    return text

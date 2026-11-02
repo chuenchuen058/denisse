@@ -92,6 +92,21 @@ def warm_up() -> None:
             pass
 
 
+def synthesize_samples(text: str):
+    """(float32 mono samples, sample rate) for `text`, or None -- the
+    no-file form, for voice_pipeline.StreamingSpeaker's one open stream."""
+    if not text or not available():
+        return None
+    try:
+        return _get().create(text, voice=VOICE, speed=SPEED, lang="en-us")
+    except Exception as e:
+        try:
+            print(f"(Kokoro voice unavailable: {e})")
+        except Exception:
+            pass
+        return None
+
+
 def synthesize(text: str, path: str | None = None) -> str | None:
     """Speak `text` into a wav file and return its path (caller owns it), or
     None if Kokoro isn't installed or fails, so the caller can fall back."""
