@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 
 import learning
 import brain_rules
+import desktop_context
 import speech_control
 import tool_router
 import tools
@@ -369,6 +370,19 @@ TOOL_DEFINITIONS = [
         "function": {
             "name": "get_brain_location",
             "description": "Check your actual code/memory paths, editable brain rules and current learning status. Use when asked about your brain, rules or whether you are learning; never guess these settings.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "look_at_this",
+            "description": (
+                "Read what Chuen is pointing at: the text selected in the window he's using "
+                "(or, if nothing is selected, his clipboard), plus that window's title. Use "
+                "for 'explain this', 'rewrite this shorter', 'what does this error mean', "
+                "'translate this' when he hasn't pasted the text himself. Not for files on disk."
+            ),
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -1971,6 +1985,14 @@ class Brain:
                          + _style_examples() + messages)
         latest_user = next((m.get("content", "") for m in reversed(messages)
                             if m.get("role") == "user"), "")
+        # "what's this?" with nothing else to go on: one line naming the
+        # front window, this call only -- never in `messages`, so never
+        # saved or synced. See desktop_context.context_line for the rule.
+        if not tool_router.feedback_only(latest_user):
+            window_line = desktop_context.context_line(latest_user)
+            if window_line:
+                system_content += "\n\n" + window_line
+                full_messages[0] = {"role": "system", "content": system_content}
         if speech_control.is_stop_request(latest_user):
             speech_control.stop()
             # Silence is the requested behaviour. Do not ask a model to

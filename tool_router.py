@@ -195,7 +195,21 @@ GROUPS = {
 _COMPILED = {name: re.compile(pat, re.IGNORECASE)
              for name, (_tools, pat) in GROUPS.items()}
 
-_ROUTED = CORE.union(*(tools for tools, _pat in GROUPS.values()))
+# look_at_this (desktop_context.py) reads the selection/clipboard. Offered
+# only when the newest message points at something -- "explain this",
+# "what does that error mean", "translate the selected text" -- and kept
+# out of GROUPS on purpose: "this"/"that" are also the follow-up words
+# request_context() looks back through, and as a group they would end that
+# look-back early ("and that?" after a weather question would lose the
+# weather tools). Newest message only, so it never lingers either.
+DESKTOP_TOOLS = {"look_at_this"}
+
+_ROUTED = CORE.union(DESKTOP_TOOLS, *(tools for tools, _pat in GROUPS.values()))
+
+
+def points_at_something(text: str) -> bool:
+    import desktop_context
+    return desktop_context.has_cue(text)
 
 
 def enabled() -> bool:
@@ -285,6 +299,8 @@ def select(tool_definitions: list, messages: list) -> list:
     # Confirmed corrections can add read-only tools and prioritise them.
     # No learned text enters the prompt, and no existing tool is removed.
     texts = _user_texts(messages, 1)
+    if texts and points_at_something(texts[0]) and not feedback_only(texts[0]):
+        allowed |= DESKTOP_TOOLS
     if texts:
         allowed = instincts.adjust(allowed, texts[0], protected=CORE)
 
