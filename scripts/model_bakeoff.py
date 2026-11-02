@@ -394,10 +394,15 @@ def worker(model: str, rounds: int, out: Path, probe: Ollama | None = None) -> i
 
 
 def _spawn_worker(model: str, rounds: int, out: Path) -> int:
-    env = dict(os.environ, DENISSE_MODEL=model)
+    env = dict(os.environ, DENISSE_MODEL=model, PYTHONIOENCODING="utf-8")
+    # Hand our std handles over explicitly: with CREATE_NO_WINDOW and no
+    # handles given, the child gets a fresh hidden console and its progress
+    # lines go nowhere (seen on the first real run, 2026-11-02).
+    sys.stdout.flush()
     return subprocess.call([sys.executable, str(Path(__file__).resolve()), "--worker",
                             "--model", model, "--rounds", str(rounds), "--out", str(out)],
-                           env=env, cwd=str(ROOT), creationflags=_NO_WINDOW)
+                           env=env, cwd=str(ROOT), creationflags=_NO_WINDOW,
+                           stdout=sys.stdout, stderr=sys.stderr)
 
 
 def bakeoff(models: list[str], rounds: int, probe=None, spawn=_spawn_worker,
