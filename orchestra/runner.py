@@ -67,7 +67,16 @@ DEFAULT_LANES = {
     "claude": ["claude", "-p", "--permission-mode", "acceptEdits", "--permission-prompts", "none",
                "--output-format", "json", "--allowedTools", "Read,Edit,Write,Glob,Grep,Bash",
                "--disallowedTools", "Bash(git push:*),Bash(gh:*)"],
-    "codex": ["codex", "exec", "--full-auto", "-"],
+    # Codex 0.162 dropped --full-auto: workspace-write = edit inside the worktree and
+    # run commands there, no network (found 2 Nov 2026, the first Orchestra task on Codex).
+    # MCP servers off: with approval "never" Chuen's Desktop Commander etc. fail and the run
+    # dies. Keep the user config, though: it holds windows.sandbox = "elevated", without
+    # which workspace-write silently falls back to read-only (2 Nov 2026).
+    "codex": ["codex", "exec", "--skip-git-repo-check", "--color", "never",
+              "-c", "mcp_servers.node_repl.enabled=false",
+              "-c", "mcp_servers.desktop-commander.enabled=false",
+              "-c", "mcp_servers.obsidian.enabled=false",
+              "-s", "workspace-write", "-"],
 }
 def npm_bin(pkg: str, name: str) -> str | None:
     """A global npm CLI's JS entry, run with node so long prompts never go through cmd.exe."""
