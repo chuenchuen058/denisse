@@ -1110,6 +1110,11 @@ _UNCONFIRMED_CLAIM_NUDGE = (
     "happened."
 )
 
+# What the honesty net says when it rejects a done-claim for good. Named so
+# multistep.py can tell a rejected step from one that worked.
+UNCONFIRMED_REPLY = "I haven't confirmed that action, so I can't say it's done."
+FAILED_REPLY = "I couldn't complete that action."
+
 _WRONG_TOOL_CLAIM_NUDGE = (
     "You just said it was done, but the only tools that ran this turn were "
     "{ran}, and none of them does that. Call the tool that actually does "
@@ -2209,7 +2214,7 @@ class Brain:
             answer = text + (f"\n\n{question}" if question else "")
             messages.append({"role": "assistant", "content": answer})
             return answer, messages
-        if _should_delegate(latest_user):
+        if _should_delegate(latest_user) and not getattr(self, "_in_plan", False):
             # A writing/research/solutions job: Claude does it and the result
             # lands in his vault -- see delegate.py. She says so plainly.
             import delegate
@@ -2230,6 +2235,16 @@ class Brain:
             answer = "I shouldn't have said 'Done' without verifying it. The last action is unverified."
             messages.append({"role": "assistant", "content": answer})
             return answer, messages
+        import multistep
+        if (not getattr(self, "_in_plan", False) and multistep.enabled()
+                and multistep.is_multistep(latest_user)):
+            # Two or more separate actions: plan, then one step at a time
+            # through this same loop -- see multistep.py. None = not a plan.
+            planned = multistep.run(self, messages, confirm, extra_context, latest_user.strip())
+            if planned is not None:
+                return planned
+        # Permission guards read his words, not a step the model wrote.
+        intent_text = getattr(self, "_plan_request", None) or latest_user
         last_tool_result = ""  # fallback for _unleak_json
         used_once = set()      # guards _ONCE_PER_TURN tools; per turn, not per round
         turn_results = []      # every tool result this turn, for the _CLAIMS_DONE check
@@ -2241,6 +2256,9 @@ class Brain:
         # Only the tools this turn could plausibly need -- see tool_router.py
         # for why sending all of them costs reply quality on an 8B model.
         turn_tools = tool_router.select(TOOL_DEFINITIONS, messages)
+        plan_tools = getattr(self, "_plan_tools", None)
+        if plan_tools is not None:
+            turn_tools = [d for d in turn_tools if d["function"]["name"] in plan_tools]
         offered_names = {d["function"]["name"] for d in turn_tools}
         request_text, request_groups = tool_router.request_context(messages)
         file_request = ("files" in request_groups
@@ -2270,6 +2288,9 @@ class Brain:
             # JSON form; neither is permission to run an unrelated tool.
             if last_round or name not in offered_names:
                 result = f"Refused: '{name}' isn't available for this request. Answer the user's actual request."
+            elif _call_key(name, args) in (getattr(self, "_step_banned", None) or ()):
+                result = (f"Refused: this exact '{name}' call was already made for this step. Do it a "
+                          "different way, or tell him plainly what you couldn't do.")
             elif _call_key(name, args) in getattr(self, "_retry_avoid", ()):
                 # Naming alternatives here was tried live on 2026-10-30: 0/5
                 # found the answer (she offered to search instead), ~2x slower.
@@ -2282,13 +2303,13 @@ class Brain:
             elif name == "get_current_time" and not _TIME_REQUEST.search(latest_user):
                 result = ("No tool needed here. Answer his question directly, in your "
                           "own words, from what you know.")
-            elif name == "write_file" and not _WRITE_REQUEST.search(latest_user):
+            elif name == "write_file" and not _WRITE_REQUEST.search(intent_text):
                 result = ("Refused: he didn't ask you to write or save anything. Don't write a file; "
                           "do what he said or answer him.")
             elif name == "write_file" and _inside_denisse(args.get("path", "")):
                 result = ("Refused: that's your own program folder, and your settings there are his "
                           "to edit. Don't write there.")
-            elif name == "add_task" and not _TASK_REQUEST.search(latest_user):
+            elif name == "add_task" and not _TASK_REQUEST.search(intent_text):
                 result = ("Refused: he didn't ask for a task or reminder. If he told you how to "
                           "talk to him, just say you've got it.")
             elif (name == "run_shell_command"
@@ -2313,7 +2334,7 @@ class Brain:
                     import instincts
                     if instincts.wants_vault_overview(latest_user):
                         args = {**args, "query": "current projects"}
-                if name == "add_task" and args.get("due") and not _due_said(str(args["due"]), latest_user):
+                if name == "add_task" and args.get("due") and not _due_said(str(args["due"]), intent_text):
                     args = {**args, "due": ""}  # see _due_said
                 result = str(_run_tool(name, args, confirm, used_once))
                 q = str(args.get("query") or args.get("pattern") or "")
@@ -2466,11 +2487,11 @@ class Brain:
                     if turn_results and all(_confirms_nothing(r) for r in turn_results):
                         # Still claiming success over nothing but errors: say
                         # what the tool said, the one thing here that's true.
-                        final_text = "I couldn't complete that action."
+                        final_text = FAILED_REPLY
                     else:
                         # The retry is best effort, never a licence to let
                         # the same unsupported 'Done' escape a second time.
-                        final_text = "I haven't confirmed that action, so I can't say it's done."
+                        final_text = UNCONFIRMED_REPLY
                 if fake_call is None:
                     # Checked after an open too. It used to be skipped once
                     # open_application had succeeded, so she could open the
