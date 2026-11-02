@@ -133,6 +133,11 @@ def print_breakdown(path=None):
         if stage in b:
             r = b[stage]
             print(f"{stage:<20}{r['n']:>5}{r['p50']:>9.3f}{r['p95']:>9.3f}")
+    pauses = [r["longest_pause_s"] for r in rows if "longest_pause_s" in r]
+    if pauses:
+        # If this creeps up to the endpoint threshold, he's being cut off.
+        print(f"longest pause inside an utterance: p95 {vp.percentile(pauses, 95):.3f}s, "
+              f"max {max(pauses):.3f}s (endpoint threshold {vp.END_SILENCE_S}s)")
     return b
 
 

@@ -237,7 +237,10 @@ def split_sentences(text: str) -> list[str]:
 
 # -- endpointing (when has he stopped talking?) -------------------------------
 
-END_SILENCE_S = _env_float("DENISSE_END_SILENCE_S", 0.9)
+# 0.6, down from 0.9: same WER on the eval set at 0.4-0.9, 0.3 cuts words
+# off; the longest synthetic pause was 0.38 s and real pauses run longer,
+# so 0.6 keeps a margin. docs/voice_latency.md.
+END_SILENCE_S = _env_float("DENISSE_END_SILENCE_S", 0.6)
 MIN_SPEECH_RMS = _env_float("DENISSE_MIN_SPEECH_RMS", 300)
 CALIBRATE_S = 0.4
 
@@ -261,6 +264,7 @@ class Endpointer:
         self.started_at = None
         self.last_voice = None
         self.t_start = None
+        self.longest_pause = 0.0
 
     @property
     def gate(self) -> float:
@@ -284,6 +288,10 @@ class Endpointer:
                 return "timeout"
             return None
         if loud:
+            # Longest quiet stretch *inside* the utterance: how close this
+            # turn came to being cut off. Logged per turn, so the threshold
+            # can be checked against his real pauses, not synthetic ones.
+            self.longest_pause = max(self.longest_pause, now - self.last_voice - self.chunk_s)
             self.last_voice = now
         if now - self.last_voice > self.end_silence_s:
             return "end"

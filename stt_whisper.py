@@ -159,6 +159,8 @@ def _record(timeout: float, phrase_time_limit: float, on_ready, trace=None) -> b
                     if trace is not None:
                         trace.mark("speech_last_voice", ep.last_voice)
                         trace.mark("speech_end", now)
+                        trace.extra.update(end_silence_s=ep.end_silence_s,
+                                           longest_pause_s=round(ep.longest_pause, 3), endpoint=verdict)
                     return b"".join(frames)
         finally:
             stream.stop_stream()

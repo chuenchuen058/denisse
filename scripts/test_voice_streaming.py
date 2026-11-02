@@ -324,6 +324,7 @@ class Endpointing(unittest.TestCase):
         self.assertEqual(self.run_clip(seq, 0.5)[0], "end")
         v, t, ep = self.run_clip(seq, 0.9)
         self.assertGreater(ep.last_voice, (7 + 10 + 10) * 0.064)  # heard the second half
+        self.assertAlmostEqual(ep.longest_pause, 10 * 0.064, places=3)  # logged per turn
 
     def test_timeout_without_speech(self):
         self.assertEqual(self.run_clip([50] * 200, 0.9)[0], "timeout")
