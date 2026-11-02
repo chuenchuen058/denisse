@@ -236,6 +236,36 @@ class BargeIn(unittest.TestCase):
         self.assertTrue(sp.speak(["One. Two."]))  # stopped, so no fallback voice either
         self.assertEqual(sink.events, [])
 
+    def test_on_start_fires_once_before_first_audio(self):
+        synth, _, _ = tagged_tts()
+        sink = FakeSink()
+        sp = vp.StreamingSpeaker(synth, sink, lead_in_s=0,
+                                 on_start=lambda: sink.events.append(("start",)))
+        sp.speak(["One. Two. Three."])
+        starts = [i for i, e in enumerate(sink.events) if e == ("start",)]
+        first_write = next(i for i, e in enumerate(sink.events) if e[0] == "write")
+        self.assertEqual(len(starts), 1)
+        self.assertLess(starts[0], first_write)
+
+    def test_on_start_not_fired_when_nothing_synthesized_or_stopped_first(self):
+        fired = []
+        vp.StreamingSpeaker(lambda s: None, FakeSink(), on_start=lambda: fired.append(1)).speak(["One."])
+        synth, _, _ = tagged_tts()
+        vp.StreamingSpeaker(synth, FakeSink(), should_stop=lambda: True,
+                            on_start=lambda: fired.append(1)).speak(["One."])
+        self.assertEqual(fired, [])
+
+    def test_stop_during_on_start_writes_nothing(self):
+        """A stop pressed while the bubble reveal runs still wins."""
+        stopped = threading.Event()
+        synth, _, _ = tagged_tts()
+        sink = FakeSink()
+        sp = vp.StreamingSpeaker(synth, sink, should_stop=stopped.is_set, on_start=stopped.set)
+        self.assertTrue(sp.speak(["One. Two."]))
+        self.assertTrue(sp.interrupted)
+        self.assertEqual([e for e in sink.events if e[0] == "write"], [])
+        self.assertIn(("abort",), sink.events)
+
     def test_detector_needs_sustained_speech_above_her_echo(self):
         det = vp.BargeInDetector(chunk_s=0.064, min_loud_s=0.3, factor=4, min_rms=300, calibrate_s=0.3)
         for _ in range(det.n_cal):
@@ -351,6 +381,20 @@ class LatencyLog(unittest.TestCase):
             self.assertEqual(b["speech_end"], {"n": 10, "p50": 0.5, "p95": 0.5})
             self.assertAlmostEqual(b["stt_done"]["p50"], 0.945, places=3)
             self.assertNotIn("playback_start", b)
+
+    def test_breakdown_by_source_and_typed_origin(self):
+        rows = []
+        for src, first in (("voice_mode", 2.0), ("tray_chat", 1.0), (None, 2.0)):
+            t = vp.LatencyTrace()
+            t.mark("input_end" if src == "tray_chat" else "speech_last_voice", 100.0)
+            t.mark("first_token", 100.0 + first)
+            if src:
+                t.extra["source"] = src
+            rows.append(t.to_record())
+        self.assertEqual(vp.breakdown(rows, "tray_chat")["first_token"]["n"], 1)
+        self.assertEqual(vp.breakdown(rows, "tray_chat")["first_token"]["p50"], 1.0)
+        self.assertEqual(vp.breakdown(rows, "voice_mode")["first_token"]["n"], 2)  # untagged = voice_mode
+        self.assertEqual(vp.breakdown(rows)["first_token"]["n"], 3)
 
     def test_percentile(self):
         self.assertIsNone(vp.percentile([], 50))

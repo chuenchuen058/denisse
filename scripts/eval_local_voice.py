@@ -128,11 +128,18 @@ def print_breakdown(path=None):
     if not b:
         print("(no timed turns yet: talk to voice_mode.py first)")
         return b
-    print(f"{'stage':<20}{'n':>5}{'p50 s':>9}{'p95 s':>9}")
-    for stage in vp.STAGES:
-        if stage in b:
-            r = b[stage]
-            print(f"{stage:<20}{r['n']:>5}{r['p50']:>9.3f}{r['p95']:>9.3f}")
+    # One table per path: a typed tray turn (t = 0 at send) has no endpoint
+    # or STT, so pooling it with spoken turns would blur both.
+    for source in sorted({vp.row_source(r) for r in rows}):
+        sb = vp.breakdown(rows, source)
+        if not sb:
+            continue
+        print(f"\n[{source}]")
+        print(f"{'stage':<20}{'n':>5}{'p50 s':>9}{'p95 s':>9}")
+        for stage in vp.STAGES:
+            if stage in sb:
+                r = sb[stage]
+                print(f"{stage:<20}{r['n']:>5}{r['p50']:>9.3f}{r['p95']:>9.3f}")
     pauses = [r["longest_pause_s"] for r in rows if "longest_pause_s" in r]
     if pauses:
         # If this creeps up to the endpoint threshold, he's being cut off.
