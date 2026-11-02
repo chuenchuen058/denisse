@@ -397,6 +397,120 @@ class RunnerTest(unittest.TestCase):
         until = dt.datetime.fromisoformat(self.state()["lanes"]["codex"]["limited_until"])
         self.assertAlmostEqual((until - before).total_seconds(), 3600, delta=120)
 
+    # --- reconcile after a killed tick (2 Nov 2026: on battery the ticks died, their lanes didn't)
+
+    def dead_pid(self):
+        p = subprocess.Popen([sys.executable, "-c", "pass"])
+        p.wait()
+        return p.pid
+
+    def live_child(self):
+        p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        self.addCleanup(lambda: (p.kill(), p.wait()))
+        return p
+
+    def write_lock(self, **info):
+        info.setdefault("since", dt.datetime.now().isoformat())
+        self.R.LOCK_FILE.write_text(json.dumps(info))
+
+    def orphan_worktree(self, slug, report=None, commit=False):
+        """What a killed tick leaves: attempt counted, worktree made, lane maybe finished."""
+        task = next(t for t in self.R.load_queue() if t.slug == slug)
+        st = self.R.load_state()
+        ts = self.R.task_state(st, task)
+        ts["attempts"] += 1
+        ts["last_start"] = dt.datetime.now().isoformat()
+        self.R.save_state(st)
+        wt, _ = self.R.fresh_worktree(task)
+        if commit:
+            (wt / "done.txt").write_text("x")
+            subprocess.run(["git", "add", "done.txt"], cwd=wt, check=True, capture_output=True)
+            subprocess.run(["git", "commit", "-qm", "orphan's work"], cwd=wt, check=True, capture_output=True)
+        if report:
+            (wt / ".review").mkdir(exist_ok=True)
+            (wt / ".review" / "report.md").write_text(report)
+        return wt
+
+    def test_creation_time_identifies_a_process(self):
+        me = self.R.proc_created(os.getpid())
+        self.assertTrue(me, "own creation time must be readable")
+        self.assertTrue(self.R._alive(os.getpid(), me))
+        self.assertFalse(self.R._alive(os.getpid(), me + 1))
+        self.assertIsNone(self.R.proc_created(self.dead_pid()))
+
+    def test_dead_owner_lock_is_reclaimed_at_once(self):
+        self.add("dl")
+        self.write_lock(pid=self.dead_pid(), created=12345)  # seconds old, far under the age rule
+        os.environ["FAKE_COMMIT"] = "1"
+        self.assertEqual(self.R.tick(), "PASS")
+        self.assertIn("RECONCILE dead owner", self.R.LOG_FILE.read_text(encoding="utf-8"))
+
+    def test_reused_pid_is_treated_as_dead(self):
+        self.add("ru")
+        child = self.live_child()  # alive, same pid, but not the process the lock was written by
+        real = self.R.proc_created(child.pid)
+        self.R.proc_created = lambda pid, _real=self.R.proc_created: (real + 999 if pid == child.pid else _real(pid))
+        self.write_lock(pid=child.pid, created=real)
+        self.assertFalse(self.R._alive(child.pid, real))
+        self.assertEqual(self.R.tick(), "PASS")
+        self.assertIn(f"RECONCILE dead owner {child.pid}", self.R.LOG_FILE.read_text(encoding="utf-8"))
+
+    def test_unparseable_lock_falls_back_to_age_and_is_kept(self):
+        self.add("up")
+        self.R.LOCK_FILE.write_text("not json")
+        self.assertEqual(self.R.tick(), "busy")
+        self.assertTrue(self.R.LOCK_FILE.exists(), "never delete a lock just because it didn't parse")
+
+    def test_live_orphan_blocks_redispatch(self):
+        self.add("or")
+        self.orphan_worktree("or")
+        child = self.live_child()
+        self.write_lock(pid=self.dead_pid(), created=1, task="or", lane="fake",
+                        lane_pid=child.pid, lane_created=self.R.proc_created(child.pid))
+        self.assertEqual(self.R.tick(), "busy")
+        self.assertEqual(self.state()["tasks"]["or"]["attempts"], 1, "not dispatched again")
+        self.assertTrue(self.R.LOCK_FILE.exists(), "the slot stays occupied")
+        self.assertTrue((self.R.QUEUE / "or.md").exists())
+        self.assertIn(f"RECONCILE orphan lane {child.pid} still running or",
+                      self.R.LOG_FILE.read_text(encoding="utf-8"))
+        # in parallel mode another slot must not pick it up either
+        self.assertEqual(self.R.reconcile(self.R.load_state()), {"or": "orphan running"})
+
+    def test_orphan_report_is_collected_and_merged(self):
+        self.add("rp")
+        self.orphan_worktree("rp", report="RESULT: PASS\nGATE: ok\nHUMAN: none\nPREMISE: right\n", commit=True)
+        self.write_lock(pid=self.dead_pid(), created=1, task="rp", lane="fake",
+                        lane_pid=self.dead_pid(), lane_created=1, before=[])
+        self.assertEqual(self.R.tick(), "idle")
+        self.assertTrue((self.repo / "done.txt").exists(), "the orphan's branch is merged")
+        ts = self.state()["tasks"]["rp"]
+        self.assertEqual(ts["attempts"], 1)
+        self.assertEqual(ts["merge"], "merged")
+        h = ts["history"][-1]
+        self.assertEqual(h["result"], "PASS")
+        self.assertTrue(h["recovered"])
+        self.assertIn("pass", h["runner_gate"])
+        day = next(self.R.ARCHIVE.iterdir())
+        self.assertTrue((day / "rp.md").exists() and (day / "rp.report.md").exists())
+        self.assertFalse(self.R.LOCK_FILE.exists())
+
+    def test_orphan_without_report_counts_one_attempt(self):
+        self.add("nr2")
+        wt = self.orphan_worktree("nr2")
+        self.write_lock(pid=self.dead_pid(), created=1, task="nr2", lane="fake",
+                        lane_pid=self.dead_pid(), lane_created=1, before=[])
+        self.assertEqual(self.R.reconcile(self.R.load_state()), {"nr2": "NO_REPORT"})
+        ts = self.state()["tasks"]["nr2"]
+        self.assertEqual((ts["attempts"], ts["last_result"]), (1, "NO_REPORT"))
+        self.assertTrue(ts["history"][-1]["recovered"])
+        self.assertTrue(wt.exists(), "worktree kept")
+        self.assertTrue((self.R.QUEUE / "nr2.md").exists(), "one retry left")
+        self.assertFalse(self.R.LOCK_FILE.exists(), "slot freed")
+        os.environ["FAKE_RESULT"] = "NONE"  # the retry fails the same way: parked, no third run
+        self.assertEqual(self.R.tick(), "NO_REPORT")
+        self.assertEqual(self.state()["tasks"]["nr2"]["attempts"], 2)
+        self.assertTrue((self.R.PARKED / "nr2.md").exists())
+
     def test_parallel_state_saves_keep_lane_limits(self):
         base = self.R.load_state()
         mine = json.loads(json.dumps(base))

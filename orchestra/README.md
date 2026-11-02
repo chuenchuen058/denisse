@@ -36,6 +36,11 @@ an agent Not working):
 registers it at 07:10 alongside the runner. Tests:
 `python -m unittest discover -s orchestra/exams -p "test_*.py"`.
 
+## Reconcile after a killed tick
+
+Each slot lock (`.review/runner*.lock`) records the runner's and its lane child's pid and process creation time; before picking, every tick checks them: a dead (or pid-reused) owner frees the slot at once, a still-running orphaned lane keeps its slot and its task isn't re-dispatched, and a finished orphan is collected through the normal `finish()` path (its report → gate re-run, merge, push; no report → NO_REPORT, one counted attempt), with `recovered: true` in the history and the worktree kept.
+Log lines: `RECONCILE dead owner <pid> for <slug>`, `RECONCILE orphan lane <pid> still running <slug>`, `RECONCILE collecting <slug>: lane gone, report found|missing`; an unreadable lock is never deleted for that alone and falls back to the old age rule.
+
 ## Re-queuing a parked task
 
 Don't edit `state.json` by hand. `requeue.py <slug>`:
