@@ -11,17 +11,18 @@
 //     every other agent can see what was done
 //
 // Background jobs: the desktop bridge cancels any tool call that runs past 60 s, and a real
-// Codex run takes minutes. So ask_* / route_task / ask_all wait up to wait_s (45 s) and,
+// Codex run takes minutes. So ask_* / route_task / split_tasks / ask_all wait up to wait_s (45 s) and,
 // if the agent isn't done, hand back a job_id while the agent keeps running. Claude then
 // polls job_status and fetches job_result. Jobs persist to .review/hub/jobs/<id>.json +
-// <id>.out (live output), so a hub restart keeps finished results.
+// <id>.out (live output), so a hub restart keeps finished results; finished jobs older than
+// AGENT_HUB_JOB_KEEP_DAYS (default 7) are pruned at start and hourly.
 //
 // Extends ~/scripts/codex-bridge (same Codex call), no npm dependencies.
 // Env: AGENT_HUB_VAULT (default: OneDrive KCL\Denisse), AGENT_HUB_FAKE=1 for tests
 // (AGENT_HUB_FAKE_CMD=<node script> makes the fakes real child processes),
 // AGENT_HUB_JOBS_DIR, AGENT_HUB_JOB_TIMEOUT_MS (default 15 min).
 import { spawn, execFileSync } from "node:child_process";
-import { readFileSync, rmSync, mkdtempSync, existsSync, mkdirSync, appendFileSync, writeFileSync, readdirSync } from "node:fs";
+import { readFileSync, rmSync, mkdtempSync, existsSync, mkdirSync, appendFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -400,6 +401,41 @@ function listJobs() {
     started: r.started, elapsed_s: elapsed(r), prompt: r.prompt, ...(r.error ? { error: r.error } : {}) })), null, 2);
 }
 
+// Job files would pile up forever otherwise. Pruned when the hub starts, then hourly.
+const PRUNE_EVERY_MS = 3600 * 1000;
+
+function keepMs() {
+  const d = Number(process.env.AGENT_HUB_JOB_KEEP_DAYS);
+  return (process.env.AGENT_HUB_JOB_KEEP_DAYS !== undefined && Number.isFinite(d) && d >= 0 ? d : 7) * 86400 * 1000;
+}
+
+export function pruneJobs(now = Date.now()) {
+  // Deletes <id>.json + <id>.out for jobs that ended more than keep-days ago. A job that is
+  // still running (here or in another live hub) is never touched; one whose hub died is
+  // failed by readRec() and aged by its original timestamps.
+  const cutoff = now - keepMs();
+  let names = [];
+  try { names = readdirSync(JOBS_DIR).filter((f) => f.endsWith(".json")); } catch { return []; }
+  const removed = [];
+  for (const f of names) {
+    const id = f.slice(0, -5);
+    let raw;
+    try { raw = JSON.parse(readFileSync(jobFile(id, "json"), "utf8")); } catch { continue; }
+    let at = Date.parse(raw.finished || raw.started);
+    if (!Number.isFinite(at)) { try { at = statSync(jobFile(id, "json")).mtimeMs; } catch { continue; } }
+    if (at >= cutoff) continue;
+    const rec = getRec(id);
+    if (!rec || rec.status === "running") continue;
+    for (const ext of ["json", "out"]) { try { rmSync(jobFile(id, ext), { force: true }); } catch {} }
+    jobs.delete(id);
+    removed.push(id);
+  }
+  return removed;
+}
+
+try { pruneJobs(); } catch {}
+setInterval(() => { try { pruneJobs(); } catch {} }, PRUNE_EVERY_MS).unref();
+
 // ------------------------------------------------------------------ MCP
 
 const taskProps = {
@@ -429,9 +465,10 @@ export const TOOLS = [
     inputSchema: { type: "object", properties: { ...taskProps, ...jobProps,
       kind: { type: "string", enum: Object.keys(ROUTES), description: "What sort of work this is. Leave out to let the hub guess from the prompt." } },
       required: ["prompt"] } },
-  { name: "split_tasks", description: "Run several sub-tasks at once, each routed to the best agent (max 5). Give each its own cwd, or keep them read-only, so they don't edit the same files.",
+  { name: "split_tasks", description: "Run several sub-tasks at once, each routed to the best agent (max 5). Give each its own cwd, or keep them read-only, so they don't edit the same files. Runs as one job." + JOB_NOTE,
     inputSchema: { type: "object", properties: { tasks: { type: "array", maxItems: 5, items: { type: "object",
-      properties: { ...taskProps, kind: { type: "string", enum: Object.keys(ROUTES) } }, required: ["prompt"] } } }, required: ["tasks"] } },
+      properties: { ...taskProps, kind: { type: "string", enum: Object.keys(ROUTES) } }, required: ["prompt"] } }, ...jobProps },
+      required: ["tasks"] } },
   { name: "ask_all", description: "Ask Codex, Gemini and Copilot the same question at once, read-only, for second opinions. Runs as one job." + JOB_NOTE,
     inputSchema: { type: "object", properties: { prompt: taskProps.prompt, cwd: taskProps.cwd, ...jobProps }, required: ["prompt"] } },
   { name: "job_status", description: "Check a background agent job: running / done / failed, seconds elapsed, and the last 20 lines of its output. Use this to follow a slow ask_* call instead of asking again.",
@@ -461,8 +498,18 @@ export async function callTool(name, a = {}) {
     return asJob(name, r.agent, a, () => routed(a, r));
   }
   if (name === "split_tasks") {
-    const outs = await Promise.all((a.tasks || []).slice(0, 5).map((t) => routed(t)));
-    return outs.join("\n\n");
+    // One job for the lot; a sub-task that fails shows up in the text, and the job only
+    // fails if every sub-task did (finish(): job.failed && !job.ok), same as ask_all.
+    const tasks = (Array.isArray(a.tasks) ? a.tasks : []).slice(0, 5);
+    if (!tasks.length) throw new Error("split_tasks needs at least one task.");
+    const routes = tasks.map((t) => pickRoute(t.prompt, t.kind));
+    const agents = [...new Set(routes.map((r) => r.agent))].join(",");
+    const summary = { ...a, prompt: tasks.map((t) => oneLine(t.prompt, 60)).join(" | ") };
+    return asJob(name, agents, summary, () => Promise.all(tasks.map((t, i) => routed(t, routes[i]).catch((e) => {
+      const job = jobCtx.getStore();
+      if (job) job.failed += 1;
+      return `### ${routes[i].agent} — ${routes[i].kind}: FAILED\n${String(e?.message || e)}`;
+    }))).then((outs) => outs.join("\n\n")));
   }
   if (name === "ask_all") {
     return asJob(name, "codex,gemini,copilot", a, () => Promise.all(["codex", "gemini", "copilot"].map((ag) =>

@@ -236,3 +236,86 @@ test("jobs: route_task and ask_all run as jobs too, and the gemini→codex fallb
   assert.equal((all.match(/^\[(codex|gemini|copilot)\]/gm) || []).length, 3);
   delete process.env.AGENT_HUB_FAKE_CMD;
 });
+
+test("jobs: split_tasks returns a job at once, and its result has every sub-task's output", async () => {
+  process.env.AGENT_HUB_FAKE_CMD = FAKE_CMD;
+  try {
+    const t0 = Date.now();
+    const first = JSON.parse(await hub.callTool("split_tasks", { wait_s: 0, tasks: [
+      { prompt: "fix it SLEEP=900 TAG=sp1", kind: "code_change" },
+      { prompt: "read it SLEEP=900 TAG=sp2", kind: "research" },
+      { prompt: "list PRs SLEEP=900 TAG=sp3", kind: "github" }] }));
+    assert.ok(Date.now() - t0 < 600, "handed back before the sub-tasks finished");
+    assert.equal(first.status, "running");
+    assert.ok(first.job_id);
+    assert.deepEqual(first.agent.split(",").sort(), ["codex", "copilot", "gemini"]);
+    const end = await until(hub, first.job_id);
+    assert.equal(end.status, "done");
+    assert.equal(end.tool, "split_tasks");
+    const res = await hub.callTool("job_result", { job_id: first.job_id });
+    for (const [a, tag] of [["codex", "sp1"], ["gemini", "sp2"], ["copilot", "sp3"]]) {
+      assert.match(res, new RegExp(`### ${a}`));
+      assert.match(res, new RegExp(`fake ${a} answer ${tag}`));
+    }
+  } finally { delete process.env.AGENT_HUB_FAKE_CMD; }
+});
+
+test("jobs: split_tasks shows a failed sub-task in the text, and fails only if all of them failed", async () => {
+  try {
+    process.env.AGENT_HUB_FAKE_FAIL = "codex";  // codex has no fallback, gemini still answers
+    const some = await hub.callTool("split_tasks", { tasks: [
+      { prompt: "fix", kind: "code_change" }, { prompt: "read", kind: "research" }] });
+    assert.match(some, /\[codex, exit 1\]/);
+    assert.match(some, /\[gemini\]\nfake gemini answer/);
+    assert.doesNotMatch(some, /FAILED:/);
+    process.env.AGENT_HUB_FAKE_FAIL = "codex,gemini,copilot";  // gemini's fallback (codex) fails too
+    const all = await hub.callTool("split_tasks", { tasks: [
+      { prompt: "fix TAG=allfail", kind: "code_change" }, { prompt: "read TAG=allfail", kind: "research" }] });
+    assert.match(all, /FAILED: the agent exited with an error/);
+  } finally { delete process.env.AGENT_HUB_FAKE_FAIL; }
+  await assert.rejects(hub.callTool("split_tasks", { tasks: [] }), /at least one task/);
+});
+
+test("jobs: split_tasks counts against the 4-job cap", async () => {
+  process.env.AGENT_HUB_FAKE_CMD = FAKE_CMD;
+  try {
+    const ids = [];
+    for (let i = 0; i < 4; i++)
+      ids.push(JSON.parse(await hub.callTool("ask_copilot", { prompt: `cap SLEEP=800 TAG=spcap${i}`, wait_s: 0 })).job_id);
+    await assert.rejects(hub.callTool("split_tasks", { wait_s: 0, tasks: [{ prompt: "x", kind: "github" }] }),
+      /4 agent jobs are already running/);
+    for (const id of ids) assert.equal((await until(hub, id)).status, "done");
+  } finally { delete process.env.AGENT_HUB_FAKE_CMD; }
+});
+
+test("job files: old finished jobs are pruned at hub start; running and recent ones are kept", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "hub-prune-"));
+  const day = 86400 * 1000;
+  const ago = (d) => new Date(Date.now() - d * day).toISOString();
+  const put = (id, rec) => {
+    writeFileSync(join(dir, `${id}.json`), JSON.stringify({ id, tool: "ask_codex", agent: "codex", prompt: "x",
+      timeout_s: 900, hub_id: "other", ...rec }), "utf8");
+    writeFileSync(join(dir, `${id}.out`), "output\n", "utf8");
+  };
+  put("old-done", { status: "done", started: ago(10), finished: ago(10), result: "r" });
+  put("old-failed", { status: "failed", started: ago(9), finished: ago(9), error: "e" });
+  put("recent-done", { status: "done", started: ago(1), finished: ago(1), result: "r" });
+  // still running in another live hub (our parent process stands in for it): never deleted
+  put("old-running", { status: "running", started: ago(30), hub_pid: process.ppid });
+  // "running" but its hub is gone: it died with that hub, so it is old and finished
+  put("old-orphan", { status: "running", started: ago(30), hub_pid: 999999 });
+  const oldDir = process.env.AGENT_HUB_JOBS_DIR;
+  process.env.AGENT_HUB_JOBS_DIR = dir;
+  let h;
+  try { h = await import("./server.mjs?prune"); } finally { process.env.AGENT_HUB_JOBS_DIR = oldDir; }
+  const has = (id, ext = "json") => existsSync(join(dir, `${id}.${ext}`));
+  for (const id of ["old-done", "old-failed", "old-orphan"]) {
+    assert.equal(has(id), false, `${id}.json pruned`);
+    assert.equal(has(id, "out"), false, `${id}.out pruned`);
+  }
+  for (const id of ["recent-done", "old-running"]) assert.ok(has(id) && has(id, "out"), `${id} kept`);
+  // AGENT_HUB_JOB_KEEP_DAYS overrides the 7 days
+  process.env.AGENT_HUB_JOB_KEEP_DAYS = "0.5";
+  try { assert.deepEqual(h.pruneJobs(), ["recent-done"]); } finally { delete process.env.AGENT_HUB_JOB_KEEP_DAYS; }
+  assert.ok(has("old-running"), "running job survives any keep-days");
+});
