@@ -1,0 +1,47 @@
+{
+  "_about": "Approved gate commands for tasks the local team proposes. orchestra/admission.py renders a packet's gate only from here: {arg} is filled with a checked argument, never with model text as such. Add a gate or an area here by hand; nothing writes this file.",
+
+  "gates": {
+    "unittest": {
+      "command": ".venv\\Scripts\\python.exe -m unittest {arg} -v",
+      "arg": "test_module",
+      "about": "one unittest module, dotted, whose last part starts with test_ (e.g. orchestra.test_runner)"
+    },
+    "unittest-discover": {
+      "command": ".venv\\Scripts\\python.exe -m unittest discover -s {arg} -p \"test_*.py\" -v",
+      "arg": "test_dir",
+      "about": "every test_*.py in one folder (e.g. orchestra/exams)"
+    },
+    "script-test": {
+      "command": ".venv\\Scripts\\python.exe {arg}",
+      "arg": "test_script",
+      "about": "one self-running test script, scripts/test_*.py or eval/test_*.py"
+    },
+    "node-test": {
+      "command": "node --test {arg}",
+      "arg": "js_test",
+      "about": "one node:test file, test_*.mjs or *.test.mjs (e.g. orchestra/agent_hub/test_hub.mjs)"
+    },
+    "run-checks": {
+      "command": ".venv\\Scripts\\python.exe scripts\\run_checks.py",
+      "arg": null,
+      "about": "the offline regression suites (scripts/run_checks.py; it has no --fast option today)"
+    }
+  },
+
+  "args": {
+    "test_module": {"pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$", "exists": "module"},
+    "test_dir": {"pattern": "^[A-Za-z0-9_][A-Za-z0-9_./-]*$", "exists": "dir"},
+    "test_script": {"pattern": "^(scripts|eval)/test_[A-Za-z0-9_]+\\.py$", "exists": "file"},
+    "js_test": {"pattern": "^[A-Za-z0-9_][A-Za-z0-9_./-]*(/test_[A-Za-z0-9_]+|\\.test)\\.mjs$", "exists": "file"}
+  },
+
+  "areas": {
+    "orchestra": {"paths": ["orchestra/"], "gates": ["unittest", "unittest-discover", "node-test"]},
+    "atrium": {"paths": ["atrium/"], "gates": ["unittest", "unittest-discover"]},
+    "eval": {"paths": ["eval/"], "gates": ["unittest", "script-test", "run-checks"]},
+    "scripts": {"paths": ["scripts/"], "gates": ["script-test", "run-checks"]},
+    "app": {"paths": [""], "gates": ["script-test", "unittest", "run-checks"]}
+  },
+  "_areas": "A packet's area is the area of all its scope paths (longest matching prefix; \"\" matches anything). A packet whose paths span two areas is refused."
+}
