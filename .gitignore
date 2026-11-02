@@ -49,3 +49,6 @@ memory/invest-fixtures/
 .review/*
 !.review/README.md
 !.review/TEMPLATE.md
+
+# model_bakeoff.py raw results (per-case pass counts; regenerated each run)
+eval/bakeoff/
