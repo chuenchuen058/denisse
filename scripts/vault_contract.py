@@ -41,6 +41,7 @@ GENERATED = (
     "Denisse/Tasks.md",
     "Templates/",
     "Calendar/Handoff-",   # agent hub's daily log, one line per hand-off
+    "Calendar/Chats/",     # bounded historical chat summaries, not hand-curated
     "STATE NOW.md",        # Orchestra, rewritten every tick
 )
 ATTACH = (".pdf", ".m", ".png", ".jpg", ".jpeg", ".svg", ".xlsx", ".docx", ".pptx", ".csv", ".zip")
