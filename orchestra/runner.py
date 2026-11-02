@@ -39,7 +39,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-if os.name == "nt":
+if os.name == "nt" and not getattr(subprocess.Popen.__init__, "_orchestra_quiet", False):
+    # (the guard stops a reload, as the tests do, from wrapping the wrapper again)
     # No console windows for anything the runner starts: the runner itself is pythonw (no
     # console), so every claude/codex/git/gate child, and their own children (the Bash tool,
     # hooks, tests), would otherwise open a terminal window of its own. Chuen, 2 Nov 2026:
@@ -54,6 +55,7 @@ if os.name == "nt":
             kwargs["creationflags"] = flags | _CREATE_NO_WINDOW
         _popen_init(self, *args, **kwargs)
 
+    _quiet_popen_init._orchestra_quiet = True
     subprocess.Popen.__init__ = _quiet_popen_init
 
 HERE = Path(__file__).resolve().parent
