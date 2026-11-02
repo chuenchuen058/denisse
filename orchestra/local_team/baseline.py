@@ -142,11 +142,11 @@ class Recorder:
 
     @contextlib.contextmanager
     def installed(self):
-        core.ask = self.ask
+        prev, core.ask = core.ask, self.ask
         try:
             yield self
         finally:
-            core.ask = self._orig
+            core.ask = prev
 
 
 def wait_ready(ctx: Ctx, max_wait_s: float, poll_s: float = 30, log=print) -> None:

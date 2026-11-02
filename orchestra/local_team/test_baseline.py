@@ -163,13 +163,14 @@ class HarnessTest(unittest.TestCase):
             return {"ok": 1}
         rec._orig = slow_ask
         role = core.load_role("scout")
+        real = core.ask
         with rec.installed():
             core.ask(None, role, {})
+        self.assertIs(core.ask, real, "the real ask must be back afterwards")
         [call] = rec.calls
         self.assertGreaterEqual(call["lease_samples"], 2)
         self.assertTrue(call["lease_held"])
         self.assertTrue(call["released"])
-        self.assertIsNot(core.ask, rec.ask, "the wrapper must be removed afterwards")
 
     def test_probe_skips_without_calling_the_model_while_the_lease_is_held(self):
         fx = self.fixture("03-orphan-lane-timeout")
