@@ -39,6 +39,23 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+if os.name == "nt":
+    # No console windows for anything the runner starts: the runner itself is pythonw (no
+    # console), so every claude/codex/git/gate child, and their own children (the Bash tool,
+    # hooks, tests), would otherwise open a terminal window of its own. Chuen, 2 Nov 2026:
+    # "the claude terminal keeps spamming my entire computer". CREATE_NO_WINDOW gives a child
+    # a hidden console that its children inherit.
+    _CREATE_NO_WINDOW = 0x08000000
+    _popen_init = subprocess.Popen.__init__
+
+    def _quiet_popen_init(self, *args, **kwargs):
+        flags = kwargs.get("creationflags", 0) or 0
+        if not flags & 0x00000018:  # leave DETACHED_PROCESS / CREATE_NEW_CONSOLE callers alone
+            kwargs["creationflags"] = flags | _CREATE_NO_WINDOW
+        _popen_init(self, *args, **kwargs)
+
+    subprocess.Popen.__init__ = _quiet_popen_init
+
 HERE = Path(__file__).resolve().parent
 REPO = Path(os.environ.get("ORCHESTRA_REPO", HERE.parent))
 REVIEW = REPO / ".review"
