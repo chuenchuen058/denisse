@@ -55,6 +55,12 @@ def build() -> str:
                            + (f" (tasks fall back to {fb} unless Lane-Fixed)" if fb else ""))
     out += ["**Limited lanes:** " + ("; ".join(limited) or "none"), ""]
 
+    try:
+        import power
+        out += ["**Power:** " + power.describe(power.power_status(), R.C), ""]
+    except Exception as e:  # a power reading must never break STATE NOW
+        out += [f"**Power:** unknown ({e})", ""]
+
     waiting = []
     for why in sorted(R.PARKED.glob("*.why.txt")) if R.PARKED.exists() else []:
         slug = why.name[: -len(".why.txt")]

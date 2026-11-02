@@ -51,6 +51,10 @@
   "review_timeout_s": 900,
   "_review_risky": "Before integration, a diff touching orchestra/, atrium/hook.py, .git/hooks, an install_*.ps1, or over review_max_lines changed lines gets a fresh read-only claude -p reviewer (prompt: orchestra/review_diff_prompt.md). VERDICT: block, no verdict, a timeout or a missing lane parks the task. Its cost counts like any lane. false turns it off.",
 
+  "dispatch_on_battery": false,
+  "battery_floor_percent": 30,
+  "_dispatch_on_battery": "Master prompt section 8: pause heavy background work on battery. false = on battery the runner starts no new lane (logs ON BATTERY at most every 30 min); running lanes finish and a finished lane is still gated, merged and pushed. true = dispatch on battery until battery_floor_percent, then stop starting lanes. Running lanes are never killed for power. Task Scheduler no longer stops ticks on unplug (install_task.ps1, 2 Nov 2026).",
+
   "git_timeout_s": 120,
   "tick_watchdog_extra_s": 900,
   "_tick_watchdog_extra_s": "The whole tick is killed this long after the longest possible lane timeout. Atrium hung 19 then 29 minutes on one call."

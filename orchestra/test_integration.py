@@ -87,6 +87,7 @@ class IntegrationTest(unittest.TestCase):
         os.environ["ORCHESTRA_REPO"] = str(self.repo)
         os.environ["ORCHESTRA_DAILY_SPEND_CAP_USD"] = "50"
         os.environ["ORCHESTRA_TIMEOUT_S"] = json.dumps({"light": 30, "heavy": 60})
+        os.environ["ORCHESTRA_POWER"] = "ac"  # never depend on whether the laptop is plugged in
         for k in ENV:
             os.environ.pop(k, None)
         os.environ["FAKE_REVIEW_FLAG"] = str(self.flag)
