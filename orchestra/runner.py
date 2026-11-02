@@ -364,6 +364,27 @@ def pick(tasks: list[Task], state: dict) -> Task | None:
 
 # ---------------------------------------------------------------- lock + watchdog
 
+def _pid_alive(pid: int) -> bool:
+    """True if a process with this PID exists. Never signals it (os.kill would terminate on Windows)."""
+    if os.name == "nt":
+        import ctypes
+        k = ctypes.windll.kernel32
+        h = k.OpenProcess(0x1000, False, int(pid))  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return ctypes.GetLastError() == 5  # access denied = exists but not ours
+        code = ctypes.c_ulong()
+        k.GetExitCodeProcess(h, ctypes.byref(code))
+        k.CloseHandle(h)
+        return code.value == 259  # STILL_ACTIVE
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
 def take_lock(state: dict) -> bool:
     """Atomic create; a lock older than the longest possible run is stale."""
     max_age = max(timeout_for(w, state) for w in ("light", "heavy")) + C["tick_watchdog_extra_s"]
@@ -374,6 +395,15 @@ def take_lock(state: dict) -> bool:
                 json.dump({"pid": os.getpid(), "since": now().isoformat()}, f)
             return True
         except FileExistsError:
+            try:
+                owner = json.loads(LOCK_FILE.read_text(encoding="utf-8")).get("pid")
+            except (OSError, ValueError):
+                owner = None
+            if owner and owner != os.getpid() and not _pid_alive(owner):
+                # e.g. Task Scheduler killed the tick when the laptop went onto battery (2 Nov)
+                log(f"lock {LOCK_FILE.name} held by dead pid {owner}; removed")
+                LOCK_FILE.unlink(missing_ok=True)
+                continue
             age = time.time() - LOCK_FILE.stat().st_mtime
             if age < max_age:
                 return False
