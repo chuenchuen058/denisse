@@ -14,7 +14,63 @@ each with its reason. This file covers the commands.
 | `python -m orchestra.exams run [--agent X] [--category Y] [--include-claude]` | The full exam bank on every available agent (codex, copilot, gemini, `local:<model>`; claude only with `--include-claude`) |
 | `python -m orchestra.exams best <category>` | The best working agent for `code-edit`, `debug`, `writing`, `study` or `extract` |
 
+| `python -m orchestra.local_team produce` | One producer pass on the local model: librarian, scout, planner, admission (Task Scheduler every 30 min with `install_task.ps1 -Producer`) |
+| `python -m orchestra.local_team scout\|planner\|librarian\|status` | One role on its own (see "Local team and producer" below) |
+
 Use the venv python (`.venv\Scripts\python.exe`) for all of them.
+
+## Local team and producer
+
+Until now new tasks came only from a Claude chat. The producer keeps the queue
+supplied on its own, on the laptop's Ollama model (`local_team_model`, `llama3.1:8b`),
+and a deterministic admission layer decides what actually enters the queue.
+
+| Role | Reads | Writes (data only, `.review/local_team/`) | Can't |
+|---|---|---|---|
+| **scout** (`roles/scout.md`) | the delta since its last *successful* scan: signal lines of `.review/runner.log` (PARKED, FAIL, PARTIAL, broken gate, …), new `parked/*.why.txt`, NOT DONE / ODD bullets of new `archive/*/*.report.md`, failing suites in `.review/checks.json` (`scripts/run_checks.py --report .review/checks.json`). At most 25 items of 300 chars | `candidates/<stamp>.json`: problems, each tied to evidence ids it was given | read files, cite evidence it wasn't given (dropped), call the model when nothing is new |
+| **planner** (`roles/planner.md`) | one candidate + its evidence, the gate registry, the test files that exist | `plans/<stamp>.json`: a task packet (title, objective, scope paths, acceptance, gate id + argument, weight); evidence is copied by code, not by the model | write a shell command, pick a gate outside `gates.json`, write the queue |
+| **librarian** (`roles/librarian.md`) | one archived report (6000 chars) | `memory/<slug>.json`: ≤3 `FOR MEMORY:` lines with the report path and RESULT | write the vault or file the lines anywhere; credential- or address-looking lines are dropped |
+
+Each role file has a version, its inputs, what it may and may not do, its budget
+(one call) and its schema (`roles/<role>.schema.json`, also sent to Ollama as the
+output `format`). Every answer is validated; a bad answer is logged and exits 1.
+
+`produce` = librarian on ≤2 unread reports, then — only while the queue holds fewer
+than `producer_target_ready` (6) tasks — one scout scan and planner + admission for
+the ≤2 best non-low candidates. Nothing new → no model call; it waits for evidence.
+
+**Admission** (`orchestra/admission.py`, no model) owns the queue write. It refuses:
+a packet outside the schema or whose text could pass for a header, heading or code
+fence; scope paths that aren't plain repo-relative paths, leave the repo, reach the
+vault, or touch `.review/`, `.git/`, `.venv/`, `.claude/`, hooks, role prompts or the
+policy files (`admission.py`, `gates.json`, `config.json`, `install_task.ps1`); a scope
+spanning two areas; a gate not in `orchestra/gates.json` for that area, or whose
+argument doesn't match its pattern or name an existing test; evidence whose quote is
+no longer in its file (premise); duplicates of queued (incl. running), parked or
+archived tasks or of earlier admissions/refusals (same evidence fingerprint, same
+normalised goal, or a similar title with overlapping files — rewording doesn't get a
+refused task back in); a queue at `producer_queue_cap` (20); more than
+`producer_admit_per_hour` (4) in an hour. Every decision is a line in
+`.review/local_team/admission.jsonl`; the full packet goes in `packets/<slug>.json`.
+
+Admitted tasks are written as **`Queue: draft`**, with `Source:`, `Area:` and
+`Evidence-Fp:` header lines. A Claude chat or check-in promotes one by reading it and
+changing the line to `Queue: auto`. **To auto-admit an area** (skip the draft step),
+add it to `auto_admit_areas` in `config.json`, e.g. `"auto_admit_areas": ["orchestra"]`
+(area names and their gates are in `gates.json`). It starts empty.
+
+**GPU.** One local inference at a time: each model call takes `.review/gpu.lease` in the
+main checkout (worktrees share it) and *skips* if it is held. `eval/run_eval.py` takes the
+same lease, waiting up to 5 minutes. A call is also skipped if Ollama is down, the model
+isn't installed (it is never pulled), another model is loaded (ours would evict it),
+or `nvidia-smi` shows the GPU ≥ `local_team_gpu_busy_pct` busy. `num_ctx` matches
+Denisse's 8192 so the loaded model is reused. Skips go to
+`.review/local_team/producer.log`; a skipped scan keeps its cursor.
+
+Schedule (not registered automatically):
+`powershell -ExecutionPolicy Bypass -File orchestra\install_task.ps1 -Producer`; not on
+battery. Tests: `python -m unittest discover -s orchestra/local_team -p "test_*.py"` and
+`python -m unittest orchestra.test_admission` (fake Ollama, temp repo).
 
 ## Agent exams and the score-based router
 
