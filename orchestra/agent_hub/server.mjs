@@ -15,14 +15,16 @@
 // if the agent isn't done, hand back a job_id while the agent keeps running. Claude then
 // polls job_status and fetches job_result. Jobs persist to .review/hub/jobs/<id>.json +
 // <id>.out (live output), so a hub restart keeps finished results; finished jobs older than
-// AGENT_HUB_JOB_KEEP_DAYS (default 7) are pruned at start and hourly.
+// AGENT_HUB_JOB_KEEP_DAYS (default 7) are pruned at start and hourly. Finished output
+// logs retain at most their last 2 MiB; truncation is recorded in the job JSON.
 //
 // Extends ~/scripts/codex-bridge (same Codex call), no npm dependencies.
 // Env: AGENT_HUB_VAULT (default: OneDrive KCL\Denisse), AGENT_HUB_FAKE=1 for tests
 // (AGENT_HUB_FAKE_CMD=<node script> makes the fakes real child processes),
 // AGENT_HUB_JOBS_DIR, AGENT_HUB_JOB_TIMEOUT_MS (default 15 min).
 import { spawn, execFileSync } from "node:child_process";
-import { readFileSync, rmSync, mkdtempSync, existsSync, mkdirSync, appendFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, rmSync, mkdtempSync, existsSync, mkdirSync, appendFileSync, writeFileSync, readdirSync,
+  lstatSync, openSync, readSync, closeSync, renameSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -291,6 +293,8 @@ async function dispatch(agent, args, label) {
 
 const JOBS_DIR = process.env.AGENT_HUB_JOBS_DIR || join(REPO, ".review", "hub", "jobs");
 const JOB_TIMEOUT_MS = Number(process.env.AGENT_HUB_JOB_TIMEOUT_MS || 15 * 60 * 1000);
+const JOB_RETENTION_DAYS = 7;  // overridden by AGENT_HUB_JOB_KEEP_DAYS
+const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 const MAX_JOBS = 4;
 const DEFAULT_WAIT_S = 45;  // under the bridge's 60 s cut-off
 const HUB_ID = randomBytes(6).toString("hex");
@@ -303,6 +307,37 @@ const nowIso = () => new Date().toISOString();
 function writeRec(rec) {
   mkdirSync(JOBS_DIR, { recursive: true });
   writeFileSync(jobFile(rec.id, "json"), JSON.stringify(rec, null, 2), "utf8");
+}
+
+function truncateOutput(rec) {
+  const file = jobFile(rec.id, "out");
+  let fd, temp;
+  try {
+    // Do not follow links or load an arbitrarily large log into memory.
+    const info = lstatSync(file);
+    if (!info.isFile() || info.size <= MAX_OUTPUT_BYTES) return;
+    fd = openSync(file, "r");
+    const buf = Buffer.alloc(MAX_OUTPUT_BYTES);
+    let read = 0;
+    while (read < buf.length) {
+      const n = readSync(fd, buf, read, buf.length - read, info.size - buf.length + read);
+      if (!n) throw new Error("output changed while truncating");
+      read += n;
+    }
+    closeSync(fd);
+    fd = undefined;
+    // Replace the directory entry, so even a hard link cannot overwrite an outside file.
+    temp = jobFile(rec.id, `out-${randomBytes(6).toString("hex")}.tmp`);
+    writeFileSync(temp, buf, { flag: "wx" });
+    renameSync(temp, file);
+    Object.assign(rec, { output_truncated: true, output_original_bytes: info.size,
+      output_retained_bytes: MAX_OUTPUT_BYTES });
+  } catch (e) {
+    if (e.code !== "ENOENT") rec.output_truncation_error = String(e.message || e);
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+    if (temp) { try { rmSync(temp, { force: true }); } catch {} }
+  }
 }
 
 function pidAlive(pid) {
@@ -370,6 +405,8 @@ function startJob(tool, agent, a, work) {
       else rec.status = "done";
       rec.finished = nowIso();
     }
+    // work has settled and all child output has drained, including after a timeout.
+    truncateOutput(rec);
     writeRec(rec);
     return rec;
   };
@@ -406,27 +443,35 @@ const PRUNE_EVERY_MS = 3600 * 1000;
 
 function keepMs() {
   const d = Number(process.env.AGENT_HUB_JOB_KEEP_DAYS);
-  return (process.env.AGENT_HUB_JOB_KEEP_DAYS !== undefined && Number.isFinite(d) && d >= 0 ? d : 7) * 86400 * 1000;
+  return (process.env.AGENT_HUB_JOB_KEEP_DAYS !== undefined && Number.isFinite(d) && d >= 0 ? d : JOB_RETENTION_DAYS) * 86400 * 1000;
 }
 
 export function pruneJobs(now = Date.now()) {
-  // Deletes <id>.json + <id>.out for jobs that ended more than keep-days ago. A job that is
-  // still running (here or in another live hub) is never touched; one whose hub died is
-  // failed by readRec() and aged by its original timestamps.
+  // Use only recorded finish times. Do not call readRec(): pruning must not turn a
+  // running job into a failed one, or write to a path taken from persisted JSON.
   const cutoff = now - keepMs();
   let names = [];
   try { names = readdirSync(JOBS_DIR).filter((f) => f.endsWith(".json")); } catch { return []; }
   const removed = [];
   for (const f of names) {
     const id = f.slice(0, -5);
+    if (!/^[\w-]+$/.test(id)) continue;
     let raw;
-    try { raw = JSON.parse(readFileSync(jobFile(id, "json"), "utf8")); } catch { continue; }
-    let at = Date.parse(raw.finished || raw.started);
-    if (!Number.isFinite(at)) { try { at = statSync(jobFile(id, "json")).mtimeMs; } catch { continue; } }
-    if (at >= cutoff) continue;
-    const rec = getRec(id);
-    if (!rec || rec.status === "running") continue;
-    for (const ext of ["json", "out"]) { try { rmSync(jobFile(id, ext), { force: true }); } catch {} }
+    try {
+      if (!lstatSync(jobFile(id, "json")).isFile()) continue;
+      raw = JSON.parse(readFileSync(jobFile(id, "json"), "utf8"));
+    } catch { continue; }
+    if (!raw || raw.id !== id || !["done", "failed"].includes(raw.status)) continue;
+    const at = Date.parse(raw.finished);
+    if (!Number.isFinite(at) || at >= cutoff) continue;
+    const live = jobs.get(id);
+    if (live && (live.rec.status === "running" || live.children.size)) continue;
+    try {
+      // Output first: keep the JSON for a later retry if either removal fails.
+      // No recursion, and paths are built only from validated directory entry names.
+      rmSync(jobFile(id, "out"), { force: true });
+      rmSync(jobFile(id, "json"), { force: true });
+    } catch { continue; }
     jobs.delete(id);
     removed.push(id);
   }
