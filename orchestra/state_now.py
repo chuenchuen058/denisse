@@ -46,6 +46,15 @@ def build() -> str:
             running = "(lock file unreadable)"
     out += ["**Running:** " + running, ""]
 
+    limited = []
+    for lane in sorted(state.get("lanes", {})):
+        until = R.lane_limited(state, lane)
+        if until:
+            fb = (R.C.get("lane_fallback", {"codex": "claude"}) or {}).get(lane)
+            limited.append(f"{lane} until {until.isoformat(sep=' ', timespec='minutes')}"
+                           + (f" (tasks fall back to {fb} unless Lane-Fixed)" if fb else ""))
+    out += ["**Limited lanes:** " + ("; ".join(limited) or "none"), ""]
+
     waiting = []
     for why in sorted(R.PARKED.glob("*.why.txt")) if R.PARKED.exists() else []:
         slug = why.name[: -len(".why.txt")]
