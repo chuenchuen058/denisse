@@ -18,9 +18,11 @@ import threading
 import pyttsx3
 
 import conversation
+import speech_control
 import stt_vosk
+import voice_pipeline
 from safety import confirm_risky_tool
-from voice_output import speak_inworld
+from voice_output import speak_inworld, TTS_ENGINE
 
 # Local pyttsx3 fallback voice, used if the Inworld voice (see
 # voice_output.py) is unset or fails -- no API key, offline, package
@@ -56,10 +58,48 @@ def _select_voice(engine) -> None:
     # No match -- leave the engine's default voice in place.
 
 
-def speak(engine, text: str) -> None:
+_sink = None
+
+
+def _speak_streaming(text: str, trace) -> bool:
+    """Kokoro, sentence by sentence: the first sentence plays while the next
+    is synthesized (voice_pipeline.StreamingSpeaker). False if Kokoro isn't
+    usable, so speak() falls back to the whole-reply path."""
+    global _sink
+    if TTS_ENGINE != "kokoro":
+        return False
+    try:
+        import tts_kokoro
+        if not tts_kokoro.available():
+            return False
+        if _sink is None:
+            _sink = voice_pipeline.PyAudioSink()
+        epoch = speech_control.capture()
+        barged = threading.Event()
+        mic = voice_pipeline.MicBargeIn(barged).start() if voice_pipeline.BARGE_IN else None
+        try:
+            speaker = voice_pipeline.StreamingSpeaker(
+                tts_kokoro.synthesize_samples, _sink, trace=trace,
+                should_stop=lambda: barged.is_set() or speech_control.cancelled(epoch))
+            ok = speaker.speak([text])
+        finally:
+            if mic is not None:
+                mic.stop()
+        if trace is not None:
+            trace.extra.update(tts="kokoro-stream", sentences=len(speaker.spoken),
+                               barged_in=barged.is_set())
+        return ok
+    except Exception as e:  # no output device, pyaudio trouble
+        print(f"(streaming voice unavailable: {e})")
+        return False
+
+
+def speak(engine, text: str, trace=None) -> None:
     """Speak text out loud. Never lets a TTS hiccup take down the session --
     worst case, Denisse just goes text-only for that reply."""
     if not text:
+        return
+    if _speak_streaming(text, trace):
         return
     if speak_inworld(text):
         return
@@ -75,7 +115,7 @@ def speak(engine, text: str) -> None:
 STT_ENGINE = os.environ.get("DENISSE_STT", "whisper").lower()
 
 
-def listen() -> str:
+def listen(trace=None) -> str:
     """Records until a pause, transcribing live via the offline Vosk model
     (stt_vosk.py) -- no audio leaves the machine, no account needed.
     Returns '' if nothing understandable was heard within the timeout.
@@ -96,8 +136,9 @@ def listen() -> str:
             import stt_whisper
             if not stt_whisper.is_ready():
                 print("(loading Whisper, one moment...)")
+            kw = {"trace": trace} if trace is not None else {}
             return stt_whisper.transcribe_once(
-                timeout=8, phrase_time_limit=15, on_ready=_announce_ready
+                timeout=8, phrase_time_limit=15, on_ready=_announce_ready, **kw
             ).strip()
         except ImportError:
             pass
@@ -108,9 +149,12 @@ def listen() -> str:
         print("(loading voice model, one moment...)")
 
     try:
-        return stt_vosk.transcribe_once(
+        text = stt_vosk.transcribe_once(
             timeout=8, phrase_time_limit=15, on_ready=_announce_ready
         ).strip()
+        if trace is not None:
+            trace.mark("stt_done")
+        return text
     except stt_vosk.ModelUnavailable as e:
         print(f"({e})")
         return ""
@@ -131,6 +175,16 @@ def main() -> None:
             threading.Thread(target=stt_vosk.preload, daemon=True).start()
     else:
         threading.Thread(target=stt_vosk.preload, daemon=True).start()
+    # Kokoro's first sentence in a process is the slow one (GPU warm-up); pay
+    # it now, in the background, not on the first real reply.
+    if TTS_ENGINE == "kokoro":
+        def _warm_kokoro():
+            try:
+                import tts_kokoro
+                tts_kokoro.warm_up()
+            except Exception:
+                pass
+        threading.Thread(target=_warm_kokoro, daemon=True).start()
 
     try:
         brain = conversation.get_brain()
@@ -155,7 +209,8 @@ def main() -> None:
             print("\nGoodbye.")
             break
 
-        transcript = listen()
+        trace = voice_pipeline.LatencyTrace()
+        transcript = listen(trace)
         if not transcript:
             print("(didn't catch that)\n")
             continue
@@ -173,11 +228,13 @@ def main() -> None:
             print(f"Error: {e}\n")
             continue
 
+        trace.mark("first_token")  # brain.respond() isn't streamed: the whole reply
         print(f"denisse> {reply}\n")
         # Spoken input, so the same mishearing gate the wake word uses.
         conversation.record(messages[turn_start:], source="voice")
         messages = conversation.replay()
-        speak(tts_engine, reply)
+        speak(tts_engine, reply, trace)
+        trace.write()
 
 
 if __name__ == "__main__":
