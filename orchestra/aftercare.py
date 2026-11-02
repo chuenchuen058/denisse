@@ -106,9 +106,18 @@ def _asked(task_text: str, limit: int = 300) -> str:
     return s if len(s) <= limit else s[: limit - 1].rstrip() + "…"
 
 
+def _tokens(tokens: dict | None) -> str:
+    """Telemetry, not an allowance: what the run used, as the lane reported it."""
+    if not tokens:
+        return "tokens n/a"
+    names = (("in", "in"), ("out", "out"), ("cache_read", "cache-read"), ("cache_write", "cache-write"))
+    return "tokens " + " ".join(f"{label} {tokens[k] if tokens.get(k) is not None else '?'}" for k, label in names)
+
+
 def vault_note(vault: Path, *, slug: str, title: str, result: str, lane: str, seconds: int,
                spent: str, merge: str = "", pushed: str = "", why: str = "",
-               task_text: str = "", report_text: str = "", report_path: str = "") -> Path:
+               task_text: str = "", report_text: str = "", report_path: str = "",
+               prompt: str = "", tokens: dict | None = None) -> Path:
     day = dt.date.today().isoformat()
     note = vault / "Calendar" / "Orchestra" / f"{day}.md"
     note.parent.mkdir(parents=True, exist_ok=True)
@@ -129,7 +138,7 @@ def vault_note(vault: Path, *, slug: str, title: str, result: str, lane: str, se
     status = result + (f", {merge}" if merge else "") + (f", {pushed}" if pushed else "")
     lines = [f"\n## {dt.datetime.now():%H:%M} {title}",
              f"- **{status}** · lane {lane} · {max(1, round(seconds / 60))} min · {spent}",
-             f"- Task: `{slug}`"]
+             f"- Task: `{slug}` · prompt `{prompt or '?'}` · {_tokens(tokens)}"]
     if why:
         lines.append(f"- Why it stopped: {why}")
     if task_text:

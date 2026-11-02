@@ -938,6 +938,43 @@ def build_prompt(task_rel: str, report_rel: str) -> str:
     return template.replace("$ARGUMENTS", f"{task_rel} {report_rel}")
 
 
+# ---------------------------------------------------------------- provenance
+# Master prompt section 10: prompt templates are versioned assets, so record which version
+# produced each result. Every history entry carries prompt_sha (the rendered text actually
+# sent), prompt_file_sha (review_prompt.md as committed), base_commit, model, tokens and
+# session_id, so "did the new prompt make workers better?" is answerable from state.json
+# (status.py --by-prompt). Tokens are telemetry only, never an allowance.
+
+PROVENANCE_KEYS = ("prompt_sha", "prompt_file_sha", "base_commit")
+
+
+def short_sha(text: str) -> str:
+    """First 12 hex of SHA-256 of text, line endings normalised (a CRLF checkout is the same prompt)."""
+    return hashlib.sha256(text.replace("\r\n", "\n").encode("utf-8")).hexdigest()[:12]
+
+
+def prompt_file_sha() -> str | None:
+    try:
+        return short_sha(PROMPT_FILE.read_text(encoding="utf-8"))
+    except OSError:
+        return None
+
+
+def run_provenance(wt: Path, prompt: str) -> dict:
+    """What a run starts from: the prompt sent, the template it came from, the worktree's commit."""
+    r = git("rev-parse", "HEAD", cwd=wt, check=False)
+    return {"prompt_sha": short_sha(prompt), "prompt_file_sha": prompt_file_sha(),
+            "base_commit": (r.stdout.strip() or None) if r.returncode == 0 else None}
+
+
+def fmt_tokens(tokens: dict | None) -> str:
+    """'tokens in 32 out 32565 cache-read 881350 cache-write 64060', or 'tokens n/a'."""
+    if not tokens:
+        return "tokens n/a"
+    names = (("in", "in"), ("out", "out"), ("cache_read", "cache-read"), ("cache_write", "cache-write"))
+    return "tokens " + " ".join(f"{label} {tokens[k] if tokens.get(k) is not None else '?'}" for k, label in names)
+
+
 def hook_settings(wt: Path) -> Path:
     py = sys.executable.replace("pythonw.exe", "python.exe")
     cmd = f'"{py}" "{GUARD}"'
@@ -1086,10 +1123,11 @@ def kill_tree(proc: subprocess.Popen) -> None:
             pass
 
 
-def run_lane(task: Task, wt: Path, report: Path, timeout: int) -> tuple[str, int]:
+def run_lane(task: Task, wt: Path, report: Path, timeout: int, prov: dict | None = None) -> tuple[str, int]:
     """Run the lane inside the worktree: the task is copied to <wt>/.review/task.md and the
     lane writes <wt>/.review/report.md, which is then copied to `report`.
-    Returns (outcome, seconds); outcome is 'ran', 'TIMEOUT' or 'LANE_MISSING: ...'."""
+    Returns (outcome, seconds); outcome is 'ran', 'TIMEOUT' or 'LANE_MISSING: ...'.
+    `prov`, if given, is filled with run_provenance() (also put in the lock for reconcile())."""
     argv = lanes().get(task.lane)
     if not argv:
         return f"LANE_MISSING: no lane called {task.lane!r}", 0
@@ -1114,6 +1152,10 @@ def run_lane(task: Task, wt: Path, report: Path, timeout: int) -> tuple[str, int
            and k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")}
     env.update(ORCHESTRA_TASK=str(local / "task.md"), ORCHESTRA_REPORT=str(local_report),
                ORCHESTRA_WORKTREE=str(wt), ORCHESTRA_MAIN=str(REPO))
+    prompt = build_prompt(".review/task.md", ".review/report.md")
+    p = run_provenance(wt, prompt)
+    if prov is not None:
+        prov.update(p)
     out = (REPORTS / f"{task.slug}.lane.log").open("w", encoding="utf-8")
     start = time.time()
     proc, job = spawn_lane([exe, *argv[1:]], cwd=wt, env=env, stdin=subprocess.PIPE,
@@ -1121,9 +1163,9 @@ def run_lane(task: Task, wt: Path, report: Path, timeout: int) -> tuple[str, int
     # So a later tick can tell an orphaned lane (this runner killed, the child not) from a dead one.
     # lane_job names the kill-on-close job (null: no job, taskkill fallback; orphans then possible).
     update_lock(lane_pid=proc.pid, lane_created=proc_created(proc.pid), lane_since=now().isoformat(),
-                lane_job=job)
+                lane_job=job, **p)
     try:
-        proc.stdin.write(build_prompt(".review/task.md", ".review/report.md"))
+        proc.stdin.write(prompt)
         proc.stdin.close()
     except OSError:
         pass
@@ -1181,9 +1223,28 @@ def read_report(report: Path) -> dict:
             "premise": p.group(1).strip() if p else "not stated"}
 
 
+def lane_tokens(usage) -> dict | None:
+    """{in, out, cache_read, cache_write} from claude's `usage`; None when the lane reports
+    none (Codex, Gemini, a killed run). A key the usage lacks is None, never 0."""
+    if not isinstance(usage, dict) or not usage:
+        return None
+    pick = lambda k: usage[k] if isinstance(usage.get(k), int) else None
+    return {"in": pick("input_tokens"), "out": pick("output_tokens"),
+            "cache_read": pick("cache_read_input_tokens"), "cache_write": pick("cache_creation_input_tokens")}
+
+
+def lane_model(model_usage) -> str | None:
+    """The model that did the work: modelUsage's key with the highest cost (then output tokens)."""
+    if not isinstance(model_usage, dict) or not model_usage:
+        return None
+    score = lambda k: ((model_usage[k] or {}).get("costUSD") or 0, (model_usage[k] or {}).get("outputTokens") or 0) \
+        if isinstance(model_usage[k], dict) else (0, 0)
+    return max(model_usage, key=score)
+
+
 def lane_result(lane_log: Path) -> dict:
-    """claude's --output-format json result: cost and refused tools. A run killed by the
-    timeout writes none, so its cost is estimated and its refusals are lost."""
+    """claude's --output-format json result: cost, refused tools, model, tokens, session id.
+    A run killed by the timeout writes none, so its cost is estimated and the rest is lost."""
     try:
         text = lane_log.read_text(encoding="utf-8", errors="replace").strip()
         # stream-json: one event per line, the result is the last line that parses as JSON with a
@@ -1204,12 +1265,24 @@ def lane_result(lane_log: Path) -> dict:
             data = json.loads(text if text.startswith("{") else text[text.rfind("\n{") + 1:])
     except (OSError, ValueError):
         return {}
+    if not isinstance(data, dict):
+        return {}
     denied = []
     for d in data.get("permission_denials") or []:
         name = d.get("tool_name", "?")
         cmd = (d.get("tool_input") or {}).get("command")
         denied.append(f"{name}({cmd.split()[0]})" if name == "Bash" and cmd else name)
-    return {"cost_usd": data.get("total_cost_usd"), "denied": denied}
+    return {"cost_usd": data.get("total_cost_usd"), "denied": denied,
+            "model": lane_model(data.get("modelUsage")), "tokens": lane_tokens(data.get("usage")),
+            "session_id": data.get("session_id") if isinstance(data.get("session_id"), str) else None}
+
+
+def provenance_fields(lane: str, prov: dict | None, lane_info: dict) -> dict:
+    """The provenance part of a history entry; every key present, null when unknown."""
+    prov = prov or {}
+    return {**{k: prov.get(k) for k in PROVENANCE_KEYS}, "lane": lane,
+            "model": lane_info.get("model"), "tokens": lane_info.get("tokens"),
+            "session_id": lane_info.get("session_id")}
 
 
 def needs_human(human: str) -> bool:
@@ -1254,11 +1327,12 @@ def charge(state: dict, task: Task, seconds: int, cost: float | None, lane: str 
 # ---------------------------------------------------------------- tick
 
 def finish(task: Task, state: dict, wt: Path, branch: str, outcome: str, seconds: int,
-           before_status: set[str] = frozenset()) -> str:
+           before_status: set[str] = frozenset(), prov: dict | None = None) -> str:
     report = REPORTS / f"{task.slug}.md"
     ts = task_state(state, task)
     lane_info = lane_result(REPORTS / f"{task.slug}.lane.log")
     spent = charge(state, task, seconds, lane_info.get("cost_usd"))
+    provenance = provenance_fields(task.lane, prov, lane_info)
 
     if outcome == "TIMEOUT":
         info = {"result": "TIMEOUT", "human": "none", "premise": "not stated", "note": f"killed after {seconds}s"}
@@ -1269,19 +1343,20 @@ def finish(task: Task, state: dict, wt: Path, branch: str, outcome: str, seconds
     if info["result"] in ("NO_REPORT", "TIMEOUT"):
         hit = detect_limit(task.lane, REPORTS / f"{task.slug}.lane.log")
         if hit:
-            return _limited(task, state, ts, hit, seconds, spent)
+            return _limited(task, state, ts, hit, seconds, spent, provenance)
     stray = sorted(main_checkout_status() - before_status)
     hooks_loaded = task.lane != "claude" or (wt / ".review" / "hook.log").exists()
 
     entry = {"end": now().isoformat(), "result": info["result"], "seconds": seconds, "lane": task.lane,
              "weight": task.weight, "note": info["note"], "premise": info["premise"], "spent": spent,
              "denied": lane_info.get("denied", []), "main_checkout_changed": stray,
-             "hooks_loaded": hooks_loaded}
+             "hooks_loaded": hooks_loaded, **provenance}
     if task.fields.get("lane-from"):
         entry["fallback_from"] = task.fields["lane-from"]
     ts["history"].append(entry)
     ts.update(last_end=entry["end"], last_result=info["result"])
-    log(f"{info['result']} {task.slug} after {seconds}s (attempt {ts['attempts']}, {spent}) {info['note']}")
+    log(f"{info['result']} {task.slug} after {seconds}s (attempt {ts['attempts']}, {spent}) "
+        f"prompt {entry['prompt_sha'] or '?'} {fmt_tokens(entry['tokens'])} {info['note']}".rstrip())
 
     if info["result"] == "PASS":
         problems = []
@@ -1356,7 +1431,8 @@ def finish(task: Task, state: dict, wt: Path, branch: str, outcome: str, seconds
     return info["result"]
 
 
-def _limited(task: Task, state: dict, ts: dict, hit: str, seconds: int, spent: str) -> str:
+def _limited(task: Task, state: dict, ts: dict, hit: str, seconds: int, spent: str,
+             provenance: dict | None = None) -> str:
     """The lane hit its usage limit: not an attempt. Record when the lane may run again."""
     until = parse_limit_until(hit) or now() + dt.timedelta(minutes=LIMIT_DEFAULT_MIN)
     state.setdefault("lanes", {})[task.lane] = {"limited_until": until.isoformat(),
@@ -1364,7 +1440,8 @@ def _limited(task: Task, state: dict, ts: dict, hit: str, seconds: int, spent: s
     ts["attempts"] = max(0, ts["attempts"] - 1)
     note = f"lane {task.lane} limited until {until:%Y-%m-%d %H:%M}: {hit[:200]}"
     entry = {"end": now().isoformat(), "result": "LIMITED", "seconds": seconds, "lane": task.lane,
-             "weight": task.weight, "note": note, "premise": "not stated", "spent": spent}
+             "weight": task.weight, "note": note, "premise": "not stated", "spent": spent,
+             **(provenance or provenance_fields(task.lane, None, {}))}
     ts["history"].append(entry)
     ts.update(last_end=entry["end"], last_result="LIMITED")
     log(f"LIMITED {task.slug} lane={task.lane} until {until.isoformat(sep=' ', timespec='minutes')}"
@@ -1406,7 +1483,8 @@ def write_vault_note(task: Task, ts: dict, result: str) -> None:
             seconds=h.get("seconds", 0), spent=h.get("spent", "?"), merge=ts.get("merge", "") if result == "PASS" else "",
             pushed=ts.get("push", "") if result == "PASS" else "", why=why, task_text=task_text,
             report_text=read(report_file),
-            report_path=str(report_file.relative_to(REPO)) if report_file.exists() else "")
+            report_path=str(report_file.relative_to(REPO)) if report_file.exists() else "",
+            prompt=h.get("prompt_sha") or "", tokens=h.get("tokens"))
     except Exception as e:  # the vault note must never break the runner
         log(f"vault note failed for {task.slug}: {e}")
 
@@ -1472,7 +1550,8 @@ def _collect(state: dict, info: dict, slug: str) -> str:
     log(f"RECONCILE collecting {slug}: lane gone, report {'found' if local_report.exists() else 'missing'}")
     ts = task_state(state, task)
     n = len(ts["history"])
-    result = finish(task, state, wt, branch, "ran", seconds, before)
+    prov = {k: info.get(k) for k in PROVENANCE_KEYS}  # run_lane put them in the lock
+    result = finish(task, state, wt, branch, "ran", seconds, before, prov)
     for entry in ts["history"][n:]:
         entry["recovered"] = True
     save_state(state)
@@ -1631,7 +1710,8 @@ def tick(dry_run: bool = False) -> str:
             return "WORKTREE_FAILED"
         before = main_checkout_status()
         update_lock(before=sorted(before))  # reconcile() needs it to judge stray writes
-        outcome, seconds = run_lane(task, wt, REPORTS / f"{task.slug}.md", timeout)
+        prov: dict = {}
+        outcome, seconds = run_lane(task, wt, REPORTS / f"{task.slug}.md", timeout, prov)
         if outcome.startswith("LANE_MISSING"):
             log(f"{task.slug}: {outcome}")
             ts.update(last_end=now().isoformat(), last_result="LANE_MISSING")
@@ -1639,7 +1719,7 @@ def tick(dry_run: bool = False) -> str:
                 park(task, outcome, None)
             save_state(state)
             return "LANE_MISSING"
-        result = finish(task, state, wt, branch, outcome, seconds, before)
+        result = finish(task, state, wt, branch, outcome, seconds, before, prov)
         save_state(state)
         write_vault_note(task, ts, result)
         return result

@@ -5,6 +5,7 @@ Each test builds a throwaway git repo, so the real queue is never touched.
 """
 # checks: slow  (~29s: builds real git repos and runs fake lanes)
 import datetime as dt
+import hashlib
 import importlib
 import json
 import os
@@ -23,7 +24,8 @@ import guard  # noqa: E402
 
 # Fake lane, steered by env vars: FAKE_RESULT (PASS/PARTIAL/FAIL/NONE), FAKE_HUMAN,
 # FAKE_SLEEP, FAKE_COMMIT, FAKE_STRAY (a path to write outside the worktree), FAKE_JUNK,
-# FAKE_LIMIT (print this and exit with no report), FAKE_HOOKLOG (pretend the guard hook fired).
+# FAKE_LIMIT (print this and exit with no report), FAKE_HOOKLOG (pretend the guard hook fired),
+# FAKE_USAGE (JSON merged into the final result event: usage, modelUsage, session_id).
 FAKE = textwrap.dedent("""
     import os, sys, time, subprocess, pathlib, json
     sys.stdin.read()
@@ -49,7 +51,8 @@ FAKE = textwrap.dedent("""
             f"RESULT: {r}\\nGATE: fake -> ok\\nHUMAN: {os.environ.get('FAKE_HUMAN', 'none')}\\n"
             f"PREMISE: {os.environ.get('FAKE_PREMISE', 'right')}\\n")
     print(json.dumps({"type": "result", "total_cost_usd": float(os.environ.get("FAKE_COST", "0.25")),
-                      "permission_denials": json.loads(os.environ.get("FAKE_DENIED", "[]"))}))
+                      "permission_denials": json.loads(os.environ.get("FAKE_DENIED", "[]")),
+                      **json.loads(os.environ.get("FAKE_USAGE", "{}"))}))
 """)
 
 GATE_OK = f'"{sys.executable}" -c "pass"'
@@ -72,7 +75,7 @@ It works.
 ```
 """
 FAKE_ENV = ("FAKE_RESULT", "FAKE_HUMAN", "FAKE_SLEEP", "FAKE_COMMIT", "FAKE_STRAY", "FAKE_JUNK",
-            "FAKE_JUNK_CHECK", "FAKE_PREMISE", "FAKE_DENIED", "FAKE_COST", "FAKE_LIMIT", "FAKE_HOOKLOG",
+            "FAKE_JUNK_CHECK", "FAKE_PREMISE", "FAKE_DENIED", "FAKE_COST", "FAKE_LIMIT", "FAKE_HOOKLOG", "FAKE_USAGE",
             "ORCHESTRA_LANE_FALLBACK")
 
 
@@ -519,6 +522,121 @@ class RunnerTest(unittest.TestCase):
         mine["lanes"]["codex"] = {"limited_until": "2026-11-02T22:55:00"}
         out = self.R._merge_into(self.R.load_state(), mine, base)
         self.assertEqual(out["lanes"]["codex"]["limited_until"], "2026-11-02T22:55:00")
+
+    # --- provenance: which prompt, commit, model and tokens produced each result
+
+    USAGE = {"session_id": "sess-123",
+             "usage": {"input_tokens": 32, "output_tokens": 500, "cache_read_input_tokens": 9000,
+                       "cache_creation_input_tokens": 700},
+             "modelUsage": {"claude-haiku-5-5": {"outputTokens": 10, "costUSD": 0.01},
+                            "claude-opus-5-5": {"outputTokens": 490, "costUSD": 0.24}}}
+
+    def test_provenance_is_recorded_from_the_lanes_json(self):
+        self.add("pv")
+        os.environ["FAKE_USAGE"] = json.dumps(self.USAGE)
+        base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.repo, capture_output=True,
+                              text=True, check=True).stdout.strip()
+        self.assertEqual(self.R.tick(), "PASS")
+        h = self.state()["tasks"]["pv"]["history"][-1]
+        sent = self.R.build_prompt(".review/task.md", ".review/report.md").replace("\r\n", "\n")
+        self.assertEqual(h["prompt_sha"], hashlib.sha256(sent.encode("utf-8")).hexdigest()[:12])
+        tmpl = (self.repo / "orchestra" / "review_prompt.md").read_text(encoding="utf-8").replace("\r\n", "\n")
+        self.assertEqual(h["prompt_file_sha"], hashlib.sha256(tmpl.encode("utf-8")).hexdigest()[:12])
+        self.assertNotEqual(h["prompt_sha"], h["prompt_file_sha"], "rendered text, not the template")
+        self.assertEqual(h["base_commit"], base)
+        self.assertEqual(h["lane"], "fake")
+        self.assertEqual(h["model"], "claude-opus-5-5", "the model that did most of the work")
+        self.assertEqual(h["tokens"], {"in": 32, "out": 500, "cache_read": 9000, "cache_write": 700})
+        self.assertEqual(h["session_id"], "sess-123")
+        log = self.R.LOG_FILE.read_text(encoding="utf-8")
+        self.assertIn(f"prompt {h['prompt_sha']} tokens in 32 out 500 cache-read 9000 cache-write 700", log)
+
+    def test_missing_usage_gives_nulls_not_zeros(self):
+        self.add("nu")
+        self.R.tick()
+        h = self.state()["tasks"]["nu"]["history"][-1]
+        for k in ("model", "tokens", "session_id"):
+            self.assertIn(k, h)
+            self.assertIsNone(h[k], k)
+        self.assertEqual(len(h["prompt_sha"]), 12)  # the runner's own fields are still there
+        self.assertIn("tokens n/a", self.R.LOG_FILE.read_text(encoding="utf-8"))
+        # partial usage: the key it lacks is null, a real 0 stays 0
+        log = self.tmp / "partial.log"
+        log.write_text(json.dumps({"usage": {"input_tokens": 5, "output_tokens": 0}}))
+        self.assertEqual(self.R.lane_result(log)["tokens"],
+                         {"in": 5, "out": 0, "cache_read": None, "cache_write": None})
+        log.write_text("codex printed plain text and no JSON\n")  # Codex / Gemini
+        self.assertEqual(self.R.lane_result(log), {})
+        self.assertEqual(self.R.provenance_fields("codex", None, {}),
+                         {"prompt_sha": None, "prompt_file_sha": None, "base_commit": None,
+                          "lane": "codex", "model": None, "tokens": None, "session_id": None})
+
+    def test_reconciled_run_keeps_the_provenance_from_the_lock(self):
+        prov = {"prompt_sha": "a" * 12, "prompt_file_sha": "b" * 12, "base_commit": "c" * 40}
+        lock = self.R.REVIEW / "runner.fake.lock"
+        lock.write_text(json.dumps({"pid": 999999, "task": "rc", "lane": "fake", **prov}))
+        self.add("rc")
+        wt = self.R.WORKTREES / "rc"
+        (wt / ".review").mkdir(parents=True)
+        (wt / ".review" / "report.md").write_text("RESULT: FAIL\nHUMAN: none\nPREMISE: right\n")
+        for d in (self.R.REPORTS, self.R.PARKED):  # tick() makes these before it reconciles
+            d.mkdir(parents=True, exist_ok=True)
+        st = self.R.load_state()
+        self.assertEqual(self.R.reconcile(st), {"rc": "FAIL"})
+        h = st["tasks"]["rc"]["history"][-1]
+        self.assertEqual({k: h[k] for k in prov}, prov)
+
+    def test_vault_note_shows_prompt_and_tokens(self):
+        import aftercare
+        v = self.tmp / "vault"
+        v.mkdir()
+        note = aftercare.vault_note(v, slug="s", title="T", result="PASS", lane="claude", seconds=60,
+                                    spent="$0.10", prompt="abc123def456",
+                                    tokens={"in": 1, "out": 2, "cache_read": 3, "cache_write": None})
+        self.assertIn("prompt `abc123def456` · tokens in 1 out 2 cache-read 3 cache-write ?",
+                      note.read_text(encoding="utf-8"))
+        note = aftercare.vault_note(v, slug="s2", title="T", result="PASS", lane="codex", seconds=60, spent="?")
+        self.assertIn("`s2` · prompt `?` · tokens n/a", note.read_text(encoding="utf-8"))
+
+    def test_status_by_prompt_groups_the_last_14_days(self):
+        import status
+        status = importlib.reload(status)
+        now = self.R.now()
+        ago = lambda d, m=0: (now - dt.timedelta(days=d, minutes=m)).isoformat()
+        state = {"tasks": {
+            "a": {"history": [{"end": ago(1), "result": "PASS", "seconds": 600, "prompt_file_sha": "v2"},
+                              {"end": ago(2), "result": "FAIL", "seconds": 1200, "prompt_file_sha": "v1"}]},
+            "b": {"history": [{"end": ago(0, 5), "result": "PARTIAL", "seconds": 300, "prompt_file_sha": "v2"},
+                              {"end": ago(0, 1), "result": "PASS", "seconds": 900, "prompt_file_sha": "v2"},
+                              {"end": ago(3), "result": "NO_REPORT", "seconds": 60, "prompt_file_sha": "v1"},
+                              {"end": ago(4), "result": "TIMEOUT", "seconds": 1800},
+                              {"end": ago(20), "result": "PASS", "seconds": 60, "prompt_file_sha": "v2"}]}}}
+        rows = {r["prompt_file_sha"]: r for r in status.by_prompt(state)}
+        self.assertEqual(set(rows), {"v2", "v1", None})
+        v2 = rows["v2"]
+        self.assertEqual((v2["PASS"], v2["PARTIAL"], v2["FAIL"], v2["NO_REPORT"], v2["runs"]), (2, 1, 0, 0, 3),
+                         "the 20-day-old run is outside the window")
+        self.assertEqual(v2["median_min"], 10.0)
+        v1 = rows["v1"]
+        self.assertEqual((v1["PASS"], v1["FAIL"], v1["NO_REPORT"]), (0, 1, 1))
+        self.assertEqual(v1["median_min"], 10.5)
+        self.assertEqual((rows[None]["other"], rows[None]["runs"]), (1, 1))
+        self.assertEqual(status.by_prompt(state)[0]["prompt_file_sha"], "v2", "newest-used first")
+        text = status.render_by_prompt(status.by_prompt(state))
+        self.assertIn("(unrecorded)", text)
+        self.assertRegex(text, r"v2\s+2\s+1\s+0\s+0\s+0\s+10\.0")
+        # the CLI reads state.json and exits 0, also with no state at all
+        env = {**os.environ, "ORCHESTRA_REPO": str(self.repo)}
+        self.R.STATE_FILE.write_text(json.dumps(state))
+        r = subprocess.run([sys.executable, str(HERE / "status.py"), "--by-prompt"], capture_output=True,
+                           text=True, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("v1", r.stdout)
+        self.R.STATE_FILE.unlink()
+        r = subprocess.run([sys.executable, str(HERE / "status.py"), "--by-prompt"], capture_output=True,
+                           text=True, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("no runs", r.stdout)
 
 
 class GuardTest(unittest.TestCase):
