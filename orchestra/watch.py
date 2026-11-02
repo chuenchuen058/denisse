@@ -14,6 +14,7 @@ import json
 import os
 import sys
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
 REPO = Path(os.environ.get("ORCHESTRA_REPO", Path(__file__).resolve().parent.parent))
@@ -72,6 +73,47 @@ def describe(line: str) -> str | None:
     return None
 
 
+@dataclass
+class WatchState:
+    tail: int = 8
+    offsets: dict[str, int] = field(default_factory=dict)
+    colour: dict[str, str] = field(default_factory=dict)
+    last_banner: str | None = None
+
+
+def poll_once(state: WatchState) -> None:
+    """Print new lane events, remembering offsets and display state for the next poll."""
+    now = running()
+    banner = ", ".join(f"{s}: {t}" for s, t in now.items()) or "nothing running"
+    if banner != state.last_banner:
+        print(f"\n{DIM}{time.strftime('%H:%M:%S')}  running → {banner}{RESET}")
+        state.last_banner = banner
+    for slot, slug in now.items():
+        log = REVIEW / "reports" / f"{slug}.lane.log"
+        c = state.colour.setdefault(slug, COLOURS[len(state.colour) % len(COLOURS)])
+        if not log.exists():
+            continue
+        with log.open("r", encoding="utf-8", errors="replace") as f:
+            if slug not in state.offsets:  # first sight: show only the last few events
+                lines = f.readlines()
+                shown = [d for d in map(describe, lines) if d][-state.tail:]
+                for d in shown:
+                    for l in d.splitlines():
+                        print(f"{c}[{slug[17:45]}]{RESET} {l}")
+                state.offsets[slug] = f.tell()
+                continue
+            offset = state.offsets[slug]
+            if os.fstat(f.fileno()).st_size < offset:  # log replaced or truncated between polls
+                offset = 0
+            f.seek(offset)
+            for line in f:
+                d = describe(line)
+                if d:
+                    for l in d.splitlines():
+                        print(f"{c}[{slug[17:45]}]{RESET} {l}")
+            state.offsets[slug] = f.tell()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--once", action="store_true", help="print current state and exit")
@@ -83,36 +125,9 @@ def main() -> int:
             sys.stdout.reconfigure(encoding="utf-8")
         except AttributeError:
             pass
-    offsets: dict[str, int] = {}
-    colour: dict[str, str] = {}
-    last_banner = None
+    state = WatchState(tail=args.tail)
     while True:
-        now = running()
-        banner = ", ".join(f"{s}: {t}" for s, t in now.items()) or "nothing running"
-        if banner != last_banner:
-            print(f"\n{DIM}{time.strftime('%H:%M:%S')}  running → {banner}{RESET}")
-            last_banner = banner
-        for slot, slug in now.items():
-            log = REVIEW / "reports" / f"{slug}.lane.log"
-            c = colour.setdefault(slug, COLOURS[len(colour) % len(COLOURS)])
-            if not log.exists():
-                continue
-            with log.open("r", encoding="utf-8", errors="replace") as f:
-                if slug not in offsets:  # first sight: show only the last few events
-                    lines = f.readlines()
-                    shown = [d for d in map(describe, lines) if d][-args.tail:]
-                    for d in shown:
-                        for l in d.splitlines():
-                            print(f"{c}[{slug[17:45]}]{RESET} {l}")
-                    offsets[slug] = f.tell()
-                    continue
-                f.seek(offsets[slug])
-                for line in f:
-                    d = describe(line)
-                    if d:
-                        for l in d.splitlines():
-                            print(f"{c}[{slug[17:45]}]{RESET} {l}")
-                offsets[slug] = f.tell()
+        poll_once(state)
         if args.once:
             return 0
         sys.stdout.flush()
