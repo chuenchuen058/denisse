@@ -331,20 +331,10 @@ def report(results: dict, added: int) -> str:
     return "\n".join(lines)
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(description="Score Denisse against the prompt suite")
-    ap.add_argument("--out", default=str(VAULT_EVAL_DIR), help="where to write the report")
-    ap.add_argument("--quiet", action="store_true", help="only print the summary line")
-    ap.add_argument("--no-dataset", action="store_true",
-                    help="don't append to dataset.jsonl -- for A/B runs")
-    args = ap.parse_args()
-
-    try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    except AttributeError:
-        pass
-
-    import conversation
+def isolate_state() -> Path:
+    """Point every store the suite can write at scratch files; return the
+    scratch task file. Shared with demo/run_demo.py so the demo runs in the
+    same sandbox as the nightly eval."""
     import tasks
 
     # The suite drives real tools, and the task cases really do add tasks.
@@ -389,6 +379,32 @@ def main() -> int:
     import study_brief
     study_brief.DRAFTS = str(scratch.with_name("Drafts"))
     study_brief.JOBS_DIR = str(scratch.with_name("jobs"))
+    return scratch
+
+
+def reseed_tasks(scratch: Path) -> None:
+    """A fresh scratch task store holding the one known task."""
+    import tasks
+    scratch.unlink(missing_ok=True)
+    tasks.add_task("file the Spritzer paperwork", "friday")
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Score Denisse against the prompt suite")
+    ap.add_argument("--out", default=str(VAULT_EVAL_DIR), help="where to write the report")
+    ap.add_argument("--quiet", action="store_true", help="only print the summary line")
+    ap.add_argument("--no-dataset", action="store_true",
+                    help="don't append to dataset.jsonl -- for A/B runs")
+    args = ap.parse_args()
+
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except AttributeError:
+        pass
+
+    import conversation
+
+    scratch = isolate_state()
 
     now = datetime.datetime.now()
     results = {"stamp": now.strftime("%Y-%m-%d %H:%M"), "date": now.strftime("%Y-%m-%d")}
@@ -405,8 +421,7 @@ def main() -> int:
         # once, so clean's task_complete_one closed the Spritzer task and
         # live's had nothing to close -- it was testing nothing.
         if cond != "clean":
-            scratch.unlink(missing_ok=True)
-            tasks.add_task("file the Spritzer paperwork", "friday")
+            reseed_tasks(scratch)
         results[cond] = []
         for case in CASES:
             r = run_case(brain, case, history)
