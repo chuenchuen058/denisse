@@ -244,6 +244,9 @@ def _remember(task: str, ok: bool, engine, path, text: str) -> None:
     """One line in today's shared handoff note, tagged [denisse], so the main
     chat, the nightly review and the other agents see what she handed off --
     the way IRIS writes back in Atrium."""
+    # Tests point DRAFTS at a temp folder; only a real hand-off reaches the shared log.
+    if not os.path.abspath(DRAFTS).startswith(os.path.abspath(VAULT)):
+        return
     try:
         from atrium import handoff
         who = {"claude": "Claude", "codex": "Codex"}.get(engine, engine)
