@@ -12,10 +12,11 @@
 //
 // Extends ~/scripts/codex-bridge (same Codex call), no npm dependencies.
 // Env: AGENT_HUB_VAULT (default: OneDrive KCL\Denisse), AGENT_HUB_FAKE=1 for tests.
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { readFileSync, rmSync, mkdtempSync, existsSync, mkdirSync, appendFileSync, writeFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
 
 const NPM = join(process.env.APPDATA || join(homedir(), ".npm-global"), "npm", "node_modules");
@@ -74,8 +75,27 @@ export function memoryLines(answer) {
     .filter((l) => l && !/^none\.?$/i.test(l)).slice(0, 10);
 }
 
+const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const pythonPath = () => process.env.AGENT_HUB_PYTHON
+  || join(REPO, ".venv", process.platform === "win32" ? "Scripts\\python.exe" : "bin/python");
+
+export function contextPack(lane) {
+  // The shared brain: live state from the vault (python -m atrium context), so an agent
+  // that can't or won't read the vault still starts from the same facts as everyone else.
+  if (process.env.AGENT_HUB_CONTEXT === "0") return "";
+  try {
+    return execFileSync(pythonPath(), ["-m", "atrium", "context", "--lane", lane],
+      { cwd: REPO, timeout: 10000, encoding: "utf8", windowsHide: true, env: { ...process.env, PYTHONIOENCODING: "utf-8" } });
+  } catch {
+    return "";
+  }
+}
+
 function preamble(agent) {
+  const lane = agent.toLowerCase().includes("copilot") ? "copilot" : agent.toLowerCase();
+  const ctx = contextPack(lane);
   return [
+    ...(ctx ? [ctx, "---", ""] : []),
     `You are ${agent}, one of Chuen's AI agents. Claude (the main chat) handed you this task; you cannot see that chat.`,
     `Shared memory: Chuen's Obsidian vault at ${VAULT}. If you can read files, read hot.md and AI-RULES.md there first (they may not exist yet).`,
     `Do not write to the vault yourself. If you learn something durable (a decision, a fact about Chuen's projects, a correction),`,
@@ -245,6 +265,8 @@ export async function callTool(name, a = {}) {
   }
   if (name === "remember") return remember("claude", a.lines || []) ? "Filed." : `Vault not found at ${VAULT}.`;
   if (name === "memory_today") {
+    const ctx = contextPack("claude");
+    if (ctx) return ctx;
     const read = (p, n = 6000) => { try { return readFileSync(p, "utf8").slice(0, n); } catch { return "(missing)"; } };
     return [`## hot.md\n${read(join(VAULT, "hot.md"))}`, `## STATE NOW\n${read(join(VAULT, "STATE NOW.md"))}`,
       `## Today's handoff\n${read(handoffPath(), 8000)}`].join("\n\n");

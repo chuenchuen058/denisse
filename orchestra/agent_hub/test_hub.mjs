@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 const vault = mkdtempSync(join(tmpdir(), "vault-"));
 process.env.AGENT_HUB_VAULT = vault;
 process.env.AGENT_HUB_FAKE = "1";
+process.env.AGENT_HUB_CONTEXT = "0";
 const hub = await import("./server.mjs");
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -57,6 +58,13 @@ test("no vault folder: nothing is written and nothing crashes", async () => {
   assert.equal(fresh.remember("x", ["y"]), false);
   assert.equal(existsSync(join(vault, "missing")), false);
   process.env.AGENT_HUB_VAULT = vault;
+});
+
+test("context pack is skipped cleanly when turned off or python is missing", () => {
+  assert.equal(hub.contextPack("codex"), "");
+  process.env.AGENT_HUB_CONTEXT = "1"; process.env.AGENT_HUB_PYTHON = join(vault, "no-python.exe");
+  assert.equal(hub.contextPack("codex"), "");
+  process.env.AGENT_HUB_CONTEXT = "0";
 });
 
 test("speaks MCP over stdio: initialize + tools/list", async () => {

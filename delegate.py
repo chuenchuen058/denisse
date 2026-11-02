@@ -60,7 +60,24 @@ def _prompt(task: str, context: list) -> str:
             f"Recent conversation, for context:\n{convo}\n\n"
             f"His files are in:\n{where}\n"
             f"(His Obsidian vault holds his notes, module pages, coursework, "
-            f"internship research and CV-related notes.)")
+            f"internship research and CV-related notes.)\n\n"
+            f"Before anything external-facing (CV, cover letter, application, email), "
+            f"read Atlas/Verified-Claims.md in the vault and state only claims marked "
+            f"verified: true. For anything meant to teach him, follow "
+            f"Atlas/Concepts/Learning/How-Chuen-Learns.md."
+            + _shared_context())
+
+
+def _shared_context() -> str:
+    """The same live context pack every agent gets (python -m atrium context):
+    standing asks, the learner model, what's active, what's settled. It goes to
+    Claude/Codex here, never into Denisse's own prompt -- feeding the vault to
+    the 8B model measured 0/4 clean replies (AGENTS.md)."""
+    try:
+        from atrium import context
+        return "\n\n" + context.show("claude")
+    except Exception:
+        return ""
 
 
 def _command(engine: str, prompt: str, outfile: str = "") -> tuple:
@@ -223,6 +240,22 @@ def save(task: str, text: str, engine: str, now: dt.datetime | None = None) -> s
     return path
 
 
+def _remember(task: str, ok: bool, engine, path, text: str) -> None:
+    """One line in today's shared handoff note, tagged [denisse], so the main
+    chat, the nightly review and the other agents see what she handed off --
+    the way IRIS writes back in Atrium."""
+    try:
+        from atrium import handoff
+        who = {"claude": "Claude", "codex": "Codex"}.get(engine, engine)
+        if ok:
+            line = f"handed off \"{task[:120]}\" -> {who}, draft saved: Denisse/Drafts/{os.path.basename(path)}"
+        else:
+            line = f"hand-off FAILED \"{task[:120]}\": {text[:200]}"
+        handoff.remember("denisse", [line])
+    except Exception:
+        pass
+
+
 def start(task: str, context: list | None = None) -> str:
     """Hand the job off in the background. Returns what Denisse says now."""
     if not (shutil.which("claude") or shutil.which("codex")):
@@ -234,6 +267,7 @@ def start(task: str, context: list | None = None) -> str:
 
     def work():
         ok, text, engine, failures = run(task, context)
+        path = None
         if ok:
             path = save(task, text, engine)
             who = "Claude" if engine == "claude" else "Codex"
@@ -244,6 +278,7 @@ def start(task: str, context: list | None = None) -> str:
         else:
             msg = (f"I couldn't get that done: {text[:300]}. Nothing was saved. "
                    "Ask me again in a bit, or ask Claude directly.")
+        _remember(task, ok, engine, path if ok else None, text)
         if on_done:
             try:
                 on_done(msg)
