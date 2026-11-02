@@ -125,6 +125,10 @@ def check(case: dict, reply: str, tools: list, sources: list | None = None) -> l
     if want and not (set(tools) & want):
         fails.append(f"called {tools or 'nothing'}, wanted one of {sorted(want)}")
 
+    every = e.get("all_tools_of")
+    if every and not every <= set(tools):
+        fails.append(f"called {tools or 'nothing'}, never called {sorted(every - set(tools))}")
+
     banned = e.get("none_of")
     if banned and (set(tools) & banned):
         fails.append(f"called forbidden {sorted(set(tools) & banned)}")
@@ -194,6 +198,15 @@ def run_case(brain, case: dict, history: list) -> dict:
         sources += [m.get("content") or "" for m in _brain_mod._style_examples()]
     except Exception:
         pass
+    # `fixtures`: tool name -> the text that tool returns for this case,
+    # whatever its arguments. For cases that need known data (a coursework
+    # note, a failing search) or a tool that must not really run (a timer
+    # would pop up on his screen 25 minutes into the night). Restored after.
+    import tools as _tools_mod
+    fixtures = case.get("fixtures") or {}
+    real = {n: _tools_mod.TOOL_FUNCTIONS.get(n) for n in fixtures}
+    for n, text in fixtures.items():
+        _tools_mod.TOOL_FUNCTIONS[n] = (lambda _t: (lambda **_kw: _t))(text)
     started = time.monotonic()
     out_msgs = []
     try:
@@ -201,6 +214,12 @@ def run_case(brain, case: dict, history: list) -> dict:
         error = None
     except Exception as exc:
         reply, error = "", f"{type(exc).__name__}: {exc}"
+    finally:
+        for n, fn in real.items():
+            if fn is None:
+                _tools_mod.TOOL_FUNCTIONS.pop(n, None)
+            else:
+                _tools_mod.TOOL_FUNCTIONS[n] = fn
     seconds = round(time.monotonic() - started, 1)
 
     # ...plus whatever a tool returned this turn.

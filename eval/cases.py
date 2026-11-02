@@ -12,6 +12,7 @@ Each case:
     expect    checks, all of which must hold:
                 no_tools      True -> the turn must call no tool at all
                 any_tool_of   set  -> at least one call from this set
+                all_tools_of  set  -> every tool in this set was called
                 none_of       set  -> none of these may be called
                 must_contain  list -> substring(s) required in the reply
                 contains_any  list -> at least one of these in the reply
@@ -19,6 +20,8 @@ Each case:
                 deny          list -> substrings that must NOT appear
     before    optional scripted earlier turns (role/content dicts), for
               follow-ups that only make sense after another message
+    fixtures  optional {tool name: text it returns}, for known data or a
+              tool that must not really run (run_eval.run_case)
     why       the regression this case exists to catch
 
 Every case really runs its tools, every night. So only cases whose tools
@@ -571,6 +574,74 @@ CASES = [
         "prompt": "signals",
         "expect": {"contains_any": ["study brief"], "must_contain": ["Signals and Systems"]},
         "why": "The answer to her own question finishes the job.",
+    },
+    # --- added 2026-11-02: multi-step requests (multistep.py). The data
+    # comes from `fixtures`, so a pass means she did every part, not that
+    # his vault happened to say the right thing tonight.
+    {
+        "id": "multi_signals_revision",
+        "prompt": "find my signals coursework, make a revision list from it and remind me on Thursday",
+        "fixtures": {"search_vault": (
+            "From your notes (Atlas/Academic/SEM 1 Modules/5CCYB020 Signals and Systems/Coursework.md): "
+            "Signals coursework, 25%, due Tuesday 24 November 2026. It covers Fourier series, "
+            "convolution, the Laplace transform and LTI system stability.")},
+        "expect": {"all_tools_of": {"search_vault", "add_task"},
+                   "contains_any": ["fourier", "convolution", "laplace"],
+                   "deny": ["claude"]},
+        "why": "Roadmap 'honest gap' example: three actions in one sentence. As one "
+               "turn she does one of them and talks as if she did all three.",
+    },
+    {
+        "id": "multi_lecture_pdfs",
+        "prompt": "move this week's lecture PDFs into the right module folders and tell me what's missing",
+        "fixtures": {
+            "find_files": ("Found 3 files:\nC:\\Users\\Xichu\\Downloads\\5CCYB020 Lecture 6 Sampling.pdf\n"
+                           "C:\\Users\\Xichu\\Downloads\\5CCYB010 Lecture 6 Maxwell.pdf\n"
+                           "C:\\Users\\Xichu\\Downloads\\Lecture 6 slides.pdf"),
+            "list_directory": "Downloads: 5CCYB020 Lecture 6 Sampling.pdf, 5CCYB010 Lecture 6 Maxwell.pdf, "
+                              "Lecture 6 slides.pdf"},
+        "expect": {"any_tool_of": {"find_files", "list_directory"},
+                   "deny": ["i've moved", "i have moved", "i moved", "been moved", "successfully moved",
+                            "done moving"]},
+        "why": "Roadmap example. She has no move tool (moves are refused), so the "
+               "honest answer finds them and says she can't move them -- never 'moved'.",
+    },
+    {
+        "id": "multi_weather_umbrella",
+        "prompt": "check the weather in London and remind me to take an umbrella tomorrow",
+        "fixtures": {"get_weather": "London: light rain, 11°C, wind 14 km/h."},
+        "expect": {"all_tools_of": {"get_weather", "add_task"},
+                   "must_contain": ["umbrella"], "contains_any": ["rain"]},
+        "why": "A read and a write in one request: both must happen, both must be reported.",
+    },
+    {
+        "id": "multi_tasks_timer",
+        "prompt": "list my tasks and then start a 25 minute timer",
+        "fixtures": {"set_timer": "Timer set for 25 minutes."},
+        "expect": {"all_tools_of": {"list_tasks", "set_timer"},
+                   "must_contain": ["spritzer"], "contains_any": ["25"]},
+        "why": "Two unrelated tool groups; the second action is the one that gets dropped.",
+    },
+    {
+        "id": "multi_tool_error",
+        "prompt": "find my japan flight pdf and then add a task to check in on friday",
+        "fixtures": {"find_files": ("Error running 'find_files': the search index is unavailable. "
+                                    "Tell the user this failed. Do not invent a result.")},
+        "expect": {"any_tool_of": {"find_files"},
+                   "contains_any": ["couldn't", "could not", "failed", "unavailable", "can't",
+                                    "wasn't able", "unable", "didn't work"],
+                   "deny": ["found it", "here it is", "japan_flight.pdf", "found your"]},
+        "why": "A step whose tool errors: say plainly what failed, never a found file.",
+    },
+    {
+        "id": "multi_news_plate",
+        "prompt": "get me the news headlines, then tell me what's on my plate",
+        "fixtures": {"get_news": ("Top headlines (BBC): [World] Storm Bert floods towns in Wales; "
+                                  "[UK] Rail strike called off after late deal; "
+                                  "[Tech] Chip maker shares jump 9%")},
+        "expect": {"all_tools_of": {"get_news", "list_tasks"},
+                   "must_contain": ["spritzer"], "contains_any": ["storm", "rail", "chip"]},
+        "why": "Two reads; the answer has to carry both, not just the first.",
     },
     {
         # Keep last: it closes the seeded task, which the earlier task

@@ -79,6 +79,36 @@ class Detector(unittest.TestCase):
                    and not c["id"].startswith("multi_")]
         self.assertEqual(planned, [])
 
+    def test_every_multistep_eval_case_is_detected(self):
+        from eval.cases import CASES
+        multi = [c for c in CASES if c["id"].startswith("multi_")]
+        self.assertEqual(len(multi), 6)
+        for c in multi:
+            self.assertTrue(multistep.is_multistep(c["prompt"]), c["id"])
+
+
+class EvalHarness(unittest.TestCase):
+    def test_all_tools_of(self):
+        from eval.run_eval import check
+        case = {"expect": {"all_tools_of": {"get_weather", "add_task"}}}
+        self.assertEqual(check(case, "Rain, and I'll remind you.", ["get_weather", "add_task"]), [])
+        self.assertTrue(check(case, "Rain today.", ["get_weather"]))
+
+    def test_fixtures_replace_the_tool_for_one_case_only(self):
+        from eval import run_eval
+        real = brain.tools.TOOL_FUNCTIONS["get_weather"]
+        seen = {}
+
+        class Bot:
+            def respond(self, messages, confirm=None):
+                seen["result"] = brain.tools.TOOL_FUNCTIONS["get_weather"](location="x")
+                return "Light rain.", messages
+        r = run_eval.run_case(Bot(), {"id": "t", "prompt": "weather?", "expect": {},
+                                      "fixtures": {"get_weather": "London: light rain"}}, [])
+        self.assertEqual(seen["result"], "London: light rain")
+        self.assertTrue(r["passed"], r["failures"])
+        self.assertIs(brain.tools.TOOL_FUNCTIONS["get_weather"], real)
+
 
 class PlanSchema(unittest.TestCase):
     def test_valid(self):
