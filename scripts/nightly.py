@@ -1,6 +1,6 @@
 """The nightly vault job: check, flag, commit. One entry point.
 
-Six stages, in this order:
+Seven stages, in this order:
 
   1. contract   -- runs vault_contract.py, which rewrites Denisse/Vault Health.md
   2. naming     -- names inside every Week N/ folder, against the convention
@@ -11,6 +11,9 @@ Six stages, in this order:
                    failures into DRAFT eval cases awaiting a human assertion,
                    then instincts.py, which turns corrections that worked
                    into tool-routing instincts (Denisse/Brain/instincts.json)
+  4b. chats     -- nightly_chat_import.py: new Claude Code / Codex sessions (and
+                   a claude.ai export left in ~/Downloads) become Calendar/Chats
+                   notes, committed on their own as "Nightly chat import"
   5. commit     -- commits ONLY the files this job writes
   6. backup     -- opt-in push to a GitHub repository verified private
 
@@ -37,6 +40,7 @@ import subprocess
 import sys
 from datetime import datetime
 from vault_git import BackupError, commit_owned, push_private
+import nightly_chat_import
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
@@ -55,6 +59,7 @@ NAME_OK = re.compile(r"^(?:%s)(?: \d+)? - .+" % "|".join(KINDS))
 WEEK_DIR = re.compile(r"^Week (\d+)$")
 
 report = []
+git_error = False
 
 
 def say(line):
@@ -202,6 +207,16 @@ else:
         if "instinct" in l or "->" in l:
             say("  " + l.strip())
 
+# -- 4b. remember every conversation ----------------------------------------
+# Claude Code and Codex sessions (skipping any touched in the last 30 minutes,
+# capped at 200 notes a night) plus any claude.ai export in ~/Downloads. It
+# commits only the notes it wrote and the import state. run() never raises:
+# a failure here is logged and the rest of the nightly carries on.
+say("== chats ==")
+chats = nightly_chat_import.run(VAULT, apply=not DRY, commit=not DRY, say=say)
+if chats["commit"] == "failed":
+    git_error = True
+
 # -- the stage that isn't running -------------------------------------------
 say("== keats ==")
 say("  not this job's work: the weekly pull is a scheduled Claude session")
@@ -212,7 +227,6 @@ say("  Nothing here fetches, and no Moodle token is involved.")
 say("== commit ==")
 MINE = ["Denisse/Vault Health.md", "Denisse/Tasks.md"]
 # Learning stores remain local/OneDrive data, not new Git checkpoints.
-git_error = False
 
 
 def git(*args, cwd=VAULT):
@@ -255,7 +269,8 @@ else:
 # -- a trail ----------------------------------------------------------------
 line = (f"{datetime.now():%Y-%m-%d %H:%M}  contract_rc={contract.returncode} "
         f"off_convention={odd} pending_writeups={len(pending)} "
-        f"draft_cases={drafts} backup={backup}{' DRY' if DRY else ''}")
+        f"draft_cases={drafts} chats={chats['imported']} "
+        f"chat_failures={chats['failed']} backup={backup}{' DRY' if DRY else ''}")
 os.makedirs(os.path.dirname(LOG), exist_ok=True)
 with open(LOG, "a", encoding="utf-8") as f:
     f.write(line + "\n")
