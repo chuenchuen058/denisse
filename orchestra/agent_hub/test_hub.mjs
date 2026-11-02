@@ -1,7 +1,7 @@
 // node --test orchestra/agent_hub/test_hub.mjs   (fake agents, temp vault; no model calls)
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, existsSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync, writeFileSync, mkdirSync, statSync, linkSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { spawn } from "node:child_process";
@@ -302,20 +302,174 @@ test("job files: old finished jobs are pruned at hub start; running and recent o
   put("recent-done", { status: "done", started: ago(1), finished: ago(1), result: "r" });
   // still running in another live hub (our parent process stands in for it): never deleted
   put("old-running", { status: "running", started: ago(30), hub_pid: process.ppid });
-  // "running" but its hub is gone: it died with that hub, so it is old and finished
+  // A missing hub is not a recorded finish time; pruning must leave this untouched.
   put("old-orphan", { status: "running", started: ago(30), hub_pid: 999999 });
   const oldDir = process.env.AGENT_HUB_JOBS_DIR;
   process.env.AGENT_HUB_JOBS_DIR = dir;
   let h;
   try { h = await import("./server.mjs?prune"); } finally { process.env.AGENT_HUB_JOBS_DIR = oldDir; }
   const has = (id, ext = "json") => existsSync(join(dir, `${id}.${ext}`));
-  for (const id of ["old-done", "old-failed", "old-orphan"]) {
+  for (const id of ["old-done", "old-failed"]) {
     assert.equal(has(id), false, `${id}.json pruned`);
     assert.equal(has(id, "out"), false, `${id}.out pruned`);
   }
-  for (const id of ["recent-done", "old-running"]) assert.ok(has(id) && has(id, "out"), `${id} kept`);
+  for (const id of ["recent-done", "old-running", "old-orphan"]) assert.ok(has(id) && has(id, "out"), `${id} kept`);
+  assert.equal(JSON.parse(readFileSync(join(dir, "old-orphan.json"))).status, "running");
   // AGENT_HUB_JOB_KEEP_DAYS overrides the 7 days
   process.env.AGENT_HUB_JOB_KEEP_DAYS = "0.5";
   try { assert.deepEqual(h.pruneJobs(), ["recent-done"]); } finally { delete process.env.AGENT_HUB_JOB_KEEP_DAYS; }
   assert.ok(has("old-running"), "running job survives any keep-days");
+  assert.ok(has("old-orphan"), "orphan survives until a finish time is recorded and ages out");
+});
+
+test("job files: retention uses finish time, skips uncertain records, and schedules hourly pruning", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "hub-retention-"));
+  const now = Date.now();
+  const day = 86400 * 1000;
+  const ago = (d) => new Date(now - d * day).toISOString();
+  const put = (id, rec) => writeFileSync(join(dir, `${id}.json`), JSON.stringify({ id,
+    status: "done", started: ago(30), ...rec }));
+  put("boundary", { finished: ago(7) });
+  put("recent-finish", { finished: ago(1) });
+  put("no-finish", {});
+  put("bad-finish", { finished: "not a date" });
+  put("unknown-status", { status: "pending", finished: ago(30) });
+  put("running-with-finish", { status: "running", finished: ago(30) });
+  writeFileSync(join(dir, "null.json"), "null");
+  writeFileSync(join(dir, "broken.json"), "{");
+  // Use an eight-day retention at startup, then check the seven-day boundary precisely.
+  const oldDir = process.env.AGENT_HUB_JOBS_DIR;
+  const oldKeep = process.env.AGENT_HUB_JOB_KEEP_DAYS;
+  const originalInterval = globalThis.setInterval;
+  let tick, period, unrefed = false, h;
+  process.env.AGENT_HUB_JOBS_DIR = dir;
+  process.env.AGENT_HUB_JOB_KEEP_DAYS = "8";
+  globalThis.setInterval = (fn, ms) => {
+    tick = fn; period = ms;
+    return { unref() { unrefed = true; } };
+  };
+  try { h = await import("./server.mjs?retention"); } finally {
+    globalThis.setInterval = originalInterval;
+    process.env.AGENT_HUB_JOBS_DIR = oldDir;
+    delete process.env.AGENT_HUB_JOB_KEEP_DAYS;
+  }
+  try {
+    assert.equal(period, 3600 * 1000);
+    assert.equal(unrefed, true, "maintenance must not keep the process alive");
+    assert.deepEqual(h.pruneJobs(now), [], "exactly seven days is retained");
+    assert.deepEqual(h.pruneJobs(now + 1), ["boundary"]);
+    for (const invalid of ["-1", "NaN", "Infinity"]) {
+      process.env.AGENT_HUB_JOB_KEEP_DAYS = invalid;
+      assert.deepEqual(h.pruneJobs(now), [], "invalid retention uses the seven-day default");
+    }
+    delete process.env.AGENT_HUB_JOB_KEEP_DAYS;
+    put("after-start", { finished: ago(8) });
+    tick();
+    assert.equal(existsSync(join(dir, "after-start.json")), false, "hourly callback prunes new eligible files");
+    for (const id of ["recent-finish", "no-finish", "bad-finish", "unknown-status", "running-with-finish", "null", "broken"])
+      assert.ok(existsSync(join(dir, `${id}.json`)), `${id} kept`);
+  } finally {
+    if (oldKeep === undefined) delete process.env.AGENT_HUB_JOB_KEEP_DAYS;
+    else process.env.AGENT_HUB_JOB_KEEP_DAYS = oldKeep;
+  }
+});
+
+test("job files: pruning never follows record IDs or directory links outside the jobs directory", async () => {
+  const root = mkdtempSync(join(tmpdir(), "hub-boundary-"));
+  const dir = join(root, "jobs");
+  mkdirSync(dir);
+  const finished = new Date(Date.now() - 30 * 86400 * 1000).toISOString();
+  const outside = JSON.stringify({ id: "outside", status: "done", started: finished, finished });
+  writeFileSync(join(root, "outside.json"), outside);
+  writeFileSync(join(root, "outside.out"), "outside output");
+  writeFileSync(join(dir, "forged.json"), JSON.stringify({ id: "../outside", status: "running",
+    started: finished, hub_id: "dead", hub_pid: 999999 }));
+  writeFileSync(join(dir, "forged-finished.json"), JSON.stringify({ id: "../outside", status: "done", finished }));
+  const nested = join(root, "nested");
+  mkdirSync(nested);
+  writeFileSync(join(nested, "keep.txt"), "outside nested file");
+  symlinkSync(nested, join(dir, "linked.json"), process.platform === "win32" ? "junction" : "dir");
+  symlinkSync(nested, join(dir, "old.out"), process.platform === "win32" ? "junction" : "dir");
+  writeFileSync(join(dir, "old.json"), JSON.stringify({ id: "old", status: "done", finished }));
+  const oldDir = process.env.AGENT_HUB_JOBS_DIR;
+  process.env.AGENT_HUB_JOBS_DIR = dir;
+  try { await import("./server.mjs?boundary"); } finally { process.env.AGENT_HUB_JOBS_DIR = oldDir; }
+  assert.equal(readFileSync(join(root, "outside.json"), "utf8"), outside);
+  assert.equal(readFileSync(join(root, "outside.out"), "utf8"), "outside output");
+  assert.equal(readFileSync(join(nested, "keep.txt"), "utf8"), "outside nested file");
+  assert.ok(existsSync(join(dir, "linked.json")), "JSON directory link is not read or removed");
+  assert.ok(existsSync(join(dir, "forged-finished.json")), "mismatched record ID is retained");
+  assert.equal(JSON.parse(readFileSync(join(dir, "forged.json"))).status, "running");
+});
+
+test("job files: finished output keeps its last 2 MiB with metadata; running output stays intact", async () => {
+  const max = 2 * 1024 * 1024;
+  const originalCmd = process.env.AGENT_HUB_FAKE_CMD;
+  const script = join(vault, "large-output.mjs");
+  const payload = Buffer.concat([Buffer.alloc(257, "a"), Buffer.alloc(max - 5, "b"), Buffer.from("tail\n")]);
+  try {
+    for (const [label, code, delay, timeout] of [["done", 0, 1200, 10], ["failed", 1, 1200, 10], ["timeout", 0, 30000, 2]]) {
+      writeFileSync(script, `process.stdin.resume();
+        process.stdout.write(Buffer.concat([Buffer.alloc(257, "a"), Buffer.alloc(${max - 5}, "b"), Buffer.from("tail\\n")]),
+          () => setTimeout(() => process.exit(${code}), ${delay}));`);
+      process.env.AGENT_HUB_FAKE_CMD = script;
+      const first = JSON.parse(await hub.callTool("ask_codex", { prompt: label, wait_s: 0, timeout_s: timeout }));
+      const output = join(jobsDir, `${first.job_id}.out`);
+      const json = join(jobsDir, `${first.job_id}.json`);
+      const deadline = Date.now() + 1500;
+      while (statSync(output).size < payload.length && Date.now() < deadline) await sleep(20);
+      assert.equal(JSON.parse(readFileSync(json)).status, "running");
+      assert.deepEqual(readFileSync(output), payload, "running output is not truncated");
+      await until(hub, first.job_id);
+      // Timeout publishes failed before the killed child's stdout has closed.
+      const end = Date.now() + 3000;
+      let rec;
+      do {
+        rec = JSON.parse(readFileSync(json));
+        if (rec.memory_filed) break;
+        await sleep(20);
+      } while (Date.now() < end);
+      assert.equal(rec.status, label === "done" ? "done" : "failed");
+      assert.equal(rec.memory_filed, true, "finish completed");
+      assert.deepEqual(readFileSync(output), payload.subarray(-max), `${label}: exact byte tail retained`);
+      assert.equal(rec.output_truncated, true);
+      assert.equal(rec.output_original_bytes, payload.length);
+      assert.equal(rec.output_retained_bytes, max);
+      assert.equal(rec.output_truncation_error, undefined);
+    }
+  } finally {
+    if (originalCmd === undefined) delete process.env.AGENT_HUB_FAKE_CMD;
+    else process.env.AGENT_HUB_FAKE_CMD = originalCmd;
+  }
+});
+
+test("job files: output at or below the limit is unchanged and a linked outside log is not overwritten", async () => {
+  const max = 2 * 1024 * 1024;
+  const originalCmd = process.env.AGENT_HUB_FAKE_CMD;
+  const script = join(vault, "boundary-output.mjs");
+  try {
+    for (const size of [max - 1, max, max + 1]) {
+      writeFileSync(script, `process.stdin.resume();
+        process.stdout.write(Buffer.alloc(${size}, "x"), () => setTimeout(() => process.exit(0), 1200));`);
+      process.env.AGENT_HUB_FAKE_CMD = script;
+      const first = JSON.parse(await hub.callTool("ask_codex", { prompt: "output boundary", wait_s: 0 }));
+      const file = join(jobsDir, `${first.job_id}.out`);
+      const data = Buffer.alloc(size, "x");
+      const deadline = Date.now() + 1500;
+      while (statSync(file).size < size && Date.now() < deadline) await sleep(20);
+      assert.equal((await status(hub, first.job_id)).status, "running");
+      const outside = join(vault, `linked-${size}.out`);
+      linkSync(file, outside);
+      const s = await until(hub, first.job_id);
+      assert.equal(s.status, "done");
+      assert.deepEqual(readFileSync(file), data.subarray(-max));
+      assert.deepEqual(readFileSync(outside), data);
+      const rec = JSON.parse(readFileSync(join(jobsDir, `${first.job_id}.json`)));
+      assert.equal(rec.output_truncated, size > max ? true : undefined);
+      assert.equal(rec.output_truncation_error, undefined);
+    }
+  } finally {
+    if (originalCmd === undefined) delete process.env.AGENT_HUB_FAKE_CMD;
+    else process.env.AGENT_HUB_FAKE_CMD = originalCmd;
+  }
 });
