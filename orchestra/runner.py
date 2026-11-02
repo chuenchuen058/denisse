@@ -18,6 +18,8 @@ What a tick does with a session's result (after Thomas's review, 31 Oct 2026):
   * timeout / no report / lane missing -> one retry in a fresh worktree, then parked
   * a task whose exact content already PASSed recently is not run again
   * daily spend cap from claude's own total_cost_usd; maintenance <= 20% of runtime
+  * on battery no new lane starts (dispatch_on_battery); running and finished lanes still
+    finish, gate, merge and push (2 Nov 2026, orchestra/power.py)
   * every limit lives in orchestra/config.json with its reason
 """
 from __future__ import annotations
@@ -1486,17 +1488,58 @@ def install_pre_push() -> bool:
         return False
 
 
+# ---------------------------------------------------------------- power
+# On battery the runner stops *starting* lanes; running lanes finish, and a finished lane is
+# still collected, gated, merged and pushed (short, and it saves the work). Task Scheduler no
+# longer kills ticks on unplug (install_task.ps1); this is where that decision lives now.
+
+POWER_FILE = REVIEW / "power.json"
+POWER_LOG_EVERY_S = 1800  # "ON BATTERY" at most once per 30 min, not every 2-minute tick
+
+
+def battery_pause() -> str | None:
+    """Why no new lane may start because of power, or None. Logs ON BATTERY (throttled)."""
+    import power
+    st = power.power_status()
+    why = power.dispatch_block(st, C)
+    if not why:
+        if POWER_FILE.exists():
+            POWER_FILE.unlink(missing_ok=True)
+            log(f"POWER: {power.describe(st, C).replace(' (dispatching)', '')}; dispatching again")
+        return None
+    try:
+        last = dt.datetime.fromisoformat(json.loads(POWER_FILE.read_text(encoding="utf-8"))["logged"])
+    except (OSError, ValueError, KeyError, TypeError):
+        last = None
+    if last is None or (now() - last).total_seconds() >= POWER_LOG_EVERY_S:
+        pct = st.get("battery_percent")
+        log(f"ON BATTERY: no new dispatch ({'?' if pct is None else pct}%): {why}")
+        REVIEW.mkdir(parents=True, exist_ok=True)
+        POWER_FILE.write_text(json.dumps({"logged": now().isoformat(), "why": why}), encoding="utf-8")
+    return why
+
+
+def write_state_now() -> None:
+    try:
+        import state_now
+        state_now.write()
+    except Exception as e:  # STATE NOW must never break the runner
+        log(f"state_now failed: {e}")
+
+
 def tick(dry_run: bool = False) -> str:
     for d in (QUEUE, REPORTS, ARCHIVE, PARKED):
         d.mkdir(parents=True, exist_ok=True)
     state = load_state()
     tasks = route(load_queue(), state)  # off a limited lane onto its fallback, if allowed
     if dry_run:
+        import power
         for t in tasks:
             print(f"{t.slug}: {why_not_runnable(t, state) or 'runnable'}"
                   f" [{t.priority}/{t.weight}/{t.kind}/{t.lane}, gate commands: {len(t.gate_commands)}]")
         t = pick(tasks, state)
-        print(f"would run: {t.slug if t else 'nothing'}; spend left today ${spend_left(state):.2f}")
+        print(f"would run: {t.slug if t else 'nothing'}; spend left today ${spend_left(state):.2f}; "
+              f"power: {power.describe(power.power_status(), C)}")
         return "dry-run"
     install_pre_push()
     global LOCK_FILE, _BASE
@@ -1504,7 +1547,12 @@ def tick(dry_run: bool = False) -> str:
     if parallel:
         _BASE = json.loads(json.dumps(state))
     # Reconcile before dispatching: a killed tick's orphaned lane or leftover report.
+    # Allowed on battery: collecting a finished lane is short and saves its work.
     orphans = {s for s, r in reconcile(state).items() if r == "orphan running"}
+    if battery_pause():
+        save_state(state)
+        write_state_now()
+        return "on battery"
     tasks = [t for t in route(load_queue(), state) if t.slug not in orphans]
     if parallel:
         # One runner per lane at a time (Chuen, 2 Nov 2026: use Claude and Codex together).
@@ -1578,11 +1626,7 @@ def tick(dry_run: bool = False) -> str:
         return result
     finally:
         release_lock()
-        try:
-            import state_now
-            state_now.write()
-        except Exception as e:  # STATE NOW must never break the runner
-            log(f"state_now failed: {e}")
+        write_state_now()
 
 
 def main() -> None:

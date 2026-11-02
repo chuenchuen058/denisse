@@ -69,6 +69,14 @@ Orchestra is **not a 24/7 service**. Checked on 2 Nov 2026 with `Get-ScheduledTa
 
 `install_task.ps1` doesn't match the installed task. The script says `-MultipleInstances IgnoreNew` and stop-on-battery; the live task is `Parallel` (needed for `parallel_lanes`) and doesn't stop on battery. Re-running the script as it is would bring back IgnoreNew.
 
+## On battery
+
+The runner decides about battery, not Task Scheduler (`power.py`, `GetSystemPowerStatus` via ctypes; unknown, e.g. a desktop, counts as AC). With `dispatch_on_battery: false` (default) a tick on battery still reconciles, so a finished lane is gated, merged and pushed, but starts no new lane; it logs `ON BATTERY: no new dispatch (n%)` at most once per 30 min and `POWER: AC; dispatching again` when plugged back in. With `dispatch_on_battery: true` it dispatches until `battery_floor_percent` (default 30). Running lanes are never killed for power. `status.py` and STATE NOW show `power: AC` or `power: battery 87% (dispatch paused)`. `ORCHESTRA_POWER=ac|battery|battery:42` fakes the reading (tests).
+
+`install_task.ps1` now registers the task with `-DontStopIfGoingOnBatteries -AllowStartIfOnBatteries`, so Windows no longer kills a tick on unplug. An already-registered task keeps its old settings until re-registered; to apply (re-registers "Denisse Orchestra" in place, `-Force`):
+`powershell -ExecutionPolicy Bypass -File orchestra\install_task.ps1`
+(add `-Canary` if the daily canary task is registered too, so it is kept current).
+
 ## Review and combined-tree integration
 
 After the runner's own gate re-run passes, two more steps stand between a PASS and master:

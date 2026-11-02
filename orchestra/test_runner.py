@@ -95,6 +95,7 @@ class RunnerTest(unittest.TestCase):
         os.environ["ORCHESTRA_BACKOFF_MIN"] = "0"
         os.environ["ORCHESTRA_DAILY_SPEND_CAP_USD"] = "5"  # the spend test is written for a $5 cap
         os.environ["ORCHESTRA_TIMEOUT_S"] = json.dumps({"light": 3, "heavy": 6})
+        os.environ["ORCHESTRA_POWER"] = "ac"  # never depend on whether the laptop is plugged in
         for k in FAKE_ENV:
             os.environ.pop(k, None)
         import runner

@@ -67,7 +67,14 @@ def collect() -> dict:
     if R.LOG_FILE.exists():
         log_tail = R.LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()[-5:]
 
-    return {"generated": R.now().isoformat(), "running": _running(), "queue": queue, "parked": parked,
+    try:
+        import power
+        ps = power.power_status()
+        pw = {**ps, "dispatch_paused": bool(power.dispatch_block(ps, R.C)), "text": power.describe(ps, R.C)}
+    except Exception as e:  # reads only; a power reading must never break status
+        pw = {"ac": None, "battery_percent": None, "dispatch_paused": False, "text": f"unknown ({e})"}
+
+    return {"generated": R.now().isoformat(), "power": pw, "running": _running(), "queue": queue, "parked": parked,
             "today": {"date": today, "results": results, "cost_usd": round(u.get("cost_usd", 0), 2),
                       "spend_cap_usd": R.C["daily_spend_cap_usd"],
                       "estimated_runs": u.get("estimated_runs", 0),
@@ -76,7 +83,7 @@ def collect() -> dict:
 
 
 def render(s: dict) -> str:
-    out = [f"Orchestra status {s['generated']}", "", "Running:"]
+    out = [f"Orchestra status {s['generated']}", f"power: {s['power']['text']}", "", "Running:"]
     out += [f"  {r['lane']} slot {r['slot']}: {r['task'] or '(starting)'} since {r['since'] or '?'}"
             for r in s["running"]] or ["  nothing"]
     out += ["", f"Queue ({len(s['queue'])}):"]
