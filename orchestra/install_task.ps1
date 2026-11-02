@@ -4,6 +4,10 @@
 #   powershell -ExecutionPolicy Bypass -File orchestra\install_task.ps1
 # Remove with:
 #   Unregister-ScheduledTask -TaskName "Denisse Orchestra" -Confirm:$false
+# Optional: -Canary also registers the daily agent health check (python -m orchestra.exams
+# canary, one 30-second exam per agent) at 07:10. Remove with:
+#   Unregister-ScheduledTask -TaskName "Denisse Agent Canary" -Confirm:$false
+param([switch]$Canary)
 $repo   = Split-Path -Parent $PSScriptRoot
 $python = Join-Path $repo ".venv\Scripts\pythonw.exe"
 $runner = Join-Path $repo "orchestra\runner.py"
@@ -14,3 +18,12 @@ $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhen
     -ExecutionTimeLimit (New-TimeSpan -Hours 2)
 Register-ScheduledTask -TaskName "Denisse Orchestra" -Action $action -Trigger $trigger `
     -Settings $settings -Description "Runs one .review/queue task per tick (orchestra/runner.py)" -Force
+
+if ($Canary) {
+    $cAction  = New-ScheduledTaskAction -Execute $python -Argument "-m orchestra.exams canary" -WorkingDirectory $repo
+    $cTrigger = New-ScheduledTaskTrigger -Daily -At "07:10"
+    $cSettings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable `
+        -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
+    Register-ScheduledTask -TaskName "Denisse Agent Canary" -Action $cAction -Trigger $cTrigger `
+        -Settings $cSettings -Description "One 30-second exam per agent; updates .review/exams/scores.json and the vault's Dev/Agent-Scores.md" -Force
+}
