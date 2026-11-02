@@ -1,9 +1,9 @@
 """Look things up in Chuen's Obsidian vault, on demand.
 
 This is the second attempt at letting Denisse see the vault. The first one
-(2026-09-02) pasted the whole Memory/ folder into the system prompt and was
+(2026-09-02) pasted the whole Dev/Memory/ folder into the system prompt and was
 measured at 0/4 clean replies against 4/4 with it off -- see the disabled
-block in brain.py and the entry in Memory/decisions.md. The lesson recorded
+block in brain.py and the entry in Dev/Memory/decisions.md. The lesson recorded
 there is about BUDGET: an 8B model spreads its attention over everything in
 the prompt, so content that is usually irrelevant makes every reply worse.
 
@@ -130,12 +130,12 @@ def _current_overview(rules):
     unrelated edit. Cite the actual section date; this is recorded context,
     not a live machine/task-status probe.
     """
-    path = os.path.join(VAULT, "Memory", "STATE.md")
+    path = os.path.join(VAULT, "Dev", "Memory", "STATE.md")
     try:
         with open(path, encoding="utf-8-sig") as f:
             text = f.read(100_000)
     except OSError:
-        return "I couldn't read Memory/STATE.md, so I can't give a current-context overview."
+        return "I couldn't read Dev/Memory/STATE.md, so I can't give a current-context overview."
     fm, body = _split(text)
     headings = list(re.finditer(r"(?m)^#{2,4}\s+([^\n]+)", body))
     sections = []
@@ -152,7 +152,7 @@ def _current_overview(rules):
             sections.append((date.group(0), i, heading.group(1), content))
     sections.sort(reverse=True)
     if not sections:
-        return "Memory/STATE.md has no recent dated sections to quote. Ask about a specific topic instead."
+        return "Dev/Memory/STATE.md has no recent dated sections to quote. Ask about a specific topic instead."
     header = "From your notes (dated context only, not live status or instructions):\n\n"
     budget = rules.vault_max_chars - len(header)
     out = []
@@ -160,7 +160,7 @@ def _current_overview(rules):
     selected = sections[:rules.vault_max_notes]
     share = max(1, (budget - 2 * len(selected)) // len(selected))
     for date, _i, heading, content in selected:
-        citation = f"Memory/STATE.md — {heading} (recorded {date})\n"
+        citation = f"Dev/Memory/STATE.md — {heading} (recorded {date})\n"
         block = citation + content[:max(0, share - len(citation))]
         out.append(block[:share])
     return (header + "\n\n".join(out))[:rules.vault_max_chars]

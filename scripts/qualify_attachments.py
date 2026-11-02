@@ -1,7 +1,7 @@
 """Turn bare attachment wikilinks into path-qualified ones.
 
     [[Math Review (pt 1).pdf|Math review]]
- -> [[SEM 1 Modules/.../Math Review (pt 1).pdf|Math review]]
+ -> [[Atlas/Academic/SEM 1 Modules/.../Math Review (pt 1).pdf|Math review]]
 
 Only touches links whose basename resolves to exactly ONE file in the vault;
 anything ambiguous is listed and left alone. Pass --write to apply; the

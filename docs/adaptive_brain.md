@@ -125,7 +125,7 @@ editable instructions from a note.
 
 Ask **"What am I working on?"** or **"Catch up with my current projects."**
 The vault tool can quote the latest eligible dated sections of
-`Memory/STATE.md`, with source and section dates, within the character
+`Dev/Memory/STATE.md`, with source and section dates, within the character
 budget. This is recorded context, not live task or computer status.
 Overview replies preserve the bounded source excerpt and recorded dates
 directly; an unverified model summary cannot change them.

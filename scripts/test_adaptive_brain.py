@@ -176,7 +176,7 @@ class AdaptiveTests(unittest.TestCase):
     def test_overview_evidence_cannot_be_replaced_with_an_empty_denial(self):
         import brain
         bot=brain.Brain.__new__(brain.Brain)
-        result='From your notes (dated context only):\n\nMemory/STATE.md — today\nBlueBand movement sensor testing.'
+        result='From your notes (dated context only):\n\nDev/Memory/STATE.md — today\nBlueBand movement sensor testing.'
         responses=iter([{'message':{'content':'','tool_calls':[{'function':{'name':'search_vault','arguments':{'query':'current projects'}}}]}},
                         {'message':{'content':"I don't have a project brief saved."}}])
         with patch.object(brain.ollama,'chat',side_effect=lambda **kwargs:next(responses)),patch.dict(brain.tools.TOOL_FUNCTIONS,{'search_vault':lambda query:result}):
@@ -185,7 +185,7 @@ class AdaptiveTests(unittest.TestCase):
 
     def test_overview_preserves_source_dates_even_when_model_mentions_right_topic(self):
         import brain
-        result='From your notes (dated context only):\n\nMemory/STATE.md — recorded 2026-10-27\nBlueBand sensor testing.'
+        result='From your notes (dated context only):\n\nDev/Memory/STATE.md — recorded 2026-10-27\nBlueBand sensor testing.'
         responses=iter([{'message':{'tool_calls':[{'function':{'name':'search_vault','arguments':{'query':'current projects'}}}]}},
                         {'message':{'content':'BlueBand sensor testing happened last October.'}}])
         with patch.object(brain.ollama,'chat',side_effect=lambda **kwargs:next(responses)),patch.dict(brain.tools.TOOL_FUNCTIONS,{'search_vault':lambda query:result}):
@@ -201,10 +201,10 @@ class AdaptiveTests(unittest.TestCase):
         self.assertIn('remember',[d['function']['name'] for d in request])
 
     def test_vault_overview_is_current_bounded_and_cited(self):
-        (self.root/'Memory').mkdir()
-        (self.root/'Memory/STATE.md').write_text('---\nupdated: '+vault_search.datetime.date.today().isoformat()+'\n---\n# Current state\n## 2020-01-01\nOld project archived.\n## '+vault_search.datetime.date.today().isoformat()+'\nBlueBand testing started.\n'+('detail '*500))
+        (self.root/'Dev/Memory').mkdir(parents=True)
+        (self.root/'Dev/Memory/STATE.md').write_text('---\nupdated: '+vault_search.datetime.date.today().isoformat()+'\n---\n# Current state\n## 2020-01-01\nOld project archived.\n## '+vault_search.datetime.date.today().isoformat()+'\nBlueBand testing started.\n'+('detail '*500))
         text=vault_search.search_vault('current projects')
-        self.assertIn('BlueBand',text);self.assertIn('Memory/STATE.md',text)
+        self.assertIn('BlueBand',text);self.assertIn('Dev/Memory/STATE.md',text)
         self.assertLessEqual(len(text),brain_rules.load().vault_max_chars)
         self.assertNotIn('Old project archived',text)
 

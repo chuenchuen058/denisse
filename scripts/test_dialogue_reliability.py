@@ -76,7 +76,7 @@ class DialogueTests(unittest.TestCase):
 
     def test_successful_vault_search_cannot_be_denied(self):
         result=self.run_turn('could you access my vault',[call('search_vault',{'query':'vault'}),reply("I don't have access to your vault.")],
-                             {'search_vault':lambda query:'From your notes (quote these):\n\nMemory/STATE.md\n- Your project is active.'})
+                             {'search_vault':lambda query:'From your notes (quote these):\n\nDev/Memory/STATE.md\n- Your project is active.'})
         self.assertNotIn("don't have access",result)
         self.assertIn('project',result)
 

@@ -23,9 +23,9 @@ import re
 VAULT_DIR = r"C:\Users\Xichu\OneDrive - King's College London\Denisse"
 DENISSE_DIR = os.path.join(VAULT_DIR, "Denisse")
 BRAIN_DIR = os.path.join(DENISSE_DIR, "Brain")
-CLAUDE_MEMORY_DIR = os.path.join(VAULT_DIR, "Memory")
+CLAUDE_MEMORY_DIR = os.path.join(VAULT_DIR, "Dev", "Memory")
 
-# The full, unfiltered contents of Memory/ (4KB+ of notes, including YAML
+# The full, unfiltered contents of Dev/Memory/ (4KB+ of notes, including YAML
 # frontmatter and meta-commentary about another AI session's own past
 # confusion about Denisse's identity) measurably broke her replies when
 # injected whole -- tested directly: the exact same question came back
@@ -87,7 +87,7 @@ def sync_facts(facts: dict) -> None:
 
 def read_claude_memory() -> str:
     """Read whatever Claude Code / Claude Desktop have written to the
-    shared vault's Memory folder, concatenated for use as extra context --
+    shared vault's Dev/Memory folder, concatenated for use as extra context --
     trimmed hard (frontmatter stripped, length capped at
     MAX_CLAUDE_CONTEXT_CHARS) since the raw unfiltered version measurably
     degraded reply quality (see the module comment above)."""

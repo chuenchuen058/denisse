@@ -27,13 +27,13 @@ def note(rel, text):
     open(p, "w", encoding="utf-8").write(text)
 
 
-note(r"SEM 1 Modules\5CCYB010 Electromagnetism\Coursework.md",
+note(r"Atlas\Academic\SEM 1 Modules\5CCYB010 Electromagnetism\Coursework.md",
      '---\ndescription: "5CCYB010 coursework, 30%, due 24 Nov 2026 — brief not yet read"\n---\n')
-note(r"SEM 1 Modules\5CCYB020 Signals and Systems\Coursework\Coursework.md",
+note(r"Atlas\Academic\SEM 1 Modules\5CCYB020 Signals and Systems\Coursework\Coursework.md",
      '---\ndescription: "Signals coursework"\n---\n> Due **Tuesday 24 November 2026, 16:00** on KEATS.\n')
-note(r"SEM 1 Modules\5CCYB020 Signals and Systems\Coursework\Worked Solutions.md",
+note(r"Atlas\Academic\SEM 1 Modules\5CCYB020 Signals and Systems\Coursework\Worked Solutions.md",
      "due 1 Jan 2026 -- not a deadline file\n")
-note(r"SEM 1 Modules\5CCYB099 Old Module\Coursework.md",
+note(r"Atlas\Academic\SEM 1 Modules\5CCYB099 Old Module\Coursework.md",
      '---\ndescription: "due 1 Mar 2026"\n---\n')
 planner.VAULT = vault
 # coursework_deadlines' default argument was bound at import -- pass it.

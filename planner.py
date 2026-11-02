@@ -67,7 +67,7 @@ def coursework_deadlines(vault: str = VAULT) -> list:
     solutions and other files that merely mention the coursework are skipped.
     """
     found = {}
-    for path in glob.glob(os.path.join(vault, "SEM * Modules", "**", "Coursework*.md"),
+    for path in glob.glob(os.path.join(vault, "Atlas", "Academic", "SEM * Modules", "**", "Coursework*.md"),
                           recursive=True):
         if os.path.basename(path).lower() != "coursework.md":
             continue

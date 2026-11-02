@@ -17,7 +17,7 @@ Durable context lives in Chuen's Obsidian vault, not in this repo:
 - `AI-RULES.md` there — Atlas-format filing rules for every agent (Claude,
   Codex, Copilot, Gemini, Denisse); read before your first vault write
 - `AGENTS.md` there — the vault contract
-- `Memory\MEMORY.md` — who Chuen is, how he works, this machine
+- `Dev\Memory\MEMORY.md` — who Chuen is, how he works, this machine
 - `Denisse\Denisse.md` — this project's index
 - `Denisse\roadmap.md` — where the project is going, and what is
   deliberately *not* being done (fine-tuning, cloud APIs) with reasons

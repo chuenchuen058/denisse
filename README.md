@@ -153,7 +153,7 @@ The assistant works without an Obsidian vault. To use your own, set the
 `DENISSE_VAULT` environment variable before starting the process. Vault
 lookups retrieve bounded excerpts on demand; the whole vault is not loaded
 into the system prompt. The current-project overview quotes recent dated
-sections of `Memory/STATE.md`, which must be maintained separately.
+sections of `Dev/Memory/STATE.md`, which must be maintained separately.
 
 Create supported preferences without overwriting an existing file:
 

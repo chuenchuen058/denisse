@@ -1,10 +1,10 @@
-"""Check every vault note against the contract in Memory/vault_setup.md.
+"""Check every vault note against the contract in Dev/Memory/vault_setup.md.
 
 READ ONLY apart from the one report it writes to 'Denisse/Vault Health.md'.
 
 The contract, as the vault actually practises it (2026-10-15):
   * every hand-written note has frontmatter with name, description, updated
-    ('tags' is only a warning -- Memory/ deliberately carries none)
+    ('tags' is only a warning -- Dev/Memory/ deliberately carries none)
   * no two notes share a 'name' (the slug style and the Title Case style
     both exist on purpose, so the style itself isn't checked)
   * 'updated' is an ISO date, not in the future
@@ -24,9 +24,10 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="repla
 
 VAULT = r"C:\Users\Xichu\OneDrive - King's College London\Denisse"
 REPORT = os.path.join(VAULT, "Denisse", "Vault Health.md")
-REQUIRED = ("name", "description", "updated")  # tags are only a warning: Memory/ deliberately has none
+REQUIRED = ("name", "description", "updated")  # tags are only a warning: Dev/Memory/ deliberately has none
 # Entry points: nothing needs to link to these for them to be found.
-ROOTS = {"README.md", "MEMORY.md", "Vault Health.md", "SEM 1 Modules.md", "Log.md", "AGENTS.md",
+ROOTS = {"README.md", "Dev/Memory/MEMORY.md", "Vault Health.md",
+         "Atlas/Academic/SEM 1 Modules/SEM 1 Modules.md", "Calendar/Log/Log.md", "AGENTS.md",
          # Atlas format (2026-10-31): router notes every agent opens first
          "hot.md", "index.md", "AI-RULES.md", "CLAUDE.md", "GEMINI.md", "STATE NOW.md"}
 # Written by a machine, one per day, and never meant to be hand-curated.
@@ -110,7 +111,7 @@ MDLINK = re.compile(r"(?<!!)\[[^\]\n]*\]\(([^)\n]+)\)")
 
 for path in sorted(md_files):
     r = rel(path)
-    # utf-8-sig: Log/Log.md starts with a BOM, and a BOM in front of the
+    # utf-8-sig: Calendar/Log/Log.md starts with a BOM, and a BOM in front of the
     # '---' made this script report a frontmatter block that was there.
     with open(path, encoding="utf-8-sig") as f:
         text = f.read()
@@ -155,7 +156,7 @@ for path in sorted(md_files):
         if "/" in target:
             full = os.path.join(VAULT, target.replace("/", os.sep))
             # Obsidian's own path-qualified form for a note leaves the
-            # extension off: [[Log/2026-10-15]].
+            # extension off: [[Calendar/Log/2026-10-15]].
             if not os.path.exists(full) and os.path.exists(full + ".md"):
                 full += ".md"
             if os.path.exists(full):
@@ -190,7 +191,7 @@ for path in sorted(md_files):
             else:
                 linked.add(rel(hits[0]))
 
-    # Memory/MEMORY.md indexes its folder with ordinary Markdown links --
+    # Dev/Memory/MEMORY.md indexes its folder with ordinary Markdown links --
     # [Profile](chuen_profile.md) -- which Obsidian follows just as happily.
     # Counting only wikilinks reported chuen_profile.md as an orphan when the
     # index links it on line 30.
@@ -208,12 +209,12 @@ for path in sorted(md_files):
 
 for path in sorted(md_files):
     r = rel(path)
-    if os.path.basename(path) in ROOTS or r.startswith(GENERATED):
+    if r in ROOTS or os.path.basename(path) in ROOTS or r.startswith(GENERATED):
         continue
     if r not in linked:
         warns.append((r, "orphan -- no other note links to it"))
 
-mod_root = "SEM 1 Modules/"
+mod_root = "Atlas/Academic/SEM 1 Modules/"
 for path in sorted(other_files):
     r = rel(path)
     # .keats-manifest.json is sync state, not material -- nothing should link it.
