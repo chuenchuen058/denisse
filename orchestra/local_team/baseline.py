@@ -63,8 +63,10 @@ def load_fixtures(root: Path = FIXTURES, only: list[str] | None = None) -> list[
 
 def tracked_files(src: Path) -> list[str]:
     out = subprocess.run(["git", "ls-files", "-z"], cwd=src, capture_output=True, check=True).stdout
+    # Never the tray's memory or models folders: the fixture repo doesn't need them, and
+    # scripts/run_checks.py's sandbox (rightly) refuses any touch of memory/.
     return [p for p in out.decode("utf-8").split("\0")
-            if p and not p.startswith(("orchestra/local_team/fixtures/", ".review/"))]
+            if p and not p.startswith(("orchestra/local_team/fixtures/", ".review/", "memory/", "models/"))]
 
 
 def build_repo(fixture: dict, dest: Path, src: Path = SRC_REPO, files: list[str] | None = None) -> Path:
