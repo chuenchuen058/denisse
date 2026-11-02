@@ -101,7 +101,9 @@ class PetChatTests(unittest.TestCase):
             return 'isolated.mp3'
         root = Mock()
         root.after.side_effect = lambda delay, callback: callback()
+        # The MCI path under test; streamed Kokoro is covered in test_tray_voice_stream.py.
         with patch.object(tray, 'root', root, create=True), \
+             patch.object(tray, 'speak_streaming', return_value=False), \
              patch.object(tray, 'synthesize_inworld', side_effect=synth), \
              patch.object(tray, 'prepare_audio', return_value=audio), \
              patch.object(voice_output, '_mci') as mci:

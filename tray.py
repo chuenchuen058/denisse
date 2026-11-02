@@ -62,6 +62,7 @@ import obsidian_sync
 import optimize
 import wake_word
 import speech_control
+import voice_pipeline
 import hotkey
 from floating_orb import FloatingOrb
 from orb_controls import OrbControls
@@ -75,7 +76,7 @@ _timer_display = None
 from brain import Brain
 from mission_control import get_status
 from safety import RISKY_TOOLS
-from voice_output import synthesize_inworld, prepare_audio, warm_up_audio
+from voice_output import synthesize_inworld, prepare_audio, warm_up_audio, speak_streaming
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -1063,6 +1064,10 @@ def _stop_speaking():
 # was 2.5s (too quick to actually read), lengthened on request.
 HEARD_DISPLAY_MS = int(os.environ.get("DENISSE_HEARD_DISPLAY_MS", "8000"))
 
+# Longest the streamed voice waits for the Tk thread to reveal the reply
+# bubble before speaking anyway (normally a few ms).
+REVEAL_WAIT_S = 2.0
+
 
 class ChatPopup:
     """A conversation flyout anchored to the desktop pet."""
@@ -1206,6 +1211,7 @@ class ChatPopup:
         self._turn_tail = []
         self._heard_clear_job = None
         self._speech_epoch = speech_control.capture()
+        self._trace = None
         self.refresh_status()
         self._render_history()
 
@@ -1468,6 +1474,9 @@ class ChatPopup:
         self._add_bubble("you", text)
         _stop_speaking()  # a new request cuts off earlier chat/voice playback
         self._speech_epoch = speech_control.capture()
+        self._trace = voice_pipeline.LatencyTrace()
+        self._trace.mark("input_end")  # typed: t = 0 is pressing send
+        self._trace.extra["source"] = "tray_chat"
         self.messages = conversation.replay()
         self._turn_start = len(self.messages)
         self._turn_tail = []
@@ -1532,30 +1541,72 @@ class ChatPopup:
         # can't erase what the wake-word listener recorded while the popup
         # sat open (see conversation.record).
         conversation.record(self._turn_tail)
-        # Synthesizing (network, ~1-2s) AND opening the audio file for
+        trace = getattr(self, "_trace", None)
+        if trace is not None:
+            trace.mark("first_token")  # brain.respond() isn't streamed: the whole reply
+        # With local Kokoro the reply streams sentence by sentence and the
+        # bubble is revealed as the first sentence starts playing. Otherwise
+        # synthesizing (network, ~1-2s) AND opening the audio file for
         # playback (real MCI overhead -- see voice_output.py) both happen
         # silently in the background; the text bubble is revealed and
         # playback fired at the same instant, so only the unavoidable final
-        # "play" command's own latency remains between them. A no-op if
-        # INWORLD_API_KEY isn't set -- reveal just happens almost instantly.
-        threading.Thread(target=self._synthesize_then_reveal, args=(reply, self._speech_epoch), daemon=True).start()
+        # "play" command's own latency remains between them. With no voice
+        # at all, reveal just happens almost instantly.
+        threading.Thread(target=self._synthesize_then_reveal, args=(reply, self._speech_epoch, trace),
+                         daemon=True).start()
 
-    def _synthesize_then_reveal(self, reply: str, speech_epoch):
-        path = None if speech_control.cancelled(speech_epoch) else synthesize_inworld(reply)
-        audio = prepare_audio(path) if path else None
-        play_now = threading.Event() if audio is not None else None
-        root.after(0, lambda: self._reveal_reply(reply, audio, play_now))
-        if audio is not None:
-            # Windows' MCI ties an opened device to the thread that opened
-            # it -- calling .play()/.close() from a different thread than
-            # prepare_audio() ran on fails with "device is not open". So
-            # this same thread waits here (blocking only itself, not the
-            # UI) until the bubble reveal fires, then plays and closes.
-            play_now.wait()
-            try:
-                audio.play(speech_epoch=speech_epoch)
-            finally:
-                audio.close()
+    def _synthesize_then_reveal(self, reply: str, speech_epoch, trace=None):
+        try:
+            if self._stream_then_reveal(reply, speech_epoch, trace):
+                return
+            path = None if speech_control.cancelled(speech_epoch) else synthesize_inworld(reply)
+            audio = prepare_audio(path) if path else None
+            play_now = threading.Event() if audio is not None else None
+            if audio is not None and trace is not None:
+                trace.mark("tts_first_chunk")
+                trace.extra["tts"] = "mci"
+            root.after(0, lambda: self._reveal_reply(reply, audio, play_now))
+            if audio is not None:
+                # Windows' MCI ties an opened device to the thread that opened
+                # it -- calling .play()/.close() from a different thread than
+                # prepare_audio() ran on fails with "device is not open". So
+                # this same thread waits here (blocking only itself, not the
+                # UI) until the bubble reveal fires, then plays and closes.
+                play_now.wait()
+                try:
+                    if trace is not None and not speech_control.cancelled(speech_epoch):
+                        trace.mark("playback_start")
+                    audio.play(speech_epoch=speech_epoch)
+                finally:
+                    audio.close()
+        finally:
+            if trace is not None and "tts" in trace.extra:
+                trace.write()  # one line per spoken turn, logs/voice_latency.jsonl
+
+    def _stream_then_reveal(self, reply: str, speech_epoch, trace) -> bool:
+        """Streamed Kokoro (voice_output.speak_streaming). The bubble reveal
+        fires once, from the speaker's own thread at first audio: it is
+        scheduled on the Tk thread and the speaker waits for it before the
+        first block is written, the same "reveal, then play" order the MCI
+        path keeps. The stop button (speech_control) is checked between
+        ~50 ms blocks. False = not handled; the caller uses the MCI path."""
+        if not reply or speech_control.cancelled(speech_epoch):
+            return False
+        revealed = threading.Event()
+
+        def reveal_at_first_audio():
+            play_now = threading.Event()
+            root.after(0, lambda: self._reveal_reply(reply, None, play_now))
+            # Bounded, unlike the MCI path's wait: if Tk is gone, speak anyway.
+            play_now.wait(REVEAL_WAIT_S)
+            revealed.set()
+
+        handled = speak_streaming(reply, should_stop=lambda: speech_control.cancelled(speech_epoch),
+                                  on_start=reveal_at_first_audio, trace=trace)
+        if handled and not revealed.is_set():
+            # Stopped before the first sentence was ready: show the text anyway.
+            root.after(0, lambda: self._reveal_reply(reply, None, None))
+        return handled
 
     def _reveal_reply(self, reply: str, audio, play_now):
         try:

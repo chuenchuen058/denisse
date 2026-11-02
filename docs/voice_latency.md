@@ -1,8 +1,9 @@
 # Voice latency: end of speech to first audio
 
 Measured 2026-11-02 on the RTX 5070 Laptop (8 GB), with Ollama's
-`llama3.1:8b` resident on the same GPU. This covers voice_mode.py
-(push-to-talk, Whisper + Kokoro).
+`llama3.1:8b` resident on the same GPU. The measurements cover voice_mode.py
+(push-to-talk, Whisper + Kokoro). The tray chat and the wake word use the
+same streaming speaker; see "Tray and wake word" below.
 
 ## Where the time goes
 
@@ -20,7 +21,8 @@ per turn to `logs/voice_latency.jsonl` (local, git-ignored, never the vault):
 | `playback_start` | first block written to the open output stream |
 
 `.venv\Scripts\python.exe scripts\eval_local_voice.py --breakdown` prints
-p50/p95 for each stage from real turns, plus the longest pause *inside* his
+p50/p95 for each stage from real turns, one table per path (`voice_mode`,
+`wake_word`, `tray_chat`), plus the longest pause *inside* his
 utterances. If that pause creeps towards the endpoint threshold, the threshold
 is cutting him off.
 
@@ -110,6 +112,37 @@ energy gate with no echo cancellation, so on open laptop speakers a loud
 reply can still interrupt itself. On headphones it's fine. Not yet tried
 live with a real voice.
 
+## Tray and wake word
+
+`tray.py` (the chat popup) and `wake_word.py` hand the reply to
+`voice_output.speak_streaming()`, which runs it through `StreamingSpeaker`
+and one shared PyAudio output. That happens when the engine is local Kokoro
+(`DENISSE_TTS=kokoro`, the default) and the model files are there. Inworld,
+`DENISSE_TTS_STREAM=0`, missing Kokoro, no output device, or a reply where
+nothing could be synthesized all fall back to the old path: synthesize the
+whole reply, then play it through MCI.
+
+- **Reveal.** The reply text (the tray bubble, or the wake word's
+  `on_reply`) appears once, when the first sentence's audio is ready and
+  the stream is open, just before its first block plays. If the reply is
+  stopped before that, the text still appears once, with no audio.
+- **Stop.** The stop button, "shush", a newer "Denisse, ..." and the wake
+  word's own interrupt event are all checked between ~50 ms blocks. A stop
+  closes the stream (dropping its buffer) and no further sentence is
+  synthesized.
+- **Threads.** PyAudio has no MCI-style thread affinity, but the sink's
+  stream is still opened, written and closed on the one thread that is
+  speaking. Replies take turns on a lock, and every new request stops the
+  old one first.
+- **Timing.** Each spoken turn appends a line to `logs/voice_latency.jsonl`
+  with `source` and `tts` (`kokoro-stream` or `mci`). Wake word: t = 0 is
+  when Vosk's final transcript arrives (`speech_end` = `stt_done`; Vosk
+  transcribes while he talks). Tray chat: t = 0 is pressing send
+  (`input_end`), so `first_token` there is the brain's time alone.
+
+No barge-in on these paths yet. `DENISSE_BARGE_IN` only applies to
+voice_mode.py.
+
 ## Settings
 
 | env var | default | what |
@@ -117,13 +150,14 @@ live with a real voice.
 | `DENISSE_END_SILENCE_S` | 0.6 (was 0.9) | quiet after speech that ends the clip |
 | `DENISSE_MIN_SPEECH_RMS` | 300 | minimum loudness that counts as speech |
 | `DENISSE_BARGE_IN` | 0 | interrupt her by talking |
+| `DENISSE_TTS_STREAM` | 1 | 0 = tray and wake word use the whole-reply MCI path |
 | `DENISSE_TTS_LEAD_IN_S` | 0.03 | silence before the first word, so the device can't clip it |
 | `DENISSE_VOICE_LATENCY_LOG` | `logs/voice_latency.jsonl` | per-turn timing log |
 
 ## Not covered
 
-- tray.py and wake_word.py still synthesize the whole reply and play it
-  through MCI. Only voice_mode.py streams.
+- The tray and wake-word streaming is unit-tested with a fake voice and
+  sink only. It hasn't been heard or timed live in the real tray yet.
 - All audio here is synthetic (Kokoro speaking to Whisper). A real room and
   real hesitations will be slower to transcribe and pause longer.
   `--breakdown` on real turns is the number that counts.
