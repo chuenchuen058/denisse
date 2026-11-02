@@ -781,10 +781,23 @@ def tick(dry_run: bool = False) -> str:
                         key=lambda t: (t.priority != "urgent", t.kind == "maintenance", t.slug)):
             if t.lane not in order:
                 order.append(t.lane)
+        slots = C.get("lane_slots", {})
+        # Tasks another slot of the same lane is already running (named in its lock file).
+        running = set()
+        for lf in REVIEW.glob("runner.*.lock"):
+            try:
+                running.add(json.loads(lf.read_text(encoding="utf-8")).get("task"))
+            except (OSError, ValueError):
+                pass
+        chosen = None
         for lane in order:
-            LOCK_FILE = REVIEW / f"runner.{lane}.lock"
-            if take_lock(state):
-                tasks = [t for t in tasks if t.lane == lane]
+            for slot in range(1, int(slots.get(lane, 1)) + 1):
+                LOCK_FILE = REVIEW / (f"runner.{lane}.lock" if slot == 1 else f"runner.{lane}.{slot}.lock")
+                if take_lock(state):
+                    chosen = lane
+                    break
+            if chosen:
+                tasks = [t for t in tasks if t.lane == lane and t.slug not in running]
                 break
         else:
             return "busy" if order else "idle"

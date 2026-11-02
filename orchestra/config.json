@@ -26,7 +26,10 @@
   "parallel_lanes": true,
   "_parallel_lanes": "One task per lane at the same time (claude + codex + gemini), each with its own lock; state saves merge and merges/pushes take turns. Task Scheduler must allow parallel instances. false = one task at a time.",
 
-  "daily_spend_cap_usd": 40.0,
+  "lane_slots": {"claude": 3, "codex": 1},
+  "_lane_slots": "How many tasks of one lane may run at once. Claude 3 until Wed 4 Nov 18:00 (Chuen's new Max plan, use it before the reset), then back to 1.",
+
+  "daily_spend_cap_usd": 400.0,
   "_daily_spend_cap_usd_note": "Raised from 5 on 2 Nov 2026: Chuen has spare Claude allowance to use before it resets. claude -p's total_cost_usd is a notional figure on his plan.",
   "_daily_spend_cap_usd": "Summed from claude -p total_cost_usd. Runs killed before reporting are charged an estimate from minutes x today's cost per minute. Thomas's ledger saw under half of a 20-hour spend.",
   "unknown_cost_per_min_usd": 0.10,
