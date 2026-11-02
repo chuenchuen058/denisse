@@ -101,9 +101,13 @@ if _gemini:
 # The prompt goes in on stdin, so running the .cmd shim is safe for long prompts.
 # Always prefer the npm shim: under Task Scheduler `which("codex")` can find a Windows app
 # alias that then fails to run. Try the home folder too in case APPDATA is unset.
+# npm installs made from inside the Claude desktop app land in its packaged (virtualised)
+# AppData, which only the app sees; outside it the real files are under
+# %LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming (found 2 Nov 2026).
+_local = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
 if True:
     for _codex_cmd in (Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming") / "npm" / "codex.cmd",
-                       Path.home() / "AppData" / "Roaming" / "npm" / "codex.cmd"):
+                       *sorted(_local.glob("Packages/Claude_*/LocalCache/Roaming/npm/codex.cmd"))):
         if _codex_cmd.exists():
             DEFAULT_LANES["codex"][0] = str(_codex_cmd)
             break
@@ -461,7 +465,9 @@ def run_lane(task: Task, wt: Path, report: Path, timeout: int) -> tuple[str, int
         return f"LANE_MISSING: no lane called {task.lane!r}", 0
     exe = shutil.which(argv[0]) or argv[0]
     if not Path(exe).exists() and not shutil.which(exe):
-        return f"LANE_MISSING: {argv[0]} not on PATH (APPDATA={os.environ.get('APPDATA')!r})", 0
+        shim = Path(os.environ.get("APPDATA", "")) / "npm" / f"{argv[0]}.cmd"
+        return (f"LANE_MISSING: {argv[0]} not on PATH (which={shutil.which(argv[0])!r}, "
+                f"{shim} exists={shim.exists()}, file={__file__})"), 0
     local = wt / ".review"
     local.mkdir(exist_ok=True)
     shutil.copyfile(task.path, local / "task.md")
