@@ -12,7 +12,8 @@ cheap, local signals fix most of that:
 
 and one tool built on them, look_at_this(), offered by tool_router only
 when the request has a deictic cue ("this", "that", "selected",
-"clipboard", "here") -- see has_cue().
+"clipboard", "here") -- and, for a bare this/that/here, an action or a
+question with it -- see has_cue().
 
 ctypes only, no new dependencies. Nothing here is logged or written
 anywhere: the text goes back to the local model as a tool result, and the
@@ -55,6 +56,21 @@ _GDI_FORMATS = {2, 3, 9, 14, 0x0080, 0x0082, 0x0083, 0x008E}
 CUE = re.compile(
     r"\b(?:this|that|these|those|here|selected|selection|highlighted|clipboard|copied)\b",
     re.IGNORECASE)
+# These name the screen on their own: "the selected text", "what I copied".
+STRONG_CUE = re.compile(
+    r"\b(?:selected|selection|highlighted|clipboard|copied)\b", re.IGNORECASE)
+# A bare this/that/here also ends half of everyday remarks -- "this is
+# fine, no need to change anything" called look_at_this in 6 of 6 eval
+# runs on 2026-11-02 (docs/look_at_this_eval.md). So a weak cue needs
+# something asked of it as well: an action on text, or a question.
+# "change"/"do" are left out on purpose ("no need to change anything",
+# "do that again").
+ASK = re.compile(
+    r"\?|\b(?:explain|rewrite|reword|rephrase|shorten|simplify|translate|summari[sz]e"
+    r"|summary|tl;?dr|mean|means|meaning|define|fix|correct|proofread|check|debug"
+    r"|solve|improve|edit|read|look|what|what's|whats|how|why|which|who|is it|is this"
+    r"|is that|are these|are those)\b",
+    re.IGNORECASE)
 
 # Title or process name of a window not to read. The first five are the
 # task's list; LastPass/Dashlane are the same thing under another name.
@@ -86,7 +102,10 @@ def enabled() -> bool:
 
 
 def has_cue(text: str) -> bool:
-    return bool(CUE.search(text or ""))
+    text = text or ""
+    if STRONG_CUE.search(text):
+        return True
+    return bool(CUE.search(text) and ASK.search(text))
 
 
 def is_private(*texts) -> bool:

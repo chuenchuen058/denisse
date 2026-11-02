@@ -50,6 +50,23 @@ class LookAtThisCases(unittest.TestCase):
             self.assertEqual(BY_ID[cid]["expect"]["any_tool_of"], {"look_at_this"}, cid)
             self.assertIn("look_at_this", offered(BY_ID[cid]), cid)
 
+    def test_casual_this_that_here_not_offered(self):
+        # The tightened cue rule: a bare this/that/here needs an action or a
+        # question with it. "this is fine..." misfired 6/6 before it.
+        for cid in WRONG:
+            self.assertNotIn("look_at_this", offered(BY_ID[cid]), cid)
+
+    def test_cue_rule(self):
+        import desktop_context as dc
+        for text in ["explain this", "is this right?", "fix that", "what's this",
+                     "summarise the selected text", "what I copied", "read this out",
+                     "can you shorten that", "what's going on here"]:
+            self.assertTrue(dc.has_cue(text), text)
+        for text in ["that's great, thanks!", "this is fine, no need to change anything",
+                     "ha, do that again", "I'm here now, just got home", "that sounds good",
+                     "explain convolution"]:
+            self.assertFalse(dc.has_cue(text), text)
+
 
 if __name__ == "__main__":
     unittest.main()
