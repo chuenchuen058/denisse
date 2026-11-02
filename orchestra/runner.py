@@ -39,6 +39,7 @@ QUEUE, REPORTS, ARCHIVE, PARKED = (REVIEW / d for d in ("queue", "reports", "arc
 STATE_FILE, LOCK_FILE, LOG_FILE = REVIEW / "state.json", REVIEW / "runner.lock", REVIEW / "runner.log"
 PROMPT_FILE = REPO / "orchestra" / "review_prompt.md"  # also usable as .claude/commands/review.md
 GUARD = HERE / "hooks" / "guard.py"
+PRE_PUSH = HERE / "hooks" / "pre-push"  # tracked; installed into the main .git/hooks each tick
 WORKTREES = REPO.parent / f"{REPO.name}-wt"
 INFRA = ("TIMEOUT", "NO_REPORT", "LANE_MISSING", "WORKTREE_FAILED")
 
@@ -94,8 +95,9 @@ DEFAULT_LANES = {
     # dies. Full access because Codex's Windows sandbox can't start a shell when launched in
     # the background ("setup refresh had errors"), so workspace-write could only read.
     # Chuen chose this (2 Nov 2026). What still holds: the worktree, the runner's own gate
-    # re-run, PASS-only merge, the main-checkout dirty check, and .git/hooks/pre-push,
-    # which refuses any push while ORCHESTRA_WORKTREE is set.
+    # re-run, PASS-only merge, the main-checkout dirty check, and .git/hooks/pre-push
+    # (orchestra/hooks/pre-push), which refuses any push while ORCHESTRA_WORKTREE is set
+    # or from a checkout under the worktrees folder.
     "codex": ["codex", "exec", "--skip-git-repo-check", "--color", "never",
               "-c", "mcp_servers.node_repl.enabled=false",
               "-c", "mcp_servers.desktop-commander.enabled=false",
@@ -1100,6 +1102,33 @@ def _collect(state: dict, info: dict, slug: str) -> str:
     return result
 
 
+def install_pre_push() -> bool:
+    """Copy orchestra/hooks/pre-push into the main checkout's hooks folder if it is missing
+    or different. Worktrees share that folder, so this covers every session. Returns True
+    when it wrote the hook (logged once, since the next tick finds it identical)."""
+    if not PRE_PUSH.exists():
+        return False
+    try:
+        r = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-path", "hooks/pre-push"],
+                           cwd=REPO, capture_output=True, text=True, timeout=C.get("git_timeout_s", 60))
+        if r.returncode or not r.stdout.strip():
+            return False
+        dst = Path(r.stdout.strip())
+        # sh can't run a CRLF script, and core.autocrlf may have given the tracked copy CRLF
+        want = PRE_PUSH.read_bytes().replace(b"\r\n", b"\n")
+        if dst.exists() and dst.read_bytes() == want:
+            return False
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        existed = dst.exists()
+        dst.write_bytes(want)
+        dst.chmod(0o755)
+        log(f"pre-push hook {'updated' if existed else 'installed'}: {dst}")
+        return True
+    except (OSError, subprocess.SubprocessError) as e:
+        log(f"pre-push hook not installed: {e!r}")
+        return False
+
+
 def tick(dry_run: bool = False) -> str:
     for d in (QUEUE, REPORTS, ARCHIVE, PARKED):
         d.mkdir(parents=True, exist_ok=True)
@@ -1112,6 +1141,7 @@ def tick(dry_run: bool = False) -> str:
         t = pick(tasks, state)
         print(f"would run: {t.slug if t else 'nothing'}; spend left today ${spend_left(state):.2f}")
         return "dry-run"
+    install_pre_push()
     global LOCK_FILE, _BASE
     parallel = bool(C.get("parallel_lanes") and aftercare_on())
     if parallel:

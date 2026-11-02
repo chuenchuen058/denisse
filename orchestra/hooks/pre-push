@@ -1,0 +1,30 @@
+#!/bin/sh
+# Orchestra pre-push hook: task sessions commit, they never push.
+# Tracked in orchestra/hooks/pre-push; the runner copies it into the main checkout's
+# .git/hooks/pre-push at the start of every tick (worktrees share that hooks folder).
+# Refuses when
+#   * ORCHESTRA_WORKTREE is set (the runner sets it for every session), or
+#   * the pushing checkout is under the worktrees folder, <repo parent>/<repo name>-wt/,
+#     which catches a session that cleared the env var.
+# Pushing from the main checkout (Chuen, or the runner's aftercare) is allowed.
+
+if [ -n "$ORCHESTRA_WORKTREE" ]; then
+  echo "pre-push: refused, this is an Orchestra session (pushes are Chuen's)." >&2
+  exit 1
+fi
+
+lower() { printf '%s' "$1" | tr '\\' '/' | tr '[:upper:]' '[:lower:]'; }
+
+top=$(git rev-parse --show-toplevel 2>/dev/null)
+common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+if [ -n "$top" ] && [ -n "$common" ]; then
+  main=$(dirname "$common")
+  wtroot="$(dirname "$main")/$(basename "$main")-wt"
+  case "$(lower "$top")/" in
+    "$(lower "$wtroot")"/*)
+      echo "pre-push: refused, $top is an Orchestra worktree (pushes are Chuen's)." >&2
+      exit 1
+      ;;
+  esac
+fi
+exit 0

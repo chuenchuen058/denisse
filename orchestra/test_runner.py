@@ -549,5 +549,137 @@ class GuardTest(unittest.TestCase):
             self.assertIsNone(self.d("Bash", command=cmd), cmd)
 
 
+def make_link(src: Path, dst: Path) -> None:
+    """The same kind of link the runner gives a worktree's .venv (a junction on Windows)."""
+    if os.name == "nt":
+        subprocess.run(["cmd", "/c", "mklink", "/J", str(dst), str(src)], check=True, capture_output=True)
+    else:
+        os.symlink(src, dst, target_is_directory=True)
+
+
+class GuardLinkTest(unittest.TestCase):
+    """Writes are checked on where they land, not on how the path is spelled."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.main = self.tmp / "denisse"
+        self.wt = self.tmp / "denisse-wt" / "task-1"
+        (self.main / ".venv" / "Scripts").mkdir(parents=True)
+        (self.wt / ".review").mkdir(parents=True)
+        make_link(self.main / ".venv", self.wt / ".venv")
+
+    def tearDown(self):
+        link = self.wt / ".venv"
+        if os.name == "nt":
+            os.rmdir(link)  # removes the junction itself, not its target
+        else:
+            link.unlink()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def d(self, tool, **inp):
+        return guard.decide({"tool_name": tool, "tool_input": inp, "cwd": str(self.wt)},
+                            str(self.wt), str(self.main))
+
+    def test_write_through_the_venv_junction_is_denied(self):
+        for tool, key in (("Write", "file_path"), ("Edit", "file_path"), ("NotebookEdit", "notebook_path")):
+            why = self.d(tool, **{key: str(self.wt / ".venv" / "Scripts" / "x.py")})
+            self.assertIsNotNone(why, tool)
+            self.assertIn("link", why)
+        self.assertIsNotNone(self.d("Write", file_path=".venv/Lib/site.py"), "relative path via the junction")
+        self.assertIsNotNone(self.d("Write", file_path=str(self.wt / ".VENV" / "x.py")), "case variant")
+
+    def test_ordinary_writes_and_the_report_are_allowed(self):
+        self.assertIsNone(self.d("Write", file_path=str(self.wt / "orchestra" / "new.py")))
+        self.assertIsNone(self.d("Edit", file_path="orchestra/runner.py"))
+        self.assertIsNone(self.d("Write", file_path=str(self.wt / ".review" / "report.md")))
+        self.assertIsNone(self.d("Write", file_path=".review/report.md"))
+
+    def test_running_the_venv_python_is_still_allowed(self):
+        for cmd in (r".venv\Scripts\python.exe -m unittest orchestra.test_runner -v",
+                    ".venv/Scripts/python.exe -m pytest"):
+            self.assertIsNone(self.d("Bash", command=cmd), cmd)
+
+
+SH = shutil.which("sh") or (r"C:\Program Files\Git\usr\bin\sh.exe" if os.name == "nt" else None)
+
+
+class PrePushTest(unittest.TestCase):
+    """orchestra/hooks/pre-push, installed by the runner into a temp main checkout."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.repo = self.tmp / "repo"
+        self.remote = self.tmp / "remote.git"
+        self.wt = self.tmp / "repo-wt" / "task-1"
+        self.git(self.tmp, "init", "-q", "--bare", str(self.remote))
+        self.repo.mkdir()
+        self.git(self.repo, "init", "-q", "-b", "main")
+        self.git(self.repo, "config", "user.name", "t")
+        self.git(self.repo, "config", "user.email", "t@t")
+        (self.repo / "a.txt").write_text("a")
+        self.git(self.repo, "add", "a.txt")
+        self.git(self.repo, "commit", "-qm", "init")
+        self.git(self.repo, "remote", "add", "origin", str(self.remote))
+        self.git(self.repo, "worktree", "add", "-q", "-b", "task-1", str(self.wt))
+        (self.wt / "b.txt").write_text("b")
+        self.git(self.wt, "add", "b.txt")
+        self.git(self.wt, "commit", "-qm", "task")
+        os.environ["ORCHESTRA_REPO"] = str(self.repo)
+        import runner
+        self.R = importlib.reload(runner)
+
+    def tearDown(self):
+        subprocess.run(["git", "worktree", "remove", "--force", str(self.wt)], cwd=self.repo, capture_output=True)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    @staticmethod
+    def git(cwd, *args, env=None):
+        return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, env=env)
+
+    @staticmethod
+    def env(**extra):
+        e = {k: v for k, v in os.environ.items() if k != "ORCHESTRA_WORKTREE"}
+        e.update(extra)
+        return e
+
+    def hook(self) -> Path:
+        return Path(self.git(self.repo, "rev-parse", "--path-format=absolute", "--git-path",
+                             "hooks/pre-push").stdout.strip())
+
+    def test_runner_installs_and_refreshes_the_hook_once(self):
+        self.assertTrue(self.R.install_pre_push())
+        self.assertNotIn(b"\r\n", self.hook().read_bytes())
+        self.assertFalse(self.R.install_pre_push(), "identical hook is left alone")
+        self.hook().write_text("#!/bin/sh\nexit 0\n")
+        self.assertTrue(self.R.install_pre_push(), "a stale hook is replaced")
+        log = self.R.LOG_FILE.read_text(encoding="utf-8")
+        self.assertEqual(log.count("pre-push hook installed"), 1)
+        self.assertEqual(log.count("pre-push hook updated"), 1)
+
+    def test_push_from_a_worktree_is_refused_with_or_without_the_env_var(self):
+        self.R.install_pre_push()
+        for env in (self.env(), self.env(ORCHESTRA_WORKTREE=str(self.wt))):
+            r = self.git(self.wt, "push", "origin", "task-1", env=env)
+            self.assertNotEqual(r.returncode, 0, r.stderr)
+            self.assertIn("pre-push: refused", r.stderr)
+        self.assertNotIn("task-1", self.git(self.remote, "branch").stdout)
+
+    def test_push_from_the_main_checkout_is_allowed(self):
+        self.R.install_pre_push()
+        r = self.git(self.repo, "push", "origin", "main", env=self.env())
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("main", self.git(self.remote, "branch").stdout)
+
+    def test_main_checkout_with_the_env_var_set_is_refused(self):
+        self.R.install_pre_push()
+        r = self.git(self.repo, "push", "origin", "main", env=self.env(ORCHESTRA_WORKTREE="x"))
+        self.assertNotEqual(r.returncode, 0)
+
+    @unittest.skipUnless(SH, "no sh to run the hook directly")
+    def test_tracked_hook_is_valid_sh(self):
+        r = subprocess.run([SH, "-n", str(self.R.PRE_PUSH)], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
