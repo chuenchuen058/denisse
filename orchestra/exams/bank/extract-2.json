@@ -1,0 +1,15 @@
+{
+  "id": "extract-2",
+  "category": "extract",
+  "timeout_s": 120,
+  "prompt": "Pull these fields out of the text below into one JSON object: order_id (integer), cables (integer, how many USB-C cables), total_gbp (number), postcode (string)\n\nText:\nORDER CONFIRMATION ~~ order no. #48213 ~~ items: 3x USB-C cable, 1x charger ... total charged GBP 27.50 (inc. VAT) -- ship to: postcode SE1 9RT\n\nReply with only the JSON object in a ```json code block.",
+  "grader": {
+    "type": "json",
+    "answer": {
+      "order_id": 48213,
+      "cables": 3,
+      "total_gbp": 27.5,
+      "postcode": "SE1 9RT"
+    }
+  }
+}

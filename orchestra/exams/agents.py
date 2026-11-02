@@ -1,0 +1,153 @@
+"""The real agents an exam can be sent to. Each returns a function
+    agent(prompt, cwd, timeout) -> core.Reply
+
+  codex     the Orchestra codex lane argv (runner.DEFAULT_LANES), prompt on stdin
+  claude    the Orchestra claude lane, only with --include-claude (Chuen's allowance is scarce)
+  copilot   node <@github/copilot entry> -p <prompt> -s, as agent_hub/server.mjs calls it
+  gemini    node <@google/gemini-cli entry>, as the hub does; IneligibleTierError = skipped
+  local:<m> every model Ollama lists at http://127.0.0.1:11434, if it answers
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import shutil
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+from .core import Reply, run_proc
+
+OLLAMA = os.environ.get("OLLAMA_HOST_URL", "http://127.0.0.1:11434")
+NOT_SERVED = re.compile(r"IneligibleTier|no longer supported|not (signed|logged) in|please log ?in|unauthori[sz]ed"
+                        r"|usage limit|quota exceeded", re.I)
+
+
+def _lanes() -> dict:
+    from orchestra import runner  # imported late: it reads config and looks for CLIs on import
+    return runner.lanes()
+
+
+def _env() -> dict:
+    # Same stripping as runner.run_lane: never bill the API, never look like a nested claude.
+    return {k: v for k, v in os.environ.items() if k != "CLAUDECODE" and not k.startswith("CLAUDE_CODE_")
+            and k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")}
+
+
+def _exe(argv0: str) -> str | None:
+    return argv0 if Path(argv0).exists() else shutil.which(argv0)
+
+
+def _npm_entry(pkg: str, name: str) -> str | None:
+    root = Path(os.environ.get("APPDATA", "")) / "npm" / "node_modules" / pkg
+    try:
+        meta = json.loads((root / "package.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    rel = meta["bin"] if isinstance(meta.get("bin"), str) else (meta.get("bin") or {}).get(name)
+    return str(root / rel) if rel else None
+
+
+def _refused(r: Reply) -> Reply:
+    """An agent that says it can't take work at all is skipped, not failed."""
+    m = NOT_SERVED.search(r.text or "") if r.error else None
+    return Reply(unavailable=m.group(0) + ": " + (r.error or "")[:150]) if m else r
+
+
+def codex(prompt: str, cwd: Path, timeout: float) -> Reply:
+    argv = list(_lanes().get("codex") or [])
+    exe = _exe(argv[0]) if argv else None
+    if not exe:
+        return Reply(unavailable="codex lane not found")
+    last = cwd / ".codex-last.txt"
+    rest = argv[1:-1] if argv[-1] == "-" else argv[1:]
+    argv = [exe, *rest, "-C", str(cwd), "-o", str(last), "-"]  # "-" = prompt on stdin
+    r = _refused(run_proc(argv, cwd=cwd, timeout=timeout, stdin=prompt, env=_env()))
+    try:
+        text = last.read_text(encoding="utf-8").strip()
+        last.unlink()
+        if text:
+            r.text = text
+    except OSError:
+        pass
+    return r
+
+
+def claude(prompt: str, cwd: Path, timeout: float) -> Reply:
+    argv = list(_lanes().get("claude") or [])
+    exe = _exe(argv[0]) if argv else None
+    if not exe:
+        return Reply(unavailable="claude lane not found")
+    r = _refused(run_proc([exe, *argv[1:]], cwd=cwd, timeout=timeout, stdin=prompt, env=_env()))
+    # stream-json: the last JSON line with a "result" is the answer
+    for line in reversed((r.text or "").splitlines()):
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(obj, dict) and "result" in obj:
+            r.text = str(obj["result"])
+            break
+    return r
+
+
+def copilot(prompt: str, cwd: Path, timeout: float) -> Reply:
+    entry = _npm_entry("@github/copilot", "copilot")
+    node = shutil.which("node")
+    if not entry or not node:
+        return Reply(unavailable="Copilot CLI not found")
+    return _refused(run_proc([node, entry, "-p", prompt, "-s", "--allow-all-tools"], cwd=cwd, timeout=timeout, env=_env()))
+
+
+def gemini(prompt: str, cwd: Path, timeout: float) -> Reply:
+    entry = _npm_entry("@google/gemini-cli", "gemini")
+    node = shutil.which("node")
+    if not entry or not node:
+        return Reply(unavailable="Gemini CLI not found")
+    argv = [node, entry, "--approval-mode", "auto_edit", "-o", "text", "-p", "Do the task given above."]
+    return _refused(run_proc(argv, cwd=cwd, timeout=timeout, stdin=prompt, env=_env()))
+
+
+def ollama_models(timeout: float = 3) -> list[str]:
+    """Installed Ollama models, or [] if Ollama isn't running."""
+    try:
+        with urllib.request.urlopen(f"{OLLAMA}/api/tags", timeout=timeout) as resp:
+            return [m["name"] for m in json.load(resp).get("models", [])]
+    except (OSError, ValueError, KeyError, urllib.error.URLError):
+        return []
+
+
+def local(model: str):
+    def ask(prompt: str, cwd: Path, timeout: float) -> Reply:
+        files = "".join(f"\n\n--- {p.name} ---\n{p.read_text(encoding='utf-8')}" for p in sorted(cwd.glob("*.py")))
+        body = json.dumps({"model": model, "prompt": prompt + (f"\n\nThe files:{files}" if files else ""),
+                           "stream": False}).encode()
+        req = urllib.request.Request(f"{OLLAMA}/api/generate", data=body, headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return Reply(text=json.load(resp).get("response", ""))
+        except TimeoutError:
+            return Reply(error=f"timed out after {timeout:g}s")
+        except urllib.error.URLError as e:
+            if isinstance(getattr(e, "reason", None), TimeoutError):
+                return Reply(error=f"timed out after {timeout:g}s")
+            return Reply(error=f"ollama: {e}")
+        except (OSError, ValueError) as e:
+            return Reply(error=f"ollama: {e}")
+    return ask
+
+
+NAMED = {"codex": codex, "copilot": copilot, "gemini": gemini, "claude": claude}
+
+
+def available(include_claude: bool = False, only: str | None = None) -> dict:
+    """name -> agent for every agent worth asking. Missing CLIs are reported by the agent as
+    unavailable on first use, so the run logs why they were skipped."""
+    out = {n: f for n, f in NAMED.items() if n != "claude" or include_claude or only == "claude"}
+    if only is None or only.startswith("local"):
+        for m in ollama_models():
+            out[f"local:{m}"] = local(m)
+    if only:
+        out = {n: f for n, f in out.items() if n == only or (only == "local" and n.startswith("local:"))}
+    return out

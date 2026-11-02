@@ -1,0 +1,17 @@
+{
+  "id": "code-edit-2",
+  "category": "code-edit",
+  "timeout_s": 180,
+  "prompt": "The current folder has leap.py and test_leap.py. is_leap(1900) is True, but 1900 was not a leap year. Fix the bug in leap.py (do not change the test) so that `python test_leap.py` passes. If you cannot edit files, reply instead with the whole corrected leap.py in one ```python code block.",
+  "files": {
+    "leap.py": "def is_leap(year):\n    if year % 4 == 0:\n        return True\n    if year % 100 == 0:\n        return False\n    return year % 400 == 0\n",
+    "test_leap.py": "import unittest\nfrom leap import is_leap\n\n\nclass T(unittest.TestCase):\n    def test(self):\n        for y, want in ((2024, True), (1900, False), (2000, True), (2023, False), (2100, False)):\n            self.assertEqual(is_leap(y), want, y)\n\n\nunittest.main()\n"
+  },
+  "grader": {
+    "type": "test",
+    "cmd": [
+      "test_leap.py"
+    ],
+    "target": "leap.py"
+  }
+}

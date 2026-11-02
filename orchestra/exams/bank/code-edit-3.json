@@ -1,0 +1,17 @@
+{
+  "id": "code-edit-3",
+  "category": "code-edit",
+  "timeout_s": 180,
+  "prompt": "The current folder has words.py and test_words.py. It reverses the letters instead of the word order. Fix the bug in words.py (do not change the test) so that `python test_words.py` passes. If you cannot edit files, reply instead with the whole corrected words.py in one ```python code block.",
+  "files": {
+    "words.py": "def reverse_words(s):\n    \"\"\"'the cat sat' -> 'sat cat the'; runs of spaces collapse to one.\"\"\"\n    return \" \".join(s.split(\" \"))[::-1]\n",
+    "test_words.py": "import unittest\nfrom words import reverse_words\n\n\nclass T(unittest.TestCase):\n    def test(self):\n        self.assertEqual(reverse_words('the cat sat'), 'sat cat the')\n        self.assertEqual(reverse_words('  hello   world '), 'world hello')\n        self.assertEqual(reverse_words(''), '')\n\n\nunittest.main()\n"
+  },
+  "grader": {
+    "type": "test",
+    "cmd": [
+      "test_words.py"
+    ],
+    "target": "words.py"
+  }
+}

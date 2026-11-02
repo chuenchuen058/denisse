@@ -230,6 +230,34 @@ export function chooseRoute(task, kind) {
   return { kind: "quick_code", ...ROUTES.quick_code, guessed: true };
 }
 
+// Measured routing (orchestra/exams, after Thomas's Atrium): when .review/exams/scores.json
+// exists, the best working agent for the kind's exam category takes the job
+// (python -m orchestra.exams best <kind> --among codex,gemini,copilot). No scores, no
+// category for the kind, or nobody working has passed one: the fixed rules above decide.
+const HUB_AGENTS = ["codex", "gemini", "copilot"];
+export const scoresPath = () => process.env.AGENT_HUB_EXAM_SCORES || join(REPO, ".review", "exams", "scores.json");
+
+export function scoredRoute(r) {
+  const file = scoresPath();
+  if (!existsSync(file)) return r;
+  let b;
+  try {
+    const out = execFileSync(pythonPath(), ["-m", "orchestra.exams", "--scores", file, "best", r.kind,
+      "--among", HUB_AGENTS.join(","), "--json"],
+    { cwd: REPO, timeout: 10000, encoding: "utf8", windowsHide: true, env: { ...process.env, PYTHONIOENCODING: "utf-8" } });
+    b = JSON.parse(out.trim().split("\n").pop());
+  } catch {
+    return r;  // exit 1 = nobody measured; python missing = today's rules
+  }
+  if (!b?.agent || !AGENTS[b.agent]) return r;
+  return { ...r, agent: b.agent, scored: true,
+    why: `best exam score for ${b.category}: ${b.passed}/${b.n} passed, median ${Math.round(b.median_s)}s` };
+}
+
+export function pickRoute(task, kind) {
+  return scoredRoute(chooseRoute(task, kind));
+}
+
 // When an agent can't take work (signed out, quota, service refused), its job goes to
 // the next one here instead of failing. 2 Nov 2026: Google stopped serving the free
 // "Gemini Code Assist for individuals" tier to Gemini CLI, so Gemini falls back to Codex.
@@ -418,8 +446,8 @@ export const TOOLS = [
     inputSchema: { type: "object", properties: {} } },
 ];
 
-function routed(t, r = chooseRoute(t.prompt, t.kind)) {
-  const label = `routed ${r.kind}${r.guessed ? " (guessed)" : ""} → ${r.agent}`;
+function routed(t, r = pickRoute(t.prompt, t.kind)) {
+  const label = `routed ${r.kind}${r.guessed ? " (guessed)" : ""}${r.scored ? " (scored)" : ""} → ${r.agent}`;
   return dispatch(r.agent, { ...t, write: t.write ?? r.write }, label)
     .then((out) => `### ${r.agent} — ${r.kind}${r.guessed ? " (guessed)" : ""}: ${r.why}\n${out}`);
 }
@@ -429,7 +457,7 @@ const ASK = { ask_codex: "codex", ask_gemini: "gemini", ask_copilot: "copilot" }
 export async function callTool(name, a = {}) {
   if (ASK[name]) return asJob(name, ASK[name], a, () => dispatch(ASK[name], a, name));
   if (name === "route_task") {
-    const r = chooseRoute(a.prompt, a.kind);
+    const r = pickRoute(a.prompt, a.kind);
     return asJob(name, r.agent, a, () => routed(a, r));
   }
   if (name === "split_tasks") {

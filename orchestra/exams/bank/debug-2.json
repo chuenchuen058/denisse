@@ -1,0 +1,12 @@
+{
+  "id": "debug-2",
+  "category": "debug",
+  "timeout_s": 120,
+  "prompt": "Here is a traceback:\n\nTraceback (most recent call last):\n  File \"app.py\", line 40, in <module>\n    main()\n  File \"app.py\", line 33, in main\n    cfg = load_config(path)\n  File \"config.py\", line 17, in load_config\n    return json.loads(text)[\"port\"]\n  File \"C:\\Python312\\Lib\\json\\__init__.py\", line 346, in loads\n    return _default_decoder.decode(s)\njson.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)\n\nThe standard library is not at fault. Which line number of config.py is the failing line in our own code? Reply with the answer on the last line as `ANSWER: <line number>`.",
+  "grader": {
+    "type": "exact",
+    "answer": [
+      "17"
+    ]
+  }
+}

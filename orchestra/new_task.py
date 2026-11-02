@@ -14,10 +14,20 @@ ap.add_argument("title")
 ap.add_argument("--priority", choices=["urgent", "normal"], default="normal")
 ap.add_argument("--weight", choices=["light", "heavy"], default="light")
 ap.add_argument("--kind", choices=["work", "maintenance"], default="work")
-ap.add_argument("--lane", default="claude")
+ap.add_argument("--lane", default=None,
+                help="Default: the best-scoring working lane for the work (orchestra/exams), else claude")
+ap.add_argument("--work", default=None,
+                help="Kind of work for the lane choice: code-edit, debug, writing, study, extract "
+                     "(or a hub kind like code_change). Default: guessed from the title")
 ap.add_argument("--auto", action="store_true",
                 help="Queue: auto straight away (default is draft: fill in the body and gate, then set auto)")
 a = ap.parse_args()
+if a.lane is None:
+    import sys
+    sys.path.insert(0, str(REVIEW.parent))
+    from orchestra.exams.lane_for import lane_for
+    a.lane = lane_for(a.work, a.title)
+    print(f"lane: {a.lane} (from exam scores; --lane to choose)")
 
 
 def norm(t: str) -> str:

@@ -1,0 +1,11 @@
+{
+  "id": "study-3",
+  "category": "study",
+  "timeout_s": 180,
+  "prompt": "An RC low-pass filter has R = 1 kilo-ohm and C = 1 microfarad. What is its -3 dB cutoff frequency in hertz, to 2 decimal places? Give the answer as a decimal number on the last line as `ANSWER: <number>`.",
+  "grader": {
+    "type": "numeric",
+    "answer": 159.15,
+    "tol": 0.1
+  }
+}
