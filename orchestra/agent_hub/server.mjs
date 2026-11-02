@@ -10,14 +10,24 @@
 //   * every hand-off (who, what, outcome) is logged there too, so the next chat and
 //     every other agent can see what was done
 //
+// Background jobs: the desktop bridge cancels any tool call that runs past 60 s, and a real
+// Codex run takes minutes. So ask_* / route_task / ask_all wait up to wait_s (45 s) and,
+// if the agent isn't done, hand back a job_id while the agent keeps running. Claude then
+// polls job_status and fetches job_result. Jobs persist to .review/hub/jobs/<id>.json +
+// <id>.out (live output), so a hub restart keeps finished results.
+//
 // Extends ~/scripts/codex-bridge (same Codex call), no npm dependencies.
-// Env: AGENT_HUB_VAULT (default: OneDrive KCL\Denisse), AGENT_HUB_FAKE=1 for tests.
+// Env: AGENT_HUB_VAULT (default: OneDrive KCL\Denisse), AGENT_HUB_FAKE=1 for tests
+// (AGENT_HUB_FAKE_CMD=<node script> makes the fakes real child processes),
+// AGENT_HUB_JOBS_DIR, AGENT_HUB_JOB_TIMEOUT_MS (default 15 min).
 import { spawn, execFileSync } from "node:child_process";
-import { readFileSync, rmSync, mkdtempSync, existsSync, mkdirSync, appendFileSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, mkdtempSync, existsSync, mkdirSync, appendFileSync, writeFileSync, readdirSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { randomBytes } from "node:crypto";
 
 const NPM = join(process.env.APPDATA || join(homedir(), ".npm-global"), "npm", "node_modules");
 const VAULT = process.env.AGENT_HUB_VAULT || join(homedir(), "OneDrive - King's College London", "Denisse");
@@ -105,22 +115,41 @@ function preamble(agent) {
   ].join("\n");
 }
 
+export function killTree(pid) {
+  // child.kill() on Windows leaves the CLI's own children running; taskkill /T takes the tree.
+  if (!pid) return;
+  try {
+    if (process.platform === "win32") execFileSync("taskkill", ["/T", "/F", "/PID", String(pid)], { stdio: "ignore", windowsHide: true });
+    else process.kill(pid, "SIGKILL");
+  } catch {}
+}
+
 function run(exe, args, { cwd, stdin, env }) {
+  const job = jobCtx.getStore();  // set when this run belongs to a background job
   return new Promise((resolve) => {
     if (FAKE) {
       if ((process.env.AGENT_HUB_FAKE_FAIL || "").split(",").includes(exe))
         return resolve({ code: 1, out: "IneligibleTierError: This client is no longer supported", ms: 1 });
-      const fake = JSON.parse(process.env.AGENT_HUB_FAKE_ANSWERS || "{}");
-      return resolve({ code: 0, out: fake[exe] ?? `fake ${exe} answer\nFOR MEMORY:\n- fake fact from ${exe}`, ms: 1 });
+      if (!process.env.AGENT_HUB_FAKE_CMD) {
+        const fake = JSON.parse(process.env.AGENT_HUB_FAKE_ANSWERS || "{}");
+        return resolve({ code: 0, out: fake[exe] ?? `fake ${exe} answer\nFOR MEMORY:\n- fake fact from ${exe}`, ms: 1 });
+      }
     }
+    if (job?.killed) return resolve({ code: -1, out: `job ${job.rec.id} was stopped: ${job.rec.error}`, ms: 0 });
     const start = Date.now();
-    const child = spawn(process.execPath, [exe, ...args], { cwd, windowsHide: true, env: { ...process.env, ...env } });
+    const argv = FAKE ? [process.env.AGENT_HUB_FAKE_CMD, exe, ...args] : [exe, ...args];
+    const child = spawn(process.execPath, argv, { cwd, windowsHide: true, env: { ...process.env, ...env } });
+    job?.children.add(child);
     let out = "";
-    child.stdout.on("data", (d) => { out += d; });
-    child.stderr.on("data", (d) => { out += d; });
-    const timer = setTimeout(() => child.kill(), TIMEOUT_MS);
-    child.on("error", (e) => { clearTimeout(timer); resolve({ code: -1, out: String(e), ms: Date.now() - start }); });
-    child.on("close", (code) => { clearTimeout(timer); resolve({ code, out, ms: Date.now() - start }); });
+    const onData = (d) => { out += d; job?.log(d); };
+    child.stdout.on("data", onData);
+    child.stderr.on("data", onData);
+    child.stdin.on("error", () => {});  // EPIPE if the child is killed before reading its prompt
+    // A job has its own timeout (and kills the tree itself); a bare call keeps the old one.
+    const timer = job ? null : setTimeout(() => killTree(child.pid), TIMEOUT_MS);
+    const done = (r) => { clearTimeout(timer); job?.children.delete(child); resolve(r); };
+    child.on("error", (e) => done({ code: -1, out: String(e), ms: Date.now() - start }));
+    child.on("close", (code) => done({ code, out, ms: Date.now() - start }));
     if (stdin !== undefined) child.stdin.end(stdin); else child.stdin.end();
   });
 }
@@ -211,13 +240,15 @@ async function dispatch(agent, args, label) {
   if (!fn) return `Unknown agent: ${agent}`;
   const r = await fn(args);
   const fb = FALLBACK[agent];
-  if (r.code !== 0 && fb && !args._fellBack) {
+  const job = jobCtx.getStore();
+  if (r.code !== 0 && fb && !args._fellBack && !job?.killed) {
     const why = oneLine(String(r.out).match(/(IneligibleTier|not (signed|logged) in|login|quota|rate limit|unauthori[sz]ed)[^\n]*/i)?.[0] || `exit ${r.code}`, 140);
     remember("claude", [`${agent} couldn't take "${oneLine(args.prompt, 80)}" (${why}); sent to ${fb} instead`]);
     const out = await dispatch(fb, { ...args, _fellBack: true }, `${label || "task"} (fallback from ${agent})`);
     return `(${agent} unavailable: ${why}. ${fb} did it instead.)\n${out}`;
   }
   const ok = r.code === 0;
+  if (job) job[ok ? "ok" : "failed"] += 1;
   const answer = String(r.out || "").trim() || `${agent} returned nothing (exit ${r.code}).`;
   const mem = ok ? memoryLines(answer) : [];
   remember(agent, [
@@ -225,6 +256,120 @@ async function dispatch(agent, args, label) {
     ...mem,
   ]);
   return `[${agent}${ok ? "" : `, exit ${r.code}`}]\n${answer}`;
+}
+
+// ------------------------------------------------------------------ background jobs
+
+const JOBS_DIR = process.env.AGENT_HUB_JOBS_DIR || join(REPO, ".review", "hub", "jobs");
+const JOB_TIMEOUT_MS = Number(process.env.AGENT_HUB_JOB_TIMEOUT_MS || 15 * 60 * 1000);
+const MAX_JOBS = 4;
+const DEFAULT_WAIT_S = 45;  // under the bridge's 60 s cut-off
+const HUB_ID = randomBytes(6).toString("hex");
+const jobs = new Map();  // id -> live job started by this hub process
+const jobCtx = new AsyncLocalStorage();
+
+const jobFile = (id, ext) => join(JOBS_DIR, `${id}.${ext}`);
+const nowIso = () => new Date().toISOString();
+
+function writeRec(rec) {
+  mkdirSync(JOBS_DIR, { recursive: true });
+  writeFileSync(jobFile(rec.id, "json"), JSON.stringify(rec, null, 2), "utf8");
+}
+
+function pidAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; }
+}
+
+function readRec(id) {
+  // A job on disk that says "running" but whose hub is gone died with that hub.
+  if (!/^[\w-]+$/.test(String(id))) return null;
+  let rec;
+  try { rec = JSON.parse(readFileSync(jobFile(id, "json"), "utf8")); } catch { return null; }
+  const otherLiveHub = rec.hub_pid !== process.pid && pidAlive(rec.hub_pid);
+  if (rec.status === "running" && rec.hub_id !== HUB_ID && !otherLiveHub) {
+    Object.assign(rec, { status: "failed", finished: nowIso(),
+      error: "the hub stopped while this job was running, and the agent's process died with it; ask again if still needed" });
+    writeRec(rec);
+  }
+  return rec;
+}
+
+const getRec = (id) => jobs.get(id)?.rec || readRec(id);
+
+function tail(id, n = 20) {
+  try {
+    return readFileSync(jobFile(id, "out"), "utf8").split(/\r?\n/).filter((l) => l.trim()).slice(-n).join("\n");
+  } catch { return ""; }
+}
+
+const elapsed = (rec) => Math.round(((rec.finished ? Date.parse(rec.finished) : Date.now()) - Date.parse(rec.started)) / 1000);
+
+function resultText(rec) {
+  if (rec.status === "done") return rec.result;
+  if (rec.status === "running") return `Job ${rec.id} (${rec.agent}) is still running, ${elapsed(rec)}s so far. Poll job_status("${rec.id}"); don't ask again, that starts a second run.`;
+  const out = rec.result || tail(rec.id) || "(no output)";
+  return `Job ${rec.id} (${rec.agent}) FAILED: ${rec.error}\n\n${out}`;
+}
+
+function startJob(tool, agent, a, work) {
+  const running = [...jobs.values()].filter((j) => j.rec.status === "running");
+  if (running.length >= MAX_JOBS)
+    throw new Error(`${MAX_JOBS} agent jobs are already running (${running.map((j) => j.rec.id).join(", ")}). ` +
+      `Wait for one to finish (job_status / job_result) before starting another.`);
+  const id = `${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${randomBytes(4).toString("hex")}`;
+  const timeoutMs = Number(a.timeout_s) > 0 ? Number(a.timeout_s) * 1000 : JOB_TIMEOUT_MS;
+  const rec = { id, tool, agent, status: "running", started: nowIso(), prompt: oneLine(a.prompt, 200),
+    timeout_s: timeoutMs / 1000, hub_id: HUB_ID, hub_pid: process.pid };
+  const job = { rec, children: new Set(), killed: false, ok: 0, failed: 0,
+    log: (d) => { try { appendFileSync(jobFile(id, "out"), d); } catch {} } };
+  jobs.set(id, job);
+  writeRec(rec);
+  writeFileSync(jobFile(id, "out"), "", "utf8");
+  const timer = setTimeout(() => {
+    job.killed = true;
+    Object.assign(rec, { status: "failed", finished: nowIso(), error: `timed out after ${rec.timeout_s}s; agent process tree killed` });
+    writeRec(rec);
+    for (const c of job.children) killTree(c.pid);
+  }, timeoutMs);
+  const finish = (result, error) => {
+    clearTimeout(timer);
+    rec.result = result;
+    // dispatch() has filed the FOR MEMORY lines by now, once, whether or not anyone fetches the result.
+    rec.memory_filed = true;
+    if (rec.status === "running") {
+      if (error || (job.failed && !job.ok)) Object.assign(rec, { status: "failed", error: error || "the agent exited with an error" });
+      else rec.status = "done";
+      rec.finished = nowIso();
+    }
+    writeRec(rec);
+    return rec;
+  };
+  job.promise = jobCtx.run(job, work).then((r) => finish(r), (e) => finish("", String(e?.message || e)));
+  return job;
+}
+
+async function asJob(tool, agent, a, work) {
+  // Answer inline if the agent is done within wait_s, otherwise hand back the job.
+  const job = startJob(tool, agent, a, work);
+  const waitS = a.wait_s === undefined ? DEFAULT_WAIT_S : Math.max(0, Number(a.wait_s) || 0);
+  let t;
+  const rec = await Promise.race([job.promise, new Promise((r) => { t = setTimeout(r, waitS * 1000, null); })]);
+  clearTimeout(t);
+  if (rec) return resultText(rec);
+  const { id, status, started } = job.rec;
+  return JSON.stringify({ job_id: id, status, agent, started,
+    next: `Still working. Poll job_status("${id}") every 30-60 s, then job_result("${id}"). Don't ask again: that starts a second run.` });
+}
+
+function listJobs() {
+  let names = [];
+  try { names = readdirSync(JOBS_DIR).filter((f) => f.endsWith(".json")); } catch {}
+  const since = Date.now() - 24 * 3600 * 1000;
+  const recs = names.map((f) => getRec(f.slice(0, -5))).filter((r) => r && Date.parse(r.started) >= since)
+    .sort((x, y) => y.started.localeCompare(x.started));
+  if (!recs.length) return "No agent jobs in the last 24 h.";
+  return JSON.stringify(recs.map((r) => ({ job_id: r.id, status: r.status, agent: r.agent, tool: r.tool,
+    started: r.started, elapsed_s: elapsed(r), prompt: r.prompt, ...(r.error ? { error: r.error } : {}) })), null, 2);
 }
 
 // ------------------------------------------------------------------ MCP
@@ -236,47 +381,73 @@ const taskProps = {
   model: { type: "string", description: "Optional model override." },
 };
 
+const jobProps = {
+  wait_s: { type: "number", description: `Seconds to wait for the answer before handing back a job_id instead. Default ${DEFAULT_WAIT_S}; keep it under 60.` },
+  timeout_s: { type: "number", description: "Kill the agent (and its child processes) after this many seconds. Default 900 (15 min)." },
+};
+
+const JOB_NOTE = ` Answers inline if done within wait_s (default ${DEFAULT_WAIT_S} s); otherwise returns {job_id, status: "running"} ` +
+  `and the agent keeps working. Then poll job_status(job_id) every 30-60 s and call job_result(job_id) once it is done. ` +
+  `Never re-ask the same task because it is slow: that starts a second run.`;
+
 export const TOOLS = [
-  { name: "ask_codex", description: "Hand a task to OpenAI Codex. Best for changing code in a repo, debugging, code review.",
-    inputSchema: { type: "object", properties: taskProps, required: ["prompt"] } },
-  { name: "ask_gemini", description: "Hand a task to Google Gemini. Best for long documents, many files at once, research and summaries.",
-    inputSchema: { type: "object", properties: taskProps, required: ["prompt"] } },
-  { name: "ask_copilot", description: "Hand a task to GitHub Copilot. Best for GitHub questions (issues, PRs), shell commands and quick code snippets.",
-    inputSchema: { type: "object", properties: taskProps, required: ["prompt"] } },
-  { name: "route_task", description: "Let the hub pick the agent for a task (codex, gemini or copilot) from its kind, run it, and say who did it and why. Use this by default when Chuen asks for work that another agent can do.",
-    inputSchema: { type: "object", properties: { ...taskProps,
+  { name: "ask_codex", description: "Hand a task to OpenAI Codex. Best for changing code in a repo, debugging, code review." + JOB_NOTE,
+    inputSchema: { type: "object", properties: { ...taskProps, ...jobProps }, required: ["prompt"] } },
+  { name: "ask_gemini", description: "Hand a task to Google Gemini. Best for long documents, many files at once, research and summaries." + JOB_NOTE,
+    inputSchema: { type: "object", properties: { ...taskProps, ...jobProps }, required: ["prompt"] } },
+  { name: "ask_copilot", description: "Hand a task to GitHub Copilot. Best for GitHub questions (issues, PRs), shell commands and quick code snippets." + JOB_NOTE,
+    inputSchema: { type: "object", properties: { ...taskProps, ...jobProps }, required: ["prompt"] } },
+  { name: "route_task", description: "Let the hub pick the agent for a task (codex, gemini or copilot) from its kind, run it, and say who did it and why. Use this by default when Chuen asks for work that another agent can do." + JOB_NOTE,
+    inputSchema: { type: "object", properties: { ...taskProps, ...jobProps,
       kind: { type: "string", enum: Object.keys(ROUTES), description: "What sort of work this is. Leave out to let the hub guess from the prompt." } },
       required: ["prompt"] } },
   { name: "split_tasks", description: "Run several sub-tasks at once, each routed to the best agent (max 5). Give each its own cwd, or keep them read-only, so they don't edit the same files.",
     inputSchema: { type: "object", properties: { tasks: { type: "array", maxItems: 5, items: { type: "object",
       properties: { ...taskProps, kind: { type: "string", enum: Object.keys(ROUTES) } }, required: ["prompt"] } } }, required: ["tasks"] } },
-  { name: "ask_all", description: "Ask Codex, Gemini and Copilot the same question at once, read-only, for second opinions.",
-    inputSchema: { type: "object", properties: { prompt: taskProps.prompt, cwd: taskProps.cwd }, required: ["prompt"] } },
+  { name: "ask_all", description: "Ask Codex, Gemini and Copilot the same question at once, read-only, for second opinions. Runs as one job." + JOB_NOTE,
+    inputSchema: { type: "object", properties: { prompt: taskProps.prompt, cwd: taskProps.cwd, ...jobProps }, required: ["prompt"] } },
+  { name: "job_status", description: "Check a background agent job: running / done / failed, seconds elapsed, and the last 20 lines of its output. Use this to follow a slow ask_* call instead of asking again.",
+    inputSchema: { type: "object", properties: { job_id: { type: "string" } }, required: ["job_id"] } },
+  { name: "job_result", description: "Get a finished job's full answer (its FOR MEMORY lines are already filed to the vault, once). If it is still running, says so: keep polling job_status.",
+    inputSchema: { type: "object", properties: { job_id: { type: "string" } }, required: ["job_id"] } },
+  { name: "jobs", description: "List agent jobs from the last 24 h (newest first) with their status. Use it to find a job_id you lost.",
+    inputSchema: { type: "object", properties: {} } },
   { name: "remember", description: "File durable facts or decisions into the shared vault's handoff note for today, tagged [claude]. One line each.",
     inputSchema: { type: "object", properties: { lines: { type: "array", items: { type: "string" } } }, required: ["lines"] } },
   { name: "memory_today", description: "Read the vault's hot.md, STATE NOW and today's handoff note, so the chat starts from shared live state.",
     inputSchema: { type: "object", properties: {} } },
 ];
 
+function routed(t, r = chooseRoute(t.prompt, t.kind)) {
+  const label = `routed ${r.kind}${r.guessed ? " (guessed)" : ""} → ${r.agent}`;
+  return dispatch(r.agent, { ...t, write: t.write ?? r.write }, label)
+    .then((out) => `### ${r.agent} — ${r.kind}${r.guessed ? " (guessed)" : ""}: ${r.why}\n${out}`);
+}
+
+const ASK = { ask_codex: "codex", ask_gemini: "gemini", ask_copilot: "copilot" };
+
 export async function callTool(name, a = {}) {
-  if (name === "ask_codex") return dispatch("codex", a, "ask_codex");
-  if (name === "ask_gemini") return dispatch("gemini", a, "ask_gemini");
-  if (name === "ask_copilot") return dispatch("copilot", a, "ask_copilot");
-  if (name === "route_task" || name === "split_tasks") {
-    const tasks = name === "route_task" ? [a] : (a.tasks || []).slice(0, 5);
-    const outs = await Promise.all(tasks.map((t) => {
-      const r = chooseRoute(t.prompt, t.kind);
-      const label = `routed ${r.kind}${r.guessed ? " (guessed)" : ""} → ${r.agent}`;
-      return dispatch(r.agent, { ...t, write: t.write ?? r.write }, label)
-        .then((out) => `### ${r.agent} — ${r.kind}${r.guessed ? " (guessed)" : ""}: ${r.why}\n${out}`);
-    }));
+  if (ASK[name]) return asJob(name, ASK[name], a, () => dispatch(ASK[name], a, name));
+  if (name === "route_task") {
+    const r = chooseRoute(a.prompt, a.kind);
+    return asJob(name, r.agent, a, () => routed(a, r));
+  }
+  if (name === "split_tasks") {
+    const outs = await Promise.all((a.tasks || []).slice(0, 5).map((t) => routed(t)));
     return outs.join("\n\n");
   }
   if (name === "ask_all") {
-    const outs = await Promise.all(["codex", "gemini", "copilot"].map((ag) =>
-      dispatch(ag, { prompt: a.prompt, cwd: a.cwd, write: false }, "ask_all")));
-    return outs.join("\n\n");
+    return asJob(name, "codex,gemini,copilot", a, () => Promise.all(["codex", "gemini", "copilot"].map((ag) =>
+      dispatch(ag, { prompt: a.prompt, cwd: a.cwd, write: false }, "ask_all"))).then((outs) => outs.join("\n\n")));
   }
+  if (name === "job_status" || name === "job_result") {
+    const rec = getRec(a.job_id);
+    if (!rec) throw new Error(`No job ${a.job_id}. Use jobs() to list the last 24 h.`);
+    if (name === "job_result") return resultText(rec);
+    return JSON.stringify({ job_id: rec.id, status: rec.status, agent: rec.agent, tool: rec.tool, started: rec.started,
+      elapsed_s: elapsed(rec), ...(rec.error ? { error: rec.error } : {}), output_tail: tail(rec.id) }, null, 2);
+  }
+  if (name === "jobs") return listJobs();
   if (name === "remember") return remember("claude", a.lines || []) ? "Filed." : `Vault not found at ${VAULT}.`;
   if (name === "memory_today") {
     const ctx = contextPack("claude");
