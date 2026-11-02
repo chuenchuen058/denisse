@@ -572,6 +572,31 @@ CASES = [
         "expect": {"contains_any": ["study brief"], "must_contain": ["Signals and Systems"]},
         "why": "The answer to her own question finishes the job.",
     },
+    # "explain this" (desktop_context.py, 2026-11-02). `desktop` is a fake
+    # front window + selection that run_eval patches in, so these never read
+    # the real clipboard or send Ctrl+C at 3am.
+    {
+        "id": "explain_this_error",
+        "prompt": "what does this error mean?",
+        "desktop": {"title": "train.py - Visual Studio Code", "process": "Code.exe",
+                    "selection": "ZeroDivisionError: division by zero"},
+        "expect": {"any_tool_of": {"look_at_this"},
+                   "contains_any": ["zero", "divid"],
+                   "deny": POSIX_LEAKS},
+        "why": "'this' used to mean nothing to her; she has to look at the "
+               "selection and explain that error, not ask what he means.",
+    },
+    {
+        "id": "explain_this_text",
+        "prompt": "explain this",
+        "desktop": {"title": "Lecture 4 - Signals.pdf - Adobe Acrobat", "process": "Acrobat.exe",
+                    "selection": "The Nyquist rate is twice the highest frequency "
+                                 "present in the signal."},
+        "expect": {"any_tool_of": {"look_at_this"},
+                   "contains_any": ["nyquist", "twice", "sampl", "frequenc"],
+                   "deny": POSIX_LEAKS},
+        "why": "Same, for a selected sentence in a PDF rather than an error.",
+    },
     {
         # Keep last: it closes the seeded task, which the earlier task
         # cases in this condition still need open.

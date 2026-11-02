@@ -24,6 +24,7 @@ import tasks
 import timers
 import vault_search
 import brain_rules
+import desktop_context
 
 FACTS_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "memory", "facts.json"
@@ -764,4 +765,5 @@ TOOL_FUNCTIONS = {
     "set_timer": timers.set_timer,
     "cancel_timer": timers.cancel_timer,
     "list_timers": timers.list_timers,
+    "look_at_this": desktop_context.look_at_this,
 }

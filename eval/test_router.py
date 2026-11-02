@@ -73,6 +73,12 @@ CASES = [
                      user("what is convolution again?")], {"search_vault"}, set()),
     ("again_without_notes", [user("what is convolution again?")], set(), {"search_vault"}),
     ("greet_no_vault", [user("hey")], set(), {"search_vault"}),
+    # look_at_this only on a pointing word, newest message only.
+    ("look_explain_this", [user("explain this")], {"look_at_this"}, set()),
+    ("look_not_greeting", [user("good morning")], set(), {"look_at_this"}),
+    ("look_not_inherited",
+     [user("explain this"), bot("..."), user("what's the weather in London?")],
+     set(), {"look_at_this"}),
 ]
 
 # Every model-eval case that needs a tool gets a routing check for free, so
