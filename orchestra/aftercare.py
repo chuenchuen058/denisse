@@ -28,7 +28,10 @@ PRIVATE_PATHS = re.compile(
 # Strings in added lines that look like keys or tokens.
 SECRET_TEXT = re.compile(
     r"(sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AIza[0-9A-Za-z_-]{30,}"
-    r"|xox[abp]-[A-Za-z0-9-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)")
+    r"|xox[abp]-[A-Za-z0-9-]{20,}"
+    # a PEM header only counts when real key material follows (on the next added line);
+    # a bare header in a test fixture is not a key (false alarm on 2 Nov 2026).
+    r"|-----BEGIN [A-Z ]*PRIVATE KEY-----\s*\n\+?\s*[A-Za-z0-9+/=]{40,})")
 
 
 def _git(repo: Path, *args: str, timeout: int = 120) -> subprocess.CompletedProcess:

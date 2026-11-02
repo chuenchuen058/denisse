@@ -70,6 +70,10 @@ class TestAftercare(unittest.TestCase):
         g(r, "add", ".")
         g(r, "commit", "-qm", "ok")
         self.assertEqual(aftercare.privacy_problems(r, "up"), [])
+        (r / "test_fixture.py").write_text('X = ["-----BEGIN RSA PRIVATE KEY-----\\nabc"]\n')
+        g(r, "add", ".")
+        g(r, "commit", "-qm", "fixture")
+        self.assertEqual(aftercare.privacy_problems(r, "up"), [])  # a bare PEM header isn't a key
         (r / "Atlas").mkdir()
         (r / "Atlas" / "Settled.md").write_text("private\n")
         (r / "b.py").write_text("K = 'sk-" + "a" * 30 + "'\n")
