@@ -234,9 +234,16 @@ def _usage(running: list[dict]) -> list[dict]:
     # the runner's own record (orchestra: "LIMITED <slug> lane=<lane> until <time>")
     try:
         for l in (REVIEW / "runner.log").read_text(encoding="utf-8", errors="replace").splitlines()[-300:]:
-            m = re.match(r"^(\S+) LIMITED \S+ lane=(\w+) until (.+)$", l)
+            m = re.match(r"^(\S+) LIMITED \S+ lane=(\w+) until (\S+ )?(\d{1,2}:\d{2})", l)
             if m and m.group(1)[:10] == today:
-                limits[m.group(2)] = "until " + m.group(3).strip()
+                day = (m.group(3) or today).strip()
+                try:
+                    if dt.datetime.fromisoformat(f"{day} {m.group(4)}") <= dt.datetime.now():
+                        limits.pop(m.group(2), None)  # that limit has already lifted
+                        continue
+                except ValueError:
+                    pass
+                limits[m.group(2)] = "until " + m.group(4)
     except OSError:
         pass
     busy = {}
