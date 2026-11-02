@@ -97,6 +97,11 @@ if _gemini:
     # auto_edit: may edit files, may not run shell commands. The runner runs the gate itself.
     DEFAULT_LANES["gemini"] = ["node", _gemini, "--approval-mode", "auto_edit", "-o", "text",
                                "-p", "Do the task given above."]
+# The scheduled task's PATH has no %APPDATA%\npm, so give codex its full path (2 Nov 2026).
+# The prompt goes in on stdin, so running the .cmd shim is safe for long prompts.
+_codex_cmd = Path(os.environ.get("APPDATA", "")) / "npm" / "codex.cmd"
+if not shutil.which("codex") and _codex_cmd.exists():
+    DEFAULT_LANES["codex"][0] = str(_codex_cmd)
 VALID = {"priority": ("urgent", "normal"), "weight": ("light", "heavy"), "kind": ("work", "maintenance")}
 
 
