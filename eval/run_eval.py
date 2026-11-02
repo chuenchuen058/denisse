@@ -464,5 +464,26 @@ def main() -> int:
     return 0 if results["live_pass"] == len(CASES) else 1
 
 
+def _gpu_lease():
+    """Take the shared local-inference lease (.review/gpu.lease in the main checkout) so
+    Orchestra's local team doesn't start a model call mid-eval. Waits up to 5 minutes for
+    a local-team call to finish; runs anyway (with a note) if it can't get it."""
+    try:
+        from orchestra.local_team.lease import GpuLease
+    except Exception:
+        return None
+    lease = GpuLease.for_repo(ROOT, "eval/run_eval.py", ttl_s=3 * 3600)
+    if not lease.acquire(wait_s=300, poll_s=5):
+        print(f"note: GPU lease still held by {(lease.info() or {}).get('holder', '?')}; running anyway")
+        return None
+    return lease
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    _lease = _gpu_lease()
+    try:
+        rc = main()
+    finally:
+        if _lease:
+            _lease.release()
+    raise SystemExit(rc)

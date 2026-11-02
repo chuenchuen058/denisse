@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "required": ["lines"],
+  "additionalProperties": false,
+  "properties": {
+    "lines": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["text", "section"],
+        "additionalProperties": false,
+        "properties": {
+          "text": {"type": "string", "minLength": 10, "maxLength": 200},
+          "section": {"type": "string", "enum": ["DONE", "NOT DONE", "ODD", "PREMISE", "GATE"]}
+        }
+      }
+    }
+  }
+}
