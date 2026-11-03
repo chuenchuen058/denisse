@@ -70,6 +70,7 @@ from orb_controls import OrbControls
 from reminder_card import TYPING_MS, ReminderCard, ThinkingBubble, _place, _work_area
 # "study mode" / "pomodoro" / "stop study mode" ... -- the phrases live in
 # study_mode.match_command, shared with the wake word.
+import study_mode
 from study_mode import StudyBubble, StudyMode, match_command as _match_study_command
 from timer_ui import TimerDisplay
 
@@ -748,6 +749,41 @@ def _start_study_mode():
 
 def _stop_study_mode():
     root.after(0, _stop_study_mode_main)
+
+
+def _on_study_change(mode):
+    """After the clock starts, stops, pauses or resumes -- from the menu,
+    the bubble, a typed phrase or one of the brain's study tools. Main
+    thread only (StudyMode calls it from its own methods)."""
+    if not mode.active:
+        _close_study_bubble()
+    if _tray_icon is not None:
+        _tray_icon.update_menu()
+
+
+def _on_tk_thread(fn, timeout_s=5.0):
+    """Run `fn` on the Tk thread and return its result. Called from the
+    brain's worker thread by study_mode's tool functions; a direct call
+    when already on the main thread, so the CLI and tests don't deadlock."""
+    if threading.current_thread() is threading.main_thread():
+        return fn()
+    done = threading.Event()
+    box = {}
+
+    def run():
+        try:
+            box["result"] = fn()
+        except Exception as exc:  # reported to the model as the tool's error
+            box["error"] = exc
+        finally:
+            done.set()
+
+    root.after(0, run)
+    if not done.wait(timeout_s):
+        raise RuntimeError("the study clock didn't answer in time")
+    if "error" in box:
+        raise box["error"]
+    return box.get("result")
 
 
 def _toggle_study_mode(icon=None, item=None):
@@ -1897,7 +1933,12 @@ def main():
     _study_mode = StudyMode(
         root, _show_study_bubble, orb=_floating_orb, font_family=FONT_FAMILY,
         avoid=lambda: [b.win for b in (_reminder_card, _study_bubble, _reply_bubble, _thinking_bubble, _orb_controls) if b is not None],
+        on_change=_on_study_change,
     )
+    # The brain's study tools (study_mode.start_session etc.) run on its
+    # worker thread; the clock lives here. Each call is marshalled onto the
+    # Tk thread and waited for, so the tool result is what really happened.
+    study_mode.set_dispatcher(_on_tk_thread)
     # Plain countdowns (timers.py) set by her set_timer tool. Its pill also
     # keeps off study mode's pill, so both can run at once.
     global _timer_display

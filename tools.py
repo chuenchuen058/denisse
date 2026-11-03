@@ -656,6 +656,12 @@ def read_skill(name: str) -> str:
         return f.read()
 
 
+_REMIND_ME = re.compile(
+    r"^(?:please\s+)?(?:remind|reminder\s+(?:for|to)|remember)\s+(?:me\s+)?"
+    r"(?:that\s+|to\s+|about\s+|of\s+)?(?:there(?:'s|\s+is)\s+(?:a\s+|an\s+)?)?",
+    re.IGNORECASE)
+
+
 # Registry mapping tool name -> callable, used by brain.py's tool-use loop.
 def add_task(text: str, due: str = "") -> str:
     """Add something Chuen has to do, with an optional deadline in his own
@@ -672,6 +678,10 @@ def add_task(text: str, due: str = "") -> str:
         if parsed.question:
             return (f"Not added yet: \"{due.strip()}\" is ambiguous. Ask Chuen: "
                     f"{parsed.question} Then call add_task again with the day he means.")
+    # The model copies his framing into the task: "remind me there is a
+    # robotics meeting" (2026-11-03). The task is the meeting. This trims
+    # the model's argument, not his words.
+    text = _REMIND_ME.sub("", (text or "").strip(), count=1).strip() or (text or "").strip()
     t = tasks.add_task(text, due)
     if t["due"]:
         # In words ("Thursday 5 Nov, 15:00"), so a wrong parse is visible.
@@ -741,6 +751,39 @@ def remove_task(task: str) -> str:
     return f"Removed: {t['text']}"
 
 
+# study_mode imports Tk and PIL for its bubble and badge; importing it here
+# at module level would drag a window toolkit into every headless user of
+# tools.py. The clock functions are looked up when called.
+def study_session_status() -> str:
+    import study_mode
+    return study_mode.session_status()
+
+
+def start_study_session() -> str:
+    import study_mode
+    return study_mode.start_session()
+
+
+def pause_study_session() -> str:
+    import study_mode
+    return study_mode.pause_session()
+
+
+def resume_study_session() -> str:
+    import study_mode
+    return study_mode.resume_session()
+
+
+def stop_study_session() -> str:
+    import study_mode
+    return study_mode.stop_session()
+
+
+def reply_preference(action: str = "add", text: str = "") -> str:
+    import reply_preferences
+    return reply_preferences.tool(action, text)
+
+
 TOOL_FUNCTIONS = {
     "run_shell_command": run_shell_command,
     "open_application": open_application,
@@ -779,4 +822,14 @@ TOOL_FUNCTIONS = {
     "cancel_timer": timers.cancel_timer,
     "list_timers": timers.list_timers,
     "look_at_this": desktop_context.look_at_this,
+    # Study mode (study_mode.py), model-visible since 2026-11-03: before,
+    # it only ran when a whole-message phrase matched in tray.py, so "is
+    # the study session running?" and "pause sutuy timer" reached a model
+    # that had no idea it existed.
+    "study_session_status": study_session_status,
+    "start_study_session": start_study_session,
+    "pause_study_session": pause_study_session,
+    "resume_study_session": resume_study_session,
+    "stop_study_session": stop_study_session,
+    "reply_preference": reply_preference,
 }
