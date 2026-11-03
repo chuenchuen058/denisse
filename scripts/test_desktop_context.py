@@ -255,5 +255,74 @@ class BrainWiring(unittest.TestCase):
         self.assertFalse(any("traceback.txt" in str(m.get("content")) for m in msgs))
 
 
+def _write_config(test, source, edit):
+    """A copy of ``source`` with ``edit(data)`` applied, in a temp file."""
+    import json
+    import tempfile
+    with open(source, encoding="utf-8") as f:
+        data = json.load(f)
+    edit(data)
+    fd, path = tempfile.mkstemp(suffix=".json")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+    test.addCleanup(os.remove, path)
+    return path
+
+
+class ConfigData(unittest.TestCase):
+    """desktop_context.json drives the rules: change the data, change the behaviour."""
+
+    def tearDown(self):
+        dc.configure(dc.CONFIG_FILE)
+
+    def test_shipped_file_equals_defaults(self):
+        import json
+        strip = lambda d: {k: strip(v) for k, v in d.items() if not k.startswith("_")} \
+            if isinstance(d, dict) else d
+        with open(dc.CONFIG_FILE, encoding="utf-8") as a, open(dc.DEFAULTS_FILE, encoding="utf-8") as b:
+            self.assertEqual(strip(json.load(a)), strip(json.load(b)))
+
+    def test_cue_words_come_from_the_data(self):
+        self.assertFalse(dc.has_cue("summarise the onscreen paragraph"))
+        dc.configure(_write_config(self, dc.CONFIG_FILE,
+                                   lambda d: d["cues"]["strong"].append("onscreen")))
+        self.assertTrue(dc.has_cue("summarise the onscreen paragraph"))
+
+    def test_private_window_terminal_and_limit_from_the_data(self):
+        def edit(d):
+            d["privacy"]["window"].append("secretapp")
+            d["terminals"]["processes"].append("Notepad.exe")
+            d["limits"]["max_chars"] = 10
+            d["wording"]["label_clipboard"] = "Clipboard says"
+        dc.configure(_write_config(self, dc.CONFIG_FILE, edit))
+        with FakeDesktop(title="SecretApp vault", clipboard="hi"):
+            self.assertEqual(dc.look_at_this(), dc.BLOCKED)
+        with FakeDesktop(clipboard="x" * 50, selection="picked") as d:
+            out = dc.look_at_this()
+        self.assertEqual(d.keys, [])  # notepad is a "terminal" now: no Ctrl+C
+        self.assertIn("Clipboard says", out)
+        self.assertIn("x" * 10 + "\n>>>", out)
+        self.assertIn("[cut to the first 10 characters]", out)
+
+    def test_bad_values_fall_back_to_the_defaults_with_a_warning(self):
+        def edit(d):
+            d["privacy"]["window"] = ["(unclosed"]
+            d["limits"]["max_chars"] = "lots"
+            d["wording"]["cut"] = "cut at {nonsense}"
+        with self.assertLogs("denisse.json_config", "WARNING") as logs:
+            dc.configure(_write_config(self, dc.CONFIG_FILE, edit))
+        text = "\n".join(logs.output)
+        for key in ("privacy.window", "limits.max_chars", "wording.cut"):
+            self.assertIn(key, text)
+        self.assertEqual(dc.MAX_CHARS, 4000)
+        self.assertTrue(dc.is_private("Bitwarden"))
+
+    def test_unreadable_file_uses_the_defaults(self):
+        with self.assertLogs("denisse.json_config", "WARNING"):
+            dc.configure(os.path.join(os.path.dirname(__file__), "no-such-desktop-config.json"))
+        self.assertTrue(dc.has_cue("the selected text"))
+        self.assertEqual(dc.MAX_CHARS, 4000)
+
+
 if __name__ == "__main__":
     unittest.main()
