@@ -324,7 +324,7 @@
     },
     "stop_study_session": {
       "side_effect": "write",
-      "reply_must_mention": "\\b(?:stopp|ended|end|over|done|finished|off)\\b"
+      "reply_must_mention": "\\b(?:stopped|stopping|ended|off|done)\\b"
     },
     "reply_preference": {
       "side_effect": "write",
