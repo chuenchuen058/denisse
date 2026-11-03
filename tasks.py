@@ -12,23 +12,45 @@ Done tasks are kept, not deleted -- `list_tasks()` hides them, so they're
 out of the way, but "what did I get done this week" stays answerable.
 """
 
+import calendar
 import json
 import os
 import re
 import uuid
 from datetime import datetime, timedelta
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TASKS_FILE = os.path.join(BASE_DIR, "memory", "tasks.json")
+import reminders_config as _cfg
 
-# dateparser handles "tomorrow 5pm" and "in 2 hours" but returns None for
-# "before friday" and "next monday 9am" -- measured. Stripping the leading
-# preposition fixes the first; the second is handled by _WEEKDAY below.
-_LEAD = re.compile(
-    r"^\s*(?:by|before|due|on|at|until|till|no later than|nlt)\s+", re.I
-)
-_WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday",
-             "saturday", "sunday"]
+# The file name, priorities, limits, word lists and wording are in
+# reminders.json (Rule 0): "files", "priorities" and "tasks".
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+TASKS_FILE = os.path.join(BASE_DIR, *re.split(r"[\\/]", _cfg.get("files.tasks")))
+
+# Weekday and month names come from the calendar module, not a list here.
+_WEEKDAYS = [d.lower() for d in calendar.day_name]
+_MONTHS = [m.lower() for m in calendar.month_abbr if m]
+
+
+def _words(key: str) -> str:
+    """A regex alternation of the phrases listed at tasks.<key>, longest
+    first so "no later than" wins over a shorter prefix."""
+    words = sorted(_cfg.get("tasks." + key), key=len, reverse=True)
+    return "|".join(re.escape(w) for w in words) or r"(?!)"
+
+
+def _lead():
+    # dateparser handles "tomorrow 5pm" and "in 2 hours" but returns None for
+    # "before friday" and "next monday 9am" -- measured. Stripping the leading
+    # preposition fixes the first; the weekday rule in parse_due the second.
+    return re.compile(r"^\s*(?:" + _words("deadline_lead_words") + r")\s+", re.I)
+
+
+def _end_of_day():
+    """(hour, minute) a day with no time means -- time_parse.json's
+    end_of_day, so both parsers agree."""
+    import time_parse
+
+    return time_parse.END_OF_DAY.hour, time_parse.END_OF_DAY.minute
 
 
 def _next_weekday(name: str, hour: int, minute: int, now: datetime) -> datetime:
@@ -69,17 +91,17 @@ def parse_due(text: str, now: datetime | None = None) -> datetime | None:
     parsed = time_parse.parse(text, now)
     if parsed.when is not None:
         return parsed.when.astimezone(time_parse.LONDON).replace(tzinfo=None)
-    cleaned = _LEAD.sub("", text.strip())
+    cleaned = _lead().sub("", text.strip())
 
     # "next monday 9am" / "friday" / "this friday 5pm" -- dateparser returns
     # None for several of these, so weekday names are resolved directly.
     m = re.match(
-        r"^(?:this|next|coming)?\s*(" + "|".join(_WEEKDAYS) + r")"
+        r"^(?:" + _words("weekday_qualifiers") + r")?\s*(" + "|".join(_WEEKDAYS) + r")"
         r"(?:\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?)?\s*$",
         cleaned, re.I,
     )
     if m:
-        hour, minute = 23, 59  # a bare "friday" means end of Friday
+        hour, minute = _end_of_day()  # a bare "friday" means end of Friday
         if m.group(2):
             hour = int(m.group(2))
             minute = int(m.group(3) or 0)
@@ -105,8 +127,9 @@ def parse_due(text: str, now: datetime | None = None) -> datetime | None:
     # dateparser keeps the clock instead: "tomorrow" said at 00:03 became a
     # task due tomorrow 00:03 (2026-10-31). "before 2 Nov" is the end of
     # the day before.
-    when = when.replace(hour=23, minute=59, second=0, microsecond=0)
-    if re.match(r"^\s*before\b", text, re.I):
+    hour, minute = _end_of_day()
+    when = when.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if re.match(r"^\s*(?:" + _words("day_before_words") + r")\b", text, re.I):
         when -= timedelta(days=1)
     return when
 
@@ -155,8 +178,8 @@ def due_from_text(text: str, now: datetime | None = None) -> datetime | None:
         if not when or when <= now:
             continue
         if re.search(r"\d", phrase) or re.search(
-            r"(?i)\b(" + "|".join(_WEEKDAYS) + r"|jan|feb|mar|apr|may|jun|"
-            r"jul|aug|sep|oct|nov|dec|today|tomorrow|tonight)", phrase
+            r"(?i)\b(" + "|".join(_WEEKDAYS + _MONTHS) + "|" + _words("inferred_date_words") + ")",
+            phrase,
         ):
             return when
     return None
@@ -212,17 +235,18 @@ def pull_vault_ticks() -> list:
     return closed
 
 
-PRIORITIES = ("high", "medium", "low")
+PRIORITIES = tuple(_cfg.priorities())
 
 
 def _norm_priority(p) -> str:
-    """high / medium / low; anything else (or nothing) is medium, so
-    tasks from before priorities existed still read sensibly."""
+    """One of the priorities in reminders.json; anything else (or nothing)
+    is tasks.default_priority, so tasks from before priorities existed
+    still read sensibly."""
     p = (p or "").strip().lower()
-    return p if p in PRIORITIES else "medium"
+    return p if p in _cfg.priorities() else _cfg.get("tasks.default_priority")
 
 
-def add_task(text: str, due: str = "", priority: str = "medium") -> dict:
+def add_task(text: str, due: str = "", priority: str | None = None) -> dict:
     """Add a task. `due` is free text ("before friday", "tomorrow 5pm");
     the raw phrase is kept alongside the parsed datetime so nothing is lost
     when parsing fails."""
@@ -233,7 +257,7 @@ def add_task(text: str, due: str = "", priority: str = "medium") -> dict:
         when = due_from_text(text)
         inferred = when is not None
     task = {
-        "id": uuid.uuid4().hex[:8],
+        "id": uuid.uuid4().hex[:_cfg.get("tasks.id_length")],
         "text": text.strip(),
         "due": when.isoformat(timespec="minutes") if when else None,
         "due_text": due.strip() or None,
@@ -242,7 +266,7 @@ def add_task(text: str, due: str = "", priority: str = "medium") -> dict:
         "due_inferred": inferred,  # read out of the text, not given as `due`
         "event_id": None,      # set when it also becomes a calendar event
         "reminded_on": None,   # date we last nagged, so login reminders don't repeat
-        "priority": _norm_priority(priority),  # high / medium / low -- colours the reminder card
+        "priority": _norm_priority(priority),  # colours the reminder card
     }
     tasks = _load()
     tasks.append(task)
@@ -250,21 +274,16 @@ def add_task(text: str, due: str = "", priority: str = "medium") -> dict:
     return task
 
 
-# Words that carry no identifying weight. Without this, "mark the sunway
-# email done" matched "submit the EE problem set" on the word "the" alone --
-# i.e. it would have completed the wrong task. Caught by test_tasks.py.
-_STOPWORDS = {
-    "the", "and", "for", "about", "with", "that", "this", "from", "into",
-    "task", "todo", "item", "done", "mark", "off", "please", "can", "you",
-    "was", "are", "get", "got", "not", "but", "all", "any", "one", "out",
-    "new", "now", "its", "it's", "have", "has", "had", "need", "needs",
-}
-
-
 def _content_words(text: str) -> set:
+    """Words that identify a task. tasks.match.ignore_words carry no
+    identifying weight: without them, "mark the sunway email done" matched
+    "submit the EE problem set" on the word "the" alone -- i.e. it would
+    have completed the wrong task. Caught by test_tasks.py."""
+    match = _cfg.get("tasks.match")
+    ignore = set(match["ignore_words"])
     return {
         w for w in re.findall(r"\w+", (text or "").lower())
-        if len(w) > 2 and w not in _STOPWORDS
+        if len(w) >= match["min_word_length"] and w not in ignore
     }
 
 
@@ -363,8 +382,11 @@ def update_task(task_id: str, text: str | None = None, due: str | None = None,
     return None
 
 
-def due_within(hours: int = 48) -> tuple:
-    """(overdue, due_soon) among open tasks -- what a reminder should say."""
+def due_within(hours: int | None = None) -> tuple:
+    """(overdue, due_soon) among open tasks -- what a reminder should say.
+    hours defaults to tasks.due_soon_hours."""
+    if hours is None:
+        hours = _cfg.get("tasks.due_soon_hours")
     now = datetime.now()
     horizon = now + timedelta(hours=hours)
     overdue, soon = [], []
@@ -390,7 +412,7 @@ def mark_reminded(ids: list) -> None:
     _save(tasks)
 
 
-def needs_reminder(hours: int = 48) -> tuple:
+def needs_reminder(hours: int | None = None) -> tuple:
     """Like due_within, but skips anything already flagged today."""
     today = datetime.now().date().isoformat()
     overdue, soon = due_within(hours)
@@ -404,12 +426,14 @@ def describe(t: dict) -> str:
         # is a real instruction even though no date comes out of it, and
         # silently dropping it makes the task look undated.
         if t.get("due_text"):
-            return f"{t['text']} ({t['due_text']})"
-        return t["text"]
+            return _cfg.say("tasks.describe.undated_note", text=t["text"], note=t["due_text"])
+        return _cfg.say("tasks.describe.undated", text=t["text"])
     when = datetime.fromisoformat(t["due"])
     now = datetime.now()
     if when.date() == now.date():
-        return f"{t['text']} (today {when:%H:%M})"
-    if when.date() == (now + timedelta(days=1)).date():
-        return f"{t['text']} (tomorrow {when:%H:%M})"
-    return f"{t['text']} ({when:%a %d %b %H:%M})"
+        key = "today"
+    elif when.date() == (now + timedelta(days=1)).date():
+        key = "tomorrow"
+    else:
+        key = "later"
+    return _cfg.say("tasks.describe." + key, text=t["text"], when=when)

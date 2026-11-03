@@ -1,0 +1,196 @@
+{
+  "_doc": "Shipped defaults for reminders.json -- the task list, the reminder card, timers and the timer pill. Edit reminders.json, not this file: reminders_config.py falls back to the value here, with a log line, for any key in reminders.json that is missing or invalid. Templates are Python str.format strings; a template may only use the {fields} its default here uses. {user} is settings.user_name().",
+
+  "files": {
+    "_doc": "Relative to the repo folder.",
+    "tasks": "memory/tasks.json"
+  },
+
+  "priorities": [
+    {"name": "high", "label": "High", "colour": "#ff6b70"},
+    {"name": "medium", "label": "Medium", "colour": "#ffcb52"},
+    {"name": "low", "label": "Low", "colour": "#7fb3ff"}
+  ],
+
+  "tasks": {
+    "_doc": "tasks.py. Deadline words are tried after time_parse, before dateparser. The end of a day is time_parse.json end_of_day.",
+    "default_priority": "medium",
+    "id_length": 8,
+    "due_soon_hours": 48,
+    "deadline_lead_words": ["by", "before", "due", "on", "at", "until", "till", "no later than", "nlt"],
+    "day_before_words": ["before"],
+    "weekday_qualifiers": ["this", "next", "coming"],
+    "inferred_date_words": ["today", "tomorrow", "tonight"],
+    "match": {
+      "_doc": "Fuzzy matching of 'mark the sunway email done' to a task: words shorter than min_word_length and ignore_words carry no identifying weight.",
+      "min_word_length": 3,
+      "ignore_words": [
+        "the", "and", "for", "about", "with", "that", "this", "from", "into",
+        "task", "todo", "item", "done", "mark", "off", "please", "can", "you",
+        "was", "are", "get", "got", "not", "but", "all", "any", "one", "out",
+        "new", "now", "its", "it's", "have", "has", "had", "need", "needs"
+      ]
+    },
+    "describe": {
+      "undated": "{text}",
+      "undated_note": "{text} ({note})",
+      "today": "{text} (today {when:%H:%M})",
+      "tomorrow": "{text} (tomorrow {when:%H:%M})",
+      "later": "{text} ({when:%a %d %b %H:%M})"
+    }
+  },
+
+  "timers": {
+    "_doc": "timers.py. Messages are what the model is told happened.",
+    "max_minutes": 1440,
+    "clock_poll_seconds": 0.5,
+    "filler_labels": ["timer", "a timer", "the timer", "countdown"],
+    "stop_all_labels": ["timer", "the timer", "all", "everything"],
+    "units": {
+      "hour": ["hour", "hours"],
+      "minute": ["minute", "minutes"],
+      "second": ["second", "seconds"]
+    },
+    "messages": {
+      "not_a_number": "{value!r} isn't a number",
+      "unreadable_duration": "No timer started: couldn't read \"{duration}\" as a length. Ask {user} how long the timer should be.",
+      "bad_number": "Error: {error}. No timer was started.",
+      "no_length": "No timer started: no length was given. Ask {user} how long the timer should be.",
+      "too_long": "No timer started: that's longer than a day. Offer to add it as a task with a deadline instead.",
+      "named": "'{label}' timer",
+      "unnamed": "Timer",
+      "started": "{what} started: {span}, done at {ends:%H:%M:%S}.",
+      "none_running": "There's no timer running, so nothing was stopped.",
+      "unnamed_one": "an unnamed one",
+      "running_name": "'{label}'",
+      "no_match": "No timer called '{label}' is running (running: {names}). Nothing was stopped.",
+      "stopped_one": "{name} stopped with {span} left.",
+      "stopped_many": "Stopped {count} timers.",
+      "list_none": "No timers running.",
+      "list_named": "'{label}'",
+      "list_unnamed": "Timer",
+      "list_line": "{name}: {span} left (done at {ends:%H:%M:%S})"
+    }
+  },
+
+  "timer_ui": {
+    "_doc": "timer_ui.py: the countdown pill under the orb (amber = the card's warn colour) and the finished message.",
+    "label_chars": 7,
+    "unnamed": "Timer",
+    "clock_hours": "{h}:{m:02d}:{s:02d}",
+    "clock_minutes": "{m}:{s:02d}",
+    "badge": "{name}  {clock}",
+    "what_named": "{label} timer",
+    "what_unnamed": "Timer",
+    "done_named": "{what} is done, {user}.",
+    "done_unnamed": "Time's up, {user}.",
+    "notify_title": "{what} done",
+    "notify_app": "Denisse"
+  },
+
+  "card": {
+    "_doc": "reminder_card.py: the task card and the reply bubble out of the orb. Sizes are logical px, times ms.",
+    "font_family": "Segoe UI",
+    "colours": {
+      "fill": "#0a0a0c",
+      "divider": "#2a1748",
+      "text": "#ffffff",
+      "muted": "#b5a8c9",
+      "faint": "#857a99",
+      "bad": "#ff6b70",
+      "warn": "#ffcb52",
+      "good": "#3ddc84",
+      "entry_bg": "#17121f"
+    },
+    "fonts": {
+      "title": 11,
+      "typing": 11,
+      "body": 9,
+      "small": 8,
+      "stamp": 7,
+      "link": 10,
+      "check": 12,
+      "reply": 10
+    },
+    "layout": {
+      "card_w": 300,
+      "pad": 12,
+      "radius": 14,
+      "typing_w": 64,
+      "tail_len": 11,
+      "tail_base": 16,
+      "margin": 12,
+      "slide": 24,
+      "stroke": 2.2,
+      "glow": 9,
+      "orb_gap": 11,
+      "long_arc": 150,
+      "short_arc": 60,
+      "breath_levels": 12,
+      "supersample": 4,
+      "alpha_snap": 14,
+      "max_rows": 100,
+      "list_max_frac": 0.23,
+      "list_min_px": 120,
+      "scroll_step_px": 20,
+      "bar_w": 4,
+      "taskbar_fallback_px": 48,
+      "reply_w": 290,
+      "reply_max_chars": 600
+    },
+    "timing": {
+      "typing_ms": 900,
+      "typing_dot_ms": 260,
+      "follow_ms": 30,
+      "anim_ms": 220,
+      "anim_steps": 14,
+      "alive_ms": 100,
+      "sweep_speed": 0.4,
+      "reply_min_ms": 6000,
+      "reply_max_ms": 45000,
+      "reply_base_ms": 3000,
+      "reply_ms_per_char": 70
+    },
+    "greetings": [
+      {"until_hour": 12, "word": "Morning"},
+      {"until_hour": 18, "word": "Afternoon"},
+      {"until_hour": 24, "word": "Evening"}
+    ],
+    "text": {
+      "header": "{greeting}, {user}",
+      "dismiss": "Dismiss",
+      "empty": "Nothing on your plate right now.",
+      "summary_one": "You've got {n} thing on your plate ({counts}):",
+      "summary_many": "You've got {n} things on your plate ({counts}):",
+      "count": "{count} {priority}",
+      "count_join": ", ",
+      "legend": "●  {label}",
+      "more": "+ {count} more -- ask Denisse to list them",
+      "add": "+  Add reminder",
+      "field_text": "Reminder",
+      "field_due": "When (e.g. friday 5pm, tomorrow 9am) -- optional",
+      "field_priority": "Priority",
+      "cancel": "Cancel",
+      "save": "Save",
+      "need_text": "A reminder needs some text.",
+      "unreadable_due": "Couldn't read \"{due}\" as a date -- kept it as a note instead.",
+      "typing_dot": "•",
+      "tick": "○",
+      "edit": "✎",
+      "delete": "✕",
+      "no_deadline": "No deadline",
+      "overdue": "Overdue · {date}{clock}",
+      "today": "Today{clock}",
+      "today_end_of_day": "Today (end of day)",
+      "tomorrow": "Tomorrow{clock}",
+      "later": "{date}{clock}",
+      "date_format": "%a %d %b",
+      "clock_format": " %H:%M",
+      "prefill_format": "%d %b %Y %H:%M",
+      "stamp_format": "%H:%M",
+      "continue_chat": "Continue chat →",
+      "stop_voice": "Stop voice",
+      "ellipsis": "…"
+    }
+  }
+}
