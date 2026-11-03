@@ -182,6 +182,8 @@ def gpu_lease(wait_s=300):
     """The shared local-inference lease, or None if unavailable or still busy
     (then the run goes ahead and the results say so)."""
     try:
+        if str(ROOT) not in sys.path:  # run as a script, only demo/ is on the path
+            sys.path.insert(1, str(ROOT))
         from orchestra.local_team.lease import GpuLease
         lease = GpuLease.for_repo(ROOT, "demo/run_demo.py", ttl_s=4 * 3600)
         if lease.acquire(wait_s=wait_s, poll_s=5):
