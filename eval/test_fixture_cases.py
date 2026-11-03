@@ -31,9 +31,9 @@ class FixtureVault(unittest.TestCase):
         self.assertIn("CAB Tutorial 5 Solutions.pdf", self.search("CAB tutorial 5 solutions"))
 
     def test_outside_file_never_surfaces(self):
-        secret = ROOT / "eval" / "fixture_outside" / "secret.md"
-        self.assertTrue(secret.exists())
-        for q in (r"..\fixture_outside\secret.md", "../fixture_outside/secret.md",
+        canary = ROOT / "eval" / "fixture_outside" / "outside_canary.md"
+        self.assertTrue(canary.exists())
+        for q in (r"..\fixture_outside\outside_canary.md", "../fixture_outside/outside_canary.md",
                   "pelican locker code", "secret"):
             self.assertNotIn("7731", self.search(q), q)
 
