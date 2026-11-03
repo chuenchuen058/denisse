@@ -14,6 +14,8 @@ Seven stages, in this order:
   4b. chats     -- nightly_chat_import.py: new Claude Code / Codex sessions (and
                    a claude.ai export left in ~/Downloads) become Calendar/Chats
                    notes, committed on their own as "Nightly chat import"
+  4c. prep      -- next_lecture.py: a Denisse/Drafts prep note per module for
+                   the next lecture still at files-only (silent if none)
   5. commit     -- commits ONLY the files this job writes
   6. backup     -- opt-in push to a GitHub repository verified private
 
@@ -217,6 +219,19 @@ chats = nightly_chat_import.run(VAULT, apply=not DRY, commit=not DRY, say=say)
 if chats["commit"] == "failed":
     git_error = True
 
+# -- 4c. prep for the next lecture ------------------------------------------
+# scripts/next_lecture.py: one Denisse/Drafts prep note per module for the
+# newest week still at files-only (or dated in the next 3 days), from file
+# names and existing notes only. Silent when nothing qualifies; it never
+# overwrites a prep note, and a failure here is logged, never fatal.
+try:
+    import next_lecture
+    prep = next_lecture.nightly_step(VAULT, say, apply=not DRY)
+except Exception as exc:  # noqa: BLE001 -- the import itself, at worst
+    say("== prep ==")
+    say(f"  next_lecture unavailable: {type(exc).__name__}: {exc}")
+    prep = "failed"
+
 # -- the stage that isn't running -------------------------------------------
 say("== keats ==")
 say("  not this job's work: the weekly pull is a scheduled Claude session")
@@ -270,7 +285,7 @@ else:
 line = (f"{datetime.now():%Y-%m-%d %H:%M}  contract_rc={contract.returncode} "
         f"off_convention={odd} pending_writeups={len(pending)} "
         f"draft_cases={drafts} chats={chats['imported']} "
-        f"chat_failures={chats['failed']} backup={backup}{' DRY' if DRY else ''}")
+        f"chat_failures={chats['failed']} prep={prep} backup={backup}{' DRY' if DRY else ''}")
 os.makedirs(os.path.dirname(LOG), exist_ok=True)
 with open(LOG, "a", encoding="utf-8") as f:
     f.write(line + "\n")
