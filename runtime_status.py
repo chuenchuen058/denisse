@@ -20,10 +20,28 @@ import tempfile
 import threading
 import time
 
+import runtime_config
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATUS_FILE = os.path.join(BASE_DIR, "memory", "runtime_status.json")
-EVERY_SECONDS = 10
-STALE_SECONDS = 3 * EVERY_SECONDS
+
+
+def _cfg():
+    """Intervals, limits and wording: runtime.defaults.json, overridden by
+    config.json settings.runtime.runtime_status (runtime_config)."""
+    return runtime_config.get("runtime_status")
+
+
+def _say(key, **fields):
+    return runtime_config.wording("runtime_status", key, **fields)
+
+
+def every_seconds():
+    return _cfg()["write_every_seconds"]
+
+
+def stale_seconds():
+    return _cfg()["stale_after_writes"] * every_seconds()
 
 
 def code_version(root=BASE_DIR):
@@ -69,11 +87,12 @@ def _write(snapshot, path):
     os.replace(tmp, path)
 
 
-def start(collect, path=None, every=EVERY_SECONDS):
+def start(collect, path=None, every=None):
     """Write {pid, started, code, written, **collect()} every `every`
     seconds on a daemon thread. A failing collect is recorded, not raised:
     the tray must never stop because its status report did."""
     path = path or STATUS_FILE
+    every = every or every_seconds()
     fixed = {"pid": os.getpid(), "started": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
              "code": code_version()}
 
@@ -81,7 +100,7 @@ def start(collect, path=None, every=EVERY_SECONDS):
         try:
             state = collect()
         except Exception as exc:  # noqa: BLE001
-            state = {"collect_error": f"{type(exc).__name__}: {exc}"[:200]}
+            state = {"collect_error": f"{type(exc).__name__}: {exc}"[:_cfg()["collect_error_chars"]]}
         try:
             _write({**fixed, "written": dt.datetime.now().astimezone().isoformat(timespec="seconds"), **state}, path)
         except OSError:
@@ -117,41 +136,43 @@ def report(path=None, now=None):
     """The snapshot plus a verdict: (dict, list of reasons a restart would
     interrupt something, or why the snapshot can't be trusted)."""
     path = path or STATUS_FILE
-    for attempt in range(10):
+    attempts = _cfg()["read_attempts"]
+    for attempt in range(attempts):
         try:
             with open(path, encoding="utf-8") as f:
                 snap = json.load(f)
             break
         except FileNotFoundError as exc:
-            return {}, [f"no readable status ({type(exc).__name__}) -- this tray predates runtime_status, or isn't running"]
+            return {}, [_say("no_status", error=type(exc).__name__)]
         except (OSError, ValueError) as exc:
             # Windows refuses the open while the tray is replacing the file
             # (CI, 2026-10-30): a moment later it's whole again.
-            if attempt == 9:
-                return {}, [f"no readable status ({type(exc).__name__}) -- this tray predates runtime_status, or isn't running"]
-            time.sleep(0.05)
+            if attempt == attempts - 1:
+                return {}, [_say("no_status", error=type(exc).__name__)]
+            time.sleep(_cfg()["read_retry_seconds"])
     blockers = []
     if not isinstance(snap, dict) or "pid" not in snap:
-        return {}, ["the status file isn't a status snapshot"]
+        return {}, [_say("not_snapshot")]
     age = (now or time.time()) - dt.datetime.fromisoformat(snap["written"]).timestamp()
     if not _alive(snap["pid"]):
-        blockers.append(f"process {snap['pid']} isn't running -- the snapshot is from a tray that has exited")
-    elif age > STALE_SECONDS:
-        blockers.append(f"the snapshot is {age:.0f}s old -- the tray may be hung")
+        blockers.append(_say("exited", pid=snap["pid"]))
+    elif age > stale_seconds():
+        blockers.append(_say("stale", age=age))
     if snap.get("collect_error"):
-        blockers.append("the tray couldn't read its own state: " + snap["collect_error"])
+        blockers.append(_say("collect_error", error=snap["collect_error"]))
     for t in snap.get("timers") or []:
-        blockers.append(f"timer running: {t.get('label') or 'unnamed'} until {t.get('ends_at')}")
+        blockers.append(_say("timer", label=t.get("label") or _say("unnamed_timer"), ends_at=t.get("ends_at")))
     if (snap.get("study") or {}).get("active"):
-        blockers.append(f"study mode on: {snap['study'].get('phase')} until {snap['study'].get('ends_at')}")
+        blockers.append(_say("study", phase=snap["study"].get("phase"), ends_at=snap["study"].get("ends_at")))
     if snap.get("chat_busy"):
-        blockers.append("a reply is being worked on")
-    blockers += [f"job running: {j}" for j, s in (snap.get("jobs") or {}).items() if s == "running"]
+        blockers.append(_say("chat_busy"))
+    # "running" is the job state the tray itself writes, not wording.
+    blockers += [_say("job", job=j) for j, s in (snap.get("jobs") or {}).items() if s == "running"]
     return snap, blockers
 
 
 if __name__ == "__main__":
     snap, blockers = report()
-    print(json.dumps(snap, indent=2) if snap else "(no snapshot)")
-    print("\nSafe to restart: " + ("yes" if not blockers else "no -- " + "; ".join(blockers)))
+    print(json.dumps(snap, indent=2) if snap else _say("no_snapshot"))
+    print("\n" + (_say("unsafe", reasons=_say("reason_separator").join(blockers)) if blockers else _say("safe")))
     sys.exit(0 if not blockers else 1)

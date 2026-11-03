@@ -39,12 +39,16 @@ import uuid
 
 import brain_rules
 import memory_store
+import runtime_config
 
-# How many past turns to replay. A turn is a user message plus everything
-# the brain produced before the next user message. Small on purpose: the
-# model is served with an 8192-token context, and the failure above was a
-# context-crowding failure, not a memory-capacity one.
-REPLAY_TURNS = 6
+# How many past turns replay() hands the model is brain_rules' recent_turns
+# (a turn is a user message plus everything the brain produced before the
+# next one). Small on purpose: the model is served with an 8192-token
+# context, and the failure above was a context-crowding failure.
+
+# The feedback commands, a fixed syntax (brain.py and instincts.py answer the
+# same two), not a guess at what he means.
+FEEDBACK = ("/good", "/bad")
 
 _lock = threading.RLock()
 _brain = None
@@ -67,7 +71,7 @@ def get_brain():
 
 
 def _is_turn_start(msg: dict) -> bool:
-    return msg.get("role") == "user" and (msg.get("content") or "").strip().lower() not in ("/good", "/bad")
+    return msg.get("role") == "user" and (msg.get("content") or "").strip().lower() not in FEEDBACK
 
 
 def _prose_only(messages: list) -> list:
@@ -85,7 +89,7 @@ def _prose_only(messages: list) -> list:
     feedback_turn = False
     for m in messages:
         if m.get("role") == "user":
-            feedback_turn = (m.get("content") or "").strip().lower() in ("/good", "/bad")
+            feedback_turn = (m.get("content") or "").strip().lower() in FEEDBACK
         if feedback_turn:
             continue  # learner sees these on disk; the model needn't imitate them
         if m.get("role") == "tool":
@@ -98,16 +102,20 @@ def _prose_only(messages: list) -> list:
     return out
 
 
-# Replies that did nothing for him. Kept on disk (the learner and the eval
-# read them there), left out of what the model sees.
-_DEFLECTION = re.compile(
-    r"didn'?t\s+(?:quite\s+)?catch|\brephrase\b|say\s+that\s+again|ask\s+that\s+again"
-    r"|i\s+don'?t\s+have\s+(?:any\s+|enough\s+)?(?:information|info|details|access)"
-    r"|can\s+you\s+tell\s+me\s+(?:more|what)|i'?m\s+not\s+(?:actually\s+)?able\s+to"
-    r"|it\s+seems\s+(?:like\s+)?i\s+don'?t\s+have|i\s+got\s+stuck"
-    r"|i\s+haven'?t\s+confirmed\s+that\s+action|i\s+couldn'?t\s+complete"
-    r"|\b[a-z]+_[a-z_]+'?\s+tool\b",  # "use the 'list_skills' tool"
-    re.IGNORECASE)
+# How brain.py's list_skills answer starts (brain.py builds it): her own
+# fixed output format, not his words.
+SKILLS_LIST_PREFIX = "Here's what I can help with"
+
+
+def _deflection():
+    """Replies that did nothing for him: runtime settings'
+    conversation.deflection_patterns as one regex (None if the list is
+    empty). Kept on disk (the learner and the eval read them there), left
+    out of what the model sees."""
+    patterns = runtime_config.get("conversation")["deflection_patterns"]
+    if not patterns:
+        return None
+    return re.compile("|".join(f"(?:{p})" for p in patterns), re.IGNORECASE)
 
 
 def _turns(history: list) -> list:
@@ -139,7 +147,7 @@ def _drop_failed(groups: list) -> list:
     turn removed ("hows my internship tracker" -> "I don't have any
     information about your internship tracker"). Three kinds go:
 
-    - a turn whose reply was a deflection (_DEFLECTION);
+    - a turn whose reply was a deflection (_deflection());
     - a turn he complained about ("thats not what im asking"), and the
       complaint turn itself -- its reply answers a request that's gone --
       unless that reply asks which one he meant (2026-10-30);
@@ -152,11 +160,12 @@ def _drop_failed(groups: list) -> list:
         from brain import _COMPLAINT, _SKILL_QUESTION
     except Exception:  # never let a broken brain import stop the replay
         _COMPLAINT = _SKILL_QUESTION = None
+    deflection = _deflection()
     keep = [True] * len(groups)
     for i, g in enumerate(groups):
         first = g[0]
         text = (first.get("content") or "").strip() if first.get("role") == "user" else ""
-        if text.lower() == "/bad" and i > 0:
+        if text.lower() == FEEDBACK[1] and i > 0:
             keep[i - 1] = False
         if text and _COMPLAINT is not None and _COMPLAINT.fullmatch(text):
             # Kept only when her reply asks which one he meant (clarify.py):
@@ -165,9 +174,9 @@ def _drop_failed(groups: list) -> list:
             if i > 0:
                 keep[i - 1] = False
         reply = _reply_of(g)
-        if _DEFLECTION.search(reply):
+        if deflection is not None and deflection.search(reply):
             keep[i] = False
-        if (_SKILL_QUESTION is not None and reply.startswith("Here's what I can help with")
+        if (_SKILL_QUESTION is not None and reply.startswith(SKILLS_LIST_PREFIX)
                 and not _SKILL_QUESTION.search(text)):
             keep[i] = False
     return [g for g, k in zip(groups, keep) if k]
@@ -192,13 +201,10 @@ def replay(turns: int | None = None) -> list:
     return _prose_only([m for g in recent if id(g) in good for m in g])
 
 
-# Filler words a Vosk mis-transcription collapses into. Not a blocklist for
-# what Denisse will answer -- she still replies to anything -- just for what
-# is worth writing down and replaying later.
-_FILLER = {
-    "the", "a", "an", "uh", "um", "ah", "oh", "eh", "hmm", "mm",
-    "is", "it", "to", "and", "or", "of", "in", "on", "you", "i",
-}
+# Filler words a Vosk mis-transcription collapses into live in runtime
+# settings (conversation.noise_filler_words). Not a blocklist for what
+# Denisse will answer -- she still replies to anything -- just for what is
+# worth writing down and replaying later.
 
 
 def last_attempt(user_text: str) -> list:
@@ -260,7 +266,8 @@ def looks_like_noise(text: str) -> bool:
     words = [w for w in "".join(c if c.isalnum() else " " for c in text.lower()).split() if w]
     if not words:
         return True
-    return not [w for w in words if w not in _FILLER]
+    filler = {w.lower() for w in runtime_config.get("conversation")["noise_filler_words"]}
+    return not [w for w in words if w not in filler]
 
 
 def record(new_messages: list, source: str = "typed") -> bool:

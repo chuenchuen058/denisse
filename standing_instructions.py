@@ -1,7 +1,9 @@
 """Persistent, scoped jobs for the Denisse tray, not Codex scheduled tasks."""
 from contextlib import contextmanager
+import copy
 import hashlib
 import json
+import logging
 import math
 import os
 from pathlib import Path
@@ -11,19 +13,31 @@ import uuid
 
 import agent_loop
 import agent_tools
+import runtime_config
 
 ROOT = Path(__file__).resolve().parent
+# The code knows how to run these three; what each does, how often and its
+# wording are data (runtime_config).
 JOBS = {"task_review", "project_review", "downloads"}
+log = logging.getLogger("denisse.standing_instructions")
+
+
+def _cfg():
+    return runtime_config.get("standing_instructions")
 
 
 def defaults():
-    return {"version": 1, "enabled": False, "project_dir": str(ROOT), "jobs": [
-        {"id": "task_review", "enabled": True, "every_seconds": 21600,
-         "goal": "Review open tasks and their deadlines. Suggest the next useful task; do not complete or create tasks."},
-        {"id": "project_review", "enabled": True, "every_seconds": 3600,
-         "goal": "Check the project's local Git status. Suggest one next engineering step from the evidence; do not change code or commit."},
-        {"id": "downloads", "enabled": True, "every_seconds": 15,
-         "goal": "Sort quiet loose Downloads files using the existing type rules; preserve subfolders and collisions."}]}
+    """A fresh tray's settings: off, with the jobs from runtime settings
+    (runtime.defaults.json; config.json settings.runtime overrides). Jobs
+    that fail validate() log a line and the shipped jobs are used."""
+    jobs = copy.deepcopy(_cfg()["jobs"])
+    data = {"version": 1, "enabled": False, "project_dir": str(ROOT), "jobs": jobs}
+    try:
+        return validate(data)
+    except ValueError as exc:
+        log.warning("standing_instructions jobs in config.json settings.runtime: %s -- using the shipped jobs", exc)
+        data["jobs"] = copy.deepcopy(runtime_config.defaults()["standing_instructions"]["jobs"])
+        return data
 
 
 def atomic_json(path, value):
@@ -75,16 +89,18 @@ def validate(data):
             or type(data["version"]) is not int or data["version"] != 1
             or type(data["enabled"]) is not bool
             or not isinstance(data["project_dir"], str) or not data["project_dir"].strip()
-            or not isinstance(data["jobs"], list) or not 1 <= len(data["jobs"]) <= 3):
+            or not isinstance(data["jobs"], list) or not 1 <= len(data["jobs"]) <= len(JOBS)):
         raise ValueError("Invalid standing-instruction settings")
+    limits = _cfg()
+    least = limits["min_every_seconds"]
     seen = set()
     for job in data["jobs"]:
         if (not isinstance(job, dict) or set(job) != {"id", "enabled", "every_seconds", "goal"}
                 or not isinstance(job["id"], str) or job["id"] not in JOBS or job["id"] in seen
                 or type(job["enabled"]) is not bool
                 or type(job["every_seconds"]) is not int
-                or not (15 if job["id"] == "downloads" else 300) <= job["every_seconds"] <= 86400
-                or not isinstance(job["goal"], str) or not 1 <= len(job["goal"].strip()) <= 600):
+                or not least.get(job["id"], least["other"]) <= job["every_seconds"] <= limits["max_every_seconds"]
+                or not isinstance(job["goal"], str) or not 1 <= len(job["goal"].strip()) <= limits["max_goal_chars"]):
             raise ValueError("Invalid or duplicate standing instruction")
         seen.add(job["id"])
     return data
@@ -102,7 +118,7 @@ class Engine:
     def settings(self):
         if not self.config.exists():
             return defaults()
-        if self.config.stat().st_size > 16384:
+        if self.config.stat().st_size > _cfg()["max_file_bytes"]:
             raise ValueError("Standing instructions are too large")
         return validate(json.loads(self.config.read_text(encoding="utf-8-sig")))
 
@@ -225,7 +241,7 @@ class Engine:
     def serve(self, jobs, notify=lambda result: None, ready=lambda: True):
         while not self.stop.is_set():
             if not ready():
-                self.stop.wait(5)
+                self.stop.wait(_cfg()["poll_seconds"])
                 continue
             for job_id in jobs:
                 result = self.run_job(job_id)
@@ -235,4 +251,4 @@ class Engine:
                         notify(result)
                     except Exception:
                         pass  # notification failure must not replay actions
-            self.stop.wait(5)
+            self.stop.wait(_cfg()["poll_seconds"])
