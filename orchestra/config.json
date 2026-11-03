@@ -26,14 +26,14 @@
   "parallel_lanes": true,
   "_parallel_lanes": "One task per lane at the same time (claude + codex + gemini), each with its own lock; state saves merge and merges/pushes take turns. Task Scheduler must allow parallel instances. false = one task at a time.",
 
-  "lane_slots": {"claude": 3, "codex": 1},
-  "_lane_slots": "How many tasks of one lane may run at once. Claude 3 until Wed 4 Nov 18:00 (Chuen's new Max plan, use it before the reset), then back to 1.",
+  "lane_slots": {"claude": 1, "codex": 1},
+  "_lane_slots": "How many tasks of one lane may run at once, normally. A campaign (.review/campaign.json, see orchestra/campaign.py) may raise it until its stop_at; the Max-plan sprint (Claude 3 until Wed 4 Nov 18:00 London) lives there, not here.",
 
   "lane_fallback": {"codex": "claude"},
   "_lane_fallback": "While a lane is limited (usage limit seen in its log, see LIMIT_PATTERNS in runner.py), its tasks run on this lane instead, unless the task header says Lane-Fixed: yes. The fallback lane's slots still apply. {} turns it off.",
 
-  "daily_spend_cap_usd": 400.0,
-  "_daily_spend_cap_usd_note": "Raised from 5 on 2 Nov 2026: Chuen has spare Claude allowance to use before it resets. claude -p's total_cost_usd is a notional figure on his plan.",
+  "daily_spend_cap_usd": 5.0,
+  "_daily_spend_cap_usd_note": "The normal cap. The sprint's $400 (2 Nov 2026: spare Claude allowance before it resets; claude -p's total_cost_usd is notional on his plan) is a campaign override that ends at its stop_at by itself.",
   "_daily_spend_cap_usd": "Summed from claude -p total_cost_usd. Runs killed before reporting are charged an estimate from minutes x today's cost per minute. Thomas's ledger saw under half of a 20-hour spend.",
   "unknown_cost_per_min_usd": 0.10,
 

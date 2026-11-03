@@ -37,6 +37,13 @@ def build() -> str:
     now = R.now()
     out = [f"## STATE NOW", f"_generated {now.isoformat(sep=' ', timespec='minutes')} by orchestra/state_now.py — do not edit by hand_", ""]
 
+    try:
+        line = R.campaign.campaign_line(R.REVIEW)
+    except Exception as e:  # a bad campaign file must not take STATE NOW down with it
+        line = f"**Sprint:** (campaign line failed: {e})"
+    if line:
+        out += [line, ""]
+
     running = "nothing"
     if R.LOCK_FILE.exists():
         try:

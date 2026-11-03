@@ -8,6 +8,9 @@ Real limits live here, not in the allow list (Thomas, 31 Oct: `Bash(python:*)` a
     checkout's venv, so <worktree>/.venv/... looks inside but lands in the main checkout.
   * Bash: git push, git -C, reset --hard, clean -f, gh, recursive deletes, or any
     command naming the main checkout -> denied
+  * the campaign controls (.review/campaign.json, .review/control.json, orchestra/campaign_seed.json)
+    and `campaign.py pause|resume|stop|emergency-stop|disable-schedule` -> denied: a worker may
+    not move the deadline, the concurrency or the spend cap, nor resume what Chuen paused
 Every call appends to <worktree>/.review/hook.log, so the runner can tell the hook loaded.
 Fails open on its own errors (a broken guard must not stall a run), and that is logged too.
 This is a guard rail, not a sandbox: `python -c` can still do anything Python can.
@@ -33,6 +36,16 @@ BASH_DENY = [
     (r"\brm\s+-\w*r\w*f|\brm\s+-\w*f\w*r|\bRemove-Item\b[^|;&]*-Recurse|\brmdir\s+/s", "recursive delete"),
     (r"\bworktree\s+(remove|prune)\b", "the runner manages worktrees"),
 ]
+
+
+# Campaign controls belong to Chuen (orchestra/campaign.py). Matched by name anywhere, so a
+# worker's own worktree copy is refused too: it has no business editing one.
+CONTROL_FILES = re.compile(r"(^|/)\.review/(campaign|control)\.json$|(^|/)campaign_seed\.json$", re.I)
+CONTROL_NAMES = re.compile(r"\b(campaign|control)\.json\b|\bcampaign_seed\.json\b", re.I)
+WRITE_HINT = re.compile(r">|\btee\b|\b(cp|mv|rm|del|copy|move|touch|truncate|ren|rename)\b|\bsed\s+-i|"
+                        r"Set-Content|Add-Content|Out-File|Copy-Item|Move-Item|Remove-Item|New-Item|"
+                        r"write_text|write_bytes|open\(|json\.dump|os\.replace|os\.rename|unlink|shutil", re.I)
+CONTROL_CLI = re.compile(r"campaign(\.py)?[\"']?\s+(pause|resume|stop|emergency-stop|disable-schedule)\b", re.I)
 
 
 HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n.*?\n\s*\2\s*(?=\n|$)", re.S)
@@ -64,6 +77,9 @@ def decide(data: dict, worktree: str, main: str) -> str | None:
         cwd = data.get("cwd") or worktree
         full = path if os.path.isabs(path) else os.path.join(cwd, path)
         target, wt = norm(full, real=True), norm(worktree, real=True)
+        if CONTROL_FILES.search(target) or CONTROL_FILES.search(norm(full)):
+            return (f"Denied by the Orchestra guard: {path} is a campaign control (deadline, slots, spend "
+                    "cap, pause). Only Chuen changes it. Finish the rest and note this under ODD.")
         if inside(target, wt):
             return None
         if inside(norm(full), norm(worktree)):
@@ -77,6 +93,12 @@ def decide(data: dict, worktree: str, main: str) -> str | None:
         return f"Writes must stay inside this task's worktree {worktree}; {path} is outside it.{hint}"
     if tool == "Bash":
         cmd = strip_heredocs(inp.get("command") or "")
+        if CONTROL_CLI.search(cmd):
+            return ("Denied by the Orchestra guard: pause/resume/stop are Chuen's controls "
+                    "(`campaign.py status` is fine). Finish the rest and note this under ODD.")
+        if CONTROL_NAMES.search(cmd) and WRITE_HINT.search(cmd):
+            return ("Denied by the Orchestra guard: this command looks like it changes a campaign control "
+                    "file; only Chuen does. Finish the rest and note this under ODD.")
         for pat, why in BASH_DENY:
             if re.search(pat, cmd, re.I | re.M):
                 return f"Denied by the Orchestra guard ({why}). Finish the rest and note this under ODD."

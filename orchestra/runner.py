@@ -20,6 +20,9 @@ What a tick does with a session's result (after Thomas's review, 31 Oct 2026):
   * daily spend cap from claude's own total_cost_usd; maintenance <= 20% of runtime
   * on battery no new lane starts (dispatch_on_battery); running and finished lanes still
     finish, gate, merge and push (2 Nov 2026, orchestra/power.py)
+  * a campaign (.review/campaign.json) raises lane_slots / the spend cap until its stop_at,
+    and Chuen's pause / stop (.review/control.json) block dispatch until he resumes; both
+    are re-read every tick and enforced here (orchestra/campaign.py, 2 Nov 2026)
   * every limit lives in orchestra/config.json with its reason
 """
 from __future__ import annotations
@@ -59,6 +62,10 @@ if os.name == "nt" and not getattr(subprocess.Popen.__init__, "_orchestra_quiet"
     subprocess.Popen.__init__ = _quiet_popen_init
 
 HERE = Path(__file__).resolve().parent
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+import campaign  # noqa: E402  deadline + pause/stop; reads .review/campaign.json and control.json
+
 REPO = Path(os.environ.get("ORCHESTRA_REPO", HERE.parent))
 REVIEW = REPO / ".review"
 QUEUE, REPORTS, ARCHIVE, PARKED = (REVIEW / d for d in ("queue", "reports", "archive", "parked"))
@@ -89,13 +96,16 @@ LIMIT_DEFAULT_MIN = 60  # when the message names no time
 BROKEN_GATE_CODES = {5, 127, 9009}  # pytest: no tests; command not found (sh / cmd)
 
 
-def load_config() -> dict:
+def load_config(now_utc: dt.datetime | None = None, log_fn=None) -> dict:
+    """config.json, then the campaign's overrides while it is active (orchestra/campaign.py),
+    then ORCHESTRA_<KEY> env vars for a single run."""
     cfg = {}
     for path in (HERE / "config.json", REPO / "orchestra" / "config.json"):
         if path.exists():
             cfg = {k: v for k, v in json.loads(path.read_text(encoding="utf-8")).items()
                    if not k.startswith("_")}
             break
+    cfg = campaign.apply(cfg, REVIEW, now_utc or campaign.utcnow(), log_fn)
     for k, v in list(cfg.items()):
         env = os.environ.get(f"ORCHESTRA_{k.upper()}")
         if env is not None:
@@ -492,6 +502,9 @@ def why_not_runnable(task: Task, state: dict) -> str | None:
     bad = header_problem(task)
     if bad:
         return f"bad header: {bad}"
+    block = campaign.dispatch_block(REVIEW)  # Chuen's pause / stop / schedule-off, before anything else
+    if block:
+        return block
     if not task.auto:
         return "Queue is not auto"
     age = now() - dt.datetime.fromisoformat(task.fields["written"])
@@ -1659,6 +1672,14 @@ def write_state_now() -> None:
 def tick(dry_run: bool = False) -> str:
     for d in (QUEUE, REPORTS, ARCHIVE, PARKED):
         d.mkdir(parents=True, exist_ok=True)
+    if aftercare_on() and not dry_run:  # the real repo only: a campaign Chuen set in chat, installed once
+        campaign.seed(REVIEW, REPO, log)
+    # Re-read the campaign-governed limits every tick: its overrides end at stop_at with no config
+    # edit. Only those keys: anything else set on C for this process stays as it was.
+    fresh = load_config(log_fn=log)
+    for k in campaign.OVERRIDE_KEYS:
+        if k in fresh:
+            C[k] = fresh[k]
     state = load_state()
     tasks = route(load_queue(), state)  # off a limited lane onto its fallback, if allowed
     if dry_run:
@@ -1739,6 +1760,13 @@ def tick(dry_run: bool = False) -> str:
                 park(task, "could not create its worktree", None)
             save_state(state)
             return "WORKTREE_FAILED"
+        block = campaign.dispatch_block(REVIEW)  # paused while the worktree was being made
+        if block:
+            log(f"{task.slug}: not started, {block}")
+            ts["attempts"] -= 1
+            remove_worktree(wt, branch, delete_branch=True)
+            save_state(state)
+            return "paused"
         before = main_checkout_status()
         update_lock(before=sorted(before))  # reconcile() needs it to judge stray writes
         prov: dict = {}
