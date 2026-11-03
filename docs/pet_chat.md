@@ -16,6 +16,16 @@ The purple orb, pet movement, voice listening and hover-only Chat / Voice /
 Reminders controls are preserved. Reminders open their own card. The chat
 uses the existing local model and conversation store.
 
+## Global hotkey
+
+Press **Ctrl+Alt+D** in any application to open the chat with the caret in
+its input box; press it again while the chat is focused to fold it away.
+Choose another combination with `DENISSE_HOTKEY` (for example
+`ctrl+alt+space`, `win+shift+f9`), or set `DENISSE_HOTKEY=off` to disable it.
+If another app already owns the combination, the tray logs one line and
+starts without it. The tray tooltip and the **Talk to Denisse** menu item
+show the active hotkey.
+
 ## Stop speech
 
 - Click **Stop voice** in the chat header or reply bubble.

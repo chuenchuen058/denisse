@@ -4,43 +4,109 @@
 
 <p align="center"><img src="assets/orb.svg" width="140" alt="Denisse's animated purple orb"/></p>
 
-A Windows desktop assistant with a local Ollama language model, offline
-speech recognition, persistent conversation, and tools for everyday laptop
-work. Chat and spoken replies attach to an animated purple orb.
+Denisse is a Windows desktop assistant that runs its language model locally:
+`llama3.1:8b` through Ollama, with an 8192-token context, on a laptop with an
+8 GB GPU. It answers by text or voice from an animated orb and acts on the
+machine (files, tasks, timers, apps). The engineering problem is not calling a
+model; it is getting an 8B model to pick the right action, checking what
+actually ran, and not reporting success that did not happen. Most of the code
+is the deterministic scaffolding that does that, and the repository is built
+to show, with reproducible checks, how often it works.
 
-The language model runs locally. Optional Inworld speech synthesis sends
-reply text to a cloud service; Spotify, news and weather also use network
-services. Text chat and local speech recognition need no cloud API key.
+## What it does, and where the evidence is
 
-## Engineering focus
+| Claim | Evidence |
+|---|---|
+| Each request is offered a small, relevant set of tools rather than every schema | [`tool_router.py`](tool_router.py), [`eval/test_router.py`](eval/test_router.py) |
+| Tool calls run in a bounded loop with repair of malformed calls | [`brain.py`](brain.py), [`scripts/test_tool_args.py`](scripts/test_tool_args.py) |
+| Replies that claim an action without tool evidence are nudged once, then replaced | [`scripts/test_reply_guards.py`](scripts/test_reply_guards.py), [`scripts/test_brain_guards.py`](scripts/test_brain_guards.py) |
+| History on disk keeps everything; the model sees only recent prose | [`conversation.py`](conversation.py), [`scripts/test_conversation.py`](scripts/test_conversation.py) |
+| Accepted corrections can change routing; this does not train weights | [docs/adaptive_brain.md](docs/adaptive_brain.md), [`scripts/test_adaptive_brain.py`](scripts/test_adaptive_brain.py) |
+| Standing jobs (task review, project status, Downloads rules) run unattended and stay in scope | [docs/standing_instructions.md](docs/standing_instructions.md), [`scripts/test_standing_instructions.py`](scripts/test_standing_instructions.py) |
+| Offline speech recognition, interruptible speech, attached desktop chat | [docs/pet_chat.md](docs/pet_chat.md), [docs/voice_latency.md](docs/voice_latency.md), [`scripts/test_pet_chat.py`](scripts/test_pet_chat.py) |
+| Repeated real-model runs with pass^k, recorded with machine and commit | [docs/denisse_evidence.md](docs/denisse_evidence.md), [`demo/results/`](demo/results/) |
 
-Denisse connects model-generated requests to real machine actions. The core
-engineering problem is deciding which tools to offer, checking what actually
-ran, and reporting the result without inventing success.
+Architecture, with a diagram of the request path and the build system:
+[docs/architecture.md](docs/architecture.md).
 
-- **Bounded tool loop:** requests get relevant tools rather than every schema;
-  execution and retries are limited, including recovery from malformed calls.
-- **Evidence checks:** unsupported completion claims, invented document paths
-  and missing task results have deterministic regression checks.
-- **Separate history and context:** shared conversation recording keeps tool
-  evidence; model replay contains recent prose rather than raw tool traffic.
-- **Feedback learning:** independently accepted corrections can change
-  phrase-specific routing. Evidence is deduplicated and negative feedback can
-  demote lessons. This does not train model weights.
-- **Responsive desktop interaction:** attached chat, hover controls, reminders,
-  timers and speech cancellation, including replies still being synthesized.
-- **Standing instructions:** persistent task/project reviews and Downloads
-  rules, scoped tools, checked results, restart cooldowns and a pause switch.
-  See [Independent work](docs/standing_instructions.md).
+## How it is built and tested
 
-This is a personal engineering prototype. The local model still makes
-incorrect tool choices and weak conversational replies; the tests below
-separate implementation regressions from model quality.
+Most of this code is written by coding agents run unattended through
+**Orchestra** ([`orchestra/`](orchestra/README.md)):
+
+- A task is a Markdown file with a `## Gate` block of shell commands. The
+  runner gives each task its own git worktree and branch and runs an agent
+  (Claude Code or Codex) under a guard hook that refuses pushes, writes
+  outside the worktree and destructive git commands.
+- The runner re-runs the gate itself; the agent's own report does not merge
+  anything.
+- Diffs that touch the runner, hooks or installers, or are large, go to a
+  separate read-only reviewer agent first.
+- The branch is then merged onto current `master` in a scratch worktree and
+  the gate plus the offline suite are run on that combined tree. `master` is
+  fast-forwarded to exactly the commit that was tested; a red combined tree
+  parks the task.
+- Anything involving money, credentials, sending in the owner's name or an
+  irreversible choice is parked for a human.
+
+Testing has three layers, and no model grades another model:
+
+1. **Offline regression checks** ([`scripts/run_checks.py`](scripts/run_checks.py)):
+   every test module in its own process, with a scratch vault and rules file.
+   A sandbox fails any test that reaches the real vault, personal memory or the
+   network (Ollama included). Runs on every push and pull request in the
+   [Offline regression checks](https://github.com/chuenchuen058/denisse/actions/workflows/checks.yml)
+   workflow (badge above).
+2. **Real-model evals** ([`eval/run_eval.py`](eval/run_eval.py)): the prompt
+   suite through the actual local model, run nightly.
+3. **Repeated runs** ([`demo/run_demo.py`](demo/run_demo.py)): the suite and
+   scenario evals repeated k times, recorded with machine, model and commit.
+
+Day-to-day operation: [docs/operator_guide.md](docs/operator_guide.md).
+Security model of the runner: [docs/orchestra_security.md](docs/orchestra_security.md).
+
+## Measured results
+
+From [`demo/results/2026-11-02.json`](demo/results/2026-11-02.json)
+(llama3.1:8b, Q4_K_M, RTX 5070 Laptop GPU with 8 GB). Each case was attempted
+k times; pass^k is the mean chance that all k attempts of a case pass. Full
+breakdown and failure reasons: [docs/denisse_evidence.md](docs/denisse_evidence.md).
+
+| Eval (`parts.<name>.summary`) | Cases (`cases`) | k (`k`) | Passed attempts (`passes` / `attempts`) | Cases passing all k (`cases_all_pass`) | pass^k (`pass_hat_k`) |
+|---|---|---|---|---|---|
+| Prompt suite (`suite`) | 57 | 3 | 171 / 171 | 57 | 1.0 |
+| Multi-turn dialogue (`dialogue`) | 7 | 3 | 20 / 21 | 6 | 0.857 |
+| Unattended action loop (`actions`) | 4 | 3 | 12 / 12 | 4 | 1.0 |
+| Feedback learning off (`learning.learning_off`) | 3 | 3 | 6 / 9 | 2 | 0.667 |
+| Feedback learning on (`learning.learning_on`) | 3 | 3 | 9 / 9 | 3 | 1.0 |
+
+`scripts/test_readme_claims.py` checks that every number in this table equals
+the cited file and that the file is the latest in `demo/results/`.
+
+## Limitations
+
+- The eval sets are small, hand-written and run on one laptop. They catch
+  regressions and show repeatability; they are not a general accuracy score.
+- Checks are deterministic (tools called, required or forbidden text,
+  invented paths). Reply quality beyond those checks is not measured.
+- The voice stack was not measured in this run (Kokoro model files were not
+  present), and end-to-end voice latency and real-room recognition are not
+  measured at all.
+- The local model still makes wrong tool choices and weak conversational
+  replies, as the dialogue row above shows.
+- Typed shell commands, file writes and app opening run without a
+  confirmation prompt, following the original user's configuration;
+  hands-free mode asks first. See [`safety.py`](safety.py). This is not a
+  sandbox for untrusted instructions, and cancelling speech does not undo an
+  action that already ran.
+- Optional speech synthesis (Inworld), Spotify, news and weather use network
+  services. Text chat and speech recognition do not.
+- Windows only, Python 3.12 only (the audio code uses `audioop`, removed in
+  3.13). This is a personal prototype, not a product.
 
 ## Quick start
 
-Use **Windows and Python 3.12**. The audio implementation uses `audioop`,
-which is unavailable in Python 3.13. Desktop CI currently targets Windows.
+Windows and Python 3.12:
 
 ```powershell
 git clone https://github.com/chuenchuen058/denisse.git
@@ -49,193 +115,49 @@ python -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-To inspect the engineering checks first, no model or API keys are needed:
+Run the offline checks (no model, microphone or API keys needed):
 
 ```powershell
 .venv\Scripts\python.exe scripts/run_checks.py --report logs/checks.json
 ```
 
-For text chat, install and start [Ollama](https://ollama.com), then:
+Text chat needs [Ollama](https://ollama.com) running:
 
 ```powershell
 ollama pull llama3.1:8b
 .venv\Scripts\python.exe main.py
 ```
 
-The default model context is 8192 tokens. Model resources and response times
-vary with hardware. `DENISSE_MODEL` and `DENISSE_NUM_CTX` are optional
-configuration variables; see [.env.example](.env.example).
+`DENISSE_MODEL` and `DENISSE_NUM_CTX` are optional; see
+[.env.example](.env.example).
 
-To use the desktop orb:
+Desktop orb (Ctrl+Alt+D opens the chat from any app):
 
 ```powershell
 .venv\Scripts\python.exe tray.py
 ```
 
-The tray starts background Downloads sorting and temporary-file maintenance.
-Its menu lets you pause these features. Start with the text CLI if you want
-to explore the assistant before enabling desktop maintenance.
+The tray also starts Downloads sorting and temporary-file maintenance, which
+can be paused from its menu. Use the text CLI first if you would rather not
+enable those.
 
-## Desktop and voice
-
-Click the orb or its hover-only **Chat** icon to open a conversation beside
-it. Dragging the orb moves the chat; placement flips near screen edges.
-**Voice** toggles wake-word listening and **Reminders** opens the task card.
-
-Typed and spoken replies share the open chat. With chat folded away, a small
-reply bubble offers **Continue chat**, **Stop voice**, and **Dismiss**.
-Type or say **shush** or **stop talking** to silence current and pending
-tray speech without another spoken acknowledgement. Spoken controls require
-wake-word listening to be enabled and remain dependent on recognition quality.
-
-### Global hotkey
-
-Press **Ctrl+Alt+D** in any application to open the chat with the caret in
-its input box; press it again while the chat is focused to fold it away.
-Choose another combo with `DENISSE_HOTKEY` (for example `ctrl+alt+space`,
-`win+shift+f9`), or set `DENISSE_HOTKEY=off` to disable it. If another app
-already owns the combo, the tray logs one line and starts without it. The
-tray tooltip and the **Talk to Denisse** menu item show the active hotkey.
-
-For offline recognition, download the Vosk model once:
+Offline voice (Vosk model downloaded once; `voice_mode.py` is push-to-talk,
+hands-free is in the tray or `wake_word.py`):
 
 ```powershell
 .venv\Scripts\python.exe scripts/download_vosk_model.py
 .venv\Scripts\python.exe voice_mode.py
 ```
 
-`voice_mode.py` is push-to-talk. Hands-free mode is available from the tray
-or `wake_word.py`. Microphone audio is transcribed locally with Vosk.
-Standalone voice mode uses the local system voice when Inworld is unavailable;
-the tray's typed replies stay text-only without Inworld configured.
+Optional pieces, each documented separately:
 
-Inworld is optional, paid cloud speech synthesis, configured with
-`INWORLD_API_KEY`. See [.env.example](.env.example). Spotify integration is
-also optional and requires its own account configuration.
+- Standing jobs: `scripts/standing.py --init --enable`, see
+  [docs/standing_instructions.md](docs/standing_instructions.md).
+- Preferences and an Obsidian vault (`DENISSE_VAULT`): `scripts/brain_settings.py --init`,
+  see [docs/adaptive_brain.md](docs/adaptive_brain.md); template in
+  [brain_rules.example.json](brain_rules.example.json).
+- Chat controls, hotkey and stopping speech: [docs/pet_chat.md](docs/pet_chat.md).
+- Reproducing the measured results: [docs/denisse_evidence.md](docs/denisse_evidence.md#reproduce).
 
-More controls and interruption details: [Pet chat](docs/pet_chat.md).
-
-## Independent work
-
-Enable the three supported standing jobs with private settings:
-
-```powershell
-.venv\Scripts\python.exe scripts/standing.py --init --enable
-```
-
-While the tray runs, Denisse reviews open tasks every six hours, checks this
-project's local Git status hourly and applies the existing Downloads rules
-every 15 seconds. Task and project reviews propose next steps; they do not
-complete tasks or edit code. Downloads stays deterministic and works without
-Ollama. Pause with **Independent work** and inspect **What Denisse did** in the
-tray. [Setup, permissions and verification](docs/standing_instructions.md).
-
-## Architecture
-
-```mermaid
-flowchart LR
-    UI[Chat / voice / desktop pet] --> C[Shared conversation]
-    C --> R[Tool router]
-    R --> M[Local Ollama model]
-    M --> E[Tool executor + evidence checks]
-    E --> M
-    M --> UI
-    E --> H[Recorded tool evidence]
-    H --> L[Feedback-validated lessons]
-    L --> R
-    V[On-demand vault excerpts] --> E
-```
-
-| Component | Responsibility |
-|---|---|
-| `brain.py`, `tool_router.py` | Model interaction, relevant tool selection, bounded execution and reply checks |
-| `tools.py`, `tasks.py`, `timers.py` | Local actions and application state |
-| `conversation.py`, `memory_store.py` | One process-level brain, recent replay and appended history |
-| `brain_rules.py`, `learning.py`, `instincts.py` | Validated preferences and correction evidence |
-| `tray.py`, `floating_orb.py`, `orb_controls.py`, `reminder_card.py` | Desktop pet, attached chat and cards |
-| `stt_vosk.py`, `voice_output.py`, `speech_control.py` | Recognition, speech playback and interruption |
-| `vault_search.py`, `obsidian_sync.py` | Optional bounded knowledge retrieval and memory mirroring |
-
-## Knowledge and preferences
-
-The assistant works without an Obsidian vault. To use your own, set the
-`DENISSE_VAULT` environment variable before starting the process. Vault
-lookups retrieve bounded excerpts on demand; the whole vault is not loaded
-into the system prompt. The current-project overview quotes recent dated
-sections of `Dev/Memory/STATE.md`, which must be maintained separately.
-
-Create supported preferences without overwriting an existing file:
-
-```powershell
-.venv\Scripts\python.exe scripts/brain_settings.py --init
-```
-
-Private preferences live in `memory/brain_rules.json`; the template is
-[brain_rules.example.json](brain_rules.example.json). Facts are saved only
-when explicitly requested by default. Corrections followed by `/good` or
-"that worked" can build candidate lessons; two independent accepted fixes
-are needed for activation. `/bad` marks a failure.
-
-See [Adaptive brain](docs/adaptive_brain.md) for validation, evidence rules,
-off switches and the limits of this learning mechanism.
-
-## Evidence
-
-- [Measured evidence](docs/denisse_evidence.md): pass^k over repeated runs
-  of the prompt suite, dialogue, unattended-loop and learning evals, with the
-  machine, model and commit, known failures, and the commands to reproduce.
-  Generated by `demo/run_demo.py` and `demo/report.py`, and every number links
-  to its results JSON in `demo/results/`.
-- [Architecture](docs/architecture.md): one page on the request path,
-  honesty checks, learning, voice, and how Orchestra and Atrium build and test it.
-- [Operator's guide](docs/operator_guide.md): running Orchestra and Atrium day to
-  day: schedule, commands, where results land, safety layers, troubleshooting.
-
-## Verification
-
-**Offline regression gate:** `scripts/run_checks.py` runs ten explicit suites
-in separate processes with scratch vault/rule paths and service keys disabled.
-It requires no Ollama server, downloaded model, microphone or personal history.
-The same command runs on pushes and pull requests in
-[GitHub Actions](https://github.com/chuenchuen058/denisse/actions/workflows/checks.yml).
-The JSON summary records suite exit codes and durations rather than transcripts.
-
-**Real-model checks:** with Ollama running, test model decisions using synthetic
-conversations and harmless tool fixtures:
-
-```powershell
-.venv\Scripts\python.exe scripts/eval_dialogue_reliability.py --rounds 3 --out logs/dialogue.json
-```
-
-The most recent recorded three-round run on 27 October 2026 passed **16/21**
-scenarios. This is a small local-model evaluation, not a general reliability
-score. Passing mocked regressions does not imply every model answer is correct.
-
-**Desktop checks:** `scripts/smoke_pet_chat.py` requires an interactive Windows
-desktop. It uses synthetic history and checks placement, scaling, reply actions
-and window lifecycles. Native microphone and audio quality need separate tests.
-
-Generated reports, downloaded models, credentials and personal memory stay out
-of Git. Avoid publishing local diagnostic reports that include personal data.
-
-## Action boundaries
-
-Typed shell commands, file writes and app opening currently run without a
-confirmation prompt, following the original user's configuration. Startup
-program disabling still asks. Hands-free mode additionally asks before shell
-commands and file writes. See [safety.py](safety.py) for the actual policy.
-The assistant is not a hardened sandbox for untrusted instructions.
-
-Speech cancellation does not undo actions already performed. Learning cannot
-grant new mutating tools or bypass execution checks. Obsidian integration,
-news, Spotify and maintenance are separate from the local language model.
-
-## Next work
-
-- Improve model tool-choice reliability on held-out, repeated scenarios.
-- Reduce coupling between model orchestration, desktop code and tool effects.
-- Make optional integrations easier to configure on a fresh machine.
-- Prepare a reproducible demo using synthetic tasks and files.
-
-Model-weight fine-tuning remains a separate future experiment requiring curated
-data and held-out evaluation. Current feedback learning adjusts routing only.
+Generated reports, downloaded models, credentials and personal memory stay
+out of Git.
