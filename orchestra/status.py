@@ -18,6 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import runner as R  # noqa: E402
+from watch import session_model  # noqa: E402
 
 BY_PROMPT_DAYS = 14
 BY_PROMPT_RESULTS = ("PASS", "PARTIAL", "FAIL", "NO_REPORT")
@@ -80,6 +81,26 @@ def recent_runs(state: dict, n: int = RECENT_RUNS) -> list[dict]:
 LOCK_NAME = re.compile(r"^runner(?:\.(?P<lane>[^.]+)(?:\.(?P<slot>\d+))?)?\.lock$")
 
 
+def _running_models(slug: str | None) -> dict:
+    models = {"model": "default", "actual_model": None}
+    if not slug:
+        return models
+    try:
+        task = R.parse_task(R.QUEUE / f"{slug}.md")
+        models["model"] = task.fields.get("model", "").strip() or "default"
+    except OSError:
+        pass  # A starting/finishing task may not have a queue file or log yet.
+    try:
+        with (R.REPORTS / f"{slug}.lane.log").open(encoding="utf-8", errors="replace") as log:
+            for line in log:
+                if model := session_model(line):
+                    models["actual_model"] = model
+                    break
+    except OSError:
+        pass
+    return models
+
+
 def _running() -> list[dict]:
     out = []
     for lf in sorted(R.REVIEW.glob("runner*.lock")):
@@ -92,7 +113,7 @@ def _running() -> list[dict]:
             lk = {}
         out.append({"lane": m.group("lane") or "(single)", "slot": int(m.group("slot") or 1),
                     "task": lk.get("task"), "since": lk.get("since"), "pid": lk.get("pid"),
-                    "lock": lf.name})
+                    "lock": lf.name, **_running_models(lk.get("task"))})
     return out
 
 
@@ -147,6 +168,7 @@ def collect() -> dict:
 def render(s: dict) -> str:
     out = [f"Orchestra status {s['generated']}", f"power: {s['power']['text']}", "", "Running:"]
     out += [f"  {r['lane']} slot {r['slot']}: {r['task'] or '(starting)'} since {r['since'] or '?'}"
+            f" model {r['model']}" + (f" (actual {r['actual_model']})" if r['actual_model'] else "")
             for r in s["running"]] or ["  nothing"]
     out += ["", f"Queue ({len(s['queue'])}):"]
     out += [f"  {q['slug']} [{q['priority']}/{q['kind']}/{q['lane']}, attempts {q['attempts']}]: "
