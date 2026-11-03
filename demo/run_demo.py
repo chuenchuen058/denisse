@@ -9,6 +9,13 @@ Runs, each in its own process with a timeout:
   actions   scripts/eval_standing_instructions.py, N rounds, unattended agent loop
   learning  scripts/eval_adaptive_brain.py, 3 trials learning on vs off (fixed by the script)
   voice     scripts/eval_local_voice.py, Kokoro TTS -> Whisper/Vosk STT, if the models exist
+  voice_stages  demo/voice_stages.py: the `eval_local_voice.py --breakdown` numbers (p50/p95
+            per stage of real spoken turns) from the turn log, if there is one
+
+The suite part is also scored by area (evidence.SUITE_AREAS): multi-step
+requests, look_at_this right and wrong use, fixture-vault search, study mode.
+Model-backed parts run under the shared GPU lease (orchestra.local_team.lease)
+when it is available, so an Orchestra local-model job doesn't share the GPU.
 
 and records the machine (GPU, model, Ollama version) and the git commit to
 demo/results/<date>.json. Then render docs/denisse_evidence.md with
@@ -39,7 +46,7 @@ RESULTS = ROOT / "demo" / "results"
 OLLAMA = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
 if not OLLAMA.startswith("http"):
     OLLAMA = "http://" + OLLAMA
-PARTS = ("suite", "dialogue", "actions", "learning", "voice")
+PARTS = ("suite", "dialogue", "actions", "learning", "voice", "voice_stages")
 MODEL_PARTS = {"suite", "dialogue", "actions", "learning"}
 
 
@@ -158,6 +165,35 @@ def voice_missing(env):
     return None
 
 
+def voice_log(args, env):
+    return Path(args.voice_log or env.get("DENISSE_VOICE_LATENCY_LOG")
+                or ROOT / "logs" / "voice_latency.jsonl")
+
+
+def no_stage_turns(part):
+    """A stage breakdown over zero turns is not a measurement."""
+    if part.get("status") == "ran" and not part.get("summary", {}).get("turns"):
+        return {"status": "skipped", "command": part.get("command"),
+                "reason": "the voice turn log has no timed turns"}
+    return part
+
+
+def gpu_lease(wait_s=300):
+    """The shared local-inference lease, or None if unavailable or still busy
+    (then the run goes ahead and the results say so)."""
+    try:
+        if str(ROOT) not in sys.path:  # run as a script, only demo/ is on the path
+            sys.path.insert(1, str(ROOT))
+        from orchestra.local_team.lease import GpuLease
+        lease = GpuLease.for_repo(ROOT, "demo/run_demo.py", ttl_s=4 * 3600)
+        if lease.acquire(wait_s=wait_s, poll_s=5):
+            return lease, {"held": True}
+        return None, {"held": False, "note": f"lease busy after {wait_s}s: "
+                      + evidence.redact((lease.info() or {}).get("holder", "?"))}
+    except Exception as exc:
+        return None, {"held": False, "note": f"lease unavailable: {type(exc).__name__}"}
+
+
 def plan(args, python, tmp):
     """(name, cmd, output file, shaper) for each part."""
     r = str(args.rounds)
@@ -172,6 +208,9 @@ def plan(args, python, tmp):
                      ROOT / "logs" / "adaptive_comparison.json", evidence.shape_adaptive),
         "voice": ([python, "scripts/eval_local_voice.py"],
                   ROOT / "logs" / "local_voice_eval.json", evidence.shape_voice),
+        "voice_stages": ([python, "demo/voice_stages.py", "--out", str(tmp / "voice_stages.json"),
+                          "--log", str(args.voice_log_path)],
+                         tmp / "voice_stages.json", evidence.shape_voice_stages),
     }
 
 
@@ -182,6 +221,8 @@ def main(argv=None):
     ap.add_argument("--timeout", type=int, default=2400, help="seconds per part (default 2400)")
     ap.add_argument("--models-dir", type=Path, help="folder holding kokoro/ and vosk-model-*/ "
                     "(default: models/ in this checkout)")
+    ap.add_argument("--voice-log", type=Path, help="voice turn log for voice_stages "
+                    "(default DENISSE_VOICE_LATENCY_LOG or logs/voice_latency.jsonl)")
     ap.add_argument("--out", type=Path, help="results file (default demo/results/<date>.json)")
     ap.add_argument("--no-report", action="store_true", help="don't render docs/denisse_evidence.md")
     args = ap.parse_args(argv)
@@ -195,30 +236,44 @@ def main(argv=None):
         env["DENISSE_KOKORO_DIR"] = str(args.models_dir / "kokoro")
         env["DENISSE_VOSK_MODEL_PATH"] = str(args.models_dir / "vosk-model-en-us-0.22-lgraph")
     (ROOT / "logs").mkdir(exist_ok=True)
+    args.voice_log_path = voice_log(args, env)
 
     started = datetime.datetime.now().astimezone()
     result = {"generated": started.isoformat(timespec="seconds"), "rounds": args.rounds,
               "command": evidence.redact("python demo/run_demo.py " + " ".join(argv if argv is not None else sys.argv[1:])),
               "git": git_info(), "machine": machine(python), "parts": {}}
     ollama_up = bool(result["machine"].get("ollama_version"))
+    lease = None
+    if ollama_up and MODEL_PARTS - set(args.skip):
+        lease, result["gpu_lease"] = gpu_lease()
 
-    with tempfile.TemporaryDirectory(prefix="denisse-demo-") as tmp:
-        steps = plan(args, python, Path(tmp))
-        for name in PARTS:
-            if name in args.skip:
-                result["parts"][name] = {"status": "skipped", "reason": "--skip on the command line"}
-                continue
-            if name in MODEL_PARTS and not ollama_up:
-                result["parts"][name] = {"status": "skipped", "reason": result["machine"]["ollama_note"]}
-                continue
-            if name == "voice" and (why := voice_missing(env)):
-                result["parts"][name] = {"status": "skipped", "reason": why}
-                continue
-            cmd, out_file, shape = steps[name]
-            result["parts"][name] = run_part(name, cmd, out_file, shape, args.timeout, env)
-            part = result["parts"][name]
-            print(f"[{name}] {part['status']} {part.get('summary', part.get('reason', ''))}", flush=True)
-
+    try:
+        with tempfile.TemporaryDirectory(prefix="denisse-demo-") as tmp:
+            steps = plan(args, python, Path(tmp))
+            for name in PARTS:
+                if name in args.skip:
+                    result["parts"][name] = {"status": "skipped", "reason": "--skip on the command line"}
+                    continue
+                if name in MODEL_PARTS and not ollama_up:
+                    result["parts"][name] = {"status": "skipped", "reason": result["machine"]["ollama_note"]}
+                    continue
+                if name in ("voice", "voice_stages") and (why := voice_missing(env)):
+                    result["parts"][name] = {"status": "skipped", "reason": why}
+                    continue
+                if name == "voice_stages" and not args.voice_log_path.is_file():
+                    result["parts"][name] = {"status": "skipped", "reason":
+                                             "no voice turn log on this machine (voice_mode.py, the tray "
+                                             "and wake_word.py write it when spoken turns are timed)"}
+                    continue
+                cmd, out_file, shape = steps[name]
+                result["parts"][name] = run_part(name, cmd, out_file, shape, args.timeout, env)
+                if name == "voice_stages":
+                    result["parts"][name] = no_stage_turns(result["parts"][name])
+                part = result["parts"][name]
+                print(f"[{name}] {part['status']} {part.get('summary', part.get('reason', ''))}", flush=True)
+    finally:
+        if lease:
+            lease.release()
     result["finished"] = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
     out = args.out or RESULTS / f"{started.date().isoformat()}.json"
     out.parent.mkdir(parents=True, exist_ok=True)

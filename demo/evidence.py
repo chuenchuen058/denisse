@@ -80,7 +80,7 @@ def shape_suite(records):
         s["median_seconds"] = round(statistics.median(secs), 1)
         s["p90_seconds"] = round(sorted(secs)[int(0.9 * (len(secs) - 1))], 1)
     s["robotic_replies"] = sum(bool(r.get("robotic")) for r in records)
-    return {"summary": s, "cases": cases}
+    return {"summary": s, "areas": suite_areas(cases), "cases": cases}
 
 
 def shape_dialogue(records):
@@ -124,3 +124,87 @@ def shape_voice(out):
     summary = {k: (redact(out[k]) if k == "vosk_error" else out[k]) for k in VOICE_KEYS if k in out}
     summary["sentences"] = len(rows)
     return {"summary": summary, "rows": rows}
+
+
+# ---- suite areas: named slices of the prompt suite ------------------------
+# Explicit ids, not prefixes: "vault_deadline" and "vault_not_for_general" are
+# older cases that read the real vault, not the fixture vault the study/vault
+# set uses. Ids missing from a run are simply not counted (an older results
+# file has none of them).
+
+SUITE_AREAS = (
+    ("multistep", "Multi-step requests (planner, file-reading follow-up)",
+     ("multi_signals_revision", "multi_lecture_pdfs", "multi_weather_umbrella",
+      "multi_tasks_timer", "multi_tool_error", "multi_news_plate")),
+    ("look_right", "look_at_this, right use (should read the selection)",
+     ("look_rewrite_this", "look_translate_selected", "look_summarise_copied",
+      "look_what_does_that_mean", "explain_this_error", "explain_this_text")),
+    ("look_wrong", "look_at_this, wrong use (must not read it)",
+     ("look_not_thats_great", "look_not_this_is_fine", "look_not_do_that_again", "look_not_here")),
+    ("vault", "Vault search on the fixture vault",
+     ("vault_week_topic", "vault_tutorial_pdf", "vault_which_week", "vault_lecturer",
+      "vault_miss_honest", "vault_no_leak")),
+    ("study", "Study mode (headless pomodoro and study brief)",
+     ("study_start", "study_timer_cycles", "study_stop_clean", "study_off_not_swallowed",
+      "study_keeps_module", "study_no_invented_lecture")),
+)
+
+
+def suite_areas(cases) -> dict:
+    """{area: summarize(...) + "ids"} over the suite's per-case output."""
+    by_id = {c["id"]: c for c in cases}
+    out = {}
+    for key, _, ids in SUITE_AREAS:
+        got = [by_id[i] for i in ids if i in by_id]
+        if got:
+            out[key] = {**summarize(got), "ids": [c["id"] for c in got]}
+    return out
+
+
+def shape_voice_stages(out):
+    """Worker output of demo/voice_stages.py: per-source stage p50/p95 only.
+    The turn log holds timings, never text, but keep only known fields anyway."""
+    sources = {}
+    for source, stages in (out.get("sources") or {}).items():
+        sources[str(source)] = {
+            st: {k: v[k] for k in ("n", "p50", "p95") if k in v}
+            for st, v in stages.items() if isinstance(v, dict)}
+    turns = int(out.get("turns", 0))
+    return {"summary": {"turns": turns, "sources": sorted(sources)}, "sources": sources}
+
+
+# ---- since last run -------------------------------------------------------
+
+def diff_rows(old: dict, new: dict) -> list:
+    """(row label, old summary or None, new summary or None) for every scored
+    summary either run has. A part that ran in only one of them keeps its row
+    with None on the other side, so a part that stopped running cannot quietly
+    vanish. "suite.same_cases" scores only the suite cases present in both
+    runs, the like-for-like comparison when the suite has grown."""
+    def ran(data, name):
+        part = (data.get("parts") or {}).get(name) or {}
+        return part if part.get("status") == "ran" else None
+
+    def scored(data):
+        rows = {}
+        for name in (data.get("parts") or {}):
+            part = ran(data, name)
+            s = (part or {}).get("summary")
+            if s and "attempts" in s:
+                rows[name] = s
+                for side in ("learning_off", "learning_on"):
+                    if isinstance(s.get(side), dict) and s[side].get("attempts"):
+                        rows[f"{name}.{side}"] = s[side]
+            for area, a in ((part or {}).get("areas") or {}).items():
+                rows[f"{name}.areas.{area}"] = a
+        return rows
+
+    a, b = scored(old), scored(new)
+    so, sn = ran(old, "suite"), ran(new, "suite")
+    if so and sn:
+        both = {c["id"] for c in so.get("cases", [])} & {c["id"] for c in sn.get("cases", [])}
+        if both:
+            a["suite.same_cases"] = summarize([c for c in so["cases"] if c["id"] in both])
+            b["suite.same_cases"] = summarize([c for c in sn["cases"] if c["id"] in both])
+    order = list(a) + [k for k in b if k not in a]
+    return [(label, a.get(label), b.get(label)) for label in order]

@@ -67,18 +67,26 @@ Security model of the runner: [docs/orchestra_security.md](docs/orchestra_securi
 
 ## Measured results
 
-From [`demo/results/2026-11-02.json`](demo/results/2026-11-02.json)
+From [`demo/results/2026-11-03.json`](demo/results/2026-11-03.json)
 (llama3.1:8b, Q4_K_M, RTX 5070 Laptop GPU with 8 GB). Each case was attempted
 k times; pass^k is the mean chance that all k attempts of a case pass. Full
 breakdown and failure reasons: [docs/denisse_evidence.md](docs/denisse_evidence.md).
 
 | Eval (`parts.<name>.summary`) | Cases (`cases`) | k (`k`) | Passed attempts (`passes` / `attempts`) | Cases passing all k (`cases_all_pass`) | pass^k (`pass_hat_k`) |
 |---|---|---|---|---|---|
-| Prompt suite (`suite`) | 57 | 3 | 171 / 171 | 57 | 1.0 |
-| Multi-turn dialogue (`dialogue`) | 7 | 3 | 20 / 21 | 6 | 0.857 |
+| Prompt suite (`suite`) | 83 | 3 | 242 / 249 | 80 | 0.964 |
+| Multi-turn dialogue (`dialogue`) | 7 | 3 | 21 / 21 | 7 | 1.0 |
 | Unattended action loop (`actions`) | 4 | 3 | 12 / 12 | 4 | 1.0 |
 | Feedback learning off (`learning.learning_off`) | 3 | 3 | 6 / 9 | 2 | 0.667 |
 | Feedback learning on (`learning.learning_on`) | 3 | 3 | 9 / 9 | 3 | 1.0 |
+
+The suite now includes the multi-step, `look_at_this`, fixture-vault and
+study-mode cases added since the first run. The evidence page scores them by
+area. Multi-step, vault and study cases passed every attempt, and so did
+`look_at_this` where it must *not* read the selection. Where it should read it,
+3 of 6 cases passed every attempt, and all seven failed suite attempts are
+those content checks. The page also has a table of changes since the
+2 Nov run.
 
 `scripts/test_readme_claims.py` checks that every number in this table equals
 the cited file and that the file is the latest in `demo/results/`.
@@ -92,8 +100,10 @@ the cited file and that the file is the latest in `demo/results/`.
 - The voice stack was not measured in this run (Kokoro model files were not
   present), and end-to-end voice latency and real-room recognition are not
   measured at all.
-- The local model still makes wrong tool choices and weak conversational
-  replies, as the dialogue row above shows.
+- The local model still makes wrong tool choices and weak replies: it
+  reads the selection but misses what it says in some `look_at_this`
+  cases, and without the learned lesson it picks the wrong tool (the
+  learning-off row above).
 - Typed shell commands, file writes and app opening run without a
   confirmation prompt, following the original user's configuration;
   hands-free mode asks first. See [`safety.py`](safety.py). This is not a

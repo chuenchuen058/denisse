@@ -4,7 +4,8 @@
 
 Every number in the page is a link to the results file it came from, and
 the field it was read from is named next to it. Parts that did not run are
-listed as not measured, with the recorded reason.
+listed as not measured, with the recorded reason. If an older results file
+sits next to this one, a "Since last run" table compares the two.
 """
 import json
 import os
@@ -12,6 +13,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "demo"))
+import evidence  # noqa: E402
+
 RESULTS = ROOT / "demo" / "results"
 DOC = ROOT / "docs" / "denisse_evidence.md"
 
@@ -37,7 +41,23 @@ AREAS = [
     ("voice", "Local voice stack (scripts/eval_local_voice.py)",
      "Kokoro speaks fixed sentences to a WAV; Whisper and Vosk transcribe them. No microphone. "
      "Times are per sentence for synthesis and for transcription, not end-to-end reply latency."),
+    ("voice_stages", "Voice turn stages (demo/voice_stages.py)",
+     "The `scripts/eval_local_voice.py --breakdown` numbers: p50/p95 seconds from the end of "
+     "speech to each stage of real spoken turns, read from the voice turn log, one table per "
+     "path (voice_mode, wake_word, tray_chat). Runs only where the voice stack and a turn log exist."),
 ]
+
+STAGE_LABELS = {"speech_last_voice": "last loud chunk", "speech_end": "end of speech detected",
+                "stt_done": "transcript ready", "first_token": "reply text ready",
+                "first_sentence": "first sentence", "tts_first_chunk": "first TTS audio",
+                "playback_start": "playback starts"}
+
+
+def previous(results_path: Path):
+    """The results file just before this one in the same folder, or None."""
+    here = Path(results_path)
+    older = sorted(p for p in here.parent.glob("*.json") if p.name < here.name)
+    return older[-1] if older else None
 
 
 def latest() -> Path:
@@ -82,6 +102,11 @@ def render(data: dict, results_path: Path, doc_path: Path = DOC) -> str:
     v = parts.get("voice", {}).get("summary")
     if v and "whisper_mean_wer" in v:
         bits.append(f"Whisper transcribed synthetic speech at {ln(_pct(v['whisper_mean_wer']))} mean word error rate")
+    sa = parts.get("suite", {}).get("areas") or {}
+    area_bits = [f"{label.split(' (')[0]} {ln(sa[key]['cases_all_pass'])}/{ln(sa[key]['cases'])}"
+                 for key, label, _ in evidence.SUITE_AREAS if key in sa]
+    if area_bits:
+        bits.append("by suite area, cases passing every attempt: " + ", ".join(area_bits))
     para = (f"Measured on {data.get('generated', '?')[:10]} at commit `{(g.get('commit') or '?')[:7]}` "
             f"with {m.get('model', 'unknown model')} on {m.get('gpu') or 'an unrecorded GPU'}. ")
     para += ("; ".join(bits) + ". ") if bits else "No model-backed part ran. "
@@ -135,6 +160,16 @@ def render(data: dict, results_path: Path, doc_path: Path = DOC) -> str:
                 L.append(f"| Vosk | not measured: {s['vosk_error']} |")
             L.append("")
             continue
+        if key == "voice_stages":
+            L += [f"Timed turns: {num(s.get('turns'), f + '.turns')}.", ""]
+            for source, stages in (p.get("sources") or {}).items():
+                L += [f"`{source}`:", "", "| Stage | Turns | p50 s | p95 s |", "|---|---|---|---|"]
+                for st, v in stages.items():
+                    sf = f"parts.{key}.sources.{source}.{st}"
+                    L.append(f"| {STAGE_LABELS.get(st, st)} (`{st}`) | {num(v.get('n'), sf + '.n')} | "
+                             f"{num(v.get('p50'), sf + '.p50')} | {num(v.get('p95'), sf + '.p95')} |")
+                L.append("")
+            continue
         L += ["| Measure | Value |", "|---|---|",
               f"| Cases | {num(s['cases'], f + '.cases')} |",
               f"| Attempts per case (k) | {num(s['k'], f + '.k')} |",
@@ -153,6 +188,19 @@ def render(data: dict, results_path: Path, doc_path: Path = DOC) -> str:
                     L.append(f"| {side.replace('_', ' ')}: passed | {num(q['passes'], f + '.' + side + '.passes')} "
                              f"of {num(q['attempts'], f + '.' + side + '.attempts')} |")
         L += [f"| Wall time, s | {num(p.get('seconds'), f'parts.{key}.seconds')} |", ""]
+        if p.get("areas"):
+            L += ["By area (cases added since the first pack, scored on their own):", "",
+                  "| Area | Cases | Passed attempts | pass^k | Cases passing all k |", "|---|---|---|---|---|"]
+            for akey, alabel, _ in evidence.SUITE_AREAS:
+                a = p["areas"].get(akey)
+                if not a:
+                    continue
+                af = f"parts.{key}.areas.{akey}"
+                L.append(f"| {alabel} | {num(a['cases'], af + '.cases')} | "
+                         f"{num(a['passes'], af + '.passes')} of {num(a['attempts'], af + '.attempts')} | "
+                         f"{num(a['pass_hat_k'], af + '.pass_hat_k')} | "
+                         f"{num(a['cases_all_pass'], af + '.cases_all_pass')} |")
+            L.append("")
         bad = [c for c in p["cases"] if c["passes"] < c["attempts"]]
         show = p["cases"] if len(p["cases"]) <= 25 else bad
         if show:
@@ -176,11 +224,43 @@ def render(data: dict, results_path: Path, doc_path: Path = DOC) -> str:
         L.append("None recorded in the parts that ran.")
     L.append("")
 
+    prev_path = previous(results_path)
+    L += ["## Since last run", ""]
+    if prev_path is None:
+        L += ["No earlier results file to compare with.", ""]
+    else:
+        prev = json.loads(prev_path.read_text(encoding="utf-8"))
+        prel = os.path.relpath(prev_path, doc_path.parent).replace(os.sep, "/")
+        pg = (prev.get("git") or {}).get("commit") or "?"
+        L += [f"Against [`demo/results/{prev_path.name}`]({prel}) (commit `{pg[:7]}`). "
+              "Each cell is then \u2192 now; a dash means that run did not measure it. The "
+              "prompt suite grew between the runs, so `suite` totals cover different case sets; "
+              "`suite.same_cases` scores only the cases both runs have.", "",
+              "| Eval | Cases | Passed attempts | Cases passing all k | pass^k | Change in pass^k |",
+              "|---|---|---|---|---|---|"]
+
+        def side(summary, link, keys):
+            if summary is None:
+                return "\u2014"
+            return " / ".join(f"[{summary.get(k)}]({link})" for k in keys)
+
+        for label, o, n in evidence.diff_rows(prev, data):
+            cells = [f"{side(o, prel, keys)} \u2192 {side(n, rel, keys)}"
+                     for keys in (("cases",), ("passes", "attempts"), ("cases_all_pass",), ("pass_hat_k",))]
+            change = ""
+            if o and n and isinstance(o.get("pass_hat_k"), (int, float)) and isinstance(n.get("pass_hat_k"), (int, float)):
+                d = round(n["pass_hat_k"] - o["pass_hat_k"], 3)
+                change = "same" if d == 0 else f"{d:+g}"
+            L.append(f"| `{label}` | " + " | ".join(cells) + f" | {change} |")
+        L.append("")
+
     L += ["## Measured vs claimed", "",
           "Measured here (numbers above):", "",
           "- Tool choice and reply checks on fixed prompts, repeated k times, on this laptop's local model.",
           "- Whether the unattended loop completes on synthetic observations and stays in scope.",
           "- Whether a learned routing lesson changes behaviour against the same prompts with learning off.",
+          "- By suite area: multi-step requests through the planner, `look_at_this` called when "
+          "pointed at text and left alone otherwise, fixture-vault search and study mode.",
           "- Speech synthesis and transcription time and word error rate on synthetic speech." if "voice" in ran
           else "- (Voice was not measured in this run.)",
           "",
@@ -188,7 +268,8 @@ def render(data: dict, results_path: Path, doc_path: Path = DOC) -> str:
           "- Accuracy on open-ended real use. The suites are small and hand-written; a pass means "
           "these checks held, not that every reply is good.",
           "- Real-room speech recognition. Synthetic speech is cleaner than a microphone.",
-          "- End-to-end voice latency (wake word to spoken reply).",
+          "- End-to-end voice latency (wake word to spoken reply), except as far as the voice "
+          "turn stages section above has numbers from real logged turns.",
           "- The `live` eval condition (replayed real history) is excluded because it uses private "
           "conversation data; it runs nightly outside this pack.",
           "- Reply quality beyond the deterministic checks: no LLM judge is used.",
@@ -208,7 +289,7 @@ def render(data: dict, results_path: Path, doc_path: Path = DOC) -> str:
           "```", "",
           "Each part can also be run alone: `demo/suite_rounds.py`, "
           "`scripts/eval_dialogue_reliability.py`, `scripts/eval_standing_instructions.py`, "
-          "`scripts/eval_adaptive_brain.py`, `scripts/eval_local_voice.py`.", ""]
+          "`scripts/eval_adaptive_brain.py`, `scripts/eval_local_voice.py`, `demo/voice_stages.py`.", ""]
     return "\n".join(L)
 
 
