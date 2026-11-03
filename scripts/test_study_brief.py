@@ -1,7 +1,9 @@
 """study_brief.py: the whole job against a fake vault and a scratch task list.
 
-Never touches his real notes, tasks or job state: VAULT, DRAFTS, JOBS_DIR,
-TASKS_FILE, PENDING_FILE and the vault mirror are redirected first.
+Never touches his real notes, tasks, job state or learner model: VAULT,
+DRAFTS, JOBS_DIR, TASKS_FILE, PENDING_FILE, the vault mirror and the learner
+store are redirected first. (No learner store here = the unshaped brief;
+scripts/test_study_brief_learner.py covers the shaping.)
 """
 import datetime as dt
 import json
@@ -16,8 +18,10 @@ import brain  # noqa: E402
 import planner  # noqa: E402
 import study_brief as sb  # noqa: E402
 import tasks  # noqa: E402
+from learner import core as learner_core  # noqa: E402
 
 tmp = tempfile.mkdtemp(prefix="denisse-brief-")
+learner_core.STORE = type(learner_core.STORE)(os.path.join(tmp, "no-learner", "model.json"))
 tasks.TASKS_FILE = os.path.join(tmp, "tasks.json")
 tasks._mirror_to_vault = lambda: None
 planner.PENDING_FILE = os.path.join(tmp, "pending_plan.json")
@@ -188,4 +192,18 @@ check("...reusing the finished steps", "RESUMED" in open(path[:-3] + " (2).md", 
 
 print()
 print(f"{sum(results)}/{len(results)} passed")
-sys.exit(0 if all(results) else 1)
+
+
+# The orchestra gate runs this file through `unittest discover`. A bare
+# sys.exit() at import made discover report an import error even when every
+# check passed. Same checks, now reported both ways.
+import unittest  # noqa: E402
+
+
+class StudyBriefChecks(unittest.TestCase):
+    def test_all_checks_pass(self):
+        self.assertTrue(results and all(results), f"{results.count(False)} check(s) failed, see output above")
+
+
+if __name__ == "__main__":
+    sys.exit(0 if all(results) else 1)
