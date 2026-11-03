@@ -14,8 +14,19 @@ While it runs, a small pill under the orb counts down the current phase
 Started and stopped from the tray menu, from the bubble itself, or by typing
 or saying any of the phrases in match_command -- "study session", "start
 pomodoro", "study session end", and while it is running the bare "turn it
-off". No model call anywhere: it's a clock, it has to be exact, and it works
-with Ollama down.
+off". That whole-message path makes no model call: it's a clock, it has to
+be exact, and it works with Ollama down. The phrases are data
+(tool_policy.json, "study_commands"), not literals here.
+
+Since 2026-11-03 the clock is also a tool set the model can see and drive
+(session_status / start / pause / resume / stop at the bottom of this file,
+registered in tools.py), because the evening before it wasn't: "pause
+sutuy timer" paused Spotify and said "Sutuy timer paused", "is the study
+session running?" listed a made-up Documents\\study folder, and "session
+over" got "No tool needed here". The model is told the live state in one
+prompt line (context_line) and acts through the tools; the clock itself
+stays exact and stays on the Tk thread -- tray.py registers a dispatcher
+that marshals a tool call there and waits for the answer.
 
 Timing runs on wall-clock deadlines checked every second rather than one
 long Tk after(), so a laptop that sleeps mid-session doesn't come back and
@@ -29,6 +40,7 @@ from datetime import datetime, timedelta
 
 from PIL import Image, ImageColor, ImageDraw, ImageTk
 
+import tool_policy
 from floating_orb import _flatten
 
 from reminder_card import ACCENT, FAINT, FILL, GOOD, MUTED, TEXT, TRANSPARENT_KEY, ReminderCard, _work_area
@@ -50,60 +62,62 @@ REST_LINES = (
 
 
 # What turns it on and off, typed or said. Whole-message only, so a question
-# about studying still goes to the model.
+# about studying still goes to the model. The patterns are
+# tool_policy.json "study_commands": "thing" names the timer ("study mode",
+# "pomodoro timer", "pamodoro"), "on"/"off" are the whole-message forms
+# around it, and "off_if_active" the subject-less ones.
 #
 # It only knew "study mode" in its first version, and on 2026-10-19
 # learning.py found what Chuen actually typed: "study time", "pomodoro",
 # "pamodoro", "off study mode". None matched, so each went to the model,
-# which has no study-mode tool -- it guessed read_skill('study'), got "No
-# skill named", and answered with a made-up pomodoro how-to. The fix is
-# here rather than a new tool because this has to work with Ollama down.
-_THING = (
-    r"(?:the\s+|a\s+|my\s+)?"
-    r"(?:study\s+(?:mode|time|timer|session|sesh)|p[ao]m[ao]doro(?:\s+timer)?)"
-)
-_STUDY_ON = re.compile(
-    rf"^(?:(?:start|begin|turn\s+on|enter|open)\s+)?{_THING}(?:\s+on)?$"
-    r"|^(?:time\s+to|let'?s|start)\s+study(?:ing)?$"
-)
-_STUDY_OFF = re.compile(
-    rf"^(?:stop|end|exit|quit|turn\s+off|cancel|close|off)\s+{_THING}$"
-    rf"|^{_THING}\s+(?:off|end|ends|over|done|finished)$"
-    r"|^(?:i'?m\s+|i\s+am\s+|i'?ve\s+|i\s+have\s+|i\s+)?(?:done|finished|stop)\s+studying$"
-)
-
-# Phrases that name no subject, so they only mean the timer WHILE it is
-# running. Asked for by Chuen on 2026-10-19: "turn the timer off and end it
-# when I say 'turn it off'". That reverses the same day's earlier decision to
-# leave "turn it off" to the model, and it is his call to reverse -- but the
-# ambiguity it was protecting is real: with nothing running, "turn it off" is
-# usually the music. So these resolve only when study mode is active, and
-# otherwise fall through untouched.
+# which then had no study-mode tool -- it guessed read_skill('study'), got
+# "No skill named", and answered with a made-up pomodoro how-to. The model
+# has the tools now (below); this path stays because it works with Ollama
+# down and costs no model call.
+#
+# "off_if_active": phrases that name no subject, so they only mean the timer
+# WHILE it is running. Asked for by Chuen on 2026-10-19: "turn the timer off
+# and end it when I say 'turn it off'". That reverses the same day's earlier
+# decision to leave "turn it off" to the model, and it is his call to
+# reverse -- but the ambiguity it was protecting is real: with nothing
+# running, "turn it off" is usually the music. So these resolve only when
+# study mode is active, and otherwise fall through untouched.
 #
 # Known consequence, accepted: with music playing AND the timer running,
 # "turn it off" stops the timer. The timer is the thing he just asked for;
 # "turn off the music" still names its subject and goes to the model.
-# The bare one-worders are here because he typed "off" at 23:08 on 2026-10-19
-# with the timer visibly running, and the first version of this rule left them
-# out as "too broad". That was wrong: breadth is exactly what `active` buys.
-# While a 25-minute timer is counting down on screen, "off" is not ambiguous.
-# With nothing running they still mean nothing here and go to the model.
-# Bare "timer" is deliberately NOT here. A 2026-10-22 session was about to
-# add it -- "stop timer", "cancel timer", "timer off" -- because he typed
-# "stop timer" and got a confident reply while the pill kept counting. That
-# would have been wrong twice over: decisions.md 2026-10-20 gave her real
-# set_timer/cancel_timer tools and kept timer wording OUT of this
-# whole-message matcher on purpose, because this path skips the model, which
-# is the thing that lets her cope with wording nobody listed. And with a
-# 5-minute timer running as well, "cancel timer" means the timer, not the
-# pomodoro. Check the timer tools before touching this rule.
-_STUDY_OFF_IF_ACTIVE = re.compile(
-    r"^(?:turn|switch|shut)\s+(?:it|that|this)\s+off$"
-    r"|^(?:stop|end|cancel|kill)\s+(?:it|that|this)$"
-    r"|^(?:off|stop|end|cancel|done|finished|enough)$"
-)
+# The bare one-worders are there because he typed "off" at 23:08 on
+# 2026-10-19 with the timer visibly running, and the first version of this
+# rule left them out as "too broad". That was wrong: breadth is exactly what
+# `active` buys. Bare "timer" is deliberately NOT there: "stop timer" means
+# the set_timer countdown (decisions.md 2026-10-20), and with a 5-minute
+# timer running as well, "cancel timer" means the timer, not the pomodoro.
+
+
+def _patterns() -> tuple:
+    sc = tool_policy.study_commands()
+    thing = sc["thing"]
+    return (re.compile(sc["on"].replace("{thing}", thing)),
+            re.compile(sc["off"].replace("{thing}", thing)),
+            re.compile(sc["off_if_active"]))
+
+
+_STUDY_ON, _STUDY_OFF, _STUDY_OFF_IF_ACTIVE = _patterns()
 
 _CURRENT = None  # the one StudyMode in this process, so is_active() is real
+_dispatch = None  # tray.py: run a callable on the Tk thread and return its result
+
+
+def set_dispatcher(fn) -> None:
+    """How the tool functions below reach the clock from another thread.
+    `fn(callable)` must run it where the StudyMode lives and return what it
+    returns. None (the default, the eval, the CLI) calls directly."""
+    global _dispatch
+    _dispatch = fn
+
+
+def _on_clock(fn):
+    return _dispatch(fn) if _dispatch is not None else fn()
 
 
 def is_active() -> bool:
@@ -267,16 +281,18 @@ class StudyBadge:
             self._pills[color] = ImageTk.PhotoImage(_flatten(small, matte=ImageColor.getrgb(color), cut=128))
         return self._pills[color]
 
-    def update(self, phase, ends_at, total_s):
-        """Redraw for this second and keep it beside the orb."""
+    def update(self, phase, ends_at, total_s, paused_left=None):
+        """Redraw for this second and keep it beside the orb. `paused_left`
+        (seconds) freezes the countdown and labels it Paused."""
         try:
-            left = max(0, (ends_at - datetime.now()).total_seconds())
+            left = paused_left if paused_left is not None else max(0, (ends_at - datetime.now()).total_seconds())
             color = ACCENT if phase == "study" else GOOD
             if color != self._color:
                 self._color = color
                 self.canvas.itemconfig(self._img_id, image=self._pill(color))
             m, sec = divmod(int(left + 0.999), 60)
-            self.canvas.itemconfig(self._text, text=f"{'Study' if phase == 'study' else 'Rest'}  {m}:{sec:02d}")
+            label = "Paused" if paused_left is not None else ("Study" if phase == "study" else "Rest")
+            self.canvas.itemconfig(self._text, text=f"{label}  {m}:{sec:02d}")
             self._follow()
         except tk.TclError:
             pass
@@ -339,14 +355,16 @@ class StudyMode:
     need to know about the reminder card or the thinking bubble.
     """
 
-    def __init__(self, root, show, orb=None, font_family="Segoe UI", avoid=None):
+    def __init__(self, root, show, orb=None, font_family="Segoe UI", avoid=None, on_change=None):
         self.root = root
         self.show = show
         self.orb, self.font, self.avoid = orb, font_family, avoid
+        self.on_change = on_change  # tray.py: called after start/stop/pause/resume
         self.badge = None
         self.phase = None  # "study", "rest", or None when off
         self.ends_at = None
         self.round_no = 0
+        self.paused_left = None  # seconds left in the phase while paused, else None
         self._job = None
         # One StudyMode per process (tray.py builds it once). Registering it
         # here is what lets match_command answer "is it running?" without the
@@ -358,11 +376,23 @@ class StudyMode:
     def active(self):
         return self.phase is not None
 
+    @property
+    def paused(self):
+        return self.active and self.paused_left is not None
+
+    def _changed(self):
+        if self.on_change is not None:
+            try:
+                self.on_change(self)
+            except Exception:
+                pass  # the menu or a bubble; never the clock
+
     def start(self):
         if self.active:
             self.show_status()  # already on: just say where we are
             return
         self.round_no = 0
+        self.paused_left = None
         self._enter("study")
         try:
             self.badge = StudyBadge(self.root, self.orb, self.show_status, font_family=self.font, avoid=self.avoid)
@@ -370,6 +400,7 @@ class StudyMode:
             self.badge = None  # cosmetic -- the clock and alerts still run
         self._tick_badge()
         self._job = self.root.after(CHECK_MS, self._check)
+        self._changed()
 
     def show_status(self):
         if self.active:
@@ -377,6 +408,7 @@ class StudyMode:
 
     def stop(self):
         self.phase = self.ends_at = None
+        self.paused_left = None
         if self.badge is not None:
             self.badge.close()
             self.badge = None
@@ -386,13 +418,58 @@ class StudyMode:
             except tk.TclError:
                 pass
             self._job = None
+        self._changed()
+
+    def pause(self):
+        """Freeze the current phase where it is. The tick stops; resume()
+        gives the phase its remaining time from then."""
+        if not self.active or self.paused:
+            return
+        self.paused_left = max(0.0, (self.ends_at - datetime.now()).total_seconds())
+        if self._job is not None:
+            try:
+                self.root.after_cancel(self._job)
+            except tk.TclError:
+                pass
+            self._job = None
+        self._tick_badge()
+        self._changed()
+
+    def resume(self):
+        if not self.paused:
+            return
+        self.ends_at = datetime.now() + timedelta(seconds=self.paused_left)
+        self.paused_left = None
+        self._tick_badge()
+        self._job = self.root.after(CHECK_MS, self._check)
+        self._changed()
+
+    def minutes_left(self) -> int:
+        if not self.active:
+            return 0
+        secs = self.paused_left if self.paused else (self.ends_at - datetime.now()).total_seconds()
+        return max(0, round(secs / 60))
 
     def status(self):
-        """'Studying · 18 min left', or '' when off -- for the tray menu."""
+        """'Studying · 18 min left', 'Paused · 18 min left', or '' when off
+        -- for the tray menu."""
         if not self.active:
             return ""
-        left = max(0, round((self.ends_at - datetime.now()).total_seconds() / 60))
-        return f"{'Studying' if self.phase == 'study' else 'Resting'} · {left} min left"
+        word = "Paused" if self.paused else ("Studying" if self.phase == "study" else "Resting")
+        return f"{word} · {self.minutes_left()} min left"
+
+    def describe(self) -> str:
+        """The clock's state in a sentence, for the model and its tools."""
+        if not self.active:
+            return "No study session is running."
+        left = self.minutes_left()
+        block = "study block" if self.phase == "study" else "rest break"
+        if self.paused:
+            return (f"Study session paused: {left} min left of the {block}, round {self.round_no}. "
+                    "Resume to continue.")
+        nxt = "rest" if self.phase == "study" else "the next study block"
+        return (f"Study session running: {'studying' if self.phase == 'study' else 'on a break'}, "
+                f"{left} min left of this {block}, round {self.round_no}; {nxt} at {self.ends_at:%H:%M}.")
 
     def _enter(self, phase):
         self.phase = phase
@@ -404,7 +481,7 @@ class StudyMode:
 
     def _check(self):
         self._job = None
-        if not self.active:
+        if not self.active or self.paused:
             return
         if datetime.now() >= self.ends_at:
             # After a sleep this may be long overdue; either way the next
@@ -416,4 +493,84 @@ class StudyMode:
     def _tick_badge(self):
         if self.badge is not None:
             total = (STUDY_MIN if self.phase == "study" else REST_MIN) * 60
-            self.badge.update(self.phase, self.ends_at, total)
+            self.badge.update(self.phase, self.ends_at, total, paused_left=self.paused_left)
+
+
+# ---- the model-visible tools (tools.py registers them) ----------------------
+# Each returns what actually happened, in plain words, and never claims
+# more: "nothing was paused" when nothing was running is the honest result,
+# and brain._confirms_nothing reads it as no action taken.
+
+NO_CLOCK = ("Study mode isn't available in this process (no tray running), so nothing "
+            "happened. Tell him plainly.")
+
+
+def session_status() -> str:
+    if _CURRENT is None:
+        return "No study session is running (study mode isn't set up in this process)."
+    return _on_clock(_CURRENT.describe)
+
+
+def start_session() -> str:
+    if _CURRENT is None:
+        return NO_CLOCK
+
+    def go():
+        if _CURRENT.active:
+            return "Already running -- " + _CURRENT.describe()
+        _CURRENT.start()
+        return (f"Study session started: {STUDY_MIN} minutes of study, then a {REST_MIN}-minute rest; "
+                f"rest at {_CURRENT.ends_at:%H:%M}.")
+    return _on_clock(go)
+
+
+def pause_session() -> str:
+    if _CURRENT is None:
+        return NO_CLOCK
+
+    def go():
+        if not _CURRENT.active:
+            return "No study session is running, so nothing was paused."
+        if _CURRENT.paused:
+            return "It's already paused -- " + _CURRENT.describe()
+        _CURRENT.pause()
+        return f"Study session paused with {_CURRENT.minutes_left()} min left of the current block."
+    return _on_clock(go)
+
+
+def resume_session() -> str:
+    if _CURRENT is None:
+        return NO_CLOCK
+
+    def go():
+        if not _CURRENT.active:
+            return "No study session is running, so nothing was resumed. Start one if he wants one."
+        if not _CURRENT.paused:
+            return "It wasn't paused -- " + _CURRENT.describe()
+        _CURRENT.resume()
+        return f"Study session resumed: {_CURRENT.minutes_left()} min left, next switch at {_CURRENT.ends_at:%H:%M}."
+    return _on_clock(go)
+
+
+def stop_session() -> str:
+    if _CURRENT is None:
+        return NO_CLOCK
+
+    def go():
+        if not _CURRENT.active:
+            return "No study session was running, so nothing was stopped."
+        rounds = _CURRENT.round_no
+        _CURRENT.stop()
+        return f"Study session stopped after {rounds} round{'s' if rounds != 1 else ''}."
+    return _on_clock(go)
+
+
+def context_line() -> str:
+    """One line for the system prompt while a session is running, so the
+    model knows without a call; "" when off, so idle turns pay nothing."""
+    if _CURRENT is None or not _CURRENT.active:
+        return ""
+    try:
+        return "Right now: " + _CURRENT.describe()
+    except Exception:
+        return ""

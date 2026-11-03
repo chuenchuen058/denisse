@@ -27,6 +27,16 @@ Matching uses the newest user message. Short follow-ups can look back
 through six user messages for their topic, stopping at a fresh topic.
 Complaints about a reply never receive machine-changing tools.
 
+The groups, their cue patterns and the core set are data in
+tool_policy.json (since 2026-11-03, AGENTS.md Rule 0): edit them there. The
+A/B history below is kept because it explains the shape of that data.
+
+Offering is a budget decision, not a permission: a read-only tool the
+model calls without being offered still runs (brain.execute,
+tool_policy.allowed_unoffered). On 2026-11-03 "open my signals and systems
+syllabus" had find_files refused as "not available for this request"
+because the router had computed the offered set from keywords.
+
 DENISSE_TOOL_ROUTER=0 turns routing off (every tool, every turn) -- the
 control arm for re-running the A/B in eval/run_eval.py.
 """
@@ -36,12 +46,9 @@ import re
 
 import brain_rules
 import instincts
+import tool_policy
 
-CORE = {
-    "get_current_time",
-    "calculate",
-    "remember",
-}
+CORE = tool_policy.core()
 
 # The skills library is in CORE on the reasoning quoted above -- "needed by
 # too many kinds of request to gate on keywords". The hypothesis on
@@ -82,124 +89,48 @@ CORE = {
 SKILLS_IN_CORE = os.environ.get("DENISSE_SKILLS_CORE", "1").lower() not in (
     "0", "false", "off", "no")
 if SKILLS_IN_CORE:
-    CORE |= {"list_skills", "read_skill"}
+    CORE |= tool_policy.skills_tools()
 
-# group name -> (tools, keyword pattern). Patterns are matched
-# case-insensitively against the recent user text.
-GROUPS = {
-    "files": (
-        {"run_shell_command", "open_application", "list_directory",
-         "find_files", "read_file", "write_file"},
-        r"file|folder|director|pdf|docx?\b|txt|csv|xlsx|pptx|path|desktop"
-        r"|\bcv\b|\br[eé]sum[eé]\b|passport|invoice|pull up|bring up"
-        r"|download|document|read|write|save|create|find|locate|search|look for"
-        r"|where('?s| is| are| did)|open|launch|start|run|command|terminal"
-        r"|powershell|cmd\b|app\b|apps\b|application|program|install",
-    ),
-    "music": (
-        {"play_song", "pause_music", "resume_music", "skip_song",
-         "previous_song", "current_track", "open_application"},
-        r"music|song|track|play|pause|resume|skip|next one|previous|spotify"
-        r"|album|artist|listen|tune|banger|stop (it|this|that)|put on",
-    ),
-    "tasks": (
-        {"add_task", "list_tasks", "complete_task", "remove_task"},
-        r"task|to-?do|remind|reminder|deadline|due|plate|have to|need to"
-        r"|got to|gotta|finish|done|complete|tick|cross (it |that )?off"
-        r"|agenda|schedule|by (monday|tuesday|wednesday|thursday|friday"
-        r"|saturday|sunday|tomorrow|tonight)|outstanding|pending",
-    ),
-    # Weather and news used to be one 'info' group, so "do you like rainy
-    # days?" was offered get_news and called it (eval small_talk,
-    # 2026-10-18). Split so each word only brings its own tool.
-    "weather": (
-        {"get_weather"},
-        r"weather|rain|temperature|forecast|hot\b|cold\b|sunny|umbrella"
-        r"|snow|wind|humid|degrees",
-    ),
-    "news": (
-        {"get_news"},
-        r"news|headline|happening|current events|going on in",
-    ),
-    "system": (
-        {"get_system_status", "clean_temp_files", "list_startup_programs",
-         "disable_startup_program", "restore_startup_program",
-         "run_shell_command"},
-        r"disk|storage|space|memory|ram\b|cpu|slow|laggy|laptop|computer"
-        r"|\bpc\b|status|temp\b|temp files|clean|startup|boot|login|log in"
-        r"|optimi[sz]e|performance|speed up|battery",
-    ),
-    "facts": (
-        {"recall", "list_known_facts"},
-        r"remember|recall|forget|know about me|you know|do you know"
-        r"|what'?s my|what is my|what are my|my fav|favou?rite|about me"
-        r"|my name|who am i"
-        # A question about his own habits is a facts question even without
-        # 'my': "which code editor do I use?" matched nothing before
-        # 2026-10-18, so recall was never even offered for it.
-        r"|\b(do|did|have|am) i\b|\bi (use|like|prefer|love|hate|usually)\b",
-    ),
-    # search_vault was the one tool still offered on every turn (it was
-    # added before it had a group), and the eval caught a greeting calling
-    # it under replayed history. Keywords follow its own description: his
-    # modules, lectures, deadlines, decisions, setup, societies -- plus
-    # "again" for "what is convolution again".
-    "notes": (
-        {"search_vault"},
-        r"note|obsidian|vault|module|lecture|tutorial|seminar|coursework"
-        r"|\bcw\b|assignment|exam|deadline|due|week \d|semester|term\b"
-        r"|decid|decision|why did we|set ?up|society|societies|msoc|robotics"
-        r"|keats|remind me what|explain|my projects|current projects|current context"
-        # 2026-10-29: "hows my internship tracker" and "the projects im
-        # doing" weren't routed here, so she said she had no information.
-        r"|internships?|tracker|\bprojects?\b"
-        # 2026-11-03: "which week of signals did we do the laplace
-        # transform" has no "week N", so search_vault was never offered and
-        # she said she didn't recall. Asking WHICH week is asking his notes.
-        # (Bare module names were tried and dropped: "remind me on Thursday
-        # to revise signals" is a reminder, and got the vault offered.)
-        r"|\b(?:which|what) week\b"
-        r"|what am i working on|catch up with me|(?:going on|happening) with me",
-    ),
-    # Added with timers.py, 2026-10-20. "start timer" used to match only
-    # "files" (on "start"), so the closest thing on offer was
-    # run_shell_command -- which it called with "start".
-    "timer": (
-        {"set_timer", "cancel_timer", "list_timers"},
-        r"timer|countdown|count down|stopwatch|time me|\bin \d+\s*(?:sec|min|hour)"
-        r"|\b\d+\s*(?:s|sec|second|m|min|minute|h|hour)s?\b.*\b(?:remind|ping|tell|alert)"
-        r"|how long (?:is )?left"
-        # A bare length is the answer to "how long?" -- "5 minutes" right
-        # after "start timer" used to route to nothing, so she called
-        # calculate(300) and said "Timer set for 5 minutes" (2026-10-20).
-        r"|^\s*(?:for\s+|like\s+|about\s+)?\d+(?:\.\d+)?\s*(?:s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?)\s*$",
-    ),
-    "self": (
-        {"get_voice_settings", "get_brain_location"},
-        r"voice|sound like|speak|accent|your brain|your code|your memory"
-        r"|your files|where (do you|are you)|stored|source code|your rules|brain rules|rules (?:do you|you) follow"
-        r"|are you learning|learning status",
-    ),
-    # Only live when DENISSE_SKILLS_CORE=0; with the default these tools
-    # are in CORE as well and this group is redundant. It is kept so the
-    # 2026-10-24 experiment can be re-run with one env var rather than
-    # rebuilt from scratch. Keywords lean broad on purpose, per the
-    # docstring: an over-offered skill costs a little attention, a missing
-    # one costs the answer. Covers both ways of asking -- naming a skill's
-    # subject, and asking for a procedure. Known gap if this is ever made
-    # the default: it matches subject names ("biology") but not the terms
-    # inside them, so "mitosis vs meiosis" routes to nothing.
-    "skills": (
-        {"list_skills", "read_skill"},
-        r"skill|how (do|should|can) (i|you|we)|teach me|show me how"
-        r"|walk me through|step by step|guide|procedure|instructions"
-        r"|briefing|brief me|biology|chemistry|physics|python|code\b"
-        r"|organi[sz]e|tidy|sort out|take notes?|note-?taking|summar",
-    ),
-}
+# group name -> (tools, compiled cue pattern), from tool_policy.json
+# ("groups"). Cues are matched case-insensitively against the recent user
+# text. Why each group's cues are what they are, in the order the file
+# lists them:
+#
+# weather / news: used to be one 'info' group, so "do you like rainy
+#   days?" was offered get_news and called it (eval small_talk,
+#   2026-10-18). Split so each word only brings its own tool.
+# facts: a question about his own habits is a facts question even without
+#   'my' -- "which code editor do I use?" matched nothing before
+#   2026-10-18, so recall was never even offered for it.
+# notes: search_vault was the one tool still offered on every turn (it was
+#   added before it had a group), and the eval caught a greeting calling
+#   it under replayed history. Cues follow its own description: his
+#   modules, lectures, deadlines, decisions, setup, societies. 2026-10-29:
+#   "hows my internship tracker" and "the projects im doing" weren't
+#   routed here, so she said she had no information. 2026-11-03: "which
+#   week of signals did we do the laplace transform" has no "week N", so
+#   search_vault was never offered; asking WHICH week is asking his notes.
+#   (Bare module names were tried and dropped: "remind me on Thursday to
+#   revise signals" is a reminder, and got the vault offered.)
+# timer: added with timers.py, 2026-10-20. "start timer" used to match
+#   only "files" (on "start"), so the closest thing on offer was
+#   run_shell_command -- which it called with "start". A bare length is
+#   the answer to "how long?" -- "5 minutes" right after "start timer"
+#   used to route to nothing, so she called calculate(300) and said
+#   "Timer set for 5 minutes".
+# skills: only live when DENISSE_SKILLS_CORE=0; with the default these
+#   tools are in CORE as well and this group is redundant. Kept so the
+#   2026-10-24 experiment can be re-run with one env var. Cues lean broad
+#   on purpose: an over-offered skill costs a little attention, a missing
+#   one costs the answer. Known gap if this is ever made the default: it
+#   matches subject names ("biology") but not the terms inside them.
+# study: the pomodoro's tools (2026-11-03). "timer" and "session" are cues
+#   here too, so a typo'd "pause sutuy timer" still gets them offered.
+# preferences: the reply_preference tool, for "from now on ..." wordings
+#   the fast path in brain.py doesn't catch.
+GROUPS = tool_policy.groups()
 
-_COMPILED = {name: re.compile(pat, re.IGNORECASE)
-             for name, (_tools, pat) in GROUPS.items()}
+_COMPILED = {name: rx for name, (_tools, rx) in GROUPS.items()}
 
 # look_at_this (desktop_context.py) reads the selection/clipboard. Offered
 # only when the newest message points at something -- "explain this",
@@ -208,7 +139,7 @@ _COMPILED = {name: re.compile(pat, re.IGNORECASE)
 # request_context() looks back through, and as a group they would end that
 # look-back early ("and that?" after a weather question would lose the
 # weather tools). Newest message only, so it never lingers either.
-DESKTOP_TOOLS = {"look_at_this"}
+DESKTOP_TOOLS = tool_policy.desktop_tools()
 
 _ROUTED = CORE.union(DESKTOP_TOOLS, *(tools for tools, _pat in GROUPS.values()))
 
@@ -239,21 +170,11 @@ def _user_texts(messages: list, n: int = 2) -> list:
 # these is treated as a fresh topic, so "hey" after a news question does
 # not inherit the news tools -- the eval's live condition caught exactly
 # that (greet_hey calling get_news with real history replayed).
-_FOLLOW_UP = re.compile(
-    r"\b(it|this|that|those|them|one|again|another|more|too|also|and|then"
-    r"|instead|same|meant)\b|^\s*why (?:can'?t|cannot|couldn'?t|not)\b",
-    re.IGNORECASE,
-)
+_FOLLOW_UP = tool_policy.cue("follow_up")
 
 # These are complaints about the last answer, not new tasks or facts.
 # Keep this narrow: "no, add a reminder" is still a real new instruction.
-_FEEDBACK_ONLY = re.compile(
-    r"^\s*(?:your\s+['\"]?done['\"]?\s+(?:is|means)\s+nothing"
-    r"|what(?:'?s| is)\s+done|you\s+(?:didn'?t|did not)\s+(?:do\s+)?anything"
-    r"|(?:that|it)\s+(?:didn'?t|did not)\s+work|not\s+what\s+i\s+(?:asked|meant)"
-    r"|that'?s\s+(?:wrong|not right)|you tell me|wrong|nope)[.!?\s]*$",
-    re.IGNORECASE,
-)
+_FEEDBACK_ONLY = tool_policy.cue("feedback_only")
 
 MUTATING_TOOLS = brain_rules.MUTATING_TOOLS
 

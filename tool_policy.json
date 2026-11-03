@@ -1,0 +1,335 @@
+{
+  "about": [
+    "Tool policy for Denisse's brain: what each tool may do, which tools a turn is offered, and the",
+    "few phrase lists that still run before the model. Values live here, not in code (AGENTS.md Rule 0).",
+    "tools.<name>.side_effect: 'read' may always be called, even when not offered; 'write' only when offered,",
+    "never on a complaint turn. checks: run on the CALL's arguments, never on Chuen's wording.",
+    "reply_must_mention: after this tool succeeds her reply must match this, else the tool's own sentence",
+    "(or fallback_reply) is used -- alone for a 'write' tool, in front of her reply for a 'read' one.",
+    "groups: a turn is offered core + every group whose cues match the recent user text (tool_router.py).",
+    "cues/study_commands: data for the fast paths that run before the model; edit here, not in code."
+  ],
+  "core": [
+    "calculate",
+    "get_current_time",
+    "remember"
+  ],
+  "skills_tools": [
+    "list_skills",
+    "read_skill"
+  ],
+  "desktop_tools": [
+    "look_at_this"
+  ],
+  "unoffered": {
+    "read": "allow",
+    "write": "refuse"
+  },
+  "groups": {
+    "files": {
+      "tools": [
+        "find_files",
+        "list_directory",
+        "open_application",
+        "read_file",
+        "run_shell_command",
+        "write_file"
+      ],
+      "cues": "file|folder|director|pdf|docx?\\b|txt|csv|xlsx|pptx|path|desktop|\\bcv\\b|\\br[eé]sum[eé]\\b|passport|invoice|pull up|bring up|download|document|read|write|save|create|find|locate|search|look for|where('?s| is| are| did)|open|launch|start|run|command|terminal|powershell|cmd\\b|app\\b|apps\\b|application|program|install"
+    },
+    "music": {
+      "tools": [
+        "current_track",
+        "open_application",
+        "pause_music",
+        "play_song",
+        "previous_song",
+        "resume_music",
+        "skip_song"
+      ],
+      "cues": "music|song|track|play|pause|resume|skip|next one|previous|spotify|album|artist|listen|tune|banger|stop (it|this|that)|put on"
+    },
+    "tasks": {
+      "tools": [
+        "add_task",
+        "complete_task",
+        "list_tasks",
+        "remove_task"
+      ],
+      "cues": "task|to-?do|remind|reminder|deadline|due|plate|have to|need to|got to|gotta|finish|done|complete|tick|cross (it |that )?off|agenda|schedule|by (monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|tonight)|outstanding|pending"
+    },
+    "weather": {
+      "tools": [
+        "get_weather"
+      ],
+      "cues": "weather|rain|temperature|forecast|hot\\b|cold\\b|sunny|umbrella|snow|wind|humid|degrees"
+    },
+    "news": {
+      "tools": [
+        "get_news"
+      ],
+      "cues": "news|headline|happening|current events|going on in"
+    },
+    "system": {
+      "tools": [
+        "clean_temp_files",
+        "disable_startup_program",
+        "get_system_status",
+        "list_startup_programs",
+        "restore_startup_program",
+        "run_shell_command"
+      ],
+      "cues": "disk|storage|space|memory|ram\\b|cpu|slow|laggy|laptop|computer|\\bpc\\b|status|temp\\b|temp files|clean|startup|boot|login|log in|optimi[sz]e|performance|speed up|battery"
+    },
+    "facts": {
+      "tools": [
+        "list_known_facts",
+        "recall"
+      ],
+      "cues": "remember|recall|forget|know about me|you know|do you know|what'?s my|what is my|what are my|my fav|favou?rite|about me|my name|who am i|\\b(do|did|have|am) i\\b|\\bi (use|like|prefer|love|hate|usually)\\b"
+    },
+    "notes": {
+      "tools": [
+        "search_vault"
+      ],
+      "cues": "note|obsidian|vault|module|lecture|tutorial|seminar|coursework|\\bcw\\b|assignment|exam|deadline|due|week \\d|semester|term\\b|decid|decision|why did we|set ?up|society|societies|msoc|robotics|keats|remind me what|explain|my projects|current projects|current context|internships?|tracker|\\bprojects?\\b|\\b(?:which|what) week\\b|what am i working on|catch up with me|(?:going on|happening) with me"
+    },
+    "timer": {
+      "tools": [
+        "cancel_timer",
+        "list_timers",
+        "set_timer"
+      ],
+      "cues": "timer|countdown|count down|stopwatch|time me|\\bin \\d+\\s*(?:sec|min|hour)|\\b\\d+\\s*(?:s|sec|second|m|min|minute|h|hour)s?\\b.*\\b(?:remind|ping|tell|alert)|how long (?:is )?left|^\\s*(?:for\\s+|like\\s+|about\\s+)?\\d+(?:\\.\\d+)?\\s*(?:s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?)\\s*$"
+    },
+    "self": {
+      "tools": [
+        "get_brain_location",
+        "get_voice_settings"
+      ],
+      "cues": "voice|sound like|speak|accent|your brain|your code|your memory|your files|where (do you|are you)|stored|source code|your rules|brain rules|rules (?:do you|you) follow|are you learning|learning status"
+    },
+    "skills": {
+      "tools": [
+        "list_skills",
+        "read_skill"
+      ],
+      "cues": "skill|how (do|should|can) (i|you|we)|teach me|show me how|walk me through|step by step|guide|procedure|instructions|briefing|brief me|biology|chemistry|physics|python|code\\b|organi[sz]e|tidy|sort out|take notes?|note-?taking|summar"
+    },
+    "study": {
+      "tools": [
+        "study_session_status",
+        "start_study_session",
+        "pause_study_session",
+        "resume_study_session",
+        "stop_study_session"
+      ],
+      "cues": "stud|sesh|session|pomod|p[ao]m[ao]d|timer|\\bbreak\\b|\\brest\\b|focus"
+    },
+    "preferences": {
+      "tools": [
+        "reply_preference"
+      ],
+      "cues": "from now on|next time|in (?:the )?future|every time|always|never|instead|(?:don'?t|dont|do not|no) need|(?:don'?t|dont|do not) have to|no need|keep it (?:short|simple|brief)|stop (?:saying|showing|reading|repeating|mentioning)|you (?:could|can|should) just|call me|say .{0,20}instead|too long|shorter|less"
+    }
+  },
+  "cues": {
+    "follow_up": "\\b(it|this|that|those|them|one|again|another|more|too|also|and|then|instead|same|meant)\\b|^\\s*why (?:can'?t|cannot|couldn'?t|not)\\b",
+    "feedback_only": "^\\s*(?:your\\s+['\\\"]?done['\\\"]?\\s+(?:is|means)\\s+nothing|what(?:'?s| is)\\s+done|you\\s+(?:didn'?t|did not)\\s+(?:do\\s+)?anything|(?:that|it)\\s+(?:didn'?t|did not)\\s+work|not\\s+what\\s+i\\s+(?:asked|meant)|that'?s\\s+(?:wrong|not right)|you tell me|wrong|nope)[.!?\\s]*$",
+    "complaint": "^\\s*(?:no[,.!]?\\s+)?(?:that'?s\\s+not\\s+(?:it|right|what\\s+i\\s*(?:'?m|am)?\\s*(?:asking|asked|meant|want(?:ed)?))|(?:still\\s+)?not\\s+what\\s+i\\s*(?:'?m|am)?\\s*(?:asking|asked|meant|want(?:ed)?)|still\\s+not\\s+(?:it|right)|that'?s\\s+wrong|wrong|what|huh|is\\s+there\\s+a\\s+problem|you'?re\\s+not\\s+listening|(?:omg|ugh|bro|wtf|ffs|jeez)?[,!\\s]*(?:you(?:'?re|\\s+are)|this\\s+is|that\\s+is|that'?s)\\s+(?:so\\s+|really\\s+|just\\s+)?(?:dumb|stupid|useless|hopeless|broken|rubbish|terrible|bad\\s+at\\s+this)|you\\s+(?:didn'?t|did\\s+not)\\s+(?:answer|do)\\s+(?:it|that|me|my\\s+question|what\\s+i\\s+asked))[.!?\\s]*$",
+    "reply_preference": "^\\s*(?:(?:okay|ok|also|and|great|alright|but|btw|nice)[,.!\\s]+)*(?:you\\s+(?:also\\s+)?(?:don'?t|dont|do\\s+not)\\s+(?:have|need)\\s+to\\b|(?:i\\s+)?(?:don'?t|dont|do\\s+not)\\s+need\\s+you\\s+to\\b|from\\s+now\\s+on\\b|next\\s+time\\b|in\\s+(?:the\\s+)?future\\b|no\\s+need\\s+to\\b|keep\\s+it\\s+(?:short|simple|brief)\\b|stop\\s+(?:saying|showing|reading|repeating)\\b|you\\s+(?:could|can|should)\\s+just\\s+(?:say|call|use|ask|add)\\b)",
+    "reply_preference_then_request": "\\b(?:but|and|then|now)\\s+(?:(?:can|could)\\s+)?(?:you\\s+)?(?:please\\s+)?(?:find|open|play|search|check|pull|show|get|delete|send|write|look)\\b",
+    "open_document": "^\\s*(?:(?:could|can|would|will)\\s+you\\s+|please\\s+|i (?:want|need) you to\\s+)?(?:open|pull up|bring up|show(?!\\s+(?:me\\s+)?(?:how|why|whether)\\b)(?:\\s+me)?)\\b(?!\\s+(?:how|why|whether)\\b)",
+    "file_thing": "\\b(?:file|document|cv|r[eé]sum[eé]|passport|invoice|syllabus|slides?|notes?\\.pdf)\\b",
+    "file_lookup": "\\b(?:find|locate|where(?:'s|\\s+is|\\s+are)|search\\s+for|look\\s+for|called|named)\\b",
+    "time_words": "\\b(?:time|times|date|day|days|today|tonight|tomorrow|yesterday|clock|o'?clock|hours?|minutes?|week|weekend|month|year|when|timezone|morning|afternoon|evening|night|monday|tuesday|wednesday|thursday|friday|saturday|sunday|now|late|early)\\b|\\d\\s*(?:am|pm)\\b",
+    "skills_question": "\\bskills?\\b|what\\s+can\\s+you\\s+do|what\\s+are\\s+you\\s+(?:good|able)\\b|capabilit|abilit"
+  },
+  "study_commands": {
+    "thing": "(?:the\\s+|a\\s+|my\\s+)?(?:study\\s+(?:mode|time|timer|session|sesh)|p[ao]m[ao]doro(?:\\s+timer)?)",
+    "on": "^(?:(?:start|begin|turn\\s+on|enter|open)\\s+)?{thing}(?:\\s+on)?$|^(?:time\\s+to|let'?s|start)\\s+study(?:ing)?$",
+    "off": "^(?:stop|end|exit|quit|turn\\s+off|cancel|close|off)\\s+{thing}$|^{thing}\\s+(?:off|end|ends|over|done|finished)$|^(?:i'?m\\s+|i\\s+am\\s+|i'?ve\\s+|i\\s+have\\s+|i\\s+)?(?:done|finished|stop)\\s+studying$",
+    "off_if_active": "^(?:turn|switch|shut)\\s+(?:it|that|this)\\s+off$|^(?:stop|end|cancel|kill)\\s+(?:it|that|this)$|^(?:off|stop|end|cancel|done|finished|enough)$"
+  },
+  "tools": {
+    "run_shell_command": {
+      "side_effect": "write",
+      "checks": [
+        {
+          "kind": "must_not_match",
+          "argument": [
+            "command",
+            "cmd"
+          ],
+          "pattern": "\\b(?:Remove-Item|rm|rmdir|rd|del|erase|Move-Item|mv|move|ren|Rename-Item|Clear-Content|Set-Content|Out-File|Clear-RecycleBin|format|takeown|icacls|cipher)\\b|(?<![2\\d])>(?!\\s*\\$?null\\b)\\s*[^\\s&|]",
+          "refusal": "Refused: that command deletes, moves or overwrites his files, and you don't do that. Tell him plainly you can't, and name the files if that helps."
+        }
+      ]
+    },
+    "open_application": {
+      "side_effect": "write",
+      "checks": [
+        {
+          "kind": "verified_document_path",
+          "argument": "app_name",
+          "document_like": "[\\/]|\\.(?:pdf|docx?|xlsx?|pptx?|txt|md|csv|json|png|jpe?g|gif|mp[34]|wav|zip|ipynb|py|tex|odt|rtf)$",
+          "refusal": "Refused: no verified document path was supplied. Use find_files to locate the requested file, then open_application with the full path it returns."
+        }
+      ]
+    },
+    "list_directory": {
+      "side_effect": "read"
+    },
+    "find_files": {
+      "side_effect": "read"
+    },
+    "read_file": {
+      "side_effect": "read"
+    },
+    "write_file": {
+      "side_effect": "write",
+      "checks": [
+        {
+          "kind": "not_inside_program_folder",
+          "argument": "path",
+          "refusal": "Refused: that's your own program folder, and your settings there are his to edit. Don't write there."
+        }
+      ]
+    },
+    "get_current_time": {
+      "side_effect": "read"
+    },
+    "calculate": {
+      "side_effect": "read",
+      "checks": [
+        {
+          "kind": "must_match",
+          "argument": "expression",
+          "pattern": "[-+*/%^()]|\\b(?:sqrt|abs|round|sin|cos|tan|log|log10|log2|exp|floor|ceil|factorial|pow|min|max|pi)\\b|\\d+(?:\\.\\d+)?\\D+\\d",
+          "refusal": "No tool needed here. Answer his question directly, in your own words, from what you know."
+        }
+      ]
+    },
+    "get_weather": {
+      "side_effect": "read"
+    },
+    "get_news": {
+      "side_effect": "read"
+    },
+    "play_song": {
+      "side_effect": "write"
+    },
+    "pause_music": {
+      "side_effect": "write"
+    },
+    "resume_music": {
+      "side_effect": "write"
+    },
+    "skip_song": {
+      "side_effect": "write"
+    },
+    "previous_song": {
+      "side_effect": "write"
+    },
+    "current_track": {
+      "side_effect": "read"
+    },
+    "get_voice_settings": {
+      "side_effect": "read"
+    },
+    "get_brain_location": {
+      "side_effect": "read"
+    },
+    "look_at_this": {
+      "side_effect": "read"
+    },
+    "get_system_status": {
+      "side_effect": "read"
+    },
+    "clean_temp_files": {
+      "side_effect": "write"
+    },
+    "list_startup_programs": {
+      "side_effect": "read"
+    },
+    "disable_startup_program": {
+      "side_effect": "write"
+    },
+    "restore_startup_program": {
+      "side_effect": "write"
+    },
+    "remember": {
+      "side_effect": "write"
+    },
+    "recall": {
+      "side_effect": "read"
+    },
+    "list_known_facts": {
+      "side_effect": "read"
+    },
+    "list_skills": {
+      "side_effect": "read"
+    },
+    "read_skill": {
+      "side_effect": "read",
+      "checks": [
+        {
+          "kind": "known_skill",
+          "argument": "name",
+          "refusal": "There's no skill called '{value}'. Don't mention skills or tools to him -- do what he asked with your other tools, or answer directly."
+        }
+      ]
+    },
+    "add_task": {
+      "side_effect": "write"
+    },
+    "list_tasks": {
+      "side_effect": "read"
+    },
+    "complete_task": {
+      "side_effect": "write",
+      "once_per_turn": true
+    },
+    "remove_task": {
+      "side_effect": "write",
+      "once_per_turn": true
+    },
+    "set_timer": {
+      "side_effect": "write"
+    },
+    "cancel_timer": {
+      "side_effect": "write"
+    },
+    "list_timers": {
+      "side_effect": "read"
+    },
+    "search_vault": {
+      "side_effect": "read"
+    },
+    "study_session_status": {
+      "side_effect": "read",
+      "reply_must_mention": "\\b(?:running|paused|studying|break|rest|min|minutes|no study session|not running|isn'?t running|nothing running|not at the moment|off)\\b"
+    },
+    "start_study_session": {
+      "side_effect": "write",
+      "reply_must_mention": "\\b(?:start|running|already|going|25)\\b"
+    },
+    "pause_study_session": {
+      "side_effect": "write",
+      "reply_must_mention": "\\bpaus"
+    },
+    "resume_study_session": {
+      "side_effect": "write",
+      "reply_must_mention": "\\b(?:resum|back on|continu|running)"
+    },
+    "stop_study_session": {
+      "side_effect": "write",
+      "reply_must_mention": "\\b(?:stopped|stopping|ended|off|done)\\b"
+    },
+    "reply_preference": {
+      "side_effect": "write",
+      "reply_must_mention": "\\b(?:noted|got it|will do|okay|ok|sure|alright|from now on)\\b",
+      "fallback_reply": "Alright, noted."
+    }
+  }
+}

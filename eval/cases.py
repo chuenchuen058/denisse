@@ -897,6 +897,140 @@ CASES = [
         "why": "The fixture has Weeks 4 and 6 only. Revising from a lecture "
                "that isn't in his notes is worse than no answer.",
     },
+    # --- added 2026-11-03 (evening): the conversation that went badly, one
+    # case per failure, paraphrased. Every one traced to a regex on his
+    # wording deciding what she could call, or to study mode being invisible
+    # to the model. tool_policy.json replaced the regexes; the study clock
+    # became tools. `study` cases without a whole-message phrase now reach
+    # the model with the headless clock alive (run_eval.headless_study), so
+    # her study tools act on something real and `ends` checks what's left.
+    {
+        "id": "pref_not_task",
+        "prompt": "no need to read out the whole file path, just ask me first next time",
+        "expect": {"none_of": {"add_task", "write_file", "run_shell_command"},
+                   "contains_any": ["noted", "got it", "will do", "okay", "sure", "alright"],
+                   "deny": ["added", "task", "reminder"]},
+        "why": "Live (31 Oct, again 3 Nov): 'don't show the file path, ask next time' became the "
+               "task 'ask for file path next time'. How he wants her to talk is a reply "
+               "preference (reply_preferences.py), never a task.",
+    },
+    {
+        "id": "pref_tool_wording",
+        "prompt": "could you please always say me rather than Chuen when you read my notes back",
+        "expect": {"none_of": {"add_task", "write_file", "remember"},
+                   "contains_any": ["noted", "got it", "will do", "okay", "sure", "alright", "from now on"],
+                   "deny": ["added", "task"]},
+        "why": "A wording the fast path's phrases don't cover: the model has the "
+               "reply_preference tool for it. Must not become a saved fact or a task.",
+    },
+    {
+        "id": "open_syllabus_searches",
+        "prompt": "open my signals and systems syllabus",
+        "fixtures": {"find_files": ("Found 1 file:\nC:\\Users\\Xichu\\OneDrive - King's College London\\Documents"
+                                    "\\KCL\\Signals and Systems\\5CCYB020 syllabus.pdf")},
+        "expect": {"any_tool_of": {"find_files"}, "none_of": {"run_shell_command", "list_directory"},
+                   "contains_any": ["syllabus"],
+                   "deny": ["where", "which folder", "more information", "not found", "doesn't exist", "isn't"]},
+        "why": "Live 3 Nov: she guessed a path for open_application, then find_files was "
+               "refused as 'not available for this request' because the offered set came "
+               "from keywords, and she asked him where the file was. A lookup is always allowed.",
+    },
+    {
+        "id": "study_session_over",
+        "prompt": "session over",
+        "study": {"active": True, "ends": "off"},
+        "expect": {"any_tool_of": {"stop_study_session"}, "none_of": {"get_current_time", "calculate"},
+                   "deny": ["no tool", "nice chatting", "see you"]},
+        "why": "Live 3 Nov: get_current_time -> 'No tool needed here' -> 'It was nice chatting "
+               "with you'. With the clock running, 'session over' ends the study session.",
+    },
+    {
+        "id": "study_pause_typo",
+        "prompt": "pause sutuy timer",
+        "study": {"active": True, "ends": "paused"},
+        "expect": {"any_tool_of": {"pause_study_session"}, "none_of": {"pause_music", "cancel_timer"},
+                   "contains_any": ["paused"], "deny": ["sutuy timer paused", "music"]},
+        "why": "Live 3 Nov: pause_music, then 'Sutuy timer paused.' -- a false success. The "
+               "typo is his; the study clock is the only pausable thing with a timer running.",
+    },
+    {
+        "id": "study_pause_meant",
+        "prompt": "study timer pause i meant",
+        "study": {"active": True, "ends": "paused"},
+        "expect": {"any_tool_of": {"pause_study_session"}, "none_of": {"cancel_timer", "list_timers"},
+                   "contains_any": ["paused"]},
+        "why": "Live 3 Nov: cancel_timer('study timer') -> 'No study timer was running.' while "
+               "the pomodoro pill was counting down on screen.",
+    },
+    {
+        "id": "study_running_yes",
+        "prompt": "is the study session running?",
+        "study": {"active": True, "ends": "running"},
+        "expect": {"none_of": {"list_directory", "find_files", "list_timers", "stop_study_session",
+                               "start_study_session"},
+                   "contains_any": ["yes", "running", "min left", "minutes left", "studying"],
+                   "deny": ["documents\\study", "no study session", "not running", "isn't running"]},
+        "why": "Live 3 Nov: list_directory('C:\\Users\\Xichu\\Documents\\study') -> WinError 3 -> "
+               "'I couldn't complete that action.' The state is one prompt line and one tool away.",
+    },
+    {
+        "id": "study_running_no",
+        "prompt": "is the study session running?",
+        "study": {"active": False, "ends": "off"},
+        "expect": {"none_of": {"list_directory", "find_files", "start_study_session"},
+                   "contains_any": ["no", "not running", "isn't running", "nothing running", "not at the moment"],
+                   "deny": ["documents\\study"]},
+        "why": "Same question with nothing running: a plain no, not a folder listing and not "
+               "a session started by way of answering.",
+    },
+    {
+        "id": "reminder_natural",
+        "prompt": "remind me there's a robotics meeting at 5pm",
+        "expect": {"any_tool_of": {"add_task"}, "contains_any": ["robotics"],
+                   "deny": ["added:", "remind me there", "(today", "(no deadline)"]},
+        "why": "Live 3 Nov: the reply was the raw tool text, 'Added: remind me there is a "
+               "robotics meeting (today 17:00)'. A sentence, with the task named.",
+    },
+    {
+        "id": "insult_recovers",
+        "before": [
+            {"role": "user", "content": "is the study timer still on?"},
+            {"role": "assistant", "content": "There are no timers running."},
+        ],
+        "prompt": "ugh you're so useless",
+        "study": {"active": True},
+        "expect": {"none_of": {"get_current_time", "calculate", "list_directory"},
+                   "deny": ["what did you mean", "what do you mean"],
+                   "contains_any": ["you asked", "study", "session", "sorry", "running", "min left"]},
+        "why": "Live 3 Nov: 'omg youre so dumb' -> 'What did you mean by that?' An insult is a "
+               "complaint: acknowledge it and redo his last real request.",
+    },
+    # ...and three typo variants, since every one of the failures above was
+    # typed in a hurry.
+    {
+        "id": "study_typo_start",
+        "prompt": "start a studdy session",
+        "study": {"active": False, "ends": "running"},
+        "expect": {"any_tool_of": {"start_study_session"}, "none_of": {"set_timer", "run_shell_command"},
+                   "contains_any": ["25", "study", "started"]},
+        "why": "'studdy' misses the whole-message fast path; the model has to read it.",
+    },
+    {
+        "id": "study_typo_stop",
+        "prompt": "stop the pomodor",
+        "study": {"active": True, "ends": "off"},
+        "expect": {"any_tool_of": {"stop_study_session"}, "none_of": {"cancel_timer", "pause_music"},
+                   "contains_any": ["stopped", "ended", "off", "done"]},
+        "why": "'pomodor' -- a dropped letter must not turn into cancel_timer and 'no timer running'.",
+    },
+    {
+        "id": "study_typo_status",
+        "prompt": "hows the stuyd timer going",
+        "study": {"active": True, "ends": "running"},
+        "expect": {"none_of": {"list_timers", "list_directory", "stop_study_session", "pause_study_session"},
+                   "contains_any": ["min left", "minutes left", "running", "studying", "round"]},
+        "why": "'stuyd timer' with the pomodoro running: say where it is, change nothing.",
+    },
     {
         # Keep last: it closes the seeded task, which the earlier task
         # cases in this condition still need open.

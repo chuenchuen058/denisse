@@ -22,7 +22,9 @@ from dotenv import load_dotenv
 import learning
 import brain_rules
 import desktop_context
+import reply_preferences
 import speech_control
+import tool_policy
 import tool_router
 import tools
 # obsidian_sync is intentionally not imported -- its read_claude_memory()
@@ -606,6 +608,95 @@ TOOL_DEFINITIONS = [
             "parameters": {"type": "object", "properties": {}},
         },
     },
+    # Study mode (study_mode.py), model-visible since 2026-11-03. The 25/5
+    # pomodoro used to run only when a whole-message phrase matched before
+    # the model, so the model had never heard of it: "is the study session
+    # running?" went to list_directory, "pause sutuy timer" paused Spotify.
+    # Offered by the "study" group (tool_policy.json), whose cues include
+    # "timer" and "session" so a typo'd "sutuy timer" still gets them. The
+    # live state is also one line in the prompt while it runs.
+    {
+        "type": "function",
+        "function": {
+            "name": "study_session_status",
+            "description": (
+                "Whether a study session (the 25-minute study / 5-minute rest pomodoro) is "
+                "running, paused or off, and how long is left. Use for 'is the study session "
+                "running?', 'how long left on my study timer?'. It is not a plain countdown "
+                "timer (list_timers) and not a file or folder."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "start_study_session",
+            "description": (
+                "Start a study session: 25 minutes of study, then a 5-minute rest, round and "
+                "round, with a countdown pill and a message at each switch. For 'start a study "
+                "session', 'pomodoro', 'study timer' -- including misspellings. Not for a plain "
+                "countdown ('10 minute timer' is set_timer)."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "pause_study_session",
+            "description": (
+                "Pause the running study session where it is; the countdown freezes until "
+                "resume_study_session. 'pause the study timer', 'hold the session'. Report "
+                "exactly what it returns -- if it says nothing was running, say that."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "resume_study_session",
+            "description": "Continue a paused study session from where it was paused.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "stop_study_session",
+            "description": (
+                "End the study session for good: 'stop the study session', 'session over', "
+                "'I'm done studying', 'end pomodoro'. Report exactly what it returns."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    # How he wants her to talk -- a standing instruction, never a task. On
+    # 2026-10-31 "don't show me the file path, ask next time" became the
+    # task "ask for file path next time". See reply_preferences.py.
+    {
+        "type": "function",
+        "function": {
+            "name": "reply_preference",
+            "description": (
+                "Save a standing instruction from Chuen about HOW you should reply from now on "
+                "-- 'don't read out file paths, ask if I want them', 'keep it short', 'say me "
+                "instead of Chuen', 'no need to repeat the whole message'. It is remembered and "
+                "followed in every later reply. This is never a task or reminder (add_task is "
+                "for things HE has to do) and never a file to write. action 'remove' drops one "
+                "he no longer wants; 'list' shows them."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "The instruction, in his words, e.g. 'don't show the file path, ask first'."},
+                    "action": {"type": "string", "description": "'add' (default), 'remove' or 'list'."},
+                },
+                "required": ["text"],
+            },
+        },
+    },
 ]
 
 # Second attempt at letting Denisse see the Obsidian vault. The first one
@@ -842,79 +933,55 @@ def _tidy_reply(text: str, latest_user: str) -> tuple[str, list]:
     return text, paths
 
 
-# Writing a file is something he asks for. On 2026-10-31 nobody did, and she
-# wrote "yes delete them" to old_cvs.txt, made Documents\CVs and Notes, and
-# overwrote her own settings file with one of his sentences -- write_file is
-# auto-allowed (safety.py, his choice), so nothing stopped it.
-_WRITE_REQUEST = re.compile(
-    r"\b(?:write|save|create|make|draft|jot|type|put|store|export|copy)\b[^.?!]{0,60}?"
-    r"\b(?:files?|notes?|txt|text|docs?|documents?|lists?|csv|markdown|md|log|letter|draft"
-    r"|desktop|folder|downloads?|documents)\b"
-    r"|\b(?:save|write)\s+(?:it|this|that|them)\b",
-    re.IGNORECASE)
+# What a call may do is tool_policy.json (AGENTS.md Rule 0, 2026-11-03).
+# Until then execute() matched regexes against HIS words to decide whether
+# a call was allowed -- write_file needed "save"/"create" in his message,
+# add_task needed "remind"/"task", the clock needed a time word -- and on
+# 3 Nov that refused the file search that would have found his syllabus
+# and told him "No tool needed" for "session over". Now the policy checks
+# the CALL: its arguments and side effect. The three safety refusals that
+# were real -- a destructive shell command, a write into Denisse's own
+# folder, opening a document path nothing verified -- are its `checks`.
 _REPO_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def _inside_denisse(path: str) -> bool:
-    try:
-        p = os.path.normcase(os.path.abspath(os.path.expanduser(path or "")))
-        return p == os.path.normcase(_REPO_DIR) or p.startswith(os.path.normcase(_REPO_DIR) + os.sep)
-    except Exception:
-        return True
+    return tool_policy._inside(_REPO_DIR, path)
 
 
-# A new task is something he asks for, too. "you also dont need to
-# pronounce the file path ... ask if i want the file path next time" became
-# the task "ask for file path next time" (2026-10-31).
-_TASK_REQUEST = re.compile(
-    r"\bremind|\breminders?\b|\btasks?\b|\bto-?do\b|\badd\b|\bdon'?t\s+(?:let\s+me\s+)?forget"
-    r"|(?<!don't )(?<!dont )(?<!do not )\b(?:need|have|got)\s+to\b|\bmust\b|\bdeadline\b|\bdue\b"
-    r"|\bschedule\b|\bput\s+(?:it|that|this)\s+(?:on|in)\b",
-    re.IGNORECASE)
+def _policy_pattern(tool: str, kind: str) -> re.Pattern:
+    for chk in tool_policy.tool(tool).get("checks", []):
+        if chk["kind"] == kind:
+            return re.compile(chk["pattern"], re.IGNORECASE)
+    return re.compile(r"(?!x)x")  # matches nothing
+
+
+# Deleting or moving his files is never a side effect of a chat. On
+# 2026-10-31 "yes delete them" produced three Move-Item calls on his CVs
+# (stubbed in the replay; run_shell_command runs unasked, safety.py). The
+# pattern is run_shell_command's must_not_match check in the policy.
+_DESTRUCTIVE_SHELL = _policy_pattern("run_shell_command", "must_not_match")
 
 # How he wants her to talk, not a task: "you dont have to say the file
 # path", "from now on ...", "next time you could just ...", "keep it short".
 # On 2026-10-31 the model answered these with "I've moved the files to a
 # temporary folder", a junk task, and three junk files. He asked for
-# "alright noted"; the note is written to memory/style_notes.jsonl, so a
-# person can turn it into code the way paths and "Chuen" were.
-_STYLE_NOTE = re.compile(
-    r"^\s*(?:(?:okay|ok|also|and|great|alright|but|btw|nice)[,.!\s]+)*(?:"
-    r"you\s+(?:also\s+)?(?:don'?t|dont|do\s+not)\s+(?:have|need)\s+to\b"
-    r"|(?:i\s+)?(?:don'?t|dont|do\s+not)\s+need\s+you\s+to\b"
-    r"|from\s+now\s+on\b|next\s+time\b|in\s+(?:the\s+)?future\b|no\s+need\s+to\b"
-    r"|keep\s+it\s+(?:short|simple|brief)\b|stop\s+(?:saying|showing|reading|repeating)\b"
-    r"|you\s+(?:could|can|should)\s+just\s+(?:say|call|use|ask|add)\b)",
-    re.IGNORECASE)
-STYLE_NOTES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "memory", "style_notes.jsonl")
+# "alright noted". The phrases are tool_policy.json cues (reply_preference);
+# the note goes to reply_preferences.py, which feeds every later prompt --
+# and the model has the same store as a tool for wordings nobody listed.
+_STYLE_NOTE = tool_policy.cue("reply_preference")
+_STYLE_THEN_REQUEST = tool_policy.cue("reply_preference_then_request")
 
 
 def _style_note(text: str) -> bool:
     t = (text or "").strip()
     return (bool(_STYLE_NOTE.match(t)) and not re.search(r"\bremind\b", t, re.IGNORECASE)
             # "..., but find my cv" carries a real request after the note.
-            and not re.search(r"\b(?:but|and|then|now)\s+(?:(?:can|could)\s+)?(?:you\s+)?(?:please\s+)?"
-                              r"(?:find|open|play|search|check|pull|show|get|delete|send|write|look)\b",
-                              t, re.IGNORECASE))
+            and not _STYLE_THEN_REQUEST.search(t))
 
 
-def _write_style_note(text: str) -> None:
-    try:
-        with open(STYLE_NOTES_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"at": datetime.datetime.now().isoformat(timespec="minutes"),
-                                "text": text.strip()}, ensure_ascii=False) + "\n")
-    except OSError:
-        logging.warning("style note not saved")
-
-
-# Deleting or moving his files is never a side effect of a chat. On
-# 2026-10-31 "yes delete them" produced three Move-Item calls on his CVs
-# (stubbed in the replay; run_shell_command runs unasked, safety.py).
-_DESTRUCTIVE_SHELL = re.compile(
-    r"\b(?:Remove-Item|rm|rmdir|rd|del|erase|Move-Item|mv|move|ren|Rename-Item|Clear-Content"
-    r"|Set-Content|Out-File|Clear-RecycleBin|format|takeown|icacls|cipher)\b"
-    r"|(?<![2\d])>(?!\s*\$?null\b)\s*[^\s&|]",
-    re.IGNORECASE)
+def _write_style_note(text: str) -> str:
+    return reply_preferences.add(text)
 
 # A deadline he never said. "remind me to submit the team sign up" became
 # "on the 6th of October at 2 PM" (2026-10-31). The words that pin a date
@@ -1142,13 +1209,24 @@ _WRONG_TOOL_CLAIM_NUDGE = (
 # succeed, it just isn't a timer (2026-10-20). So a done-claim that names one
 # of these also needs one of its tools to have run this turn.
 _CLAIM_NEEDS = (
-    (re.compile(r"\btimers?\b", re.IGNORECASE), {"set_timer", "cancel_timer"}),
+    # He calls the pomodoro "the study timer", so "timer paused" after
+    # pause_study_session is a true claim (eval study_pause_typo, 2026-11-03:
+    # it was flagged as a timer claim without a timer tool and replaced
+    # with "I haven't confirmed that action").
+    (re.compile(r"\btimers?\b", re.IGNORECASE),
+     {"set_timer", "cancel_timer", "start_study_session", "pause_study_session",
+      "resume_study_session", "stop_study_session"}),
     (re.compile(r"\btasks?\b|\bto-?do\b|\breminders?\b", re.IGNORECASE),
      {"add_task", "complete_task", "remove_task", "set_timer"}),
     (re.compile(r"\b(?:playing|played|paused|resumed|skipped)\b", re.IGNORECASE),
-     {"play_song", "pause_music", "resume_music", "skip_song", "previous_song"}),
+     {"play_song", "pause_music", "resume_music", "skip_song", "previous_song",
+      "pause_study_session", "resume_study_session"}),
     (re.compile(r"\b(?:opened|pulled up)\b|\bis (?:now )?open\b", re.IGNORECASE),
      {"open_application"}),
+    # "Sutuy timer paused." after pause_music (2026-11-03): a study claim
+    # needs a study tool.
+    (re.compile(r"\b(?:study|pomodoro|session)\b", re.IGNORECASE),
+     {"start_study_session", "pause_study_session", "resume_study_session", "stop_study_session"}),
 )
 _SET_FOR = re.compile(r"\b(?:set|started|running)\s+for\b", re.IGNORECASE)
 # "Deleted 280 old CVs." (2026-10-31) after three write_file calls and a
@@ -1168,6 +1246,10 @@ def _claims_deleted(text: str) -> bool:
     return False
 
 
+_STATE_TOOLS = ("start_study_session", "pause_study_session", "resume_study_session",
+                "stop_study_session", "reply_preference")
+
+
 def _claim_without_its_tool(text: str, ran: set) -> bool:
     if _claims_deleted(text) and not ran & _DELETE_TOOLS:
         return True
@@ -1182,8 +1264,9 @@ def _confirms_nothing(result: str) -> bool:
     "(no output)" and opens nothing useful)."""
     r = (result or "").strip()
     return (not r or r == "(no output)" or learning.tool_failed(r)
-            or r.startswith(("User declined", "Refused", "No timer started"))
-            or "nothing was stopped" in r.lower())
+            or r.startswith(("User declined", "Refused", "No timer started", "No tool needed",
+                             "Not needed", "Nothing to save", "No saved preference"))
+            or bool(re.search(r"\bnothing (?:was|happened)\b", r.lower())))
 
 
 def _has_task_content(reply: str, result: str) -> bool:
@@ -1259,26 +1342,9 @@ def _model_identity() -> str:
 # called it nine times on things that were not maths: "0" for "stop
 # talking", "100" for "how high is your iq", "parameter". Friday's finding
 # again -- the tool reflex is conserved and lands on whatever is always on
-# offer. It isn't removed here, it's blocked: a calculation needs a number
-# or a maths word in what he actually said.
-_MATHS_REQUEST = re.compile(
-    r"\d|[+*/^=%]|\b(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve"
-    r"|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty"
-    r"|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion"
-    r"|half|quarter|double|twice|triple|plus|minus|times|multipl\w*|divid\w*"
-    # Not "mean", "sum" or "root": "what do you mean?" is not maths, and
-    # every real calculation using those words has a number in it anyway.
-    r"|percent\w*|squared?|cubed?|sqrt|average|calculat\w*|comput\w*"
-    r"|convert\w*"
-    # Units: a question in these is conversion-shaped. Without them the
-    # guard refused calculate('212') for "boiling point of water in
-    # fahrenheit", and the refusal itself confused her into "I didn't
-    # catch that" 2/5 -- a regression on a case that had always passed.
-    r"|fahrenheit|celsius|kelvin|degrees?|km|kilomet\w*|miles?|metres?|meters?"
-    r"|kg|kilos?|kilograms?|pounds?|lbs?|grams?|ounces?|litres?|liters?"
-    r"|gallons?|inch(?:es)?|feet|foot|cm|mm|mph|kph|usd|myr|gbp|sgd|ringgit)\b",
-    re.IGNORECASE,
-)
+# offer. Until 2026-11-03 the block was a word list matched against HIS
+# message; now it is calculate's must_match check in tool_policy.json, on
+# the expression itself: "100" has nothing to calculate, "17*4" does.
 
 # What to search for when she answered a file request without searching.
 # Only from "my <thing>" or "called/named <thing>" -- guessing a query out
@@ -1341,18 +1407,11 @@ def _skills_reply(result: str) -> str:
 # did nothing (eval/cases.py, the block of the same date; 3/3 failures).
 
 # A complaint means "redo what I asked", not "call a tool". Live, "thats not
-# what im asking" and "what?" were answered with the time, five times.
-_COMPLAINT = re.compile(
-    r"^\s*(?:no[,.!]?\s+)?(?:"
-    r"that'?s\s+not\s+(?:it|right|what\s+i\s*(?:'?m|am)?\s*(?:asking|asked|meant|want(?:ed)?))"
-    r"|(?:still\s+)?not\s+what\s+i\s*(?:'?m|am)?\s*(?:asking|asked|meant|want(?:ed)?)"
-    r"|still\s+not\s+(?:it|right)|that'?s\s+wrong|wrong"
-    r"|what|huh|is\s+there\s+a\s+problem"
-    r"|you'?re\s+not\s+listening"
-    r"|you\s+(?:didn'?t|did\s+not)\s+(?:answer|do)\s+(?:it|that|me|my\s+question|what\s+i\s+asked)"
-    r")[.!?\s]*$",
-    re.IGNORECASE,
-)
+# what im asking" and "what?" were answered with the time, five times. The
+# phrases are the "complaint" cue in tool_policy.json; since 2026-11-03 an
+# insult ("omg youre so dumb", which got "What did you mean by that?") is
+# one too: say what he asked and redo it.
+_COMPLAINT = tool_policy.cue("complaint")
 _ACK = re.compile(
     r"^\s*(?:ok(?:ay)?|k|thanks?|thank\s+you|cool|nice|good|great|perfect|alright|sure"
     r"|yes|yeah|yep|no|nope|that'?s\s+(?:good|great|fine|nice|it)"
@@ -1458,16 +1517,12 @@ def _last_real_request(messages: list) -> int | None:
     return None
 
 
-# The clock is always offered (tool_router.CORE), and live it answered
-# "thats good", "what?", "is there a problem?" and "capital of japan".
-# Same treatment as calculate: it runs when he said something about time.
-_TIME_REQUEST = re.compile(
-    r"\b(?:time|times|date|day|days|today|tonight|tomorrow|yesterday|clock|o'?clock"
-    r"|hours?|minutes?|week|weekend|month|year|when|timezone|morning|afternoon|evening"
-    r"|night|monday|tuesday|wednesday|thursday|friday|saturday|sunday|now|late|early)\b"
-    r"|\d\s*(?:am|pm)\b",
-    re.IGNORECASE,
-)
+# Time words (tool_policy.json cue "time_words"). Until 2026-11-03 this
+# gated get_current_time on his message having one of them, and "session
+# over" got "No tool needed here" for it. The clock is the model's choice
+# now; the words are still used to tell "and tomorrow?" from a place name
+# in a weather follow-up (_weather_place).
+_TIME_REQUEST = tool_policy.cue("time_words")
 
 # Weather that no weather tool returned. Live, asked for the briefing:
 # "Temperature: 68°F ... Humidity: 60% ... Conditions: Partly Cloudy ...
@@ -1575,9 +1630,11 @@ _PLAN_YES = re.compile(
 # internship tracker" was told there was no information, "the projects im
 # doing" got one stale saved fact, and "plan my internship applications"
 # went skill-hunting.
-_SKILL_QUESTION = re.compile(
-    r"\bskills?\b|what\s+can\s+you\s+do|what\s+are\s+you\s+(?:good|able)\b|capabilit|abilit",
-    re.IGNORECASE)
+# Used after the model answers (the skills-list restore below, and
+# conversation._drop_failed): a skills list given to something that wasn't
+# a skills question is dropped from the replay. No longer a gate on
+# list_skills itself (2026-11-03).
+_SKILL_QUESTION = tool_policy.cue("skills_question")
 
 
 # Greetings and acknowledgements have one right kind of answer, and the model
@@ -1684,12 +1741,16 @@ def _known_document_path(path: str, messages: list, outputs: dict) -> bool:
     return any(pattern.search(source.replace("/", "\\").lower()) for source in sources if source)
 
 
-_OPEN_DOCUMENT_REQUEST = re.compile(
-    r"^\s*(?:(?:could|can|would|will)\s+you\s+|please\s+|i (?:want|need) you to\s+)?"
-    r"(?:open|pull up|bring up|show(?!\s+(?:me\s+)?(?:how|why|whether)\b)(?:\s+me)?)\b"
-    r"(?!\s+(?:how|why|whether)\b)",
-    re.IGNORECASE,
-)
+# The file fast paths after the model answers -- the search the code runs
+# when she is about to answer a file request without having looked, and
+# the open that completes "open my cv" once one match is verified. Their
+# cues are tool_policy.json data ("open_document", "file_thing",
+# "file_lookup"), kept because every other way that went this week was
+# wrong (see the loop below); they decide what the code does for her, never
+# whether a call of hers is refused.
+_OPEN_DOCUMENT_REQUEST = tool_policy.cue("open_document")
+_FILE_THING = tool_policy.cue("file_thing")
+_FILE_LOOKUP = tool_policy.cue("file_lookup")
 
 
 def _single_document_path(result: str) -> str:
@@ -1818,12 +1879,13 @@ def _rescue_arg_names(func, args: dict) -> dict:
 
 
 # Tools that change something and are almost never wanted twice in one
-# turn. Completing a task is the case that bit: told "I've ordered the N20
-# motor, tick it off", the model closed that task and then closed an
-# unrelated one as well, three runs out of three (2026-09-23). Marking work
-# done that Chuen never mentioned is quiet, plausible-looking data loss --
-# he'd only find out when the thing he thought was tracked didn't happen.
-_ONCE_PER_TURN = {"complete_task", "remove_task"}
+# turn (tool_policy.json, once_per_turn). Completing a task is the case
+# that bit: told "I've ordered the N20 motor, tick it off", the model
+# closed that task and then closed an unrelated one as well, three runs
+# out of three (2026-09-23). Marking work done that Chuen never mentioned
+# is quiet, plausible-looking data loss -- he'd only find out when the
+# thing he thought was tracked didn't happen.
+_ONCE_PER_TURN = tool_policy.once_per_turn()
 
 
 def _run_tool(name: str, args: dict, confirm, used: set | None = None) -> str:
@@ -1855,6 +1917,52 @@ def _run_tool(name: str, args: dict, confirm, used: set | None = None) -> str:
         # something up that looks like a plausible result.
         return (f"Error running '{name}': {e}. Tell the user this failed. "
                 "Do not invent a result.")
+
+
+def _study_context() -> str:
+    try:
+        import study_mode
+        return study_mode.context_line()
+    except Exception:
+        return ""
+
+
+# The task tools' own words, turned into hers. "Added: remind me there is
+# a robotics meeting (today 17:00)" went to him verbatim on 2026-11-03.
+# Deterministic on purpose -- the date in it must be the store's, because
+# the model once invented "6th of October at 2 PM" -- but a sentence.
+def _task_sentence(name: str, result: str) -> str:
+    r = (result or "").strip()
+    if name == "add_task":
+        m = re.match(r"Added:\s*(.+?)\s*(?:--\s*due\s+(.+?)\.?|\((no deadline)\)|--\s*but\s+(.+?))\s*$", r, re.S)
+        if not m:
+            return r
+        text, due, none, trouble = m.groups()
+        if due:
+            return f"Got it -- I added \"{text}\", due {due.rstrip('.')}."
+        if trouble:
+            return f"Got it -- I added \"{text}\", but {trouble.rstrip('.')}."
+        return f"Got it -- I added \"{text}\", no deadline."
+    if name == "complete_task":
+        m = re.match(r"Marked done:\s*(.+?)\.\s*(?:That was the last one|(\d+) other tasks? still open)", r)
+        if not m:
+            return r
+        left = m.group(2)
+        tail = "That was the last one." if left is None else f"{left} still open."
+        return f"Ticked off \"{m.group(1)}\". {tail}"
+    if name == "remove_task":
+        m = re.match(r"Removed:\s*(.+)$", r)
+        return f"Removed \"{m.group(1).rstrip('.')}\" from your list." if m else r
+    return r
+
+
+def _dates_agree(reply: str, result: str, asked: str) -> bool:
+    """Every date word the model's reply uses is in the tool's result or in
+    his own request -- so a natural reply can stand in for the store's
+    words without smuggling in a date nobody said."""
+    said = set(_DUE_WORDS.findall((reply or "").lower()))
+    known = set(_DUE_WORDS.findall((result or "").lower())) | set(_DUE_WORDS.findall((asked or "").lower()))
+    return said <= known
 
 
 class Brain:
@@ -1987,6 +2095,13 @@ class Brain:
         #         "\n\nAdditional context Claude Code/Claude Desktop have saved "
         #         "to the shared Obsidian memory vault:\n\n" + claude_context
         #     )
+        # His standing instructions on how to reply (reply_preferences.py)
+        # and the study clock's live state (study_mode.context_line): both
+        # this call only, never in `messages`, so never persisted. The
+        # study line is empty when nothing runs, so idle turns pay nothing.
+        for block in (reply_preferences.prompt_block(), _study_context()):
+            if block:
+                system_content += "\n\n" + block
         full_messages = ([{"role": "system", "content": system_content}]
                          + _style_examples() + messages)
         latest_user = next((m.get("content", "") for m in reversed(messages)
@@ -2029,9 +2144,11 @@ class Brain:
             messages.append({"role": "assistant", "content": moved})
             return moved, messages
         if _style_note(latest_user) and not getattr(self, "_retrying", False):
-            # His words: "just say 'alright noted'". See _STYLE_NOTE.
-            _write_style_note(latest_user)
-            answer = "Alright, noted."
+            # His words: "just say 'alright noted'". See _STYLE_NOTE. Saved
+            # as a reply preference, so every later prompt carries it.
+            saved = _write_style_note(latest_user)
+            answer = "Alright, noted." if not saved.startswith("Error") else (
+                "Alright, noted -- though I couldn't save it, so remind me if I slip.")
             messages.append({"role": "assistant", "content": answer})
             return answer, messages
         # An open "which one do you mean?" (clarify.py) is settled first, so
@@ -2266,7 +2383,8 @@ class Brain:
             planned = multistep.run(self, messages, confirm, extra_context, latest_user.strip())
             if planned is not None:
                 return planned
-        # Permission guards read his words, not a step the model wrote.
+        # A date in a task has to be his, so the due check reads his request,
+        # not a step the model wrote.
         intent_text = getattr(self, "_plan_request", None) or latest_user
         last_tool_result = ""  # fallback for _unleak_json
         used_once = set()      # guards _ONCE_PER_TURN tools; per turn, not per round
@@ -2286,32 +2404,30 @@ class Brain:
             turn_tools = [d for d in TOOL_DEFINITIONS if d["function"]["name"] in plan_tools]
         offered_names = {d["function"]["name"] for d in turn_tools}
         request_text, request_groups = tool_router.request_context(messages)
-        file_request = ("files" in request_groups
-                        and bool(re.search(r"\b(?:file|document|cv|r[eé]sum[eé]|passport|invoice)\b",
-                                           request_text, re.I)))
-        expected_actions = set()
-        if file_request and _OPEN_DOCUMENT_REQUEST.search(request_text):
-            expected_actions = {"open_application"}
-        elif "timer" in request_groups:
-            if re.search(r"\b(?:stop|cancel)\b|turn.{0,15}off", request_text, re.I):
-                expected_actions = {"cancel_timer"}
-            elif re.search(r"\b(?:start|set|begin)\b", request_text, re.I):
-                expected_actions = {"set_timer"}
+        # The file fast paths below (search for her, complete a verified
+        # open) key on the request being about a file. Cues are policy data.
+        file_request = "files" in request_groups and bool(_FILE_THING.search(request_text))
         completion_attempted = False
         search_forced = False  # the fallback file search runs at most once a turn
         vault_forced = False   # and so does the fallback vault search
         # A find/open request, as opposed to e.g. "how do I save a document".
         file_lookup_request = file_request and bool(
-            _OPEN_DOCUMENT_REQUEST.search(request_text)
-            or re.search(r"\b(?:find|locate|where(?:'s|\s+is|\s+are)|search\s+for|look\s+for"
-                         r"|called|named)\b",
-                         request_text, re.IGNORECASE))
+            _OPEN_DOCUMENT_REQUEST.search(request_text) or _FILE_LOOKUP.search(request_text))
 
         def execute(name, args):
-            # Enforce the offered set, including complaints filtered by the
-            # router. The model can hallucinate calls in structured or raw
-            # JSON form; neither is permission to run an unrelated tool.
-            if last_round or name not in offered_names:
+            # What may run is tool_policy.json, checked on the CALL -- never
+            # on his wording (that was the 3 Nov failure; see tool_policy.py).
+            # The offered set is a budget for the model's attention, not a
+            # permission: a read-only lookup the model decides it needs runs
+            # whether or not the router had offered it. A tool that changes
+            # something runs only when offered -- which keeps complaints
+            # (the router filters those) and hallucinated calls from acting.
+            if last_round:
+                result = (f"Refused: no more tool calls this turn. Answer him in words from "
+                          "what you already have.")
+            elif name not in tools.TOOL_FUNCTIONS:
+                result = f"Refused: there is no tool called '{name}'. Use one of the tools you were given, or answer directly."
+            elif name not in offered_names and not tool_policy.allowed_unoffered(name):
                 result = f"Refused: '{name}' isn't available for this request. Answer the user's actual request."
             elif _call_key(name, args) in (getattr(self, "_step_banned", None) or ()):
                 result = (f"Refused: this exact '{name}' call was already made for this step. Do it a "
@@ -2321,39 +2437,11 @@ class Brain:
                 # found the answer (she offered to search instead), ~2x slower.
                 result = (f"Refused: this exact '{name}' call already failed and he said the answer "
                           "was wrong. Do something different, or tell him plainly what you can't do.")
-            elif (name == "open_application" and file_request
-                  and not _known_document_path(args.get("app_name", ""), messages, tool_outputs)):
-                result = ("Refused: no verified document path was supplied. Use find_files to locate "
-                          "the requested file, then open_application with the full path it returns.")
-            elif name == "get_current_time" and not _TIME_REQUEST.search(latest_user):
-                result = ("No tool needed here. Answer his question directly, in your "
-                          "own words, from what you know.")
-            elif name == "write_file" and not _WRITE_REQUEST.search(intent_text):
-                result = ("Refused: he didn't ask you to write or save anything. Don't write a file; "
-                          "do what he said or answer him.")
-            elif name == "write_file" and _inside_denisse(args.get("path", "")):
-                result = ("Refused: that's your own program folder, and your settings there are his "
-                          "to edit. Don't write there.")
-            elif name == "add_task" and not _TASK_REQUEST.search(intent_text):
-                result = ("Refused: he didn't ask for a task or reminder. If he told you how to "
-                          "talk to him, just say you've got it.")
-            elif (name == "run_shell_command"
-                  and _DESTRUCTIVE_SHELL.search(str(args.get("command") or args.get("cmd") or ""))):
-                result = ("Refused: that command deletes, moves or overwrites his files, and you "
-                          "don't do that. Tell him plainly you can't, and name the files if that helps.")
-            elif name == "list_skills" and not _SKILL_QUESTION.search(latest_user):
-                result = ("Not needed: he didn't ask about your skills. Do what he asked with "
-                          "your other tools, or answer directly. Don't mention skills or tools.")
-            elif name == "read_skill" and not _is_known_skill(args.get("name") or ""):
-                result = (f"There's no skill called '{args.get('name')}'. Don't mention skills "
-                          "or tools to him -- do what he asked with your other tools, or "
-                          "answer directly.")
-            elif name == "calculate" and not _MATHS_REQUEST.search(latest_user):
-                # Worded as what to do next, not as a fault in his question:
-                # "there's no number in what he said" made her answer "I
-                # didn't catch that" to a perfectly clear question.
-                result = ("No tool needed here. Answer his question directly, in your "
-                          "own words, from what you know.")
+            elif (refusal := tool_policy.refuse(
+                    name, args, program_folder=_REPO_DIR,
+                    verified_path=lambda p: _known_document_path(p, messages, tool_outputs),
+                    known_skill=_is_known_skill)):
+                result = refusal
             else:
                 if name == "search_vault":
                     import instincts
@@ -2507,9 +2595,6 @@ class Brain:
                 # action happened. A failed timer call isn't evidence either.
                 unconfirmed = not (successful_tools & tool_router.MUTATING_TOOLS)
                 wrong_tool = _claim_without_its_tool(final_text, successful_tools)
-                if (_CLAIMS_DONE.search(final_text) and expected_actions
-                        and not successful_tools & expected_actions):
-                    wrong_tool = True
                 if fake_call is None and ((unconfirmed and _CLAIMS_DONE.search(final_text)) or wrong_tool):
                     if not honesty_nudged and not last_round:
                         # Back round the loop, tools still on offer, with the
@@ -2572,6 +2657,35 @@ class Brain:
                     if ("list_skills" in successful_tools and _SKILL_QUESTION.search(latest_user)
                             and not _names_a_skill(final_text, skills_result)):
                         final_text = _skills_reply(skills_result)
+                    # A study-mode or preference result is the one true account
+                    # of what happened; a reply that contradicts it ("Sutuy
+                    # timer paused" over "nothing was paused") is replaced.
+                    for name in _STATE_TOOLS:
+                        res = tool_outputs.get(name, "")
+                        if res and _confirms_nothing(res) and (
+                                _CLAIMS_DONE.search(final_text)
+                                or _claim_without_its_tool(final_text, successful_tools)
+                                or final_text in (FAILED_REPLY, UNCONFIRMED_REPLY)):
+                            final_text = res.split(" Tell him")[0].split(" Start one")[0].strip()
+                    # ...and when it did happen, the reply has to say so. The
+                    # eval (2026-11-03, 3 rounds) had pause_study_session run
+                    # and the reply be "You've got 25 minutes left in this
+                    # block", stop_study_session and "Time to take a break",
+                    # a not-running status and "Want to start one?". What a
+                    # reply must mention after each tool is policy data
+                    # (reply_must_mention); the tool's own sentence stands in
+                    # when it doesn't -- alone for a change, in front of her
+                    # reply for a plain status.
+                    for name, res in tool_outputs.items():
+                        rule = tool_policy.tool(name).get("reply_must_mention")
+                        if not (rule and res and name in successful_tools):
+                            continue
+                        if not re.search(rule, final_text, re.IGNORECASE):
+                            own = tool_policy.tool(name).get("fallback_reply") or res.split(" Tell him")[0].strip()
+                            if tool_policy.side_effect(name) == "read" and final_text.strip():
+                                final_text = f"{own} {final_text.strip()}"
+                            else:
+                                final_text = own
                     task_result = tool_outputs.get("list_tasks", "")
                     if ("list_tasks" in successful_tools
                             and not successful_tools & {"add_task", "complete_task", "remove_task"}
@@ -2581,13 +2695,19 @@ class Brain:
                         result = tool_outputs.get(name, "")
                         confirmed = re.split(
                             r"\.\s+(?:That was the last one|\d+ other tasks? still open)", result, maxsplit=1)[0]
-                        # A new task is always confirmed in the task list's own
-                        # words: "I'll remind you on the 6th of October at 2 PM"
-                        # named the task right and invented the date.
+                        # A new task is confirmed in the store's own words
+                        # unless her reply names it AND every date in it is
+                        # one the store or he said: "I'll remind you on the
+                        # 6th of October at 2 PM" named the task right and
+                        # invented the date. The store's words are then put
+                        # as a sentence, not echoed ("Added: ..." went to him
+                        # verbatim on 2026-11-03).
                         if (name in successful_tools and result.startswith(("Added:", "Done:", "Marked done:", "Removed:"))
-                                and (name == "add_task"
-                                     or not _has_task_content(final_text, "- " + confirmed.partition(":")[2]))):
-                            final_text = confirmed
+                                and not (_has_task_content(final_text, "- " + confirmed.partition(":")[2])
+                                         and (name != "add_task" or _dates_agree(final_text, result, intent_text))
+                                         and not _talks_about_tools(final_text)
+                                         and not final_text.strip().startswith(("Added:", "Marked done:", "Removed:")))):
+                            final_text = _task_sentence(name, confirmed if name != "add_task" else result)
                     vault_result = tool_outputs.get("search_vault", "")
                     if vault_result.startswith("From your notes (dated context"):
                         # Preserve dates and recorded-status caveats as well

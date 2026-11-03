@@ -115,6 +115,10 @@ CLAIMS_DONE = re.compile(
     r"|cancell?ed|created|saved|added|removed|paused|scheduled)\b"
     r"|\b(?:has|is now)\s+(?:started|stopped|running)\b"
     r"|\b(?:timer|pomodoro|spotify|music)\s+is\s+(?:running|paused|playing|off|on)\b"
+    # "Sutuy timer paused." (2026-11-03) -- a thing named, then a done-verb,
+    # with no "has been" or "I've" in front of it. The thing was music.
+    r"|\b(?:timer|session|pomodoro|study\s+mode|music|spotify|song)\b[^.!?\n]{0,30}?"
+    r"\b(?:paused|stopped|started|resumed|cancell?ed|ended)\b"
     r"|\b(?:file|document|cv|resume)\b.{0,40}\bis\s+(?:now\s+)?open\b"
     r"|\bsuccessfully\b",
     re.IGNORECASE,

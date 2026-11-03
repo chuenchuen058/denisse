@@ -193,6 +193,7 @@ def main():
                "PYTHONDONTWRITEBYTECODE": "1", "PYTHONPATH": pythonpath,
                "DENISSE_CHECKS_FORBID": os.pathsep.join(str(p) for p in FORBIDDEN),
                "DENISSE_VAULT": str(sandbox / "vault"), "DENISSE_RULES_FILE": str(rules),
+               "DENISSE_REPLY_PREFERENCES": str(sandbox / "reply_preferences.json"),
                "DENISSE_TOOL_ROUTER": "1", "DENISSE_SKILLS_CORE": "1",
                "DENISSE_INSTINCTS": "1", "DENISSE_VAULT_SEARCH": "1",
                "DENISSE_STYLE_EXAMPLES": "1", "INWORLD_API_KEY": "",

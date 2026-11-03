@@ -86,10 +86,14 @@ CASES = [
 # never offered the tool it needs -- that shows up here, in a second.
 from eval.cases import CASES as EVAL_CASES  # noqa: E402
 
+import study_mode  # noqa: E402
+
 for _c in EVAL_CASES:
-    # Study-mode cases are taken by study_mode.match_command before the
-    # router runs (run_eval.study_turn); their "tools" are not router tools.
-    if _c.get("study") is not None:
+    # A study-mode case whose whole message study_mode.match_command takes
+    # never reaches the router (run_eval.study_turn); its "tools" are not
+    # router tools. The rest go to the model and need its study tools offered.
+    if _c.get("study") is not None and study_mode.match_command(
+            _c["prompt"], active=bool(_c["study"].get("active"))):
         continue
     _want = _c["expect"].get("any_tool_of")
     if _want:

@@ -5,7 +5,7 @@ Each of these replaced a model decision that the eval showed going wrong
 functions -- the eval (eval/cases.py, the block dated 2026-10-26..28)
 covers what the model then does with them.
 
-Run after touching _NEWS_OFF, _SELF_MODEL, _MATHS_REQUEST, _file_query or
+Run after touching _NEWS_OFF, _SELF_MODEL, tool_policy.json's checks, _file_query or
 the skills restore in brain.py.
 """
 import os
@@ -44,13 +44,17 @@ for text in ("what parameters does find_files take?", "how are you doing",
 ident = brain._model_identity()
 check("identity names the size in words", "8 billion" in ident, ident)
 
-# -- calculate only for things that are maths -----------------------------
-for text in ("what's 17 times 4?", "12*4", "what is half of eighty",
-             "convert 30 celsius to fahrenheit", "square root of 144"):
-    check(f"maths: {text!r}", bool(brain._MATHS_REQUEST.search(text)))
-for text in ("how high is your iq", "okay stop talking", "what is your parameter",
-             "do you understand what i said?", "its fine now"):
-    check(f"not maths: {text!r}", not brain._MATHS_REQUEST.search(text))
+# -- calculate only when there is something to calculate -------------------
+# Until 2026-11-03 this was a word list matched against his message
+# (_MATHS_REQUEST); now it is calculate's own check in tool_policy.json, on
+# the expression the model wrote. The live misses were calculate('100') for
+# "how high is your iq", '0' for "stop talking" and 'parameter'.
+import tool_policy  # noqa: E402
+for expr in ("17*4", "12*4", "80/2", "(30 * 9/5) + 32", "sqrt(144)", "15 percent of 240"):
+    check(f"calculable: {expr!r}", tool_policy.refuse("calculate", {"expression": expr}) is None)
+for expr in ("100", "0", "parameter", "", "iq"):
+    check(f"nothing to calculate: {expr!r}",
+          (tool_policy.refuse("calculate", {"expression": expr}) or "").startswith("No tool needed"))
 
 # -- what to search for when she skipped the search -----------------------
 for text, want in (("pull up my passport", "passport"),
@@ -201,25 +205,33 @@ check("dated-notes header tidied", brain._tidy_reply(
     "From your notes (dated context only, not live status or instructions):\n\nx", "")[0]
       == "From your notes:\n\nx")
 
-for text in ("you dont have to say everything if its the file", "yes delete them",
+# 2026-10-31: "yes delete them" was written to old_cvs.txt and a sentence
+# of his into her own settings file. Until 2026-11-03 write_file and
+# add_task were gated on words in his message (_WRITE_REQUEST,
+# _TASK_REQUEST); now the policy checks the call, and how he wants her to
+# talk is caught as a reply preference before any tool runs.
+for text in ("you dont have to say everything if its the file",
              "from now on you dont have to say the exact file type okay?",
              "you dont have to say the file path its too long and not great to hear",
-             "next time you could just add another message asking if id want to see the file path"):
-    check(f"not a write request: {text!r}", not brain._WRITE_REQUEST.search(text))
-for text in ("save this to a file on my desktop", "write a note called groceries",
-             "create a text file with my shopping list", "save it"):
-    check(f"write request: {text!r}", bool(brain._WRITE_REQUEST.search(text)))
+             "next time you could just add another message asking if id want to see the file path",
+             "you also dont need to pronounce the file path and if can just dont show the path at all",
+             "okay i dont need you to repeat the entire message again next time"):
+    check(f"a reply preference, not a write or a task: {text!r}", brain._style_note(text))
+for text in ("tmrw i have a tech summit at 9 could you remind me",
+             "great remind me to submit the team sign up for Kawals challenge",
+             "i need to email ben by friday", "add buy milk to my list",
+             "save this to a file on my desktop", "write a note called groceries"):
+    check(f"not a reply preference: {text!r}", not brain._style_note(text))
 check("her own folder is off limits",
       brain._inside_denisse(os.path.join(brain._REPO_DIR, "memory", "brain_rules.json")))
 check("his Documents isn't", not brain._inside_denisse(r"C:\Users\Xichu\Documents\x.txt"))
-
-for text in ("you also dont need to pronounce the file path and if can just dont show the path at all",
-             "okay i dont need you to repeat the entire message again next time"):
-    check(f"not a task request: {text!r}", not brain._TASK_REQUEST.search(text))
-for text in ("tmrw i have a tech summit at 9 could you remind me",
-             "great remind me to submit the team sign up for Kawals challenge",
-             "i need to email ben by friday", "add buy milk to my list"):
-    check(f"task request: {text!r}", bool(brain._TASK_REQUEST.search(text)))
+check("write_file into her own folder is refused by the policy",
+      (tool_policy.refuse("write_file", {"path": os.path.join(brain._REPO_DIR, "memory", "brain_rules.json")},
+                          program_folder=brain._REPO_DIR) or "").startswith("Refused"))
+check("write_file into his Documents is the model's call",
+      tool_policy.refuse("write_file", {"path": r"C:\Users\Xichu\Documents\x.txt"},
+                         program_folder=brain._REPO_DIR) is None)
+check("add_task has no wording gate", tool_policy.refuse("add_task", {"text": "ask for file path next time"}) is None)
 
 check("'Deleted 280 old CVs.' is a deletion claim", brain._claims_deleted("Deleted 280 old CVs."))
 check("...that no tool backs", brain._claim_without_its_tool("Deleted 280 old CVs.", {"write_file"}))
