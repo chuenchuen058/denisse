@@ -175,32 +175,36 @@ def shape_voice_stages(out):
 
 # ---- since last run -------------------------------------------------------
 
-DIFF_FIELDS = ("cases", "passes", "attempts", "pass_at_1", "pass_hat_k", "cases_all_pass")
-
-
 def diff_rows(old: dict, new: dict) -> list:
-    """(row label, field, old value, new value) for every scored summary either
-    run has. A part that ran in only one of them is listed with None on the
-    other side, so a part that stopped running cannot quietly vanish."""
+    """(row label, old summary or None, new summary or None) for every scored
+    summary either run has. A part that ran in only one of them keeps its row
+    with None on the other side, so a part that stopped running cannot quietly
+    vanish. "suite.same_cases" scores only the suite cases present in both
+    runs, the like-for-like comparison when the suite has grown."""
+    def ran(data, name):
+        part = (data.get("parts") or {}).get(name) or {}
+        return part if part.get("status") == "ran" else None
+
     def scored(data):
         rows = {}
-        for name, part in (data.get("parts") or {}).items():
-            s = part.get("summary") if part.get("status") == "ran" else None
+        for name in (data.get("parts") or {}):
+            part = ran(data, name)
+            s = (part or {}).get("summary")
             if s and "attempts" in s:
                 rows[name] = s
                 for side in ("learning_off", "learning_on"):
                     if isinstance(s.get(side), dict) and s[side].get("attempts"):
                         rows[f"{name}.{side}"] = s[side]
-            for area, a in ((part.get("areas") or {}) if part.get("status") == "ran" else {}).items():
+            for area, a in ((part or {}).get("areas") or {}).items():
                 rows[f"{name}.areas.{area}"] = a
         return rows
 
     a, b = scored(old), scored(new)
-    out = []
-    for label in list(a) + [k for k in b if k not in a]:
-        for f in DIFF_FIELDS:
-            ov, nv = a.get(label, {}).get(f), b.get(label, {}).get(f)
-            if ov is None and nv is None:
-                continue
-            out.append((label, f, ov, nv))
-    return out
+    so, sn = ran(old, "suite"), ran(new, "suite")
+    if so and sn:
+        both = {c["id"] for c in so.get("cases", [])} & {c["id"] for c in sn.get("cases", [])}
+        if both:
+            a["suite.same_cases"] = summarize([c for c in so["cases"] if c["id"] in both])
+            b["suite.same_cases"] = summarize([c for c in sn["cases"] if c["id"] in both])
+    order = list(a) + [k for k in b if k not in a]
+    return [(label, a.get(label), b.get(label)) for label in order]

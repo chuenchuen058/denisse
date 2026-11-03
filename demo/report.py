@@ -233,18 +233,25 @@ def render(data: dict, results_path: Path, doc_path: Path = DOC) -> str:
         prel = os.path.relpath(prev_path, doc_path.parent).replace(os.sep, "/")
         pg = (prev.get("git") or {}).get("commit") or "?"
         L += [f"Against [`demo/results/{prev_path.name}`]({prel}) (commit `{pg[:7]}`). "
-              "A dash means that side did not measure it. The prompt suite grew between "
-              "the runs, so its totals cover different case sets; old cases and new are "
-              "not separated in the totals.", "",
-              "| Eval | Field | Then | Now | Change |", "|---|---|---|---|---|"]
-        for label, field, ov, nv in evidence.diff_rows(prev, data):
-            then = f"[{ov}]({prel})" if ov is not None else "\u2014"
-            now = ln(nv) if nv is not None else "\u2014"
+              "Each cell is then \u2192 now; a dash means that run did not measure it. The "
+              "prompt suite grew between the runs, so `suite` totals cover different case sets; "
+              "`suite.same_cases` scores only the cases both runs have.", "",
+              "| Eval | Cases | Passed attempts | Cases passing all k | pass^k | Change in pass^k |",
+              "|---|---|---|---|---|---|"]
+
+        def side(summary, link, keys):
+            if summary is None:
+                return "\u2014"
+            return " / ".join(f"[{summary.get(k)}]({link})" for k in keys)
+
+        for label, o, n in evidence.diff_rows(prev, data):
+            cells = [f"{side(o, prel, keys)} \u2192 {side(n, rel, keys)}"
+                     for keys in (("cases",), ("passes", "attempts"), ("cases_all_pass",), ("pass_hat_k",))]
             change = ""
-            if isinstance(ov, (int, float)) and isinstance(nv, (int, float)):
-                d = round(nv - ov, 3)
+            if o and n and isinstance(o.get("pass_hat_k"), (int, float)) and isinstance(n.get("pass_hat_k"), (int, float)):
+                d = round(n["pass_hat_k"] - o["pass_hat_k"], 3)
                 change = "same" if d == 0 else f"{d:+g}"
-            L.append(f"| `{label}` | `{field}` | {then} | {now} | {change} |")
+            L.append(f"| `{label}` | " + " | ".join(cells) + f" | {change} |")
         L.append("")
 
     L += ["## Measured vs claimed", "",

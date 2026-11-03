@@ -212,8 +212,9 @@ class Report(unittest.TestCase):
         self.assertIn("## Since last run", md)
         self.assertIn("commit `0123456`", md)
         # old suite had 2 cases, new has 3; a part only one side ran shows a dash
-        self.assertIn("| `suite` | `cases` | [2](2026-11-02.json) | [3](2026-11-03.json) | +1 |", md)
-        self.assertIn("| `suite.areas.multistep` | `cases` | — | [1](2026-11-03.json) |  |", md)
+        self.assertIn("| `suite` | [2](2026-11-02.json) → [3](2026-11-03.json) | "
+                      "[5](2026-11-02.json) / [6](2026-11-02.json) → [8](2026-11-03.json) / [9](2026-11-03.json)", md)
+        self.assertIn("| `suite.areas.multistep` | — → [1](2026-11-03.json) |", md)
 
     def test_no_previous_file(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -264,7 +265,17 @@ class NewAreas(unittest.TestCase):
         old = {"parts": {"voice": {"status": "ran", "summary": {"cases": 1, "attempts": 1, "passes": 1}}}}
         new = {"parts": {"voice": {"status": "skipped", "reason": "x"}}}
         rows = evidence.diff_rows(old, new)
-        self.assertIn(("voice", "cases", 1, None), rows)
+        self.assertEqual(rows, [("voice", old["parts"]["voice"]["summary"], None)])
+
+    def test_diff_same_cases_is_like_for_like(self):
+        def run(recs):
+            return {"parts": {"suite": {"status": "ran", **evidence.shape_suite(recs)}}}
+        old = run([{"id": "a", "passed": True, "failures": []}])
+        new = run([{"id": "a", "passed": True, "failures": []}, {"id": "b", "passed": False, "failures": ["x"]}])
+        rows = {label: (o, n) for label, o, n in evidence.diff_rows(old, new)}
+        o, n = rows["suite.same_cases"]
+        self.assertEqual((o["cases"], n["cases"], n["passes"]), (1, 1, 1))
+        self.assertEqual(rows["suite"][1]["cases"], 2)
 
 
 class Committed(unittest.TestCase):
