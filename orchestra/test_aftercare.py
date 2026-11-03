@@ -40,6 +40,10 @@ class TestAftercare(unittest.TestCase):
         v = self.tmp / "vault"
         v.mkdir()
         g(v, "init", "-q")
+        # CI runners have no global git identity; vault_note's own commit needs one (3 Nov 2026:
+        # every push failed "Offline regression checks" on this assert)
+        g(v, "config", "user.name", "t")
+        g(v, "config", "user.email", "t@t")
         for i in (1, 2):
             note = aftercare.vault_note(v, slug=f"s{i}", title="Fix the thing", result="PASS", lane="codex",
                                         seconds=600, spent="$0.00", merge="merged", pushed="pushed 1 commit(s)",
