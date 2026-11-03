@@ -16,6 +16,12 @@ store is redirected to a scratch file for the run. An eval that pollutes
 the thing it measures is worse than no eval.
 
     .venv\\Scripts\\python.exe eval\\run_eval.py [--out DIR] [--quiet]
+    .venv\\Scripts\\python.exe eval\\run_eval.py --changed-only master   # quick check
+
+A run takes the shared GPU lease first and does not start while another
+local model job holds it (exit 3; --force overrides). The GPU's load is
+sampled before the first case and a busy GPU marks the report noisy. Every
+report ends with where the time went -- see eval/speed.py.
 """
 
 import argparse
@@ -29,6 +35,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from eval import speed  # noqa: E402
 from eval.cases import CASES, LEAKS, MISHEARD, POSIX_LEAKS, ROBOTIC  # noqa: E402
 
 
@@ -399,16 +406,23 @@ def write_dataset(results: dict) -> int:
 
 
 def report(results: dict, added: int) -> str:
+    n = len(results["clean"])
+    subset = results.get("subset")
     lines = [
         "---", "tags: [denisse, eval]", f"updated: {results['date']}", "---", "",
-        f"# Denisse eval — {results['stamp']}", "",
-        f"- **clean** (no history): {results['clean_pass']}/{len(CASES)} passed",
-        f"- **live** (real replayed history): {results['live_pass']}/{len(CASES)} passed",
+        f"# Denisse eval — {results['stamp']}" + (" (subset)" if subset else ""), "",
+        f"- **clean** (no history): {results['clean_pass']}/{n} passed",
+        f"- **live** (real replayed history): {results['live_pass']}/{n} passed",
         f"- median reply: {results['median']}s",
-        f"- sounds robotic: {results['robotic']} of {2 * len(CASES)} replies",
+        f"- sounds robotic: {results['robotic']} of {2 * n} replies",
         f"- curated dataset: +{added} this run, {results['dataset_total']} total",
-        "",
     ]
+    if subset:
+        lines.append(f"- subset: {n} of {len(CASES)} cases, changed since `{subset['ref']}`:")
+        lines += [f"    - {r}" for r in subset["reasons"]]
+    if results.get("gpu"):
+        lines += speed.gpu_lines(results["gpu"], results.get("lease"))
+    lines.append("")
 
     gap = results["clean_pass"] - results["live_pass"]
     if gap > 0:
@@ -442,6 +456,8 @@ def report(results: dict, added: int) -> str:
                 for f in r["failures"]:
                     lines.append(f"- {f}")
             lines.append("")
+    if results.get("timing"):
+        lines += speed.timing_lines(results["timing"])
     return "\n".join(lines)
 
 
@@ -503,12 +519,30 @@ def reseed_tasks(scratch: Path) -> None:
     tasks.add_task("file the Spritzer paperwork", "friday")
 
 
+_T0 = time.monotonic()  # process start, near enough: imports above are the bulk of startup
+
+
+def add_gpu_args(ap: argparse.ArgumentParser) -> None:
+    """The lease flags, shared with run_pass_k."""
+    ap.add_argument("--wait-gpu", type=int, default=300, metavar="SECONDS",
+                    help="how long to wait for the shared GPU lease (default 300)")
+    ap.add_argument("--force", action="store_true",
+                    help="run even if another local model job holds the GPU lease")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Score Denisse against the prompt suite")
-    ap.add_argument("--out", default=str(VAULT_EVAL_DIR), help="where to write the report")
+    ap.add_argument("--out", default=None,
+                    help=f"where to write the report (default: the vault's Evals folder; "
+                         f"a temp folder for --changed-only)")
     ap.add_argument("--quiet", action="store_true", help="only print the summary line")
     ap.add_argument("--no-dataset", action="store_true",
                     help="don't append to dataset.jsonl -- for A/B runs")
+    ap.add_argument("--changed-only", metavar="REF",
+                    help="run only the cases a change since this git ref can reach, plus the "
+                         "smoke set (eval/speed.py). For quick checks; full runs stay the A/B standard")
+    ap.add_argument("--json", metavar="PATH", help="also write every result, timing and GPU reading here")
+    add_gpu_args(ap)
     args = ap.parse_args()
 
     try:
@@ -516,18 +550,53 @@ def main() -> int:
     except AttributeError:
         pass
 
+    cases, subset = CASES, None
+    if args.changed_only:
+        try:
+            cases, reasons = speed.select_cases(CASES, args.changed_only)
+        except RuntimeError as exc:
+            print(f"FATAL: {exc}")
+            return 2
+        subset = {"ref": args.changed_only, "reasons": reasons}
+        print(f"--changed-only {args.changed_only}: {len(cases)} of {len(CASES)} cases")
+        for r in reasons:
+            print(f"  {r}")
+    out_dir = Path(args.out) if args.out else (
+        Path(tempfile.mkdtemp(prefix="denisse-eval-subset-")) if subset else VAULT_EVAL_DIR)
+
+    lease = _gpu_lease(wait_s=args.wait_gpu, on_busy="run" if args.force else "exit")
+    try:
+        return _run(args, cases, subset, out_dir, lease)
+    finally:
+        if lease:
+            lease.release()
+
+
+def _run(args, cases, subset, out_dir, lease) -> int:
     import conversation
 
     scratch = isolate_state()
+    prof = speed.Profile()
+    prof.install()
 
     now = datetime.datetime.now()
-    results = {"stamp": now.strftime("%Y-%m-%d %H:%M"), "date": now.strftime("%Y-%m-%d")}
+    results = {"stamp": now.strftime("%Y-%m-%d %H:%M"), "date": now.strftime("%Y-%m-%d"),
+               "subset": subset, "lease": lease_info(lease)}
 
     try:
         brain = conversation.get_brain()
     except Exception as exc:
         print(f"FATAL: brain unavailable — {exc}")
         return 2
+
+    # Sampled after the brain is up and before the first case: this is the
+    # GPU the cases are about to share. A noisy start is flagged in the
+    # report, not fatal -- the pass/fail still counts, the seconds don't.
+    results["gpu"] = speed.gpu_snapshot()
+    if results["gpu"]["noisy"]:
+        print(f"note: GPU already {results['gpu']['util_pct']}% busy -- timings in this run are noisy")
+    startup_s = time.monotonic() - _T0
+    cases_t0 = time.monotonic()
 
     conditions = {"clean": [], "live": conversation.replay()}
     for cond, history in conditions.items():
@@ -537,31 +606,40 @@ def main() -> int:
         if cond != "clean":
             reseed_tasks(scratch)
         results[cond] = []
-        for case in CASES:
+        for case in cases:
+            before = prof.snapshot()
             r = run_case(brain, case, history)
+            r["profile"] = speed.Profile.delta(before, prof.snapshot())
             results[cond].append(r)
             if not args.quiet:
                 print(f"[{'OK  ' if r['passed'] else 'FAIL'}] {cond:5} {r['id']:15} "
                       f"{r['seconds']:5}s  {r['failures'] or ''}")
+    cases_s = time.monotonic() - cases_t0
 
+    n = len(cases)
     results["clean_pass"] = sum(r["passed"] for r in results["clean"])
     results["live_pass"] = sum(r["passed"] for r in results["live"])
     times = sorted(r["seconds"] for c in ("clean", "live") for r in results[c])
     results["median"] = times[len(times) // 2] if times else 0
     results["robotic"] = sum(bool(r["robotic"]) for c in ("clean", "live") for r in results[c])
 
-    added = 0 if args.no_dataset else write_dataset(results)
+    # A subset run is a quick check: it curates nothing and skips the
+    # learning pass, which is the nightly's job.
+    added = 0 if (args.no_dataset or subset) else write_dataset(results)
 
-    # Never let it cost the night's eval: a bad history file is reported,
-    # not fatal.
-    try:
-        import learning
-        results["learned"] = learning.summary(learning.run())
-    except Exception as exc:
-        results["learned"] = [f"- learning pass failed: {exc}"]
+    learning_t0 = time.monotonic()
+    if not subset:
+        # Never let it cost the night's eval: a bad history file is
+        # reported, not fatal.
+        try:
+            import learning
+            results["learned"] = learning.summary(learning.run())
+        except Exception as exc:
+            results["learned"] = [f"- learning pass failed: {exc}"]
     results["dataset_total"] = sum(1 for _ in DATASET.open(encoding="utf-8")) if DATASET.exists() else 0
+    results["timing"] = prof.summary(wall_s=time.monotonic() - _T0, cases_s=cases_s,
+                                     startup_s=startup_s, learning_s=time.monotonic() - learning_t0)
 
-    out_dir = Path(args.out)
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / f"{results['date']}.md").write_text(
@@ -570,34 +648,66 @@ def main() -> int:
         where = str(out_dir / f"{results['date']}.md")
     except OSError as exc:
         where = f"(could not write report: {exc})"
+    if args.json:
+        try:
+            Path(args.json).write_text(json.dumps(results, indent=1, ensure_ascii=False, default=str),
+                                       encoding="utf-8")
+        except OSError as exc:
+            print(f"(could not write json: {exc})")
 
-    print(f"\n{results['stamp']}  clean {results['clean_pass']}/{len(CASES)}  "
-          f"live {results['live_pass']}/{len(CASES)}  "
+    t = results["timing"]
+    gpu = results["gpu"]
+    print(f"\n{results['stamp']}  clean {results['clean_pass']}/{n}  "
+          f"live {results['live_pass']}/{n}  "
           f"median {results['median']}s  robotic {results['robotic']}  dataset {results['dataset_total']}")
+    print(f"wall {t['wall_s']}s: startup {t['startup_s']}  model {t['model_s']} "
+          f"(prefill {t['prefill_s']}, generation {t['gen_s']})  tools {t['tool_s']}  "
+          f"python {t['other_s']}  learning {t['learning_s']}"
+          + (f"  | GPU at start {gpu['util_pct']}%" if gpu.get("util_pct") is not None else "")
+          + ("  NOISY" if gpu.get("noisy") else ""))
     print(where)
-    return 0 if results["live_pass"] == len(CASES) else 1
+    return 0 if results["live_pass"] == n else 1
 
 
-def _gpu_lease():
-    """Take the shared local-inference lease (.review/gpu.lease in the main checkout) so
-    Orchestra's local team doesn't start a model call mid-eval. Waits up to 5 minutes for
-    a local-team call to finish; runs anyway (with a note) if it can't get it."""
+def lease_info(lease) -> dict:
+    if lease is None:
+        return {"held": False, "holder": _LAST_HOLDER}
+    return {"held": True, "holder": lease.holder}
+
+
+_LAST_HOLDER = None
+
+
+def _gpu_lease(wait_s: int = 300, on_busy: str = "run"):
+    """Take the shared local-inference lease (.review/gpu.lease in the main
+    checkout) so Orchestra's local team doesn't start a model call mid-eval,
+    and so the eval doesn't start mid-call. Waits `wait_s` for the holder to
+    finish. Still held after that:
+
+        on_busy="exit"  print who holds it and exit 3 (the scheduled run's
+                        own "skipped, not a run" code). The eval's default:
+                        a round timed against someone else's model job is
+                        the noise this exists to stop.
+        on_busy="run"   note it and run anyway (--force; the bakeoff's old
+                        behaviour, kept for it).
+    """
+    global _LAST_HOLDER
     try:
         from orchestra.local_team.lease import GpuLease
     except Exception:
         return None
     lease = GpuLease.for_repo(ROOT, "eval/run_eval.py", ttl_s=3 * 3600)
-    if not lease.acquire(wait_s=300, poll_s=5):
-        print(f"note: GPU lease still held by {(lease.info() or {}).get('holder', '?')}; running anyway")
+    if not lease.acquire(wait_s=wait_s, poll_s=5):
+        held = lease.info() or {}
+        _LAST_HOLDER = held.get("holder", "?")
+        if on_busy == "exit":
+            print(f"GPU busy: lease held by {_LAST_HOLDER} (pid {held.get('pid', '?')}) after "
+                  f"waiting {wait_s}s. Not running -- --wait-gpu N to wait longer, --force to run anyway.")
+            raise SystemExit(3)
+        print(f"note: GPU lease still held by {_LAST_HOLDER}; running anyway")
         return None
     return lease
 
 
 if __name__ == "__main__":
-    _lease = _gpu_lease()
-    try:
-        rc = main()
-    finally:
-        if _lease:
-            _lease.release()
-    raise SystemExit(rc)
+    raise SystemExit(main())
