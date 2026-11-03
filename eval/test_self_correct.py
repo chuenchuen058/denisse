@@ -204,4 +204,19 @@ got = instincts.rebuild(lofi + lofi_trial(2))
 check("instincts: his 'off' survives a rebuild", got[0]["enabled"] is False)
 
 print(f"\n{sum(results)}/{len(results)} passed.")
-raise SystemExit(0 if all(results) else 1)
+
+
+# The same checks, visible to `unittest discover` (an Orchestra gate runs
+# eval/ that way). Until 2026-11-03 the module-level SystemExit made discover
+# report an import error -- exit 1 with every check passing.
+import unittest  # noqa: E402
+
+
+class SelfCorrectChecks(unittest.TestCase):
+    def test_every_check_passed(self):
+        self.assertTrue(all(results), f"{sum(results)}/{len(results)} passed")
+        self.assertGreaterEqual(len(results), 30)  # the 2026-10-20 set; a lost block fails here
+
+
+if __name__ == "__main__":
+    raise SystemExit(0 if all(results) else 1)

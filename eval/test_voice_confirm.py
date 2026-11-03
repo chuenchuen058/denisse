@@ -99,4 +99,19 @@ t.join(2)
 check("DENISSE_VOICE_CONFIRM=0 restores un-gated shell", out.get("v") is True)
 
 print(f"\n{sum(results)}/{len(results)} passed.")
-sys.exit(0 if all(results) else 1)
+
+
+# The same checks, visible to `unittest discover` (an Orchestra gate runs
+# eval/ that way). Until 2026-11-03 the module-level sys.exit made discover
+# report an import error -- exit 1 with every check passing.
+import unittest  # noqa: E402
+
+
+class VoiceConfirmChecks(unittest.TestCase):
+    def test_every_check_passed(self):
+        self.assertTrue(all(results), f"{sum(results)}/{len(results)} passed")
+        self.assertGreaterEqual(len(results), 23)  # the table above; a lost block fails here
+
+
+if __name__ == "__main__":
+    sys.exit(0 if all(results) else 1)
