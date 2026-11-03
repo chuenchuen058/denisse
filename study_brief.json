@@ -1,0 +1,210 @@
+{
+  "_help": [
+    "Read by study_brief.py at import; restart the tray after editing.",
+    "modules: names, codes and aliases for each module. Modules with a dated Coursework.md in the vault are found at runtime as well (their name and code become keys automatically); entries here only add aliases and fix the order she lists them in.",
+    "matching: how a module is recognised. 1) any alias, the full name or the code as whole words; 2) word prefixes in order ('sig and sys', 'comp meth'), each at least min_prefix letters (min_prefix_alone when the name is one word), connectors skipped; 3) a near-miss spelling of an alias ('signls'). The first tier that names exactly one module wins; two modules in one tier = none.",
+    "patterns: regexes with inline flags. Keep their capture groups. {heading}, {week} and {n} are filled at runtime (regex-escaped); no other braces are formatted.",
+    "templates: Python format strings. Date fields take strftime specs, e.g. {due:%a %d %b %Y}. Entries with 'one'/'many' are picked by count. verify_due must produce the same text as the due date in brief.due."
+  ],
+  "paths": {
+    "jobs": ["memory", "jobs"],
+    "drafts": ["Denisse", "Drafts"],
+    "week_notes": ["Week *", "* Week *.md"],
+    "coursework_dir": "coursework",
+    "job_file": "study_brief-{slug}.json",
+    "written_file": "study_brief-written.json",
+    "draft_name": "{today:%Y-%m-%d} {module} study brief.md",
+    "note_ext": ".md",
+    "draft_copy_suffix": " (2)"
+  },
+  "steps": ["deadline", "coursework", "weeks", "tasks", "write", "verify", "offer"],
+  "job": {
+    "resume_minutes": 30,
+    "attempts": 2
+  },
+  "modules": [
+    {"name": "Signals and Systems", "code": "5CCYB020",
+     "aliases": ["signals", "signal", "ss", "s&s", "sns", "s and s"]},
+    {"name": "Electromagnetism", "code": "5CCYB010",
+     "aliases": ["electromagnetism", "electromag", "em"]},
+    {"name": "Computational Methods", "code": "5CCYB070",
+     "aliases": ["methods", "cm", "comp methods"]},
+    {"name": "Computational Applied Biomathematics", "code": "5CCYB080",
+     "aliases": ["biomathematics", "biomaths", "biomath", "applied", "cab"]}
+  ],
+  "matching": {
+    "non_word": "[^a-z0-9&]+",
+    "connectors": ["and", "&", "n", "of", "the"],
+    "min_prefix": 3,
+    "min_prefix_alone": 5,
+    "min_prefix_words": 2,
+    "typo_ratio": 0.85,
+    "typo_min_length": 5,
+    "discovery_seconds": 600
+  },
+  "patterns": {
+    "frontmatter": "(?s)\\A---\\s*\\n(.*?)\\n---",
+    "checkbox": "(?m)^\\s*-\\s*\\[( |x|X)\\]\\s*(.+?)\\s*$",
+    "question_row": "(?m)^\\|\\s*\\*\\*(\\d+)\\*\\*\\s*\\|(.+?)\\|\\s*(\\d+)\\s*\\|(.+?)\\|\\s*$",
+    "week_ref": "(?i)\\bW(?:ee)?k\\s*(\\d{1,2})\\b",
+    "section": "(?m)^##\\s+{heading}\\b.*$",
+    "next_section": "(?m)^##\\s",
+    "question_label": "Q(\\d+)\\b",
+    "feeds_link": "\\[\\[[^]|]*Week (\\d+)",
+    "week_in_path": "Week (\\d+)",
+    "wikilink": "\\[\\[([^]|#]+)(?:#[^]|]*)?(?:\\|[^]]*)?\\]\\]",
+    "slug": "[^a-z0-9]+",
+    "escaped_pipe": "\\|",
+    "topic_cut": [" — ", ":"],
+    "revise_sep": ";",
+    "duration": "(?i)(\\d+(?:\\.\\d+)?)\\s*(minutes?|mins?|hours?|hrs?|h)\\b",
+    "example_source": "(?i)\\b(tutorial|example|past paper|problem sheet|worksheet|exercise)",
+    "skip_item": "(?i)assemble|submit|read the brief",
+    "write_up_task": "write[ -]?up[^|]*\\bweek {week}\\b",
+    "planned_write_up": "^Write up Week (\\d+)"
+  },
+  "coursework": {
+    "item_sections": ["Progress", "Plan"],
+    "feeds_section": "Which week notes feed it",
+    "done_mark": "x",
+    "topic_clip": 40
+  },
+  "weeks": {
+    "unwritten": ["scaffolded", "files-only"],
+    "written_status": "written"
+  },
+  "schedule": {
+    "default_weight": 10,
+    "write_up_weight": 6,
+    "read_brief_weight": 5,
+    "work_ends_days_before": 2,
+    "submit_days_before": 1,
+    "task_due": "{when:%d %b %Y} 18:00"
+  },
+  "learner": {
+    "areas": {"format": "format", "attention": "attention", "study": "study"},
+    "format_first": {
+      "example": {"pattern": "(?i)\\bexamples?\\b", "shape": "example_first"},
+      "diagram": {"pattern": "(?i)\\b(diagrams?|pictures?|visuals?)\\b", "shape": "diagram_first"},
+      "theory": {"pattern": "(?i)\\b(theory|derivations?|proofs?)\\b", "shape": null}
+    },
+    "unit_minutes": {"h": 60},
+    "default_unit_minutes": 1,
+    "pace": [[30, 1], [60, 2]],
+    "pace_max": 3,
+    "claim_clip": 60
+  },
+  "limits": {
+    "task_preview": 3,
+    "task_preview_chars": 60,
+    "untaught_chars": 50,
+    "missing_item_chars": 40,
+    "failure_chars": 200
+  },
+  "templates": {
+    "which_module": "Which module is the study brief for?",
+    "which_module_offer": "{question} I can do one for {modules}.",
+    "list_sep": ", ",
+    "list_or": " or ",
+    "clip_ellipsis": "...",
+    "clip_strip": " ,;(",
+    "week": "Week {n}",
+    "weeks": "Weeks {first} and {last}",
+    "submit_step": "Assemble, check and submit on KEATS",
+    "read_brief_step": "Read the {module} coursework brief",
+    "write_up_step": "Write up Week {week} ({topic})",
+    "write_up_topic": "lecture",
+    "question_step": "{text} ({topic}, {marks} marks)",
+    "task_prefix": "{module}: {text}",
+    "brief": {
+      "front": [
+        "---",
+        "name: {today:%Y-%m-%d} {module} study brief",
+        "description: \"Study brief for {module}: coursework due {due:%d %b %Y}, {left} of {total} items left. Built by Denisse from the module notes.\"",
+        "tags: [denisse, draft, study-brief]",
+        "updated: {today:%Y-%m-%d}",
+        "---",
+        "",
+        "# {module} — study brief",
+        ""
+      ],
+      "due": "> [!important] Due **{due:%a %d %b %Y}** ({when})",
+      "weight": " · {weight}",
+      "source": "> From [[{link}|the coursework note]]. Built {today:%d %b} from your notes only.",
+      "where_heading": ["", "## Where you are", ""],
+      "ticked": "- **{ticked} of {total}** coursework items ticked.",
+      "brief_unread": "- **The brief isn't read yet** — the plan below is guessed from the deadline until it is.",
+      "gaps": "- Not written up yet: {weeks}.",
+      "gap": "[[{note}|Week {week}]]",
+      "gap_status": " ({status})",
+      "tasks_short": "- On your task list already: {count}.",
+      "tasks": "- On your task list already: {count} — {preview}.",
+      "task_sep": "; ",
+      "left_heading": ["", "## What's left", ""],
+      "example_first": ["Start each item from a worked example (tutorial sheet or past paper), then the theory it uses.", ""],
+      "diagram_first": ["Start each item from a sketch or diagram of the problem, then the theory it uses.", ""],
+      "table_head": ["| Item | Marks | Revise from |", "|---|---|---|"],
+      "table_row": "| {text} | {marks} | {revise} |",
+      "list_row": "- [ ] {text}",
+      "plan_heading": ["", "## Plan", ""],
+      "missing": {
+        "one": "{weeks} isn't written up, and questions below need them -- do the write-up before the question.",
+        "many": "{weeks} aren't written up, and questions below need them -- do the write-up before the question."
+      },
+      "missing_short": {
+        "one": "Write up {weeks} before the questions that need it.",
+        "many": "Write up {weeks} before the questions that need them."
+      },
+      "missing_listed": {
+        "one": " {weeks} is already on your task list.",
+        "many": " {weeks} are already on your task list."
+      },
+      "plan_row": "- by **{when:%a %d %b}** — {text}",
+      "sessions_heading": ["", "## Sessions", ""],
+      "sessions": {
+        "one": "About {minutes} min a session, {per} plan item each:",
+        "many": "About {minutes} min a session, {per} plan items each:"
+      },
+      "session_row": "- Session {n} (by {when:%a %d %b}): {items}",
+      "session_sep": "; ",
+      "unknown_heading": ["", "## What I don't know", ""],
+      "untaught": "- Not linked to a taught week yet: {items}.",
+      "untaught_sep": "; ",
+      "unknown": "- Your lecture timetable and exam dates — the plan covers this coursework only.",
+      "shaped_heading": ["", "## Shaped by", ""],
+      "cite": "{id}: \"{claim}\"",
+      "shaped": {
+        "example_first": "- Worked example before theory — {cite}",
+        "diagram_first": "- Picture before theory — {cite}",
+        "short": "- Shorter sections — {cite}",
+        "pace": "- {per} plan item(s) per session of about {minutes} min — {cite}"
+      },
+      "shaped_fix": "- Wrong? `python -m learner supersede <id> \"what's true\"` and ask again."
+    },
+    "verify_due": "{due:%a %d %b %Y}",
+    "problems": {
+      "unreadable": "can't read it back: {error}",
+      "no_due": "the due date isn't in it",
+      "missing_item": "missing item: {item}",
+      "plan_date": "plan date {when} is outside today..deadline",
+      "broken_link": "broken link: {target}",
+      "sep": "; "
+    },
+    "no_deadline": "no upcoming dated coursework for {module} in the module notes",
+    "step_failed": "{step} step failed ({detail})",
+    "failed_check": "I wrote the {module} brief but it failed my check, so don't trust it yet: {problems}. It's at {path}.",
+    "could_not_finish": "I couldn't finish the {module} brief: the {error}. Nothing was added to your tasks.",
+    "reply": {
+      "where": "Your {module} study brief is in your vault at {path}.",
+      "due": "Coursework is due {due:%a %d %b} ({when}), with {left} of {total} items left.",
+      "first": "First, by {when:%a %d %b}: {text}.",
+      "gaps": {
+        "one": "{weeks} isn't written up yet.",
+        "many": "{weeks} aren't written up yet."
+      },
+      "resumed": "(Picked up where the last run stopped.)",
+      "sep": " ",
+      "question": "\n\n{question}"
+    }
+  }
+}
