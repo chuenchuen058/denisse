@@ -8,7 +8,9 @@ and speaks it back out loud.
 Run:
     python voice_mode.py
 
-Say 'exit' or 'quit' (typed or spoken) to stop. Ctrl+C also works.
+Say one of voice.json voice_mode.exit_phrases ('exit', 'quit') to stop.
+Ctrl+C also works. Voice, STT engine and listen timeouts are in voice.json
+"voice_mode" too (AGENTS.md Rule 0); DENISSE_VOICE / DENISSE_STT still win.
 """
 
 import os
@@ -20,6 +22,7 @@ import pyttsx3
 import conversation
 import speech_control
 import stt_vosk
+import voice_config
 import voice_pipeline
 from safety import confirm_risky_tool
 from voice_output import speak_inworld, TTS_ENGINE
@@ -27,9 +30,13 @@ from voice_output import speak_inworld, TTS_ENGINE
 # Local pyttsx3 fallback voice, used if the Inworld voice (see
 # voice_output.py) is unset or fails -- no API key, offline, package
 # missing, service hiccup. Override with a substring of a specific voice
-# name (e.g. "Zira") via the DENISSE_VOICE env var / .env. Defaults to
-# picking a female-sounding voice.
-VOICE_PREFERENCE = os.environ.get("DENISSE_VOICE", "female")
+# name (e.g. "Zira") via the DENISSE_VOICE env var / .env, or
+# voice.json voice_mode.voice_preference.
+_CFG = voice_config.section("voice_mode")
+VOICE_PREFERENCE = os.environ.get("DENISSE_VOICE", _CFG["voice_preference"])
+LISTEN_TIMEOUT_S = _CFG["listen_timeout_s"]
+PHRASE_TIME_LIMIT_S = _CFG["phrase_time_limit_s"]
+EXIT_PHRASES = {" ".join(p.lower().split()) for p in _CFG["exit_phrases"]}
 
 
 def _select_voice(engine) -> None:
@@ -112,7 +119,7 @@ def speak(engine, text: str, trace=None) -> None:
         print(f"(couldn't speak the reply out loud: {e})")
 
 
-STT_ENGINE = os.environ.get("DENISSE_STT", "whisper").lower()
+STT_ENGINE = os.environ.get("DENISSE_STT", _CFG["stt_engine"]).lower()
 
 
 def listen(trace=None) -> str:
@@ -138,7 +145,7 @@ def listen(trace=None) -> str:
                 print("(loading Whisper, one moment...)")
             kw = {"trace": trace} if trace is not None else {}
             return stt_whisper.transcribe_once(
-                timeout=8, phrase_time_limit=15, on_ready=_announce_ready, **kw
+                timeout=LISTEN_TIMEOUT_S, phrase_time_limit=PHRASE_TIME_LIMIT_S, on_ready=_announce_ready, **kw
             ).strip()
         except ImportError:
             pass
@@ -150,7 +157,7 @@ def listen(trace=None) -> str:
 
     try:
         text = stt_vosk.transcribe_once(
-            timeout=8, phrase_time_limit=15, on_ready=_announce_ready
+            timeout=LISTEN_TIMEOUT_S, phrase_time_limit=PHRASE_TIME_LIMIT_S, on_ready=_announce_ready
         ).strip()
         if trace is not None:
             trace.mark("stt_done")
@@ -158,6 +165,11 @@ def listen(trace=None) -> str:
     except stt_vosk.ModelUnavailable as e:
         print(f"({e})")
         return ""
+
+
+def is_exit(transcript: str) -> bool:
+    """The whole transcript is one of the exit phrases (case and spacing aside)."""
+    return " ".join((transcript or "").lower().split()) in EXIT_PHRASES
 
 
 def main() -> None:
@@ -216,7 +228,7 @@ def main() -> None:
             continue
 
         print(f"you> {transcript}")
-        if transcript.lower() in ("exit", "quit"):
+        if is_exit(transcript):
             print("Goodbye.")
             break
 

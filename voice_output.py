@@ -4,6 +4,8 @@ Denisse -- shared text-to-speech helper.
 One place that knows how to speak a reply out loud with Inworld's neural
 voice (Veronica by default), shared by voice_mode.py (the console CLI) and
 tray.py (the chat popup) so the logic isn't duplicated between them.
+Engine order, voice and model names and playback timings come from
+voice.json "output" (AGENTS.md Rule 0); the DENISSE_* env vars still win.
 """
 
 import ctypes
@@ -13,7 +15,10 @@ import threading
 import time
 import wave
 import speech_control
+import voice_config
 from ctypes import c_buffer
+
+_CFG = voice_config.section("output")
 
 # Inworld's neural TTS. Unlike the rest of Denisse, this is a paid cloud API
 # (a ~40-minute free trial, then billed per character) needing your own
@@ -22,13 +27,13 @@ from ctypes import c_buffer
 # voice (or stays text-only, for the tray popup). Override the voice with
 # DENISSE_INWORLD_VOICE (any voice name from
 # inworld_tts.InworldTTS().list_voices()), or the model with
-# DENISSE_INWORLD_MODEL. Default model is "inworld-tts-1.5-mini" -- measured
-# ~2x faster to start speaking than "inworld-tts-2" (~1s vs ~2s generation
-# time before playback can even start), at some cost to expressiveness;
-# switch back via DENISSE_INWORLD_MODEL=inworld-tts-2 if quality matters
-# more than the delay.
-INWORLD_VOICE = os.environ.get("DENISSE_INWORLD_VOICE", "Ashley")
-INWORLD_MODEL = os.environ.get("DENISSE_INWORLD_MODEL", "inworld-tts-1.5-mini")
+# DENISSE_INWORLD_MODEL; defaults in voice.json output.inworld_voice /
+# inworld_model (the smaller model measured ~2x faster to start speaking,
+# at some cost to expressiveness -- see voice.json output._why_tts).
+INWORLD_VOICE = os.environ.get("DENISSE_INWORLD_VOICE", _CFG["inworld_voice"])
+INWORLD_MODEL = os.environ.get("DENISSE_INWORLD_MODEL", _CFG["inworld_model"])
+PLAYBACK_POLL_S = _CFG["playback_poll_s"]
+LOCAL_POLL_S = _CFG["local_poll_s"]
 
 
 def _safe_print(msg: str) -> None:
@@ -40,11 +45,11 @@ def _safe_print(msg: str) -> None:
         pass
 
 
-# Local neural voice (tts_kokoro.py): free and offline. DENISSE_TTS picks the
-# order: "kokoro" (default when its model files exist) speaks with Kokoro and
+# Local neural voice (tts_kokoro.py): free and offline. DENISSE_TTS (or
+# voice.json output.tts_engine) picks the order: "kokoro" speaks with Kokoro and
 # only uses Inworld if Kokoro fails; "inworld" keeps Inworld first and falls
 # back to Kokoro. Either way pyttsx3 stays the last resort in the callers.
-TTS_ENGINE = os.environ.get("DENISSE_TTS", "kokoro").lower()
+TTS_ENGINE = os.environ.get("DENISSE_TTS", _CFG["tts_engine"]).lower()
 
 
 def _kokoro(text: str) -> str | None:
@@ -78,8 +83,9 @@ def synthesize_inworld(text: str) -> str | None:
 # With Kokoro, a reply is spoken sentence by sentence through one open
 # PyAudio stream (voice_pipeline.StreamingSpeaker): sentence 1 plays while
 # sentence 2 is synthesized, instead of synthesizing the whole reply to a
-# wav and playing it through MCI. DENISSE_TTS_STREAM=0 turns it off and
-# keeps the old whole-reply path. Inworld always uses the old path.
+# wav and playing it through MCI. DENISSE_TTS_STREAM=0 (or voice.json
+# output.tts_stream false) turns it off and keeps the old whole-reply path.
+# Inworld always uses the old path.
 
 _stream_lock = threading.Lock()
 _stream_sink = None
@@ -88,7 +94,8 @@ _stream_sink = None
 def stream_enabled() -> bool:
     if TTS_ENGINE != "kokoro":
         return False
-    if os.environ.get("DENISSE_TTS_STREAM", "1").strip().lower() in ("0", "false", "no", "off"):
+    env = os.environ.get("DENISSE_TTS_STREAM", "").strip().lower()
+    if (env in ("0", "false", "no", "off")) if env else not _CFG["tts_stream"]:
         return False
     try:
         import tts_kokoro
@@ -226,7 +233,7 @@ class PreparedAudio:
         if not block:
             return
         duration_s = self._duration_ms / 1000.0
-        step = 0.05
+        step = PLAYBACK_POLL_S
         elapsed = 0.0
         while elapsed < duration_s:
             if cancelled():
@@ -278,7 +285,7 @@ def speak_local(engine, text, speech_epoch=None):
                 engine.stop()
                 break
             engine.iterate()
-            time.sleep(.02)
+            time.sleep(LOCAL_POLL_S)
     finally:
         if started:
             engine.endLoop()
@@ -295,8 +302,8 @@ def warm_up_audio() -> None:
         with wave.open(path, "wb") as w:
             w.setnchannels(1)
             w.setsampwidth(2)
-            w.setframerate(8000)
-            w.writeframes(b"\x00\x00" * 400)  # 50ms of silence
+            w.setframerate(_CFG["warm_up_rate"])
+            w.writeframes(b"\x00\x00" * _CFG["warm_up_frames"])  # a moment of silence
         audio = PreparedAudio(path)
         audio.play(block=True)
         audio.close()
