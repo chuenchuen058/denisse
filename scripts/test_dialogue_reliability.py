@@ -162,6 +162,33 @@ class DialogueTests(unittest.TestCase):
             self.run_turn('add a task to call the dentist',[call('add_task',{'task':'call the dentist'})],{'add_task':write})
         write.assert_not_called()
 
+    def test_empty_module_file_search_also_checks_notes(self):
+        # 2026-11-03 eval (vault_tutorial_pdf): find_files missed, the Week 5
+        # note says where the solutions are, and she asked him for a hint.
+        vault=Mock(return_value='From your notes:\n\nCAB Week 5.md\n  - Tutorial 5 solutions are in this Week 5 folder')
+        seen=[]
+        def chat(**kwargs):
+            seen.append(kwargs['messages'])
+            return call('find_files',{'query':'cab tutorial 5 solutions'}) if len(seen)==1 else reply('They are in the Week 5 folder.')
+        bot=brain.Brain.__new__(brain.Brain)
+        isolated={name:(lambda **kwargs:'Refused: isolated tool') for name in brain.tools.TOOL_FUNCTIONS}
+        isolated.update({'find_files':lambda query:"No files matching 'cab' found in documents.",'search_vault':vault})
+        with patch.object(brain.ollama,'chat',side_effect=chat), patch.dict(brain.tools.TOOL_FUNCTIONS,isolated,clear=True):
+            bot.respond([user('where are the CAB tutorial 5 solutions')])
+        vault.assert_called_once()
+        self.assertIn('Week 5 folder',seen[-1][-1]['content'])
+
+    def test_empty_file_search_off_notes_does_not_search_vault(self):
+        vault=Mock(return_value='From your notes: nothing')
+        self.run_turn('find my japan flight pdf',[call('find_files',{'query':'japan flight'}),reply('Not found.')],
+                      {'find_files':lambda query:"No files matching 'japan' found in documents.",'search_vault':vault})
+        vault.assert_not_called()
+
+    def test_which_week_offers_notes(self):
+        groups=tool_router.matched_groups([user('which week of signals did we do the laplace transform')])
+        self.assertIn('notes',groups)
+        self.assertNotIn('notes',tool_router.matched_groups([user('remind me on Thursday to revise signals')]))
+
     def test_file_search_relay_preserves_the_actual_path(self):
         result=self.run_turn('find my cv',[call('find_files',{'query':'cv'}),reply('It is in your Test folder.')],
                              {'find_files':lambda query:'Found 1 match: C:/test/cv.pdf'})

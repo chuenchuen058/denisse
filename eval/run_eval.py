@@ -189,11 +189,106 @@ def _fake_desktop(desk):
     return stack
 
 
+FIXTURE_VAULT = ROOT / "eval" / "fixture_vault"
+
+
+def _fixture_vault(which):
+    """A case with `"vault": "fixture"` searches eval/fixture_vault -- tiny
+    fake notes in the Atlas layout -- instead of his real vault, so the
+    answer it checks is known and nothing of his is read. Every module that
+    resolves a vault path is pointed there for the one case."""
+    import contextlib
+    from unittest.mock import patch
+    stack = contextlib.ExitStack()
+    if which != "fixture":
+        return stack
+    import planner
+    import study_brief
+    import vault_search
+    v = str(FIXTURE_VAULT)
+    stack.enter_context(patch.object(vault_search, "VAULT", v))
+    stack.enter_context(patch.object(planner, "VAULT", v))
+    stack.enter_context(patch.object(study_brief, "VAULT", v))
+    real_cw = planner.coursework_deadlines
+    stack.enter_context(patch.object(planner, "coursework_deadlines",
+                                     lambda vault=v: real_cw(vault)))
+    return stack
+
+
+class _NoTkRoot:
+    """Enough of a Tk root for StudyMode's clock: after() is recorded, never
+    run, so the eval steps time by hand. The badge needs a real window and
+    fails to build here, which StudyMode already treats as cosmetic."""
+
+    def __init__(self):
+        self.jobs = []
+
+    def after(self, ms, fn):
+        self.jobs.append(fn)
+        return len(self.jobs)
+
+    def after_cancel(self, job):
+        pass
+
+
+def study_turn(case: dict):
+    """Study mode is not a model feature: tray.py's chat matches the message
+    against study_mode.match_command BEFORE the brain sees it, and runs the
+    pomodoro clock itself. A case with a `study` dict goes down that same
+    path, headless: {"active": was it running, "advance": [minutes, ...] to
+    step the clock after the command}. Returns (reply, tools) when study
+    mode took the turn, None when the message falls through to the model.
+
+    The reply is the clock's own status line after each step, so a case can
+    assert what the tray menu would read; "Study mode off." only when stop
+    left nothing behind (no phase, no pending tick, no badge)."""
+    import datetime as _dt
+    from unittest.mock import patch
+    import study_mode
+
+    spec = case["study"]
+    with patch.object(study_mode, "_chime", lambda: None), \
+            patch.object(study_mode, "_CURRENT", None):
+        shown = []
+        mode = study_mode.StudyMode(_NoTkRoot(), lambda *a, **k: shown.append(a[0]))
+        if spec.get("active"):
+            mode.start()
+        what = study_mode.match_command(case["prompt"])
+        if what is None:
+            return None
+        lines = []
+        if what == "study":
+            mode.start()
+            lines.append(f"{mode.status()} (round {mode.round_no})")
+            for mins in spec.get("advance", []):
+                mode.ends_at -= _dt.timedelta(minutes=mins)
+                mode._check()
+                lines.append(f"{mode.status()} (round {mode.round_no})")
+        else:
+            mode.stop()
+            clean = not mode.active and mode._job is None and mode.badge is None
+            lines.append("Study mode off." if clean else f"Study mode still running: {mode.status()}")
+        return "\n".join(lines), [f"study_mode:{'start' if what == 'study' else 'stop'}"]
+
+
 def run_case(brain, case: dict, history: list) -> dict:
     """One prompt through the real brain. Tool calls are allowed to run --
     they're read-only in this suite, and a mocked tool wouldn't tell us
     whether the real one still works."""
     import safety
+
+    if case.get("study") is not None:
+        started = time.monotonic()
+        handled = study_turn(case)
+        if handled is not None:
+            reply, tools = handled
+            fails = check(case, reply, tools, [reply])
+            return {"id": case["id"], "prompt": case["prompt"],
+                    "reply": " | ".join(reply.splitlines()), "tools": tools,
+                    "seconds": round(time.monotonic() - started, 1),
+                    "passed": not fails, "failures": fails,
+                    "robotic": robotic(reply), "follow_up": True}
+        # Fell through: the tray would hand it to the brain, so do the same.
 
     tools: list = []
 
@@ -231,7 +326,7 @@ def run_case(brain, case: dict, history: list) -> dict:
     started = time.monotonic()
     out_msgs = []
     try:
-        with _fake_desktop(case.get("desktop")):
+        with _fake_desktop(case.get("desktop")), _fixture_vault(case.get("vault")):
             reply, out_msgs = brain.respond(messages, confirm=spy)
         error = None
     except Exception as exc:

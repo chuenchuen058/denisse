@@ -2368,6 +2368,21 @@ class Brain:
                     plain = re.sub(r"[*?]+", " ", q).strip(" .")
                     if plain and plain != q:
                         result = str(_run_tool(name, {"query": plain}, confirm, used_once))
+                if (name == "find_files" and result.startswith("No files matching")
+                        and "search_vault" in offered_names and "search_vault" not in tool_outputs
+                        and tool_router._COMPILED["notes"].search(latest_user)):
+                    # 2026-11-03 eval: "where are the CAB tutorial 5 solutions"
+                    # -> find_files only -> "couldn't find them, any hint?",
+                    # while the Week 5 note says where they are. A module
+                    # file that isn't on disk under that name is usually
+                    # linked from his notes: check them once, for his words.
+                    vres = str(_run_tool("search_vault", {"query": _lookup_terms(latest_user) or latest_user},
+                                         confirm, used_once))
+                    tool_outputs["search_vault"] = vres
+                    turn_results.append(vres)
+                    if not _no_evidence(vres):
+                        successful_tools.add("search_vault")
+                    result += "\n\nFrom his notes:\n" + vres
                 vq = _vault_query(latest_user)
                 if (name == "recall" and vq and "search_vault" in offered_names
                         and "search_vault" not in tool_outputs):

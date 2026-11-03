@@ -87,6 +87,10 @@ CASES = [
 from eval.cases import CASES as EVAL_CASES  # noqa: E402
 
 for _c in EVAL_CASES:
+    # Study-mode cases are taken by study_mode.match_command before the
+    # router runs (run_eval.study_turn); their "tools" are not router tools.
+    if _c.get("study") is not None:
+        continue
     _want = _c["expect"].get("any_tool_of")
     if _want:
         # (id, messages, must all be offered, must not be, at least one of)
