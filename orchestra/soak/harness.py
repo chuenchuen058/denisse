@@ -237,6 +237,9 @@ class Soak:
                  # of 300 s let the "hang" task run five minutes past the end of a 2-minute soak
                  ORCHESTRA_TIMEOUT_FLOOR_S=str(TIMEOUTS["light"]),
                  ORCHESTRA_BACKOFF_MIN="0", ORCHESTRA_DAILY_SPEND_CAP_USD="1000", ORCHESTRA_POWER=power,
+                 # AFTERCARE=1 also switches the daily exams on, and those reach the real agents
+                 # (CI's network guard caught a connect to Ollama, 3 Nov 2026): never in a soak
+                 ORCHESTRA_EXAMS_DAILY_AT="",
                  SOAK_ROOT=str(self.root), PYTHONDONTWRITEBYTECODE="1", **GIT_ID)
         return e
 
