@@ -65,6 +65,23 @@ the model reliably gets wrong before it sees them: briefings and study plans
 (`clarify.py`), "explain this" from the selection (`desktop_context.py`), and
 big writing jobs handed to Claude Code (`delegate.py`).
 
+**Tool policy** (`tool_policy.json`, read by `tool_policy.py`). What each
+tool may do is data: its side effect (`read` tools may always run, `write`
+tools only when offered and never on a complaint turn), the routing groups
+and their cue patterns, the checks run on a call's *arguments* (a destructive
+shell command, a write into Denisse's own folder, a document path nothing
+verified, a "calculation" with nothing to calculate, a skill that doesn't
+exist), and the few phrase lists that still run before the model. Until
+2026-11-03 `execute()` refused calls by matching regexes against Chuen's
+wording; that refused the file search that would have found his syllabus.
+Understanding what he means is the model's job (AGENTS.md Rule 0).
+
+**Reply preferences** (`reply_preferences.py`). His standing instructions
+on how to reply ("don't read out file paths, ask first", "keep it short")
+are a private data file fed into every system prompt, never a task. The
+model saves one with its `reply_preference` tool; a phrase list in the
+policy catches the common wordings before the model and answers at once.
+
 **Honesty net** (in `brain.py`, after the model's final text). A reply that
 claims an action ("Done", "I've opened…") is checked against what ran this
 turn. No mutating tool succeeded, or the claim names a tool that did not
@@ -96,7 +113,11 @@ good settings.
 ## Study mode and voice
 
 **Study mode** (`study_mode.py`) is a deterministic pomodoro (25/5) that
-messages from the orb like a reminder card. **Voice** is local by default:
+messages from the orb like a reminder card. Since 2026-11-03 it is also a
+tool set the model drives (status / start / pause / resume / stop) with its
+live state as one prompt line, so "is it running?", "session over" and a
+typo'd "pause sutuy timer" reach the clock; the whole-message phrases that
+run it with Ollama down are policy data. **Voice** is local by default:
 Vosk does live wake-word spotting ("Denisse" anywhere in an utterance;
 everything else is dropped unlogged), Whisper transcribes push-to-talk clips,
 and Kokoro speaks. Inworld cloud TTS is optional and paid. Cancelling speech

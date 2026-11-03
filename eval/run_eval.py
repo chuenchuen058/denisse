@@ -25,6 +25,7 @@ report ends with where the time went -- see eval/speed.py.
 """
 
 import argparse
+import contextlib
 import datetime
 import json
 import sys
@@ -238,55 +239,71 @@ class _NoTkRoot:
         pass
 
 
-def study_turn(case: dict):
-    """Study mode is not a model feature: tray.py's chat matches the message
-    against study_mode.match_command BEFORE the brain sees it, and runs the
-    pomodoro clock itself. A case with a `study` dict goes down that same
-    path, headless: {"active": was it running, "advance": [minutes, ...] to
-    step the clock after the command}. Returns (reply, tools) when study
-    mode took the turn, None when the message falls through to the model.
+@contextlib.contextmanager
+def headless_study(spec: dict):
+    """A StudyMode with no window, registered as the process's one clock
+    (study_mode._CURRENT) for the length of the case, so both the tray's
+    whole-message fast path and the brain's study tools act on it. Started
+    first when the case says it was running."""
+    from unittest.mock import patch
+    import study_mode
+
+    with patch.object(study_mode, "_chime", lambda: None), \
+            patch.object(study_mode, "_CURRENT", None), \
+            patch.object(study_mode, "_dispatch", None):
+        shown = []
+        mode = study_mode.StudyMode(_NoTkRoot(), lambda *a, **k: shown.append(a[0]))
+        if spec.get("active"):
+            mode.start()
+            if spec.get("paused"):
+                mode.pause()
+        yield mode
+
+
+def study_turn(case: dict, mode):
+    """Study mode's whole-message fast path: tray.py's chat matches the
+    message against study_mode.match_command BEFORE the brain sees it, and
+    runs the pomodoro clock itself. A case with a `study` dict goes down
+    that same path, headless: {"active": was it running, "advance":
+    [minutes, ...] to step the clock after the command}. Returns (reply,
+    tools) when the fast path took the turn, None when the message falls
+    through to the model -- which since 2026-11-03 has the study tools and
+    acts on the same clock (`mode`).
 
     The reply is the clock's own status line after each step, so a case can
     assert what the tray menu would read; "Study mode off." only when stop
     left nothing behind (no phase, no pending tick, no badge)."""
     import datetime as _dt
-    from unittest.mock import patch
     import study_mode
 
     spec = case["study"]
-    with patch.object(study_mode, "_chime", lambda: None), \
-            patch.object(study_mode, "_CURRENT", None):
-        shown = []
-        mode = study_mode.StudyMode(_NoTkRoot(), lambda *a, **k: shown.append(a[0]))
-        if spec.get("active"):
-            mode.start()
-        what = study_mode.match_command(case["prompt"])
-        if what is None:
-            return None
-        lines = []
-        if what == "study":
-            mode.start()
+    what = study_mode.match_command(case["prompt"])
+    if what is None:
+        return None
+    lines = []
+    if what == "study":
+        mode.start()
+        lines.append(f"{mode.status()} (round {mode.round_no})")
+        for mins in spec.get("advance", []):
+            mode.ends_at -= _dt.timedelta(minutes=mins)
+            mode._check()
             lines.append(f"{mode.status()} (round {mode.round_no})")
-            for mins in spec.get("advance", []):
-                mode.ends_at -= _dt.timedelta(minutes=mins)
-                mode._check()
-                lines.append(f"{mode.status()} (round {mode.round_no})")
-        else:
-            mode.stop()
-            clean = not mode.active and mode._job is None and mode.badge is None
-            lines.append("Study mode off." if clean else f"Study mode still running: {mode.status()}")
-        return "\n".join(lines), [f"study_mode:{'start' if what == 'study' else 'stop'}"]
+    else:
+        mode.stop()
+        clean = not mode.active and mode._job is None and mode.badge is None
+        lines.append("Study mode off." if clean else f"Study mode still running: {mode.status()}")
+    return "\n".join(lines), [f"study_mode:{'start' if what == 'study' else 'stop'}"]
 
 
 def run_case(brain, case: dict, history: list) -> dict:
     """One prompt through the real brain. Tool calls are allowed to run --
     they're read-only in this suite, and a mocked tool wouldn't tell us
     whether the real one still works."""
-    import safety
-
-    if case.get("study") is not None:
+    if case.get("study") is None:
+        return _run_case(brain, case, history, None)
+    with headless_study(case["study"]) as mode:
         started = time.monotonic()
-        handled = study_turn(case)
+        handled = study_turn(case, mode)
         if handled is not None:
             reply, tools = handled
             fails = check(case, reply, tools, [reply])
@@ -295,7 +312,13 @@ def run_case(brain, case: dict, history: list) -> dict:
                     "seconds": round(time.monotonic() - started, 1),
                     "passed": not fails, "failures": fails,
                     "robotic": robotic(reply), "follow_up": True}
-        # Fell through: the tray would hand it to the brain, so do the same.
+        # Fell through: the tray would hand it to the brain, so do the same,
+        # with the clock still there for her study tools to act on.
+        return _run_case(brain, case, history, mode)
+
+
+def _run_case(brain, case: dict, history: list, mode) -> dict:
+    import safety
 
     tools: list = []
 
@@ -351,6 +374,12 @@ def run_case(brain, case: dict, history: list) -> dict:
                 if m.get("role") == "tool"]
 
     fails = [error] if error else check(case, reply, tools, sources)
+    # A study case can say what state the clock must be left in.
+    want = (case.get("study") or {}).get("ends")
+    if want is not None and mode is not None and not error:
+        state = "off" if not mode.active else ("paused" if getattr(mode, "paused", False) else "running")
+        if state != want:
+            fails.append(f"study clock left {state}, wanted {want}")
     return {
         "id": case["id"],
         "prompt": case["prompt"],
@@ -502,8 +531,12 @@ def isolate_state() -> Path:
     delegate.DRY_RUN = True
     import planner
     planner.PENDING_FILE = str(scratch.with_name("pending_plan.json"))
-    import brain as _brain_notes  # his "from now on ..." notes (2026-10-31)
-    _brain_notes.STYLE_NOTES_FILE = str(scratch.with_name("style_notes.jsonl"))
+    # His "from now on ..." instructions (reply_preferences.py, 2026-11-03;
+    # style_notes.jsonl before that): the suite's go to scratch, and the
+    # suite reads none of his real ones, so a case can't pass on a
+    # preference he happened to save.
+    import reply_preferences
+    reply_preferences.FILE = str(scratch.with_name("reply_preferences.json"))
     # A study brief is written into his vault's Drafts and its progress into
     # memory/jobs -- the suite's briefs go to scratch instead. (2026-10-30)
     import study_brief
@@ -542,6 +575,8 @@ def main() -> int:
                     help="run only the cases a change since this git ref can reach, plus the "
                          "smoke set (eval/speed.py). For quick checks; full runs stay the A/B standard")
     ap.add_argument("--json", metavar="PATH", help="also write every result, timing and GPU reading here")
+    ap.add_argument("--only", metavar="IDS", help="run only these case ids (comma-separated); a subset "
+                    "run, so it curates nothing and skips the learning pass")
     add_gpu_args(ap)
     args = ap.parse_args()
 
@@ -551,7 +586,16 @@ def main() -> int:
         pass
 
     cases, subset = CASES, None
-    if args.changed_only:
+    if args.only:
+        wanted = [s.strip() for s in args.only.split(",") if s.strip()]
+        known = {c["id"] for c in CASES}
+        missing = [w for w in wanted if w not in known]
+        if missing:
+            print(f"FATAL: unknown case id(s): {', '.join(missing)}")
+            return 2
+        cases = [c for c in CASES if c["id"] in wanted]
+        subset = {"ref": "--only", "reasons": [f"asked for: {', '.join(wanted)}"]}
+    elif args.changed_only:
         try:
             cases, reasons = speed.select_cases(CASES, args.changed_only)
         except RuntimeError as exc:
