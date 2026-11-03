@@ -135,8 +135,17 @@ def _spend() -> list[dict]:
     except (OSError, ValueError):
         return []
     u = st.get("days", {}).get(dt.date.today().isoformat(), {})
+    cap = cfg.get("daily_spend_cap_usd", 0)
+    try:  # a live campaign's override wins, as in the runner (3 Nov: the hub showed $43 of $5)
+        c = json.loads((REVIEW / "campaign.json").read_text(encoding="utf-8"))
+        stop = c.get("stop_at")
+        if c.get("enabled") and (not stop or dt.datetime.fromisoformat(stop.replace("Z", "+00:00"))
+                                 > dt.datetime.now(dt.timezone.utc)):
+            cap = (c.get("overrides") or {}).get("daily_spend_cap_usd", cap)
+    except (OSError, ValueError, TypeError):
+        pass
     return [{"day": dt.date.today().isoformat(), "cost_usd": round(u.get("cost_usd", 0), 2),
-             "cap_usd": cfg.get("daily_spend_cap_usd", 0), "work_min": round(u.get("work_s", 0) / 60),
+             "cap_usd": cap, "work_min": round(u.get("work_s", 0) / 60),
              "maint_min": round(u.get("maint_s", 0) / 60)}]
 
 
