@@ -5,12 +5,15 @@ Never touches the real vault: every call is given a temp-dir vault.
 import ast
 import datetime as dt
 import glob
+import importlib.util
+import json
 import os
 import re
 import shutil
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -266,6 +269,117 @@ class NightlyStep(Fixture):
                 guarded = any(isinstance(h.type, ast.Name) and h.type.id == "Exception" for h in node.handlers)
         self.assertTrue(guarded, "next_lecture.nightly_step is not wrapped in try/except Exception")
         self.assertLess(src.index("nightly_step("), src.index('say("== commit ==")'))
+
+
+class DifferentModuleNames(Fixture):
+    def check_new_module(self, folder, title):
+        module = os.path.join(nl.MODULES_REL, folder)
+        self.note(module, f"{title} notes.md", f"[[{title} concepts]]")
+        self.note(module, f"{title} concepts.md",
+                  f"### Resonance\nObserved response.\n[[{title} Week 2]]\n"
+                  f"### Field basics\nField relationships.\n[[{title} Week 1]]\n")
+        self.note(module, f"Week 1/{title} Week 1.md", week_note(
+            title, 1, body="> [!todo] Revisit the diagram\n"))
+        self.note(module, f"Week 2/{title} Week 2.md", week_note(
+            title, 2, "files-only").replace(f"{title} topic 2", "Field response"))
+        self.note(module, "Week 2/Lecture - Field coupling.pdf", "")
+        path = os.path.join(self.drafts, f"2026-11-03 {title} Week 2 prep.md")
+        self.assertEqual(nl.module_title(folder), title)
+        self.assertIn(("wrote", path), nl.run(self.vault, TODAY))
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        self.assertIn("**Resonance**", text)
+        self.assertIn("**Field coupling**", text)
+        self.assertIn(f"[[{title} concepts#Field basics|Field basics]]", text)
+        self.assertIn("Revisit the diagram", text)
+        self.assertIn(("exists", path), nl.run(self.vault, TODAY + dt.timedelta(days=1)))
+
+    def test_coded_module_with_year_suffix(self):
+        self.check_new_module("PHY900 Planetary Science (2040~41)", "Planetary Science")
+
+    def test_uncoded_module_with_accents_and_punctuation(self):
+        self.check_new_module("Écologie & évolution", "Écologie & évolution")
+
+    def test_punctuated_module_with_alternate_json_rules(self):
+        # Load the unchanged script beside edited data, leaving nl's defaults intact.
+        with open(os.path.join(HERE, "next_lecture.json"), encoding="utf-8") as f:
+            config = json.load(f)
+        config["paths"] = {"modules": ["Courses"], "drafts": ["Previews"]}
+        config["patterns"].update({
+            "module_code": r"^[A-Z]+-\d+$", "module_suffix": r"\s+@\[\d+\]$",
+            "week_dir": r"^Session (\d+)$",
+            "week_reference": r"\[\[{title} Block (\d+)",
+            "todo": r"(?m)^>\s*\[!action\]\s*(.*?)\s*$",
+            "concept_heading": r"(?m)^####\s+(.+?)\s*$",
+            "section_boundary": r"(?m)^###\s", "generic_topic": r"(?i)^outline$",
+        })
+        config["naming"].update({
+            "module_separator": "__", "week_note": "{title} Block {week}.md",
+            "hub_note": "{title} index.md", "file_topic_separator": " -- ",
+            "prep_stem": "{title} Block {week} preview.md",
+        })
+        config["week_rules"].update({
+            "status_field": "stage", "pending_statuses": ["queued"],
+            "date_fields": ["held_on", "fallback"], "soon_days": 6, "prior_week_offset": 2,
+        })
+        config["topics"] = {"metadata_field": "theme", "file_kinds": ["Seminar"]}
+        config["concepts"].update({"name_suffixes": ["ideas"], "tag_fragments": ["knowledge"]})
+        config["limits"] = {"topics": 2, "earlier": 1}
+        for key, value in config["templates"].items():
+            config["templates"][key] = ([line.replace("Week", "Block") for line in value]
+                                         if isinstance(value, list) else value.replace("Week", "Block"))
+        script_dir = os.path.join(self.vault, "isolated_script")
+        os.makedirs(script_dir)
+        script = shutil.copyfile(os.path.join(HERE, "next_lecture.py"),
+                                 os.path.join(script_dir, "next_lecture.py"))
+        with open(os.path.splitext(script)[0] + ".json", "w", encoding="utf-8") as f:
+            json.dump(config, f)
+        spec = importlib.util.spec_from_file_location("configured_next_lecture", script)
+        configured = importlib.util.module_from_spec(spec)
+        with mock.patch.object(sys, "path", sys.path.copy()):
+            spec.loader.exec_module(configured)
+
+        title = "Adaptive (Bio)+ Systems"
+        folder = f"BIO-42__{title} @[2040]"
+        module = os.path.join("Courses", folder)
+        self.assertEqual(configured.module_title(folder), title)
+        self.note(module, f"{title} index.md", f"[[{title} ideas]]")
+        self.note(module, f"{title} ideas.md",
+                  f"#### Field basics\nField relationships.\n[[{title} Block 2]]\n"
+                  f"#### Field models\nField approximations.\n[[{title} Block 2]]\n"
+                  "#### Spurious\n[[Adaptive BioBio Systems Block 4]]\n"
+                  f"### References\n[[{title} Block 4]]\n")
+        self.note(module, f"Session 2/{title} Block 2.md",
+                  "---\nstage: queued\n---\n> [!action] Review the previous diagram\n")
+        self.note(module, f"Session 4/{title} Block 4.md",
+                  "---\nheld_on: invalid\nfallback: 2026-11-09\ntheme: Field response\n---\n")
+        self.note(module, f"Session 5/{title} Block 5.md", "---\nheld_on: 2026-11-10\n---\n")
+        for name in ("Seminar -- Outline.pdf", "Seminar -- Field coupling.pdf",
+                     "Seminar -- Resonance.pdf", "Lecture - Unwanted.pdf"):
+            self.note(module, f"Session 4/{name}", "")
+        path = os.path.join(self.vault, "Previews", f"2026-11-03 {title} Block 4 preview.md")
+        self.assertEqual(configured.run(self.vault, TODAY, apply=False), [("would write", path)])
+        self.assertFalse(os.path.exists(os.path.dirname(path)))
+        self.assertEqual(configured.run(self.vault, TODAY), [("wrote", path)])
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        self.assertIn("**Field response**", text)
+        self.assertIn("**Field coupling**", text)
+        for excluded in ("**Outline**", "**Resonance**", "Unwanted", "Spurious", "Week"):
+            self.assertNotIn(excluded, text)
+        self.assertIn("## Still open from Block 2", text)
+        self.assertIn("Review the previous diagram", text)
+        earlier = text.split("## Earlier ideas to have ready")[1]
+        self.assertEqual(earlier.count("- [["), 1)
+        self.assertIn(f"[[{title} ideas#Field basics|Field basics]]", earlier)
+        sections = configured.concept_sections(os.path.join(self.vault, module, f"{title} ideas.md"), title)
+        self.assertEqual(sections[-1]["weeks"], [])  # regex metacharacters stay literal
+        self.assertEqual(configured.run(self.vault, TODAY), [("exists", path)])
+        tomorrow_path = os.path.join(self.vault, "Previews", f"2026-11-04 {title} Block 5 preview.md")
+        self.assertEqual(configured.run(self.vault, TODAY + dt.timedelta(days=1)),
+                         [("wrote", tomorrow_path)])  # next block enters the configured window
+        weeks = configured.read_weeks(os.path.join(self.vault, module), title)
+        self.assertEqual(configured.pick_week(weeks, TODAY + dt.timedelta(days=8))["week"], 2)
 
 
 if __name__ == "__main__":
