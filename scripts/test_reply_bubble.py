@@ -1,3 +1,4 @@
+# checks: slow  opens real Tk reply bubbles on the desktop; kept out of Orchestra's --fast runs (3 Nov 2026: they popped up on every merge)
 """A reply must never land nowhere.
 
 The bug this pins down: when no "thinking" bubble is up, _show_reply_main
