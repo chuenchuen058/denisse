@@ -1,0 +1,20 @@
+{
+  "candidate": true,
+  "area": "atrium",
+  "gates": [
+    {
+      "id": "unittest-discover",
+      "arg": "atrium"
+    },
+    {
+      "id": "unittest",
+      "arg": "atrium.test_atrium"
+    },
+    {
+      "id": "unittest",
+      "arg": "atrium.test_import_chats"
+    }
+  ],
+  "duplicate": false,
+  "why": "Two atrium suites fail to import 'atrium' when run as scripts (real, from the 1948 test-suite-green run)."
+}

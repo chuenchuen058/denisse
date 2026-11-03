@@ -1,0 +1,42 @@
+2026-11-02T20:26:10 START 2026-11-02T1951-demo-pack lane=claude weight=heavy timeout=3600s attempt=1
+2026-11-02T20:26:53 PASS 2026-11-02T1950-nightly-chat-import after 162s (attempt 1, ~$1.50 (estimated)) 
+2026-11-02T20:26:56 runner gate 2026-11-02T1950-nightly-chat-import: pass: 2 command(s) exited 0
+2026-11-02T20:26:57 merge review/2026-11-02T1950-nightly-chat-import: merged
+2026-11-02T20:26:59 push 2026-11-02T1950-nightly-chat-import: not pushed: an added line looks like a key or token
+2026-11-02T20:28:10 START 2026-11-02T1952-voice-latency lane=claude weight=heavy timeout=3600s attempt=1
+2026-11-02T20:55:01 PARTIAL 2026-11-02T1952-voice-latency after 1609s (attempt 1, ~$16.60 (estimated)) 
+2026-11-02T20:55:01 PARKED 2026-11-02T1952-voice-latency: PARTIAL: a blind re-run won't change it (see report)
+2026-11-02T20:56:10 START 2026-11-02T2001-combined-tree-integration-review lane=claude weight=heavy timeout=3600s attempt=1
+2026-11-02T21:04:11 REQUEUED 2026-11-02T1947-guard-redteam: Rescoped to two specific hardening fixes (the first run was stopped by a safety classifier while enumerating bypasses).
+2026-11-02T21:04:11 REQUEUED 2026-11-02T1952-voice-latency: Accept the documented limits (floor ~1.6 s, no token streaming, barge-in opt-in). The work is done on branch review/2026-11-02T1952-voice-latency: cherry-pick its commits onto your branch, re-run the gate, and report PASS if it passes. Don't redo the work or re-measure on a busy GPU.
+2026-11-02T21:05:31 PASS 2026-11-02T2001-combined-tree-integration-review after 559s (attempt 1, ~$12.32 (estimated)) 
+2026-11-02T21:05:57 PARTIAL 2026-11-02T1951-demo-pack after 2385s (attempt 1, ~$22.08 (estimated)) 
+2026-11-02T21:05:57 PARKED 2026-11-02T1951-demo-pack: PARTIAL: a blind re-run won't change it (see report)
+2026-11-02T21:06:10 START 2026-11-02T1947-guard-redteam lane=claude weight=heavy timeout=3600s attempt=1
+2026-11-02T21:06:40 runner gate 2026-11-02T2001-combined-tree-integration-review: pass: 2 command(s) exited 0
+2026-11-02T21:06:41 merge review/2026-11-02T2001-combined-tree-integration-review: merged
+2026-11-02T21:06:46 push 2026-11-02T2001-combined-tree-integration-review: pushed 3 commit(s) to origin/master
+2026-11-02T21:08:10 START 2026-11-02T1952-voice-latency lane=claude weight=heavy timeout=3600s attempt=1
+2026-11-02T21:09:01 PASS 2026-11-02T1952-voice-latency after 49s (attempt 1, ~$2.27 (estimated)) 
+2026-11-02T21:09:02 runner gate 2026-11-02T1952-voice-latency: pass: 2 command(s) exited 0
+2026-11-02T21:09:02 review 2026-11-02T1952-voice-latency: 1455 changed lines (over 400)
+2026-11-02T21:09:18 review 2026-11-02T1952-voice-latency: ok after 15s ($0.74)
+2026-11-02T21:09:22 integration 2026-11-02T1952-voice-latency on 1ef1301a: pass: gate: pass: 2 command(s) exited 0; run_checks --fast: skipped: scripts/run_checks.py has no --fast option
+2026-11-02T21:09:28 push 2026-11-02T1952-voice-latency: pushed 4 commit(s) to origin/master
+2026-11-02T21:09:28 merge review/2026-11-02T1952-voice-latency: merged
+2026-11-02T21:41:10 REQUEUED 2026-11-02T1951-demo-pack: Accept voice as skipped (its models are git-ignored and only in the main checkout; the demo already records that with a reason). The rest is done on its kept branch: cherry-pick it, re-run the gate, report PASS if it passes. Don't redo the eval runs.
+2026-11-02T21:41:26 PASS 2026-11-02T1948-test-suite-green after 673s (attempt 1, ~$88.49 (estimated)) 
+2026-11-02T21:41:39 runner gate 2026-11-02T1948-test-suite-green: pass: 1 command(s) exited 0
+2026-11-02T21:41:40 review 2026-11-02T1948-test-suite-green: touches orchestra/exams/test_exams.py, orchestra/test_integration.py, orchestra/test_runner.py, orchestra/test_supervision.py; 465 changed lines (over 400)
+2026-11-02T21:42:06 review 2026-11-02T1948-test-suite-green: ok after 26s ($0.43)
+2026-11-02T21:42:11 START 2026-11-02T1951-demo-pack lane=claude weight=heavy timeout=3600s attempt=1
+2026-11-02T21:42:37 integration 2026-11-02T1948-test-suite-green on 2cc710e3: pass: gate: pass: 1 command(s) exited 0; run_checks --fast: pass: run_checks.py --fast exited 0
+2026-11-02T21:42:43 push 2026-11-02T1948-test-suite-green: pushed 4 commit(s) to origin/master
+2026-11-02T21:42:43 merge review/2026-11-02T1948-test-suite-green: merged
+2026-11-02T21:43:10 PASS 2026-11-02T1951-demo-pack after 57s (attempt 1, ~$9.46 (estimated)) 
+2026-11-02T21:43:11 runner gate 2026-11-02T1951-demo-pack: pass: 1 command(s) exited 0
+2026-11-02T21:43:12 review 2026-11-02T1951-demo-pack: 2032 changed lines (over 400)
+2026-11-02T21:43:34 review 2026-11-02T1951-demo-pack: ok after 21s ($0.84)
+2026-11-02T21:43:52 integration 2026-11-02T1951-demo-pack on 544a849c: pass: gate: pass: 1 command(s) exited 0; run_checks --fast: pass: run_checks.py --fast exited 0
+2026-11-02T21:43:58 push 2026-11-02T1951-demo-pack: pushed 7 commit(s) to origin/master
+2026-11-02T21:43:58 merge review/2026-11-02T1951-demo-pack: merged

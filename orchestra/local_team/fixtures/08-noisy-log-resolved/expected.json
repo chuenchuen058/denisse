@@ -1,0 +1,7 @@
+{
+  "candidate": false,
+  "area": null,
+  "gates": [],
+  "duplicate": false,
+  "why": "Every PARTIAL/PARKED here is followed by a REQUEUED and a PASS that merged. Nothing actionable."
+}

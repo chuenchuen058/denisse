@@ -1,0 +1,29 @@
+2026-10-31T23:16:33 START 2026-10-31T1800-test-install-vault lane=claude weight=light timeout=1200s attempt=1
+2026-10-31T23:17:43 PASS 2026-10-31T1800-test-install-vault after 69s (attempt 1, $0.40) 
+2026-10-31T23:17:44 runner gate 2026-10-31T1800-test-install-vault: pass: 1 command(s) exited 0
+2026-10-31T23:17:44 merge review/2026-10-31T1800-test-install-vault: main checkout has uncommitted changes; merge by hand
+2026-10-31T23:20:19 merge review/2026-10-31T1800-test-install-vault: merged (by hand after the merge rule fix)
+2026-11-02T17:56:41 START 2026-11-02T1805-atlas-vault-paths lane=codex weight=heavy timeout=3600s attempt=1
+2026-11-02T17:56:42 NO_REPORT 2026-11-02T1805-atlas-vault-paths after 0s (attempt 1, unknown) no report written
+2026-11-02T17:58:32 START 2026-11-02T1805-atlas-vault-paths lane=codex weight=heavy timeout=3600s attempt=2
+2026-11-02T17:59:50 NO_REPORT 2026-11-02T1805-atlas-vault-paths after 77s (attempt 2, unknown) no report written
+2026-11-02T17:59:50 PARKED 2026-11-02T1805-atlas-vault-paths: NO_REPORT again after 2 attempts
+2026-11-02T18:08:10 START 2026-11-02T1805-atlas-vault-paths lane=codex weight=heavy timeout=3600s attempt=1
+2026-11-02T18:08:12 2026-11-02T1805-atlas-vault-paths: LANE_MISSING: codex not on PATH
+2026-11-02T18:20:10 START 2026-11-02T1805-atlas-vault-paths lane=codex weight=heavy timeout=3600s attempt=2
+2026-11-02T18:20:12 2026-11-02T1805-atlas-vault-paths: LANE_MISSING: codex not on PATH
+2026-11-02T18:20:12 PARKED 2026-11-02T1805-atlas-vault-paths: LANE_MISSING: codex not on PATH
+2026-11-02T18:23:15 START 2026-11-02T1805-atlas-vault-paths lane=codex weight=heavy timeout=3600s attempt=1
+2026-11-02T18:23:20 2026-11-02T1805-atlas-vault-paths: LANE_MISSING: codex not on PATH (APPDATA='<private path>')
+2026-11-02T18:24:10 START 2026-11-02T1805-atlas-vault-paths lane=codex weight=heavy timeout=3600s attempt=1
+2026-11-02T18:24:12 2026-11-02T1805-atlas-vault-paths: LANE_MISSING: codex not on PATH (APPDATA='<private path>')
+2026-11-02T18:25:30 START 2026-11-02T1805-atlas-vault-paths lane=codex weight=heavy timeout=3600s attempt=1
+2026-11-02T18:25:32 2026-11-02T1805-atlas-vault-paths: LANE_MISSING: codex not on PATH (which=None, <private path>)
+2026-11-02T18:26:44 START 2026-11-02T1805-atlas-vault-paths lane=codex weight=heavy timeout=3600s attempt=1
+2026-11-02T18:31:07 PASS 2026-11-02T1805-atlas-vault-paths after 261s (attempt 1, unknown) 
+2026-11-02T18:31:17 runner gate 2026-11-02T1805-atlas-vault-paths: pass: 5 command(s) exited 0
+2026-11-02T18:32:10 START 2026-11-02T1805-atlas-vault-paths lane=codex weight=heavy timeout=3600s attempt=2
+2026-11-02T18:35:08 PASS 2026-11-02T1805-atlas-vault-paths after 175s (attempt 2, unknown) 
+2026-11-02T18:35:18 runner gate 2026-11-02T1805-atlas-vault-paths: pass: 5 command(s) exited 0
+2026-11-02T18:35:19 merge review/2026-11-02T1805-atlas-vault-paths: merged
+2026-11-02T18:35:25 push 2026-11-02T1805-atlas-vault-paths: pushed 7 commit(s) to origin/master

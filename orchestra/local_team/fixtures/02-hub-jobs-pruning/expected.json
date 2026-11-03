@@ -1,0 +1,12 @@
+{
+  "candidate": true,
+  "area": "orchestra",
+  "gates": [
+    {
+      "id": "node-test",
+      "arg": "orchestra/agent_hub/test_hub.mjs"
+    }
+  ],
+  "duplicate": true,
+  "why": "Both NOT DONE gaps (split_tasks still blocking, no pruning of old job files) were real, but the archived 2008 task 'split_tasks runs as a background job too, and old job files get pruned' did both. A proposal for either should be refused as a duplicate."
+}

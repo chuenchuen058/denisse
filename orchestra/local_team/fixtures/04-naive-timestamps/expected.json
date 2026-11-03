@@ -1,0 +1,12 @@
+{
+  "candidate": true,
+  "area": "orchestra",
+  "gates": [
+    {
+      "id": "unittest",
+      "arg": "orchestra.test_runner"
+    }
+  ],
+  "duplicate": false,
+  "why": "Real gap: state.json mixes naive local and UTC timestamps."
+}

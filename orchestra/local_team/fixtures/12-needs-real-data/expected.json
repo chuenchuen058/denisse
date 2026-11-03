@@ -1,0 +1,7 @@
+{
+  "candidate": false,
+  "area": null,
+  "gates": [],
+  "duplicate": false,
+  "why": "'No real Claude or Gemini limit output was captured' and 'old history can't be backfilled': needs real data or is impossible, not a bounded code task."
+}

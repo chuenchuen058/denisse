@@ -1,0 +1,7 @@
+{
+  "candidate": false,
+  "area": null,
+  "gates": [],
+  "duplicate": false,
+  "why": "NO_REPORT and 'codex not on PATH' for a task that was rerouted and passed. An environment blip, nothing to build."
+}
