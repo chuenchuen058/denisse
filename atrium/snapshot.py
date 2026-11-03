@@ -178,6 +178,15 @@ def _running() -> list[dict]:
                           if l.startswith("# ")), title)
         rows.append({"id": j["task"], "task": title[:90], "lane": lane, "slot": slot,
                      "since": j.get("since", "")[11:16], "minutes": mins})
+    # One row per configured slot, idle ones included: the hub can't read an empty file
+    # (3 Nov 2026: "Tasks running now" showed "failed" whenever nothing ran).
+    taken = {(r["lane"], r["slot"]) for r in rows}
+    for lane, n in (_config().get("lane_slots") or {"claude": 1, "codex": 1}).items():
+        for slot in range(1, int(n) + 1):
+            if (lane, slot) not in taken:
+                rows.append({"id": f"idle:{lane}:{slot}", "task": "", "lane": lane, "slot": slot,
+                             "since": "", "minutes": 0})
+    rows.sort(key=lambda r: (r["task"] == "", r["lane"], r["slot"]))
     return rows
 
 
