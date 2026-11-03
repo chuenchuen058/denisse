@@ -1,7 +1,7 @@
 """The real agents an exam can be sent to. Each returns a function
     agent(prompt, cwd, timeout) -> core.Reply
 
-  codex     the Orchestra codex lane argv (runner.DEFAULT_LANES), prompt on stdin
+  codex     the Orchestra codex lane argv (config.json lane_argv), prompt on stdin
   claude    the Orchestra claude lane, only with --include-claude (Chuen's allowance is scarce)
   copilot   node <@github/copilot entry> -p <prompt> -s, as agent_hub/server.mjs calls it
   gemini    node <@google/gemini-cli entry>, as the hub does; IneligibleTierError = skipped
@@ -40,13 +40,11 @@ def _exe(argv0: str) -> str | None:
 
 
 def _npm_entry(pkg: str, name: str) -> str | None:
-    root = Path(os.environ.get("APPDATA", "")) / "npm" / "node_modules" / pkg
-    try:
-        meta = json.loads((root / "package.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    rel = meta["bin"] if isinstance(meta.get("bin"), str) else (meta.get("bin") or {}).get(name)
-    return str(root / rel) if rel else None
+    """The CLI's JS entry, found by the runner's resolver (config.json "npm_dirs"), so the exams
+    see the same installs the lanes do, including npm installs made from the Claude desktop app
+    (3 Nov 2026: under Task Scheduler the exams logged "Copilot CLI not found")."""
+    from orchestra import runner
+    return runner.npm_bin(pkg, name)
 
 
 def _refused(r: Reply) -> Reply:

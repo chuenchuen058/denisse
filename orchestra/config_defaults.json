@@ -15,8 +15,8 @@
   "maint_floor_s": 900,
   "stale_days": 7,
   "parallel_lanes": true,
-  "lane_slots": {"claude": 1, "codex": 1},
-  "lane_fallback": {"codex": "claude"},
+  "lane_slots": {"claude": 1, "codex": 1, "copilot": 1},
+  "lane_fallback": {"codex": "claude", "copilot": "claude"},
 
   "lane_argv": {
     "claude": ["claude", "-p", "--permission-mode", "acceptEdits", "--permission-prompts", "none",
@@ -29,9 +29,14 @@
               "-c", "mcp_servers.obsidian.enabled=false",
               "-s", "danger-full-access", "-"],
     "gemini": ["node", "{npm:@google/gemini-cli:gemini}", "--approval-mode", "auto_edit", "-o", "text",
-               "-p", "Do the task given above."]
+               "-p", "Do the task given above."],
+    "copilot": ["{npm-shim:copilot}", "-p",
+                "Your full instructions are in the file {prompt-file}. Read that file first and follow it exactly.",
+                "--allow-all-tools", "--no-ask-user", "--no-color", "--no-auto-update", "--disable-builtin-mcps",
+                "--deny-tool", "shell(git push)", "--deny-tool", "shell(gh)"]
   },
   "unpriced_lanes": ["codex", "gemini", "copilot"],
+  "npm_dirs": ["%APPDATA%/npm", "~/AppData/Roaming/npm", "%LOCALAPPDATA%/Packages/Claude_*/LocalCache/Roaming/npm"],
 
   "limit_patterns": {
     "codex": ["you've hit your usage limit", "usage limit", "rate limit(ed)? (reached|exceeded)",
@@ -39,7 +44,14 @@
     "claude": ["usage limit reached", "you've hit your (usage )?limit", "\\b\\d+-hour limit reached",
                "weekly limit reached", "rate limit (reached|exceeded)", "rate_limit_error"],
     "gemini": ["IneligibleTierError", "quota exceeded", "exceeded your current quota",
-               "RESOURCE_EXHAUSTED", "rate limit (reached|exceeded)"]
+               "RESOURCE_EXHAUSTED", "rate limit (reached|exceeded)"],
+    "copilot": ["premium requests?\\b.{0,60}\\b(limit|quota|exhausted|run out|used up)",
+                "(limit|quota|allowance)\\b.{0,40}\\bpremium requests?",
+                "(out of|exhausted|no remaining|used (all|up)( of)?)( your)? (premium requests|ai credits)",
+                "ai credits?\\b.{0,40}\\b(exhausted|limit (reached|exceeded)|run out|used up)",
+                "monthly (limit|quota|allowance) (reached|exceeded|hit)",
+                "you've (hit|reached|exceeded) your .{0,40}(limit|quota)",
+                "rate limit(ed)? (reached|exceeded)", "429 too many requests"]
   },
   "limit_tail_lines": 40,
   "limit_default_min": 60,
