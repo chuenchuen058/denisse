@@ -1,0 +1,88 @@
+{
+  "_comment": "Everything time_parse.py knows about words and defaults (Rule 0). The code only says how these fit together. Day-part times here are fallbacks: time_parse.set_part_source() lets what the learner model knows about Chuen override them.",
+  "timezone": "Europe/London",
+
+  "day_parts": {
+    "morning": "09:00",
+    "lunchtime": "12:00",
+    "afternoon": "14:00",
+    "evening": "18:00",
+    "tonight": "20:00",
+    "night": "20:00"
+  },
+  "day_part_aliases": {"lunch": "lunchtime"},
+  "am_parts": ["morning"],
+  "pm_parts": ["afternoon", "evening", "tonight", "night"],
+  "pm_leaning_parts": ["lunchtime"],
+  "parts_meaning_today": ["tonight"],
+  "end_of_day": "23:59",
+
+  "day_words": {
+    "the day after tomorrow": 2,
+    "day after tomorrow": 2,
+    "tomorrow": 1,
+    "today": 0
+  },
+  "misspellings": {
+    "tomorrow": ["tmr", "tmrw", "tmw", "tomorow", "tmorrow"]
+  },
+  "next_weekday_modifiers": ["next", "coming", "this coming"],
+  "this_weekday_modifiers": ["this"],
+
+  "weekdays": ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"],
+  "weekday_abbreviations": {
+    "mon": 0, "tue": 1, "tues": 1, "wed": 2, "weds": 2, "thu": 3,
+    "thur": 3, "thurs": 3, "fri": 4, "sat": 5, "sun": 6
+  },
+  "months": ["january", "february", "march", "april", "may", "june", "july",
+             "august", "september", "october", "november", "december"],
+  "month_abbreviations": {"sept": 9},
+
+  "number_words": {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+    "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+    "fifteen": 15, "twenty": 20, "thirty": 30, "forty": 40, "forty-five": 45,
+    "ninety": 90, "a": 1, "an": 1, "a couple of": 2, "couple of": 2,
+    "a few": 3, "few": 3
+  },
+  "not_hour_words": ["a", "an", "few"],
+  "minute_words": {
+    "half": 30, "quarter": 15, "five": 5, "ten": 10, "twenty": 20,
+    "twenty-five": 25, "twenty five": 25
+  },
+  "named_times": {"noon": "12:00", "midday": "12:00", "midnight": "00:00"},
+
+  "duration_units": {
+    "s": 1, "sec": 1, "secs": 1, "second": 1, "seconds": 1,
+    "m": 60, "min": 60, "mins": 60, "minute": 60, "minutes": 60,
+    "h": 3600, "hr": 3600, "hrs": 3600, "hour": 3600, "hours": 3600,
+    "d": 86400, "day": 86400, "days": 86400,
+    "week": 604800, "weeks": 604800, "wk": 604800, "wks": 604800
+  },
+  "duration_phrases": {
+    "half an hour": 1800, "half a hour": 1800, "a half hour": 1800,
+    "half hour": 1800, "a quarter of an hour": 900,
+    "quarter of an hour": 900, "a quarter hour": 900,
+    "three quarters of an hour": 2700
+  },
+  "duration_lead_words": ["in", "for", "within", "after"],
+  "span_lead_words": ["in", "within", "after"],
+  "span_tail_words": ["from now", "later"],
+  "duration_tail_words": ["from now", "later", "time"],
+
+  "before_words": ["before", "no later than", "nlt"],
+  "filler": ["by", "before", "due", "on", "at", "until", "till", "the", "of",
+             "around", "about", "ish", "no", "later", "than", "nlt", "for",
+             "in", "this", "and", "please", "remind", "me", "o'clock", "oclock",
+             "sharp", "time", "-", "to", "a"],
+  "suspect_words": ["day", "days", "week", "weeks", "month", "months", "year", "years",
+                    "hour", "hours", "hr", "hrs", "min", "mins", "minute", "minutes",
+                    "ago", "end", "eod", "weekend", "fortnight", "midday", "noon",
+                    "am", "pm", "past", "next", "last"],
+
+  "ambiguity": {
+    "_comment": "A bare hour with no am/pm: pm_hours read as pm, others as am (12 is noon). 'tomorrow' said before small_hours_end o'clock is asked about.",
+    "bare_hour_pm": [1, 6],
+    "small_hours_end": 5
+  }
+}
