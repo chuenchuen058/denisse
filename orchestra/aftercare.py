@@ -114,11 +114,8 @@ def _tokens(tokens: dict | None) -> str:
     return "tokens " + " ".join(f"{label} {tokens[k] if tokens.get(k) is not None else '?'}" for k, label in names)
 
 
-def vault_note(vault: Path, *, slug: str, title: str, result: str, lane: str, seconds: int,
-               spent: str, merge: str = "", pushed: str = "", why: str = "",
-               task_text: str = "", report_text: str = "", report_path: str = "",
-               prompt: str = "", tokens: dict | None = None) -> Path:
-    day = dt.date.today().isoformat()
+def _day_note(vault: Path, day: str) -> Path:
+    """<vault>/Calendar/Orchestra/<day>.md, created with its frontmatter if missing."""
     note = vault / "Calendar" / "Orchestra" / f"{day}.md"
     note.parent.mkdir(parents=True, exist_ok=True)
     if not note.exists():
@@ -134,6 +131,15 @@ def vault_note(vault: Path, *, slug: str, title: str, result: str, lane: str, se
             f"# Orchestra {day}\n\n"
             f"Written by the runner as each task finishes. See also [[Handoff-{day}]].\n",
             encoding="utf-8")
+    return note
+
+
+def vault_note(vault: Path, *, slug: str, title: str, result: str, lane: str, seconds: int,
+               spent: str, merge: str = "", pushed: str = "", why: str = "",
+               task_text: str = "", report_text: str = "", report_path: str = "",
+               prompt: str = "", tokens: dict | None = None) -> Path:
+    day = dt.date.today().isoformat()
+    note = _day_note(vault, day)
     sec = _sections(report_text)
     status = result + (f", {merge}" if merge else "") + (f", {pushed}" if pushed else "")
     lines = [f"\n## {dt.datetime.now():%H:%M} {title}",
@@ -241,3 +247,17 @@ def update_waiting(vault: Path, lines: list[str]) -> bool:
         _git(vault, "add", "--", "hot.md")
         _git(vault, "commit", "-q", "-m", "Orchestra: waiting list", "--", "hot.md")
     return True
+
+
+def exam_note(vault: Path, line: str) -> Path:
+    """One line for the daily exam run (orchestra/exams/daily.py): agents and pass rates."""
+    day = dt.date.today().isoformat()
+    note = _day_note(vault, day)
+    text = note.read_text(encoding="utf-8")
+    text = re.sub(r"^updated: .*$", f"updated: {day}", text, count=1, flags=re.M)
+    note.write_text(text.rstrip("\n") + f"\n\n## {dt.datetime.now():%H:%M} Exams\n- {line}\n", encoding="utf-8")
+    rel = note.relative_to(vault).as_posix()
+    if (vault / ".git").exists():
+        _git(vault, "add", "--", rel)
+        _git(vault, "commit", "-q", "-m", "Orchestra: daily exams", "--", rel)
+    return note

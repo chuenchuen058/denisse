@@ -71,6 +71,12 @@
   "gpu_lease_ttl_s": 900,
   "_local_team_model": "Installed Ollama model only; the local team never pulls one. num_ctx matches Denisse's DENISSE_NUM_CTX so the loaded model is reused, not reloaded. A call is skipped (not queued) if nvidia-smi says the GPU is at least local_team_gpu_busy_pct busy, another model is loaded, or .review/gpu.lease is held; a lease older than gpu_lease_ttl_s or whose pid is gone is stale.",
 
+  "exams_daily_at": "07:10",
+  "exams_agents": ["codex", "copilot", "local"],
+  "exams_include_claude": false,
+  "exams_cap_s": 900,
+  "_exams_daily_at": "Once a day, at the first tick after this time, the runner starts one canary exam per agent (orchestra/exams/daily.py) in a hidden background process with its own lock (.review/exams.lock) and a total cap of exams_cap_s, so routing (orchestra/exams/lane_for.py) runs on real scores. Skipped while any lane is limited, on battery, or paused; it never takes a lane slot. claude only with exams_include_claude: true (Chuen's allowance). Empty string turns it off.",
+
   "git_timeout_s": 120,
   "tick_watchdog_extra_s": 900,
   "_tick_watchdog_extra_s": "The whole tick is killed this long after the longest possible lane timeout. Atrium hung 19 then 29 minutes on one call."

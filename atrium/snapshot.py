@@ -213,6 +213,24 @@ def _cost_num(spent: str) -> float:
     return float(m.group(1)) if m else 0.0
 
 
+def _exam_pass_rates() -> dict[str, float]:
+    """lane -> pass rate over the results kept in .review/exams/scores.json (orchestra/exams),
+    all categories together; local:<model> rows count for "local". Absent = no exam result."""
+    try:
+        agents = json.loads((REVIEW / "exams" / "scores.json").read_text(encoding="utf-8")).get("agents", {})
+    except (OSError, ValueError, AttributeError):
+        return {}
+    tally: dict[str, list[int]] = {}
+    for name, cats in (agents or {}).items():
+        lane = name.split(":", 1)[0]
+        t = tally.setdefault(lane, [0, 0])
+        for rows in (cats or {}).values():
+            for r in rows or []:
+                t[0] += bool(r.get("ok"))
+                t[1] += 1
+    return {lane: round(p / n, 3) for lane, (p, n) in tally.items() if n}
+
+
 def _usage(running: list[dict]) -> list[dict]:
     """One row per model: can it take work now, and what it did today. Claude Max does not
     expose a remaining-allowance figure to the CLI, so its row shows activity, not a %."""
@@ -274,6 +292,7 @@ def _usage(running: list[dict]) -> list[dict]:
         local = "ready, loaded: " + ", ".join(loaded) if loaded else "ready, no model loaded"
     except Exception:
         local = "Ollama not running"
+    exam_rates = _exam_pass_rates()
     rows = []
     for lane, label, plan in (("claude", "Claude", "Max plan (allowance not exposed to the CLI)"),
                               ("codex", "Codex", "ChatGPT plan"), ("gemini", "Gemini", "free tier blocked"),
@@ -294,6 +313,7 @@ def _usage(running: list[dict]) -> list[dict]:
                      "busy": busy.get(lane, 0), "slots": n_slots, "runs_today": p["runs"],
                      "passed_today": p["pass"], "minutes_today": round(p["minutes"]),
                      "est_cost_today": round(p["cost"], 2), "last_run": p["last"],
+                     "exam_pass_rate": exam_rates.get(lane),
                      "state": ("bad" if status.startswith(("limited", "blocked", "Ollama not"))
                                else "busy" if busy.get(lane) else "ok")})
     return rows
