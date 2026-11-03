@@ -66,7 +66,9 @@ Putting a parked task back:
 
 Read `.review/parked/<slug>.why.txt` and the parked report first. A blind re-run of a
 PARTIAL or FAIL has never come back PASS; the note is how you change the outcome. Never
-edit `state.json` by hand.
+edit `state.json` by hand. If the work is done on `review/<slug>` but never merged (conflict,
+integration reject), `requeue.py <slug> --merge-only [--note "..."]` takes it from parked or the
+newest archive, marks it urgent and tells the session to merge that branch and re-run the gate.
 
 Pause, resume and stop (`orchestra/campaign.py`; the runner itself enforces these, and
 only `resume` undoes them — no tick, watchdog or logon clears a pause):
