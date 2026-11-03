@@ -94,15 +94,35 @@ that: its gate command reads the lock in the worktree and again in the integrati
 
 ## Why this task's own first two attempts "PASSed" but never merged
 
-Not a runner bug: `.gitignore` had `_*.py` for a session's scratch files, and that pattern also
-matches `__init__.py` and `__main__.py`. `git add orchestra/soak` silently skipped both, so the
-branch held `orchestra/soak/` without its package files. The session's gate passed in its
-worktree, where the untracked files existed; the runner's fresh integration checkout had no
-package, hence `No module named orchestra.soak`. `.gitignore` now ends that rule with
-`!__init__.py` and `!__main__.py` (other packages' `__init__.py` had been force-added). Whether
-attempt 2 started because attempt 1's tick died in the reviewer step (bug 1: a curly quote in
-the diff) could not be checked from the worktree (the main checkout's `runner.log` is off
-limits to a session); the mechanism fits and the fix covers it either way.
+The main checkout's `runner.log` (read on the fourth attempt, 3 Nov 16:54) shows the incident
+above happening to this task itself, on the runner that was still on master:
+
+1. `02:59:44 PASS 2026-11-02T2332-orchestra-soak-test` (attempt 1, 3452 s), `03:05:47 runner
+   gate ... pass: 2 command(s) exited 0` (so attempt 1's branch did hold `orchestra/soak/` with
+   its package files; its report says they were `git add -f`'d past the ignore rule below),
+   `03:05:47 review ... touches orchestra/README.md, orchestra/runner.py, orchestra/soak/... ;
+   1608 changed lines (over 400)`, then nothing more from that tick. Its diff carried the curly
+   quote on purpose (the regression fixtures), and master's `git()` still decoded with cp1252:
+   bug 1, exactly as on 2 Nov.
+2. `03:06:10 START ... attempt=2`, 23 s later: the crash had freed the slot. `fresh_worktree`
+   deleted attempt 1's branch (its commits `ec2dacc` and `a8b2947` are still dangling in the
+   object store) and started the session again from master.
+3. `03:15:47 PASS ... after 575s (attempt 2)`, then `runner gate ... fail: No module named
+   orchestra.soak`, then `PARKED`. Attempt 2's session had written no report in its worktree.
+   `run_lane` cleared only the worktree copy, not `.review/reports/<slug>.md`, which still held
+   attempt 1's PASS (the tick that died never archived or renamed it), so `finish()` read it as
+   attempt 2's result: the parked report is attempt 1's byte for byte, naming attempt 1's
+   commits. The gate then ran in attempt 2's bare worktree, hence the missing module. Bug 10.
+
+So "it PASSed twice" was one PASS (attempt 1, lost to the re-dispatch) and one stale report.
+The third attempt (11:08, this chain's commits `bb04173`, `892e3c5`, `3603dd1`) ended
+`LIMITED` at 12:29 before its report was collected and was deleted the same way; the fourth
+cherry-picked those three commits onto master and added bug 10.
+
+Also fixed, not a runner bug: `.gitignore` had `_*.py` for a session's scratch files, and that
+pattern also matches `__init__.py` and `__main__.py`, so a plain `git add orchestra/soak` skips
+both and a fresh checkout of the branch has no package to run. `.gitignore` now ends that rule
+with `!__init__.py` and `!__main__.py` (other packages' `__init__.py` had been force-added).
 
 ## Bugs found and fixed
 
@@ -121,6 +141,7 @@ showed it; with `--keep` the temp repo and every tick's output are left for insp
 | 7 | Master had a merge commit whose task said `merge: "no commits"`, no integration record, never pushed. | The tick was killed between `git merge --ff-only` and its state save; the recovered run found the branch already contained and called it "no commits". | `integrate()` looks for that merge on master's first-parent line (`merged_already`: same subject, second parent = the branch tip), records it as `recovered:` and runs the push. | `test_merge_already_on_master_is_recovered_recorded_and_archived` | 2, 8 tasks, 0.6 min (`soak-2-06`) |
 | 8 | Every tick died at import with `JSONDecodeError` when an `ORCHESTRA_<KEY>` env var was empty. | `env[:1] in "{["` is true for `""`, so `json.loads("")`. | `env[:1] in ("{", "[")`. | `test_empty_env_override_does_not_crash_config_load` | any (the soak sets `ORCHESTRA_VAULT_DIR=""`) |
 | 9 | `no_concurrent_runs`: `runner.alpha.lock` and `runner.alpha.2.lock` named the same task at the same instant (the task ran twice at once), even with the dispatch lock of bug 3. | Slot locks were rewritten with `write_text`, which truncates first. `update_lock` (lane pid, main-checkout status) runs outside the dispatch lock, so a dispatcher scanning the slots at that instant read an empty lock, saw no task, and picked it. | `read_lock()` re-reads a lock that is empty, partial or momentarily unopenable (5 tries, 20 ms apart) before calling it unreadable; writes stay in place (`write_lock`). A temp file plus `os.replace` was tried first and is worse on Windows: the target is absent for an instant and readers get `FileNotFoundError`, and the rename fails while a reader holds the file open. | `test_lock_rewrites_are_never_seen_half_written` | 1, 40 tasks, 2 min, third run (`soak-1-22`); the two earlier seed-1 runs did not hit the window |
+| 10 | A session that wrote no report was logged `PASS` with the previous attempt's report (this task, 3 Nov 03:15), and its gate ran in a worktree that held none of that work. | `run_lane` deleted only the worktree's `.review/report.md` before a run. `.review/reports/<slug>.md` from an earlier attempt survives when that attempt's tick died after PASS (no archive, no rename), and `finish()` reads whatever is there. | `run_lane` clears `.review/reports/<slug>.md` before starting the lane, as `_collect` already did. A lane that writes nothing is `NO_REPORT`. | `test_a_report_left_by_an_earlier_attempt_is_not_read_as_this_attempts_result` | not a seed: the fake lanes always write a report. Read from the main `runner.log` and the parked report. |
 
 One harness lesson from the same run: after 20 measured runs `timeout_for` is
 `max(timeout_floor_s, 3 x p95)`, and the default floor is 300 s, so the "hang" task could run

@@ -34,7 +34,8 @@ FAKE = textwrap.dedent("""
         p.write_text(os.environ.get("FAKE_TEXT", "x"), encoding="utf-8")
         subprocess.run(["git", "add", os.environ["FAKE_FILE"]], check=True)
         subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "fake"], check=True)
-    pathlib.Path(os.environ["ORCHESTRA_REPORT"]).write_text("RESULT: PASS\\nGATE: ok\\nHUMAN: none\\nPREMISE: right\\n")
+    if not os.environ.get("FAKE_NO_REPORT"):
+        pathlib.Path(os.environ["ORCHESTRA_REPORT"]).write_text("RESULT: PASS\\nGATE: ok\\nHUMAN: none\\nPREMISE: right\\n")
     print(json.dumps({"type": "result", "total_cost_usd": 0.01}))
 """)
 FAKE_REVIEWER = textwrap.dedent("""
@@ -63,7 +64,7 @@ Do {slug}.
 {gate}
 ```
 """
-ENV = ("FAKE_FILE", "FAKE_TEXT", "FAKE_SLEEP", "FAKE_REVIEW_FLAG")
+ENV = ("FAKE_FILE", "FAKE_TEXT", "FAKE_SLEEP", "FAKE_REVIEW_FLAG", "FAKE_NO_REPORT")
 
 
 class CrashRecoveryTest(unittest.TestCase):
@@ -196,6 +197,25 @@ class CrashRecoveryTest(unittest.TestCase):
         self.assertTrue(self.flag.exists(), "the reviewer ran")
         self.assertTrue(any(c.startswith("gate: pass") for c in ts["integration"]["checks"]))
         self.assertFalse(self.R.LOCK_FILE.exists(), "released only after everything")
+
+    def test_a_report_left_by_an_earlier_attempt_is_not_read_as_this_attempts_result(self):
+        """This task's own attempt 2 (3 Nov 2026): attempt 1's tick died after its PASS (the incident
+        above), so .review/reports/<slug>.md was never archived or renamed. Attempt 2's session wrote
+        no report, run_lane cleared only the worktree copy, and finish() read attempt 1's PASS as
+        attempt 2's result; the gate then ran in attempt 2's bare worktree and failed."""
+        self.add("t8")
+        self.R.REPORTS.mkdir(parents=True, exist_ok=True)
+        stale = self.R.REPORTS / "t8.md"
+        stale.write_text("RESULT: PASS\nGATE: ok\nHUMAN: none\nPREMISE: right\nCOMMITS: attempt 1\n", encoding="utf-8")
+        os.environ["FAKE_NO_REPORT"] = "1"
+        self.assertEqual(self.R.tick(), "NO_REPORT")
+        log = self.log()
+        self.assertIn("NO_REPORT t8", log)
+        self.assertNotIn("PASS t8", log, "attempt 1's report must not count for attempt 2")
+        self.assertFalse(stale.exists(), "the old report is cleared before the lane runs")
+        self.assertEqual(self.state()["tasks"]["t8"]["last_result"], "NO_REPORT")
+        self.assertTrue((self.R.QUEUE / "t8.md").exists(), "one infra retry, like any NO_REPORT")
+        self.assertEqual(list(self.R.ARCHIVE.glob("*/t8*")) if self.R.ARCHIVE.exists() else [], [])
 
     # --- the cause of the incident: git output decoded with the console code page
 

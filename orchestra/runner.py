@@ -1284,6 +1284,12 @@ def run_lane(task: Task, wt: Path, report: Path, timeout: int, prov: dict | None
     shutil.copyfile(task.path, local / "task.md")
     local_report = local / "report.md"
     local_report.unlink(missing_ok=True)
+    # And the main copy: an earlier attempt whose tick died after PASS left its report here
+    # (never archived, parked or renamed), and finish() reads whatever is there. On 3 Nov 2026 a
+    # session that wrote nothing was logged PASS on the previous attempt's report, then failed
+    # the gate in its bare worktree (docs/orchestra_soak.md, bug 10). A lane that writes nothing
+    # must be NO_REPORT.
+    unlink_retry(report)
     argv = list(argv)
     if task.lane == "claude":
         argv += ["--settings", str(hook_settings(wt))]
