@@ -198,6 +198,20 @@ class ExecuteAgainstThePolicy(unittest.TestCase):
             self.assertIn("keep it short", prompts[0])
             self.assertFalse(any("keep it short" in (m.get("content") or "") for m in msgs))
 
+    def test_preference_saved_but_not_acknowledged_gets_the_fast_paths_words(self):
+        # Eval 2026-11-03: reply_preference ran and she said "No worries." /
+        # "I'll make the change." He asked for "alright noted".
+        with patch.object(reply_preferences, "FILE", os.path.join(tempfile.mkdtemp(), "p.json")):
+            out, _ = run_turn("could you please always say me rather than Chuen when you read my notes back",
+                              [call("reply_preference", {"text": "say me rather than Chuen"}), reply("No worries.")],
+                              {"reply_preference": brain.tools.reply_preference})
+            self.assertEqual(out, "Alright, noted.")
+            self.assertIn("say me rather than chuen", reply_preferences.prompt_block().lower())
+            out, _ = run_turn("keep replies shorter please",
+                              [call("reply_preference", {"text": "keep replies short"}), reply("Sure, will do.")],
+                              {"reply_preference": brain.tools.reply_preference})
+            self.assertEqual(out, "Sure, will do.")
+
     def test_task_confirmation_is_a_sentence_not_the_tool_text(self):
         # 3 Nov: "Added: remind me there is a robotics meeting (today 17:00)" verbatim.
         out, _ = run_turn("remind me there's a robotics meeting at 5pm",

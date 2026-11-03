@@ -4,6 +4,8 @@
     "few phrase lists that still run before the model. Values live here, not in code (AGENTS.md Rule 0).",
     "tools.<name>.side_effect: 'read' may always be called, even when not offered; 'write' only when offered,",
     "never on a complaint turn. checks: run on the CALL's arguments, never on Chuen's wording.",
+    "reply_must_mention: after this tool succeeds her reply must match this, else the tool's own sentence",
+    "(or fallback_reply) is used -- alone for a 'write' tool, in front of her reply for a 'read' one.",
     "groups: a turn is offered core + every group whose cues match the recent user text (tool_router.py).",
     "cues/study_commands: data for the fast paths that run before the model; edit here, not in code."
   ],
@@ -305,22 +307,29 @@
       "side_effect": "read"
     },
     "study_session_status": {
-      "side_effect": "read"
+      "side_effect": "read",
+      "reply_must_mention": "\\b(?:running|paused|studying|break|rest|min|minutes|no study session|not running|isn'?t running|nothing running|not at the moment|off)\\b"
     },
     "start_study_session": {
-      "side_effect": "write"
+      "side_effect": "write",
+      "reply_must_mention": "\\b(?:start|running|already|going|25)\\b"
     },
     "pause_study_session": {
-      "side_effect": "write"
+      "side_effect": "write",
+      "reply_must_mention": "\\bpaus"
     },
     "resume_study_session": {
-      "side_effect": "write"
+      "side_effect": "write",
+      "reply_must_mention": "\\b(?:resum|back on|continu|running)"
     },
     "stop_study_session": {
-      "side_effect": "write"
+      "side_effect": "write",
+      "reply_must_mention": "\\b(?:stopp|ended|end|over|done|finished|off)\\b"
     },
     "reply_preference": {
-      "side_effect": "write"
+      "side_effect": "write",
+      "reply_must_mention": "\\b(?:noted|got it|will do|okay|ok|sure|alright|from now on)\\b",
+      "fallback_reply": "Alright, noted."
     }
   }
 }

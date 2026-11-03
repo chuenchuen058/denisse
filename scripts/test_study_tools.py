@@ -175,6 +175,33 @@ class BrainOnTheClock(unittest.TestCase):
         self.assertNotIn("timer paused", out.lower())
         self.assertIn("nothing was paused", out.lower())
 
+    # Eval, 3 rounds on 2026-11-03: the right tool ran and the clock was left
+    # right, but the reply didn't say what happened. The tool's sentence does.
+    def test_pause_reply_that_omits_the_pause_is_replaced(self):
+        self.mode.start()
+        out, _ = self.run_turn("study timer pause i meant",
+                               [call("pause_study_session"), reply("You've got 25 minutes left in this block.")])
+        self.assertTrue(self.mode.paused)
+        self.assertIn("paused", out.lower())
+
+    def test_pause_reply_calling_it_a_timer_is_not_unconfirmed(self):
+        self.mode.start()
+        out, _ = self.run_turn("pause sutuy timer", [call("pause_study_session"), reply("Study timer paused.")])
+        self.assertTrue(self.mode.paused)
+        self.assertEqual(out, "Study timer paused.")
+
+    def test_stop_reply_that_omits_the_stop_is_replaced(self):
+        self.mode.start()
+        out, _ = self.run_turn("stop the pomodor", [call("stop_study_session"), reply("Time to take a break.")])
+        self.assertFalse(self.mode.active)
+        self.assertIn("stopped", out.lower())
+
+    def test_not_running_status_is_said_before_the_offer(self):
+        out, _ = self.run_turn("is the study session running?",
+                               [call("study_session_status"), reply("Want to start one?")])
+        self.assertTrue(out.startswith("No study session is running."), out)
+        self.assertIn("Want to start one?", out)
+
     def test_status_question_is_answered_from_the_clock(self):
         self.mode.start()
         out, _ = self.run_turn("is the study session running?",

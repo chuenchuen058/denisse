@@ -1209,11 +1209,18 @@ _WRONG_TOOL_CLAIM_NUDGE = (
 # succeed, it just isn't a timer (2026-10-20). So a done-claim that names one
 # of these also needs one of its tools to have run this turn.
 _CLAIM_NEEDS = (
-    (re.compile(r"\btimers?\b", re.IGNORECASE), {"set_timer", "cancel_timer"}),
+    # He calls the pomodoro "the study timer", so "timer paused" after
+    # pause_study_session is a true claim (eval study_pause_typo, 2026-11-03:
+    # it was flagged as a timer claim without a timer tool and replaced
+    # with "I haven't confirmed that action").
+    (re.compile(r"\btimers?\b", re.IGNORECASE),
+     {"set_timer", "cancel_timer", "start_study_session", "pause_study_session",
+      "resume_study_session", "stop_study_session"}),
     (re.compile(r"\btasks?\b|\bto-?do\b|\breminders?\b", re.IGNORECASE),
      {"add_task", "complete_task", "remove_task", "set_timer"}),
     (re.compile(r"\b(?:playing|played|paused|resumed|skipped)\b", re.IGNORECASE),
-     {"play_song", "pause_music", "resume_music", "skip_song", "previous_song"}),
+     {"play_song", "pause_music", "resume_music", "skip_song", "previous_song",
+      "pause_study_session", "resume_study_session"}),
     (re.compile(r"\b(?:opened|pulled up)\b|\bis (?:now )?open\b", re.IGNORECASE),
      {"open_application"}),
     # "Sutuy timer paused." after pause_music (2026-11-03): a study claim
@@ -2660,6 +2667,25 @@ class Brain:
                                 or _claim_without_its_tool(final_text, successful_tools)
                                 or final_text in (FAILED_REPLY, UNCONFIRMED_REPLY)):
                             final_text = res.split(" Tell him")[0].split(" Start one")[0].strip()
+                    # ...and when it did happen, the reply has to say so. The
+                    # eval (2026-11-03, 3 rounds) had pause_study_session run
+                    # and the reply be "You've got 25 minutes left in this
+                    # block", stop_study_session and "Time to take a break",
+                    # a not-running status and "Want to start one?". What a
+                    # reply must mention after each tool is policy data
+                    # (reply_must_mention); the tool's own sentence stands in
+                    # when it doesn't -- alone for a change, in front of her
+                    # reply for a plain status.
+                    for name, res in tool_outputs.items():
+                        rule = tool_policy.tool(name).get("reply_must_mention")
+                        if not (rule and res and name in successful_tools):
+                            continue
+                        if not re.search(rule, final_text, re.IGNORECASE):
+                            own = tool_policy.tool(name).get("fallback_reply") or res.split(" Tell him")[0].strip()
+                            if tool_policy.side_effect(name) == "read" and final_text.strip():
+                                final_text = f"{own} {final_text.strip()}"
+                            else:
+                                final_text = own
                     task_result = tool_outputs.get("list_tasks", "")
                     if ("list_tasks" in successful_tools
                             and not successful_tools & {"add_task", "complete_task", "remove_task"}
