@@ -26,12 +26,19 @@ jobs:
           python-version: '3.12'
           cache: pip
           cache-dependency-path: requirements.txt
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '22'
+          package-manager-cache: false
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
       - name: Run isolated offline checks
         run: python scripts/run_checks.py --report logs/checks.json
+      - name: Run agent hub Node tests
+        if: always()
+        run: node --test orchestra/agent_hub/test_hub.mjs
       - name: Save check summary
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

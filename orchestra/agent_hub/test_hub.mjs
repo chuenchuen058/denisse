@@ -19,6 +19,8 @@ const hub = await import("./server.mjs");
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FAKE_CMD = join(HERE, "fake_agent.mjs");
 const REPO_PY = join(HERE, "..", "..", ".venv", process.platform === "win32" ? "Scripts\\python.exe" : "bin/python");
+// setup-python supplies Python on PATH in CI; only local checkouts have a .venv.
+const TEST_PY = process.env.AGENT_HUB_PYTHON || (existsSync(REPO_PY) ? REPO_PY : "python");
 
 test("exam scores: route_task picks the best working agent, and falls back to the rules without scores", async () => {
   const at = new Date().toISOString();
@@ -31,7 +33,7 @@ test("exam scores: route_task picks the best working agent, and falls back to th
   const file = join(vault, "scores.json");
   writeFileSync(file, JSON.stringify(scores), "utf8");
   const oldPy = process.env.AGENT_HUB_PYTHON;
-  process.env.AGENT_HUB_PYTHON = REPO_PY;
+  process.env.AGENT_HUB_PYTHON = TEST_PY;
   try {
     assert.equal(hub.pickRoute("summarise this", "summarise").agent, "gemini", "no scores file: today's rules");
     process.env.AGENT_HUB_EXAM_SCORES = file;
