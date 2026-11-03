@@ -7,8 +7,11 @@ queue of the thread that registered it, and must be unregistered by that
 same thread. Each press is handed to ``schedule`` (in the tray that is
 ``root.after(0, fn)``) so all UI work stays on the Tk main thread.
 
-Configuration: ``DENISSE_HOTKEY`` (default ``ctrl+alt+d``); ``off`` disables
-it. A combo another app already owns is logged once and ignored -- startup
+Configuration: ``DENISSE_HOTKEY`` overrides ``summon.combo`` in hotkeys.json
+(shipped as ``ctrl+alt+d``); any of its ``off_words`` disables it. The
+modifier words, the "off" words and the timeouts live there too, checked by
+json_config.py (bad value: one log line, the hotkeys.defaults.json value).
+A combo another app already owns is logged once and ignored -- startup
 never fails because of the hotkey.
 """
 
@@ -18,10 +21,15 @@ import ctypes
 import os
 import sys
 import threading
+from pathlib import Path
 from typing import Callable, Optional, Tuple
 
-DEFAULT_HOTKEY = "ctrl+alt+d"
+import json_config
+
 ENV_VAR = "DENISSE_HOTKEY"
+CONFIG_ENV_VAR = "DENISSE_HOTKEYS_CONFIG"
+CONFIG_FILE = Path(__file__).with_name("hotkeys.json")
+DEFAULTS_FILE = Path(__file__).with_name("hotkeys.defaults.json")
 
 MOD_ALT = 0x0001
 MOD_CONTROL = 0x0002
@@ -33,13 +41,11 @@ WM_HOTKEY = 0x0312
 WM_QUIT = 0x0012
 ASFW_ANY = 0xFFFFFFFF
 
-_MODIFIERS = {
-    "ctrl": MOD_CONTROL, "control": MOD_CONTROL,
-    "alt": MOD_ALT,
-    "shift": MOD_SHIFT,
-    "win": MOD_WIN, "windows": MOD_WIN, "super": MOD_WIN, "meta": MOD_WIN,
-}
+# The Win32 bit for each modifier hotkeys.json names; the words for them
+# are data (``modifiers`` there).
+_MOD_BITS = {"ctrl": MOD_CONTROL, "alt": MOD_ALT, "shift": MOD_SHIFT, "win": MOD_WIN}
 
+# Win32 virtual-key codes: a fixed table of the API, not a setting.
 _NAMED_KEYS = {
     "space": 0x20, "enter": 0x0D, "return": 0x0D, "tab": 0x09,
     "esc": 0x1B, "escape": 0x1B, "backspace": 0x08,
@@ -61,6 +67,57 @@ def _key_vk(name: str) -> Optional[int]:
     return _NAMED_KEYS.get(name)
 
 
+# ------------------------------------------------------------ hotkeys.json
+
+CONFIG: dict = {}
+DEFAULT_HOTKEY = ""
+_MODIFIERS: dict = {}
+_OFF_WORDS: frozenset = frozenset()
+
+
+def _modifier_table(words: dict) -> dict:
+    table = {}
+    for name, bit in _MOD_BITS.items():
+        for w in words.get(name) or []:
+            w = w.strip().lower()
+            if not w or "+" in w or w in table:
+                raise ValueError(f"modifier word {w!r} is empty, has '+' or is repeated")
+            table[w] = bit
+        if not words.get(name):
+            raise ValueError(f"no words for {name!r}")
+    return table
+
+
+def _extra_checks(data: dict, defaults: dict, checker) -> dict:
+    try:
+        _modifier_table(data["modifiers"])
+    except ValueError as e:
+        data["modifiers"] = checker.bad("hotkeys.modifiers", f"is unusable ({e})", defaults["modifiers"])
+    mods = _modifier_table(data["modifiers"])
+    if not data["off_words"]:
+        data["off_words"] = checker.bad("hotkeys.off_words", "is empty", defaults["off_words"])
+    off = frozenset(w.strip().lower() for w in data["off_words"])
+    for section in ("summon", "explain"):
+        combo = data[section]["combo"]
+        try:
+            _parse(combo, mods, off)
+        except ValueError as e:
+            data[section]["combo"] = checker.bad(f"hotkeys.{section}.combo", f"doesn't parse ({e})",
+                                                 defaults[section]["combo"])
+    return data
+
+
+def configure(path=None) -> dict:
+    """(Re)load hotkeys.json (or ``path``, or $DENISSE_HOTKEYS_CONFIG)."""
+    global CONFIG, DEFAULT_HOTKEY, _MODIFIERS, _OFF_WORDS
+    path = path or os.environ.get(CONFIG_ENV_VAR) or CONFIG_FILE
+    CONFIG = json_config.load("hotkeys", path, DEFAULTS_FILE, extra=_extra_checks, warn=_log)
+    _MODIFIERS = _modifier_table(CONFIG["modifiers"])
+    _OFF_WORDS = frozenset(w.strip().lower() for w in CONFIG["off_words"])
+    DEFAULT_HOTKEY = CONFIG["summon"]["combo"]
+    return CONFIG
+
+
 def parse_hotkey(spec: Optional[str]) -> Optional[Tuple[int, int]]:
     """``"ctrl+alt+d"`` -> ``(modifiers, virtual_key)``; ``"off"`` -> None.
 
@@ -71,8 +128,12 @@ def parse_hotkey(spec: Optional[str]) -> Optional[Tuple[int, int]]:
     """
     if spec is None or not spec.strip():
         spec = DEFAULT_HOTKEY
+    return _parse(spec, _MODIFIERS, _OFF_WORDS)
+
+
+def _parse(spec: str, modifiers: dict, off_words) -> Optional[Tuple[int, int]]:
     text = spec.strip().lower()
-    if text in ("off", "none", "disabled", "false", "0", "no"):
+    if text in off_words:
         return None
     parts = [p.strip() for p in text.split("+")]
     # "ctrl+alt++" style: a trailing empty part means the key is "+" itself,
@@ -82,8 +143,8 @@ def parse_hotkey(spec: Optional[str]) -> Optional[Tuple[int, int]]:
     mods = 0
     key = None
     for part in parts:
-        if part in _MODIFIERS:
-            bit = _MODIFIERS[part]
+        if part in modifiers:
+            bit = modifiers[part]
             if mods & bit:
                 raise ValueError(f"bad hotkey {spec!r}: {part!r} repeated")
             mods |= bit
@@ -97,7 +158,7 @@ def parse_hotkey(spec: Optional[str]) -> Optional[Tuple[int, int]]:
     if key is None:
         raise ValueError(f"bad hotkey {spec!r}: no key, only modifiers")
     if not mods:
-        raise ValueError(f"bad hotkey {spec!r}: needs ctrl, alt, shift or win")
+        raise ValueError(f"bad hotkey {spec!r}: needs one of {', '.join(_MOD_BITS)}")
     return mods, key
 
 
@@ -108,6 +169,9 @@ def _log(msg: str) -> None:
         print(f"[hotkey] {msg}", flush=True)
     except Exception:
         pass
+
+
+configure()
 
 
 class GlobalHotkey:
@@ -148,7 +212,7 @@ class GlobalHotkey:
             self._kernel32 = ctypes.windll.kernel32
         return self._user32, self._kernel32
 
-    def start(self, timeout: float = 2.0) -> bool:
+    def start(self, timeout: Optional[float] = None) -> bool:
         """Start the thread and wait for registration. True if registered.
 
         Never raises: a bad spec, a non-Windows platform or a combo owned by
@@ -166,7 +230,7 @@ class GlobalHotkey:
         self._thread = threading.Thread(target=self._run, args=parsed,
                                         name=self.name, daemon=True)
         self._thread.start()
-        self._ready.wait(timeout)
+        self._ready.wait(CONFIG["summon"]["register_timeout_s"] if timeout is None else timeout)
         return self.registered
 
     def _run(self, mods: int, vk: int) -> None:

@@ -1,0 +1,26 @@
+{
+  "_about": "hotkey.py and explain_hotkey.py's values (AGENTS.md Rule 0). Loaded once at import and checked by json_config.py: a bad value logs one warning naming the key and the default used instead (the defaults are hotkeys.defaults.json, the same values this file ships with; scripts/test_hotkey.py keeps the two equal). DENISSE_HOTKEYS_CONFIG points at another file. The env vars DENISSE_HOTKEY / DENISSE_EXPLAIN_HOTKEY still override the combos here. Keys starting with _ are notes.",
+  "summon": {
+    "_about": "Opens the chat from any app. combo: modifiers and one key joined by +, or one of off_words.",
+    "combo": "ctrl+alt+d",
+    "register_timeout_s": 2.0
+  },
+  "explain": {
+    "_about": "Sends the front app's selection to the chat. prefix starts the message; release_wait_s: how long to wait for Alt/Shift/Win to come up before Ctrl+C; send_wait_s: how long a fresh chat may take to connect before the text is left in the box; send_retry_ms: how often to retry meanwhile.",
+    "combo": "ctrl+alt+e",
+    "prefix": "Explain this:",
+    "release_wait_s": 1.0,
+    "release_poll_s": 0.02,
+    "send_wait_s": 30.0,
+    "send_retry_ms": 200,
+    "off_note": "Reading the screen is switched off (DENISSE_DESKTOP_CONTEXT=0), so I didn't look."
+  },
+  "off_words": ["off", "none", "disabled", "false", "0", "no"],
+  "modifiers": {
+    "_about": "Words accepted for each modifier in a combo.",
+    "ctrl": ["ctrl", "control"],
+    "alt": ["alt"],
+    "shift": ["shift"],
+    "win": ["win", "windows", "super", "meta"]
+  }
+}

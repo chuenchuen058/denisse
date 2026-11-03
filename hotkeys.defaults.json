@@ -1,0 +1,26 @@
+{
+  "_about": "The shipped defaults for hotkeys.json: the documented fallback for any bad or missing value there. Keep the two equal (scripts/test_hotkey.py checks).",
+  "summon": {
+    "_about": "Opens the chat from any app. combo: modifiers and one key joined by +, or one of off_words.",
+    "combo": "ctrl+alt+d",
+    "register_timeout_s": 2.0
+  },
+  "explain": {
+    "_about": "Sends the front app's selection to the chat. prefix starts the message; release_wait_s: how long to wait for Alt/Shift/Win to come up before Ctrl+C; send_wait_s: how long a fresh chat may take to connect before the text is left in the box; send_retry_ms: how often to retry meanwhile.",
+    "combo": "ctrl+alt+e",
+    "prefix": "Explain this:",
+    "release_wait_s": 1.0,
+    "release_poll_s": 0.02,
+    "send_wait_s": 30.0,
+    "send_retry_ms": 200,
+    "off_note": "Reading the screen is switched off (DENISSE_DESKTOP_CONTEXT=0), so I didn't look."
+  },
+  "off_words": ["off", "none", "disabled", "false", "0", "no"],
+  "modifiers": {
+    "_about": "Words accepted for each modifier in a combo.",
+    "ctrl": ["ctrl", "control"],
+    "alt": ["alt"],
+    "shift": ["shift"],
+    "win": ["win", "windows", "super", "meta"]
+  }
+}

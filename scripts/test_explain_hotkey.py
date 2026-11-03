@@ -394,5 +394,42 @@ class RegistrationTests(unittest.TestCase):
         self.assertEqual(user32.allow_fg, 1)  # foreground right passed on
 
 
+class ConfigData(unittest.TestCase):
+    """hotkeys.json's "explain" section: change the data, change the behaviour."""
+
+    def tearDown(self):
+        eh.configure(hotkey.CONFIG_FILE)
+
+    def _configure(self, edit):
+        import json
+        import tempfile
+        with open(hotkey.CONFIG_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        edit(data["explain"])
+        fd, path = tempfile.mkstemp(suffix=".json")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        self.addCleanup(os.remove, path)
+        eh.configure(path)
+
+    def test_prefix_note_and_combo_from_the_data(self):
+        def edit(e):
+            e["prefix"] = "What is this:"
+            e["off_note"] = "Screen reading is off."
+            e["combo"] = "ctrl+shift+x"
+        self._configure(edit)
+        self.assertEqual(eh.build_request(eh.Grab("text", "hi")).message, "What is this:\n\nhi")
+        self.assertEqual(eh.build_request(eh.Grab("off")).note, "Screen reading is off.")
+        with mock.patch.dict(os.environ, {eh.ENV_VAR: ""}):
+            self.assertEqual(eh.resolve_spec(), "ctrl+shift+x")
+
+    def test_bad_combo_falls_back_to_the_default(self):
+        lines = []
+        with mock.patch.object(hotkey, "_log", lines.append):
+            self._configure(lambda e: e.update(combo="ctrl+alt"))
+        self.assertTrue(any("explain.combo" in line for line in lines), lines)
+        self.assertEqual(eh.DEFAULT_HOTKEY, "ctrl+alt+e")
+
+
 if __name__ == "__main__":
     unittest.main()
