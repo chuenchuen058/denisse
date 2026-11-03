@@ -93,6 +93,28 @@ class AtriumTest(unittest.TestCase):
         self.assertEqual(len(bad), 1)
         self.assertIn("untagged decision", bad[0][2])
 
+    def test_usage_rows_carry_exam_pass_rate(self):
+        from atrium import snapshot
+        review = Path(tempfile.mkdtemp())
+        old = snapshot.REVIEW
+        snapshot.REVIEW = review
+        from unittest import mock
+        offline = mock.patch("urllib.request.urlopen", side_effect=OSError("no Ollama in tests"))
+        offline.start()
+        try:
+            self.assertIsNone(next(r for r in snapshot._usage([]) if r["lane"] == "codex")["exam_pass_rate"])
+            ok, bad = {"at": "2026-11-03T07:10:00", "ok": True}, {"at": "2026-11-03T07:11:00", "ok": False}
+            w(review, "exams/scores.json", json.dumps({"agents": {
+                "codex": {"extract": [ok, ok, bad, ok]},
+                "local:llama3.1:8b": {"extract": [ok]}, "local:tiny": {"extract": [bad]}}}))
+            rows = {r["lane"]: r for r in snapshot._usage([])}
+            self.assertEqual(rows["codex"]["exam_pass_rate"], 0.75)
+            self.assertEqual(rows["local"]["exam_pass_rate"], 0.5)
+            self.assertIsNone(rows["copilot"]["exam_pass_rate"])
+        finally:
+            offline.stop()
+            snapshot.REVIEW = old
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
