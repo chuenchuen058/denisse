@@ -1,5 +1,5 @@
 {
-  "_about": "Orchestra limits, one place. Each has its reason. Env vars ORCHESTRA_<KEY> (upper case) override for a single run.",
+  "_about": "Orchestra limits, one place. Each has its reason. Env vars ORCHESTRA_<KEY> (upper case) override for a single run. The runner checks every value on load: a missing key or a value of the wrong shape (type, list items, a bad regex) logs `config: <key> ...` in .review/runner.log and falls back to orchestra/config_defaults.json, which holds today's values; an unreadable file falls back wholesale. Edit this file, not that one.",
 
   "infra_retries": 1,
   "_infra_retries": "Retries only for timeout / no report / lane missing. Thomas, 2,006 reports: a re-run FAIL never came back PASS (5 of 5 ended PARTIAL). PARTIAL/FAIL park and need a task edit.",
@@ -15,6 +15,8 @@
 
   "gate_timeout_s": 600,
   "_gate_timeout_s": "The runner re-runs the task's gate before merging. A gate that times out is broken, not passed.",
+  "broken_gate_codes": [5, 127, 9009],
+  "_broken_gate_codes": "Gate exit codes that mean a broken gate, not a failed one: pytest found no tests (5), command not found (127 sh, 9009 cmd).",
 
   "maint_share": 0.20,
   "maint_floor_s": 900,
@@ -30,7 +32,36 @@
   "_lane_slots": "How many tasks of one lane may run at once, normally. A campaign (.review/campaign.json, see orchestra/campaign.py) may raise it until its stop_at; the Max-plan sprint (Claude 3 until Wed 4 Nov 18:00 London) lives there, not here.",
 
   "lane_fallback": {"codex": "claude"},
-  "_lane_fallback": "While a lane is limited (usage limit seen in its log, see LIMIT_PATTERNS in runner.py), its tasks run on this lane instead, unless the task header says Lane-Fixed: yes. The fallback lane's slots still apply. {} turns it off.",
+  "_lane_fallback": "While a lane is limited (usage limit seen in its log, see limit_patterns below), its tasks run on this lane instead, unless the task header says Lane-Fixed: yes. The fallback lane's slots still apply. {} turns it off.",
+
+  "lane_argv": {
+    "claude": ["claude", "-p", "--permission-mode", "acceptEdits", "--permission-prompts", "none",
+               "--output-format", "stream-json", "--verbose",
+               "--allowedTools", "Read,Edit,Write,Glob,Grep,Bash",
+               "--disallowedTools", "Bash(git push:*),Bash(gh:*)"],
+    "codex": ["{npm-shim:codex}", "exec", "--skip-git-repo-check", "--color", "never",
+              "-c", "mcp_servers.node_repl.enabled=false",
+              "-c", "mcp_servers.desktop-commander.enabled=false",
+              "-c", "mcp_servers.obsidian.enabled=false",
+              "-s", "danger-full-access", "-"],
+    "gemini": ["node", "{npm:@google/gemini-cli:gemini}", "--approval-mode", "auto_edit", "-o", "text",
+               "-p", "Do the task given above."]
+  },
+  "_lane_argv": "Each lane's command; the prompt goes in on stdin. {npm-shim:<name>} = full path of npm's <name>.cmd if found (the scheduled task's PATH has no %APPDATA%\\npm), else <name>. {npm:<package>:<bin>} = that global npm CLI's JS entry, run with node; the lane is left out if it isn't installed. .review/lanes.json still overrides or adds lanes. Why each flag: comment above lane_argv in runner.py (claude stream-json for the live watch; codex full access and MCP off, Chuen 2 Nov 2026; gemini auto_edit = edits, no shell).",
+  "unpriced_lanes": ["codex", "gemini", "copilot"],
+  "_unpriced_lanes": "Lanes that report no cost, so the daily spend cap never blocks them.",
+
+  "limit_patterns": {
+    "codex": ["you've hit your usage limit", "usage limit", "rate limit(ed)? (reached|exceeded)",
+              "429 too many requests"],
+    "claude": ["usage limit reached", "you've hit your (usage )?limit", "\\b\\d+-hour limit reached",
+               "weekly limit reached", "rate limit (reached|exceeded)", "rate_limit_error"],
+    "gemini": ["IneligibleTierError", "quota exceeded", "exceeded your current quota",
+               "RESOURCE_EXHAUSTED", "rate limit (reached|exceeded)"]
+  },
+  "limit_tail_lines": 40,
+  "limit_default_min": 60,
+  "_limit_patterns": "A lane's usage limit is come-back-later, not a failed attempt (2 Nov 2026: Codex's limit message was logged NO_REPORT and spent the retry). Case-insensitive regexes per lane, checked against the last limit_tail_lines lines of the lane log after a run with no report; a lane not listed is checked against all of them. The lane waits until the time the message names, else limit_default_min minutes.",
 
   "auth_patterns": {
     "claude": ["failed to authenticate", "oauth session expired", "please run /login", "invalid api key", "not logged in"],
@@ -59,7 +90,13 @@
   "review_risky": true,
   "review_max_lines": 400,
   "review_timeout_s": 900,
-  "_review_risky": "Before integration, a diff touching orchestra/, atrium/hook.py, .git/hooks, an install_*.ps1, or over review_max_lines changed lines gets a fresh read-only claude -p reviewer (prompt: orchestra/review_diff_prompt.md). VERDICT: block, no verdict, a timeout or a missing lane parks the task. Its cost counts like any lane. false turns it off.",
+  "review_diff_max_chars": 150000,
+  "review_risky_patterns": ["^orchestra/", "^atrium/hook\\.py$", "\\.git/hooks", "(^|/)install_[^/]*\\.ps1$"],
+  "reviewer_argv": ["claude", "-p", "--permission-mode", "default", "--permission-prompts", "none",
+                    "--output-format", "json",
+                    "--allowedTools", "Read,Glob,Grep,Bash(git diff:*),Bash(git log:*)",
+                    "--disallowedTools", "Edit,Write,MultiEdit,NotebookEdit,Bash(git push:*),Bash(gh:*)"],
+  "_review_risky": "Before integration, a diff with a changed path matching review_risky_patterns (regexes: orchestra/, atrium/hook.py, .git/hooks, an install_*.ps1), or over review_max_lines changed lines, gets a fresh read-only reviewer (reviewer_argv, unless .review/lanes.json has a \"reviewer\" lane; prompt: orchestra/review_diff_prompt.md, the diff cut at review_diff_max_chars). VERDICT: block, no verdict, a timeout or a missing lane parks the task. Its cost counts like any lane. false turns it off.",
 
   "dispatch_on_battery": false,
   "battery_floor_percent": 30,

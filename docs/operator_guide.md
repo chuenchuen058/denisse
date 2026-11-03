@@ -6,6 +6,27 @@ One page for running the thing day to day. The detail behind each part lives in
 [`docs/orchestra_security.md`](orchestra_security.md) (the safety layers). Limits and
 their reasons are in [`orchestra/config.json`](../orchestra/config.json).
 
+The runner's code holds no limits, patterns or lane commands of its own; they are all in
+`config.json`, each with a `_<key>` note giving its reason:
+
+| Key | What it controls |
+|---|---|
+| `infra_retries`, `backoff_min` | Retries after timeout / no report / lane missing, and the wait before one. |
+| `timeout_s` (`light`, `heavy`), `timeout_min_runs`, `timeout_p95_factor`, `timeout_floor_s` | A lane's time limit per task weight, later learnt from past runs. |
+| `gate_timeout_s`, `broken_gate_codes` | Gate time limit; exit codes that mean a broken gate (5, 127, 9009), not a failed one. |
+| `lane_argv` | Each lane's command line. `{npm-shim:codex}` = the npm `.cmd` shim's full path; `{npm:<package>:<bin>}` = a global npm CLI run with node (lane left out if not installed). `.review/lanes.json` still overrides. |
+| `unpriced_lanes` | Lanes that report no cost, so the spend cap never blocks them. |
+| `limit_patterns`, `limit_tail_lines`, `limit_default_min` | Usage-limit regexes per lane, how much of the lane log they read, and how long a lane waits when the message names no time. |
+| `auth_patterns`, `auth_retry_min`, `auth_fix_hint` | The same for an expired sign-in. |
+| `review_risky_patterns`, `review_max_lines`, `review_timeout_s`, `review_diff_max_chars`, `reviewer_argv` | Which diffs get the reviewer lane, its time limit, how much diff it sees, and its command. |
+
+A bad value never crashes a tick. A key missing from `config.json`, or one of the wrong
+shape (a string where a number belongs, a list item of the wrong type, an invalid regex,
+an empty command, `timeout_s` without a weight), falls back to
+[`orchestra/config_defaults.json`](../orchestra/config_defaults.json), which holds today's
+values, and `.review/runner.log` says so: `config: <key> <why>; using the default <value>`.
+An unreadable `config.json` falls back as a whole. Edit `config.json`, not the defaults.
+
 Every command below is run from the repo root (`C:\Users\Xichu\GitHub\denisse`) with the
 venv python. `orchestra/test_docs.py` checks that every script path in this guide's
 command blocks exists.
@@ -197,6 +218,7 @@ because power-aware dispatch (which logs `ON BATTERY`) only landed that evening.
 | `PARTIAL` / `FAIL … a blind re-run won't change it` | The session couldn't finish. | Read the report's NOT DONE and ODD lines, then requeue with a note that changes the task. |
 | `TICK CRASHED: <Error>: ...` with an indented traceback | The runner itself raised. Before 3 Nov 2026 this was silent (pythonw has no stderr) and the task was dispatched again at once. If a task was running, its state says `RUNNER_CRASH`: one retry, then parked. | Read the traceback, fix the runner, requeue. |
 | `RUNNER CRASHED <slug>: <Error> during review\|integration after the session's PASS` then `PARKED` | The session's work is done and on `review/<slug>`; the runner failed after it. This is what killed the 2 Nov `multistep-read-found-file` run (a curly quote in the diff under the cp1252 console code page). | Fix the cause, then `requeue.py <slug> --merge-only`. Nothing is lost. |
+| `config: <key> should be a number; using the default …` (or `is not a valid regex`, `unreadable`) | A value in `orchestra/config.json` has the wrong shape; the runner is using the fallback from `config_defaults.json`. | Fix the value in `config.json`; the line stops on the next tick. |
 | `<name>.lock: holder <pid> is gone; taken over` / `RECONCILE <name>.lock: holder <pid> is gone; removed` | A tick died holding a brief lock (state, merge, dispatch, reconcile). | Nothing: the next tick takes it over or sweeps it. |
 | `could not remove <name>: still open in another process` | Windows refused to delete a lock another tick was reading for a whole second. | Nothing; the next tick retries. If it repeats, look for a stuck process holding `.review/` files open. |
 | `integration <slug>: merge <sha> already on master; recovering` | A tick died between its fast-forward and its state save; the merge was on master but unrecorded and unpushed. | Nothing: it is recorded as `recovered:` and pushed. |

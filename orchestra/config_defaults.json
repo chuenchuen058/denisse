@@ -1,0 +1,74 @@
+{
+  "_about": "Fallbacks for the runner's keys in config.json, with today's values. Edit config.json, not this file: a key here is used only when config.json lacks it, or its value there has the wrong shape (the runner logs `config: <key> ...` and carries on). Each list/object here is also the shape the value must have.",
+  "_complete": ["timeout_s"],
+  "_complete_note": "Objects that must keep every key they have here (timeout_s needs a value for each task weight).",
+
+  "infra_retries": 1,
+  "backoff_min": 10,
+  "timeout_s": {"light": 1200, "heavy": 3600},
+  "timeout_min_runs": 20,
+  "timeout_p95_factor": 3,
+  "timeout_floor_s": 300,
+  "gate_timeout_s": 600,
+  "broken_gate_codes": [5, 127, 9009],
+  "maint_share": 0.20,
+  "maint_floor_s": 900,
+  "stale_days": 7,
+  "parallel_lanes": true,
+  "lane_slots": {"claude": 1, "codex": 1},
+  "lane_fallback": {"codex": "claude"},
+
+  "lane_argv": {
+    "claude": ["claude", "-p", "--permission-mode", "acceptEdits", "--permission-prompts", "none",
+               "--output-format", "stream-json", "--verbose",
+               "--allowedTools", "Read,Edit,Write,Glob,Grep,Bash",
+               "--disallowedTools", "Bash(git push:*),Bash(gh:*)"],
+    "codex": ["{npm-shim:codex}", "exec", "--skip-git-repo-check", "--color", "never",
+              "-c", "mcp_servers.node_repl.enabled=false",
+              "-c", "mcp_servers.desktop-commander.enabled=false",
+              "-c", "mcp_servers.obsidian.enabled=false",
+              "-s", "danger-full-access", "-"],
+    "gemini": ["node", "{npm:@google/gemini-cli:gemini}", "--approval-mode", "auto_edit", "-o", "text",
+               "-p", "Do the task given above."]
+  },
+  "unpriced_lanes": ["codex", "gemini", "copilot"],
+
+  "limit_patterns": {
+    "codex": ["you've hit your usage limit", "usage limit", "rate limit(ed)? (reached|exceeded)",
+              "429 too many requests"],
+    "claude": ["usage limit reached", "you've hit your (usage )?limit", "\\b\\d+-hour limit reached",
+               "weekly limit reached", "rate limit (reached|exceeded)", "rate_limit_error"],
+    "gemini": ["IneligibleTierError", "quota exceeded", "exceeded your current quota",
+               "RESOURCE_EXHAUSTED", "rate limit (reached|exceeded)"]
+  },
+  "limit_tail_lines": 40,
+  "limit_default_min": 60,
+
+  "auth_patterns": {
+    "claude": ["failed to authenticate", "oauth session expired", "please run /login", "invalid api key", "not logged in"],
+    "codex": ["not logged in", "please (log|sign) in", "401 unauthorized", "authentication (failed|required)"],
+    "copilot": ["not logged in", "please (log|sign) in", "authentication (failed|required)", "no authentication"],
+    "gemini": ["authentication (failed|required)", "please (log|sign) in"]
+  },
+  "auth_retry_min": 15,
+  "auth_fix_hint": "sign-in expired: open a terminal, run the lane's CLI (e.g. `claude`) and sign in (`/login`)",
+
+  "daily_spend_cap_usd": 5.0,
+  "unknown_cost_per_min_usd": 0.10,
+  "done_window_days": 14,
+  "vault_dir": "~/OneDrive - King's College London/Denisse",
+  "auto_push": true,
+
+  "review_risky": true,
+  "review_max_lines": 400,
+  "review_timeout_s": 900,
+  "review_diff_max_chars": 150000,
+  "review_risky_patterns": ["^orchestra/", "^atrium/hook\\.py$", "\\.git/hooks", "(^|/)install_[^/]*\\.ps1$"],
+  "reviewer_argv": ["claude", "-p", "--permission-mode", "default", "--permission-prompts", "none",
+                    "--output-format", "json",
+                    "--allowedTools", "Read,Glob,Grep,Bash(git diff:*),Bash(git log:*)",
+                    "--disallowedTools", "Edit,Write,MultiEdit,NotebookEdit,Bash(git push:*),Bash(gh:*)"],
+
+  "git_timeout_s": 120,
+  "tick_watchdog_extra_s": 900
+}

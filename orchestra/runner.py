@@ -9,7 +9,7 @@ What a tick does with a session's result (after Thomas's review, 31 Oct 2026):
   * PASS is not taken on the session's word: the runner re-runs the task's gate
     commands in the worktree and merges only if they exit 0, the hooks loaded,
     and nothing was written into the main checkout
-  * a risky diff (orchestra/, atrium/hook.py, git hooks, install_*.ps1, >400 lines) first
+  * a risky diff (config review_risky_patterns, or over review_max_lines) first
     goes to a fresh read-only reviewer lane; VERDICT: block parks it (2 Nov 2026)
   * the branch is then merged onto *current* master in an integration worktree, the gate
     (plus run_checks --fast if it exists) re-runs there, and master is fast-forwarded to
@@ -25,7 +25,9 @@ What a tick does with a session's result (after Thomas's review, 31 Oct 2026):
     are re-read every tick and enforced here (orchestra/campaign.py, 2 Nov 2026)
   * once a day (exams_daily_at) a hidden background process gives each agent one canary exam
     (orchestra/exams/daily.py), unless a lane is limited; it takes no lane slot (3 Nov 2026)
-  * every limit lives in orchestra/config.json with its reason
+  * every limit, pattern and lane command lives in orchestra/config.json with its reason;
+    orchestra/config_defaults.json holds the fallbacks, used when a key is missing or its
+    value has the wrong shape (logged as `config: ...`, never a crashed tick)
 """
 from __future__ import annotations
 
@@ -81,101 +83,13 @@ INFRA = ("TIMEOUT", "NO_REPORT", "LANE_MISSING", "WORKTREE_FAILED", "RUNNER_CRAS
 
 # A lane's usage limit is "come back later", not a failed attempt (2 Nov 2026: Codex printed
 # the line below, the runner logged NO_REPORT, spent the retry and parked the task).
-# One table: lane -> patterns, checked against the tail of <slug>.lane.log after a run with
-# no report. A lane not in the table (e.g. a custom wrapper in lanes.json) is checked
-# against every pattern.
+# The patterns are data: config.json "limit_patterns" (lane -> regexes), checked against the
+# last limit_tail_lines of <slug>.lane.log after a run with no report. A lane not in the
+# table (e.g. a custom wrapper in lanes.json) is checked against every pattern.
+# (Test fixture only: a real Codex message the shipped patterns must keep recognising.)
 CODEX_LIMIT_FIXTURE = ("ERROR: You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), "
                        "visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 10:55 PM.")
-LIMIT_PATTERNS = {
-    "codex": [r"you've hit your usage limit", r"usage limit", r"rate limit(ed)? (reached|exceeded)",
-              r"429 too many requests"],
-    "claude": [r"usage limit reached", r"you've hit your (usage )?limit", r"\b\d+-hour limit reached",
-               r"weekly limit reached", r"rate limit (reached|exceeded)", r"rate_limit_error"],
-    "gemini": [r"IneligibleTierError", r"quota exceeded", r"exceeded your current quota",
-               r"RESOURCE_EXHAUSTED", r"rate limit (reached|exceeded)"],
-}
-LIMIT_TAIL_LINES = 40
-LIMIT_DEFAULT_MIN = 60  # when the message names no time
-BROKEN_GATE_CODES = {5, 127, 9009}  # pytest: no tests; command not found (sh / cmd)
-
-
-def load_config(now_utc: dt.datetime | None = None, log_fn=None) -> dict:
-    """config.json, then the campaign's overrides while it is active (orchestra/campaign.py),
-    then ORCHESTRA_<KEY> env vars for a single run."""
-    cfg = {}
-    for path in (HERE / "config.json", REPO / "orchestra" / "config.json"):
-        if path.exists():
-            cfg = {k: v for k, v in json.loads(path.read_text(encoding="utf-8")).items()
-                   if not k.startswith("_")}
-            break
-    cfg = campaign.apply(cfg, REVIEW, now_utc or campaign.utcnow(), log_fn)
-    for k, v in list(cfg.items()):
-        env = os.environ.get(f"ORCHESTRA_{k.upper()}")
-        if env is not None:
-            # ("{", "[") not the string "{[": "" is in every string, and ORCHESTRA_VAULT_DIR="" (vault
-            # notes off) then crashed every tick at import with json.loads("") (soak test, 3 Nov 2026)
-            cfg[k] = json.loads(env) if env[:1] in ("{", "[") else type(v)(env) if not isinstance(v, dict) else v
-    return cfg
-
-
-C = load_config()
-
-# Lanes: argv lists; the prompt goes in on stdin. Override in .review/lanes.json.
-# The allow list is broad on purpose; the real limits are in hooks/guard.py, which the
-# runner passes with --settings (Thomas: a prefix allow list mostly buys refusals).
-DEFAULT_LANES = {
-    "claude": ["claude", "-p", "--permission-mode", "acceptEdits", "--permission-prompts", "none",
-               # stream-json: the lane log fills as the session works, so orchestra/watch.py can
-               # show it live (Chuen, 2 Nov); the last line is still the result JSON lane_result reads.
-               "--output-format", "stream-json", "--verbose",
-               "--allowedTools", "Read,Edit,Write,Glob,Grep,Bash",
-               "--disallowedTools", "Bash(git push:*),Bash(gh:*)"],
-    # Codex 0.162 dropped --full-auto: workspace-write = edit inside the worktree and
-    # run commands there, no network (found 2 Nov 2026, the first Orchestra task on Codex).
-    # MCP servers off: with approval "never" Chuen's Desktop Commander etc. fail and the run
-    # dies. Full access because Codex's Windows sandbox can't start a shell when launched in
-    # the background ("setup refresh had errors"), so workspace-write could only read.
-    # Chuen chose this (2 Nov 2026). What still holds: the worktree, the runner's own gate
-    # re-run, PASS-only merge, the main-checkout dirty check, and .git/hooks/pre-push
-    # (orchestra/hooks/pre-push), which refuses any push while ORCHESTRA_WORKTREE is set
-    # or from a checkout under the worktrees folder.
-    "codex": ["codex", "exec", "--skip-git-repo-check", "--color", "never",
-              "-c", "mcp_servers.node_repl.enabled=false",
-              "-c", "mcp_servers.desktop-commander.enabled=false",
-              "-c", "mcp_servers.obsidian.enabled=false",
-              "-s", "danger-full-access", "-"],
-}
-def npm_bin(pkg: str, name: str) -> str | None:
-    """A global npm CLI's JS entry, run with node so long prompts never go through cmd.exe."""
-    root = Path(os.environ.get("APPDATA", "")) / "npm" / "node_modules" / pkg
-    try:
-        meta = json.loads((root / "package.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    rel = meta["bin"] if isinstance(meta.get("bin"), str) else (meta.get("bin") or {}).get(name)
-    return str(root / rel) if rel else None
-
-
-_gemini = npm_bin("@google/gemini-cli", "gemini")
-if _gemini:
-    # auto_edit: may edit files, may not run shell commands. The runner runs the gate itself.
-    DEFAULT_LANES["gemini"] = ["node", _gemini, "--approval-mode", "auto_edit", "-o", "text",
-                               "-p", "Do the task given above."]
-# The scheduled task's PATH has no %APPDATA%\npm, so give codex its full path (2 Nov 2026).
-# The prompt goes in on stdin, so running the .cmd shim is safe for long prompts.
-# Always prefer the npm shim: under Task Scheduler `which("codex")` can find a Windows app
-# alias that then fails to run. Try the home folder too in case APPDATA is unset.
-# npm installs made from inside the Claude desktop app land in its packaged (virtualised)
-# AppData, which only the app sees; outside it the real files are under
-# %LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming (found 2 Nov 2026).
-_local = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
-if True:
-    for _codex_cmd in (Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming") / "npm" / "codex.cmd",
-                       *sorted(_local.glob("Packages/Claude_*/LocalCache/Roaming/npm/codex.cmd"))):
-        if _codex_cmd.exists():
-            DEFAULT_LANES["codex"][0] = str(_codex_cmd)
-            break
-VALID = {"priority": ("urgent", "normal"), "weight": ("light", "heavy"), "kind": ("work", "maintenance")}
+CONFIG_DEFAULTS = HERE / "config_defaults.json"
 
 
 def now() -> dt.datetime:
@@ -188,6 +102,174 @@ def log(msg: str) -> None:
     REVIEW.mkdir(parents=True, exist_ok=True)
     with LOG_FILE.open("a", encoding="utf-8") as f:
         f.write(line + "\n")
+
+
+def _read_json_object(path: Path, say) -> dict | None:
+    """The file's top-level object, or None (with a log line) if it is unreadable or not an object."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        say(f"config: {path.name} unreadable ({e}); using the defaults in {CONFIG_DEFAULTS.name}")
+        return None
+    if not isinstance(data, dict):
+        say(f"config: {path.name} is not a JSON object; using the defaults in {CONFIG_DEFAULTS.name}")
+        return None
+    return data
+
+
+def config_problem(key: str, value, default) -> str | None:
+    """Why `value` can't stand in for `default` (same shape: type, list items, object values),
+    or None if it can. Keys ending _patterns must hold valid regexes; _argv lists can't be empty."""
+    if isinstance(default, bool):
+        return None if isinstance(value, bool) else "should be true or false"
+    if isinstance(default, (int, float)):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return "should be a number"
+        return None if value >= 0 else "should not be negative"
+    if isinstance(default, str):
+        return None if isinstance(value, str) else "should be a string"
+    if isinstance(default, list):
+        if not isinstance(value, list):
+            return "should be a list"
+        if key.endswith("_argv") and not value:
+            return "should not be an empty command"
+        for item in value:
+            why = config_problem(key, item, default[0]) if default else None
+            if why:
+                return f"item {item!r} {why}"
+            if key.endswith("_patterns"):
+                try:
+                    re.compile(item)
+                except re.error as e:
+                    return f"pattern {item!r} is not a valid regex ({e})"
+        return None
+    if isinstance(default, dict):
+        if not isinstance(value, dict):
+            return "should be an object"
+        proto = next(iter(default.values()), None)
+        for k, v in value.items():
+            ref = default.get(k, proto)
+            why = config_problem(key, v, ref) if ref is not None else None
+            if why:
+                return f"[{k!r}] {why}"
+        return None
+    return None
+
+
+def validated(cfg: dict, defaults: dict, complete: list, say) -> dict:
+    """cfg with every default filled in, and any value of the wrong shape replaced by its
+    default (logged): a bad config.json value costs a log line, never a tick."""
+    out = dict(cfg)
+    for key, default in defaults.items():
+        if key not in out:
+            out[key] = default
+            continue
+        why = config_problem(key, out[key], default)
+        if not why and key in complete and isinstance(out[key], dict):
+            missing = [k for k in default if k not in out[key]]
+            why = f"is missing {', '.join(missing)}" if missing else None
+        if why:
+            say(f"config: {key} {why}; using the default {json.dumps(default)}")
+            out[key] = default
+    return out
+
+
+def load_config(now_utc: dt.datetime | None = None, log_fn=None, path: Path | None = None) -> dict:
+    """config.json, then the campaign's overrides while it is active (orchestra/campaign.py),
+    then ORCHESTRA_<KEY> env vars for a single run. Every key in config_defaults.json is
+    present and of the right shape afterwards. `path` picks another config file (tests)."""
+    say = log_fn or log
+    raw_defaults = _read_json_object(CONFIG_DEFAULTS, say) or {}
+    defaults = {k: v for k, v in raw_defaults.items() if not k.startswith("_")}
+    complete = raw_defaults.get("_complete") or []
+    cfg = {}
+    for p in ([path] if path else (HERE / "config.json", REPO / "orchestra" / "config.json")):
+        if p.exists():
+            cfg = {k: v for k, v in (_read_json_object(p, say) or {}).items() if not k.startswith("_")}
+            break
+    cfg = validated(cfg, defaults, complete, say)
+    cfg = campaign.apply(cfg, REVIEW, now_utc or campaign.utcnow(), log_fn)
+    for k, v in list(cfg.items()):
+        env = os.environ.get(f"ORCHESTRA_{k.upper()}")
+        if env is not None:
+            # ("{", "[") not the string "{[": "" is in every string, and ORCHESTRA_VAULT_DIR="" (vault
+            # notes off) then crashed every tick at import with json.loads("") (soak test, 3 Nov 2026)
+            try:
+                cfg[k] = json.loads(env) if env[:1] in ("{", "[") else type(v)(env) if not isinstance(v, (dict, list)) else v
+            except ValueError as e:
+                say(f"config: ORCHESTRA_{k.upper()} ignored ({e})")
+    return validated(cfg, defaults, complete, say)
+
+
+C = load_config()
+
+# Lanes: argv lists from config.json "lane_argv"; the prompt goes in on stdin. Override or add
+# lanes in .review/lanes.json. The allow list is broad on purpose; the real limits are in
+# hooks/guard.py, which the runner passes with --settings (Thomas: a prefix allow list mostly
+# buys refusals). Two placeholders are resolved at run time:
+#   {npm:<package>:<bin>}  a global npm CLI's JS entry (run with node); the lane is left out
+#                          when the package isn't installed.
+#   {npm-shim:<name>}      the full path of npm's <name>.cmd shim if found, else <name>.
+# claude: stream-json, so the lane log fills as the session works and orchestra/watch.py can
+# show it live (Chuen, 2 Nov); the last line is still the result JSON lane_result reads.
+# codex: Codex 0.162 dropped --full-auto. MCP servers off: with approval "never" Chuen's Desktop
+# Commander etc. fail and the run dies. Full access because Codex's Windows sandbox can't start
+# a shell when launched in the background ("setup refresh had errors"), so workspace-write
+# could only read. Chuen chose this (2 Nov 2026). What still holds: the worktree, the runner's
+# own gate re-run, PASS-only merge, the main-checkout dirty check, and .git/hooks/pre-push
+# (orchestra/hooks/pre-push), which refuses any push while ORCHESTRA_WORKTREE is set or from a
+# checkout under the worktrees folder.
+# gemini: auto_edit = may edit files, may not run shell commands. The runner runs the gate itself.
+def npm_bin(pkg: str, name: str) -> str | None:
+    """A global npm CLI's JS entry, run with node so long prompts never go through cmd.exe."""
+    root = Path(os.environ.get("APPDATA", "")) / "npm" / "node_modules" / pkg
+    try:
+        meta = json.loads((root / "package.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    rel = meta["bin"] if isinstance(meta.get("bin"), str) else (meta.get("bin") or {}).get(name)
+    return str(root / rel) if rel else None
+
+
+def npm_shim(name: str) -> str:
+    """The full path of npm's <name>.cmd, else <name>.
+    The scheduled task's PATH has no %APPDATA%\\npm, so give the lane its full path (2 Nov 2026).
+    The prompt goes in on stdin, so running the .cmd shim is safe for long prompts.
+    Always prefer the npm shim: under Task Scheduler `which("codex")` can find a Windows app
+    alias that then fails to run. Try the home folder too in case APPDATA is unset.
+    npm installs made from inside the Claude desktop app land in its packaged (virtualised)
+    AppData, which only the app sees; outside it the real files are under
+    %LOCALAPPDATA%\\Packages\\Claude_*\\LocalCache\\Roaming (found 2 Nov 2026)."""
+    local = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+    for cmd in (Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming") / "npm" / f"{name}.cmd",
+                *sorted(local.glob(f"Packages/Claude_*/LocalCache/Roaming/npm/{name}.cmd"))):
+        if cmd.exists():
+            return str(cmd)
+    return name
+
+
+_PLACEHOLDER = re.compile(r"\{(npm|npm-shim):([^{}]+)\}")
+
+
+def resolve_argv(argv: list) -> list | None:
+    """argv with its {npm:...}/{npm-shim:...} placeholders filled in; None if an npm CLI is missing."""
+    out = []
+    for arg in argv:
+        m = _PLACEHOLDER.fullmatch(str(arg))
+        if not m:
+            out.append(arg)
+        elif m.group(1) == "npm-shim":
+            out.append(npm_shim(m.group(2)))
+        else:
+            pkg, _, name = m.group(2).rpartition(":")
+            found = npm_bin(pkg, name) if pkg else None
+            if not found:
+                return None
+            out.append(found)
+    return out
+
+
+VALID = {"priority": ("urgent", "normal"), "weight": ("light", "heavy"), "kind": ("work", "maintenance")}
 
 
 # ---------------------------------------------------------------- tasks
@@ -405,7 +487,7 @@ def _limit_text(lane_log: Path) -> str:
     """The tail of a lane log as plain text. In claude's stream-json only result/error events
     count, so a session that merely *read* about limits (a tool result) doesn't trip it."""
     try:
-        lines = lane_log.read_text(encoding="utf-8", errors="replace").splitlines()[-LIMIT_TAIL_LINES:]
+        lines = lane_log.read_text(encoding="utf-8", errors="replace").splitlines()[-int(C["limit_tail_lines"]):]
     except OSError:
         return ""
     out = []
@@ -433,7 +515,8 @@ def _limit_text(lane_log: Path) -> str:
 
 def detect_limit(lane: str, lane_log: Path) -> str | None:
     """The matching line if the tail of the lane log shows a usage/rate limit, else None."""
-    pats = LIMIT_PATTERNS.get(lane) or [p for ps in LIMIT_PATTERNS.values() for p in ps]
+    table = C["limit_patterns"]
+    pats = table.get(lane) or [p for ps in table.values() for p in ps]
     for line in reversed(_limit_text(lane_log).splitlines()):
         if any(re.search(p, line, re.I) for p in pats):
             return line.strip()
@@ -444,7 +527,7 @@ def detect_auth(lane: str, lane_log: Path) -> str | None:
     """The matching line if the lane log shows an expired/missing sign-in, else None. Patterns are
     data: config.json "auth_patterns" (3 Nov 2026: the Claude CLI's sign-in expired at 18:06,
     every run then died in 1 s as NO_REPORT and 9 tasks were parked within an hour)."""
-    table = C.get("auth_patterns") or {}
+    table = C["auth_patterns"]
     pats = table.get(lane) or [p for ps in table.values() for p in ps]
     for line in reversed(_limit_text(lane_log).splitlines()):
         if any(re.search(p, line, re.I) for p in pats):
@@ -455,8 +538,8 @@ def detect_auth(lane: str, lane_log: Path) -> str | None:
 def auth_hit(text: str) -> str:
     """A sign-in failure as a limit message the LIMITED path understands: retry after
     auth_retry_min, with the fix spelled out for status, hot.md and the dashboard."""
-    mins = int(C.get("auth_retry_min", 15))
-    return f"{text[:200]} | {C.get('auth_fix_hint', 'sign in again')}; try again in {mins} minutes"
+    mins = int(C["auth_retry_min"])
+    return f"{text[:200]} | {C['auth_fix_hint']}; try again in {mins} minutes"
 
 
 _MONTHS = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug",
@@ -611,12 +694,9 @@ def why_not_runnable(task: Task, state: dict) -> str | None:
     if task.kind == "maintenance" and not maintenance_allowed(state):
         return f"maintenance cap ({int(C['maint_share'] * 100)}%) reached today"
     # The cap is Claude Code's cost figure; Codex/Gemini runs aren't priced, so it never blocks them.
-    if task.lane not in UNPRICED_LANES and spend_left(state) <= 0:
+    if task.lane not in C["unpriced_lanes"] and spend_left(state) <= 0:
         return f"daily spend cap ${C['daily_spend_cap_usd']:.2f} reached"
     return None
-
-
-UNPRICED_LANES = ("codex", "gemini", "copilot")  # report no cost, so the spend cap can't apply
 
 
 def pick(tasks: list[Task], state: dict) -> Task | None:
@@ -990,19 +1070,13 @@ def integrate(task: Task, branch: str, rec: dict, on_merged=None) -> str:
 # claude -p before integration; its `VERDICT: block` parks the task.
 
 REVIEW_DIFF_PROMPT = HERE / "review_diff_prompt.md"
-DEFAULT_REVIEWER = ["claude", "-p", "--permission-mode", "default", "--permission-prompts", "none",
-                    "--output-format", "json",
-                    "--allowedTools", "Read,Glob,Grep,Bash(git diff:*),Bash(git log:*)",
-                    "--disallowedTools", "Edit,Write,MultiEdit,NotebookEdit,Bash(git push:*),Bash(gh:*)"]
-RISKY_LINES = 400
-REVIEW_DIFF_MAX_CHARS = 150_000
 
 
 def risk(branch: str) -> str | None:
     """Why this branch's diff (vs master) needs a reviewer, or None if it doesn't."""
     files = git("diff", "--name-only", f"HEAD...{branch}", check=False).stdout.split()
-    hits = [f for f in files if f.startswith("orchestra/") or f == "atrium/hook.py"
-            or ".git/hooks" in f or re.fullmatch(r"install_[^/]*\.ps1", f.rsplit("/", 1)[-1])]
+    pats = C["review_risky_patterns"]
+    hits = [f for f in files if any(re.search(p, f) for p in pats)]
     lines = 0
     for row in git("diff", "--numstat", f"HEAD...{branch}", check=False).stdout.splitlines():
         a, d, *_ = row.split("\t") + ["", ""]
@@ -1010,8 +1084,8 @@ def risk(branch: str) -> str | None:
     why = []
     if hits:
         why.append("touches " + ", ".join(hits[:8]) + (" ..." if len(hits) > 8 else ""))
-    if lines > int(C.get("review_max_lines", RISKY_LINES)):
-        why.append(f"{lines} changed lines (over {int(C.get('review_max_lines', RISKY_LINES))})")
+    if lines > int(C["review_max_lines"]):
+        why.append(f"{lines} changed lines (over {int(C['review_max_lines'])})")
     return "; ".join(why) or None
 
 
@@ -1033,15 +1107,16 @@ def parse_verdict(text: str) -> tuple[str | None, str]:
 def run_reviewer(task: Task, wt: Path, branch: str, report: Path, why: str) -> dict:
     """A fresh read-only reviewer lane on the actual diff. Returns {verdict, reasons, seconds,
     cost_usd, log}. Fails closed: no verdict, a timeout or a missing lane is a block."""
-    argv = list(lanes().get("reviewer") or DEFAULT_REVIEWER)
+    argv = list(lanes().get("reviewer") or resolve_argv(C["reviewer_argv"]) or ["(reviewer_argv unresolved)"])
     exe = shutil.which(argv[0]) or argv[0]
     if not Path(exe).exists() and not shutil.which(exe):
         return {"verdict": "block", "reasons": f"reviewer lane missing: {argv[0]} not on PATH",
                 "seconds": 0, "cost_usd": None}
     base = git("merge-base", "HEAD", branch, check=False).stdout.strip() or "HEAD"
     diff = git("diff", f"{base}...{branch}", check=False).stdout
-    if len(diff) > REVIEW_DIFF_MAX_CHARS:
-        diff = diff[:REVIEW_DIFF_MAX_CHARS] + f"\n[... diff cut at {REVIEW_DIFF_MAX_CHARS} chars; run `git diff {base[:12]}...HEAD` for the rest]\n"
+    cut = int(C["review_diff_max_chars"])
+    if len(diff) > cut:
+        diff = diff[:cut] + f"\n[... diff cut at {cut} chars; run `git diff {base[:12]}...HEAD` for the rest]\n"
     read = lambda p: p.read_text(encoding="utf-8", errors="replace") if p.exists() else "(none)"
     prompt = REVIEW_DIFF_PROMPT.read_text(encoding="utf-8")
     for k, v in (("TASK", read(task.path)), ("REPORT", read(report)), ("BRANCH", branch),
@@ -1054,7 +1129,7 @@ def run_reviewer(task: Task, wt: Path, branch: str, report: Path, why: str) -> d
            and k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")}
     env.update(ORCHESTRA_WORKTREE=str(wt), ORCHESTRA_MAIN=str(REPO), ORCHESTRA_REVIEW="1")
     log_path = REPORTS / f"{task.slug}.review.log"
-    timeout = int(C.get("review_timeout_s", 900))
+    timeout = int(C["review_timeout_s"])
     start = time.time()
     with log_path.open("w", encoding="utf-8") as out:
         proc, _job = spawn_lane([exe, *argv[1:]], cwd=wt, env=env, stdin=subprocess.PIPE, stdout=out,
@@ -1090,7 +1165,11 @@ def run_reviewer(task: Task, wt: Path, branch: str, report: Path, why: str) -> d
 # ---------------------------------------------------------------- lanes
 
 def lanes() -> dict:
-    cfg = dict(DEFAULT_LANES)
+    cfg = {}
+    for name, argv in C["lane_argv"].items():
+        argv = resolve_argv(argv)
+        if argv:
+            cfg[name] = argv
     custom = REVIEW / "lanes.json"
     if custom.exists():
         cfg.update(json.loads(custom.read_text(encoding="utf-8")))
@@ -1375,7 +1454,7 @@ def run_gate(task: Task, wt: Path) -> tuple[str, str]:
                                timeout=C["gate_timeout_s"], encoding="utf-8", errors="replace")
         except subprocess.TimeoutExpired:
             return "broken", f"`{cmd}` timed out after {C['gate_timeout_s']}s"
-        if r.returncode in BROKEN_GATE_CODES:
+        if r.returncode in C["broken_gate_codes"]:
             return "broken", f"`{cmd}` exited {r.returncode} (no tests found / command not found)"
         if r.returncode != 0:
             tail = (r.stdout + r.stderr).strip().splitlines()[-3:]
@@ -1668,7 +1747,7 @@ def _after_pass(task: Task, state: dict, ts: dict, entry: dict, wt: Path, branch
 def _limited(task: Task, state: dict, ts: dict, hit: str, seconds: int, spent: str,
              provenance: dict | None = None) -> str:
     """The lane hit its usage limit: not an attempt. Record when the lane may run again."""
-    until = parse_limit_until(hit) or now() + dt.timedelta(minutes=LIMIT_DEFAULT_MIN)
+    until = parse_limit_until(hit) or now() + dt.timedelta(minutes=C["limit_default_min"])
     state.setdefault("lanes", {})[task.lane] = {"limited_until": until.isoformat(),
                                                 "since": now().isoformat(), "message": hit[:300]}
     ts["attempts"] = max(0, ts["attempts"] - 1)
@@ -1817,7 +1896,7 @@ def install_pre_push() -> bool:
         return False
     try:
         r = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-path", "hooks/pre-push"],
-                           cwd=REPO, capture_output=True, text=True, timeout=C.get("git_timeout_s", 60))
+                           cwd=REPO, capture_output=True, text=True, timeout=C["git_timeout_s"])
         if r.returncode or not r.stdout.strip():
             return False
         dst = Path(r.stdout.strip())
