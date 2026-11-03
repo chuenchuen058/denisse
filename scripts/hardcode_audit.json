@@ -1,0 +1,100 @@
+{
+  "scan": {
+    "include_files": ["*.py"],
+    "exclude_dirs": [".*", ".venv", "venv", "denisse-wt", "__pycache__", "node_modules", "site-packages", "vendor", "third_party", "models", "memory", "logs", "tests", "test", "fixtures", "fixture", "*-fixtures"],
+    "exclude_files": ["test_*.py", "*_test.py", "conftest.py"],
+    "exclude_paths": ["eval/cases.py", "eval/proposed_cases.py", "eval/bakeoff/*"]
+  },
+  "kinds": {
+    "regex candidate": {"home": "data file"},
+    "text match / keyword candidate": {"home": "data file"},
+    "absolute path": {"home": "runtime lookup"},
+    "user / vault name": {"home": "runtime lookup"},
+    "model name": {"home": "config.json"},
+    "URL": {"home": "config.json"},
+    "time / duration / threshold / limit": {"home": "config.json"},
+    "numeric literal (review)": {"home": "config.json"}
+  },
+  "fallback_kind": "numeric literal (review)",
+  "suppress_fallback_when": ["time / duration / threshold / limit"],
+  "mapping_iterators": {"items": ["key", "value"], "keys": ["key"], "values": ["value"]},
+  "rules": [
+    {
+      "kind": "regex candidate", "selector": "call", "type": "string",
+      "call_pattern": "^(?:re|regex)\\.(?:compile|search|match|fullmatch|findall|finditer|split|sub|subn)$",
+      "positions": [0], "keywords": ["pattern"]
+    },
+    {
+      "kind": "text match / keyword candidate", "selector": "comparison", "type": "string",
+      "operators": ["In", "NotIn", "Eq", "NotEq"], "value_pattern": "[^\\W\\d_]"
+    },
+    {
+      "kind": "text match / keyword candidate", "selector": "call", "type": "string",
+      "call_pattern": "\\.(?:startswith|endswith|find|rfind|index|count|replace)$",
+      "positions": [0], "keywords": [], "value_pattern": "[^\\W\\d_]"
+    },
+    {
+      "kind": "text match / keyword candidate", "selector": "literal", "type": "string",
+      "context_pattern": "(?i)(?:keyword|phrase|aliases|synonym|(?:^|_)words?(?:_|$))",
+      "value_pattern": "[^\\W\\d_]"
+    },
+    {
+      "kind": "absolute path", "selector": "literal", "type": "string",
+      "value_pattern": "(?:(?<![\\w])[A-Za-z]:[\\\\/]|\\\\\\\\[^\\\\\\s]+\\\\|^/(?!/)[^\\s]+|(?:^|[\\s'\"])/(?:home|Users|tmp|etc|var|opt|usr)/)"
+    },
+    {
+      "kind": "user / vault name", "selector": "literal", "type": "string",
+      "value_pattern": "(?i)(?<![\\w])(?:Chuen|Xichu|Denisse|King['’]s College London)(?![\\w])"
+    },
+    {
+      "kind": "model name", "selector": "literal", "type": "string",
+      "value_pattern": "(?i)(?:\\b(?:llama|qwen|gemma|mistral|mixtral|phi|deepseek|gpt|claude|whisper|kokoro|vosk)[\\w.:-]*|\\b[\\w./-]+:\\d+(?:\\.\\d+)?[bBmM]\\b)"
+    },
+    {
+      "kind": "model name", "selector": "literal", "type": "string",
+      "context_pattern": "(?i)(?:^|[\\W_])model(?:$|[\\W_])",
+      "value_pattern": "^[A-Za-z0-9][A-Za-z0-9_./:-]*$"
+    },
+    {
+      "kind": "URL", "selector": "literal", "type": "string",
+      "value_pattern": "(?i)\\b(?:https?|wss?|ftp)://[^\\s]+"
+    },
+    {
+      "kind": "time / duration / threshold / limit", "selector": "literal", "type": "number",
+      "context_pattern": "(?i)(?:time|duration|timeout|delay|interval|seconds?|minutes?|hours?|days?|weeks?|sleep|after|wait|threshold|limit|max|min|cap|budget|retries|retry|rounds?|tokens?|num_ctx|keep_alive|temperature|top_p|size|length|count|_ms|_sec|_ttl|_fps|rate)"
+    },
+    {
+      "kind": "time / duration / threshold / limit", "selector": "literal", "type": "string",
+      "value_pattern": "^[+-]?\\d+(?:\\.\\d+)?$",
+      "context_pattern": "(?i)(?:time|duration|timeout|delay|interval|seconds?|minutes?|hours?|days?|weeks?|sleep|after|wait|threshold|limit|max|min|cap|budget|retries|retry|rounds?|tokens?|num_ctx|keep_alive|temperature|top_p|size|length|count|_ms|_sec|_ttl|_fps|rate)"
+    },
+    {
+      "kind": "time / duration / threshold / limit", "selector": "literal", "type": "string",
+      "value_pattern": "(?i)(?:\\b\\d{1,2}:\\d{2}(?::\\d{2})?\\b|\\b\\d+(?:\\.\\d+)?\\s*(?:milliseconds?|seconds?|minutes?|hours?|days?|weeks?)\\b)"
+    },
+    {"kind": "numeric literal (review)", "selector": "literal", "type": "number"}
+  ],
+  "ranking": [
+    {"rank": 1, "label": "Conversation, intent routing and visible study behaviour", "top_level_only": true, "paths": ["brain.py", "tool_router.py", "study_mode.py", "tray.py", "clarify.py", "speech_control.py", "planner.py", "multistep.py", "learning.py", "instincts.py"]},
+    {"rank": 2, "label": "User-facing tools, voice, UI and runtime services", "top_level_only": true, "paths": ["*.py"]},
+    {"rank": 3, "label": "Background automation and operator tooling", "top_level_only": false, "paths": ["*"]}
+  ],
+  "report": {
+    "output": "docs/hardcoding_audit.md",
+    "notes": [
+      "Generated from Python ASTs only; no source module is imported or executed and no application behaviour is changed.",
+      "Review order follows the configurable user-impact tiers, then candidate count (descending), then path. Line numbers refer to this source snapshot; regenerate after edits.",
+      "Candidates are intentionally conservative: regexes include parsers, text comparisons include protocol/status strings, and numeric literals include indices, conversion factors and geometry. Review these before moving anything. A suggested home is a triage hint, not an instruction to replace model understanding with a configurable phrase matcher.",
+      "Static coverage is not proof of exhaustiveness: comments/docstrings, non-Python files, excluded fixtures/private state/dependencies, dynamically constructed/imported values and interprocedural user-text flow are not analysed. Local aliases and comprehension/loop iterables are followed conservatively without execution-order analysis; results can include unrelated possible bindings.",
+      "Values are complete decoded literal representations; f-string fragments and concatenated pieces are reported at their AST source location. Multiple kinds at one location are intentional. No value truncation is applied. Numeric strings used as defaults are included. Booleans and None are excluded."
+    ],
+    "usage": [
+      "Regenerate from the repository root:",
+      "```powershell",
+      ".venv\\Scripts\\python.exe scripts\\hardcode_audit.py",
+      "```",
+      "Use `--root`, `--config` and `--output` to audit a fixture tree or change policy/output. Default root and companion configuration are derived from the script location. All detection expressions, directory/file exclusions, suggested homes and impact tiers live in `scripts/hardcode_audit.json`.",
+      "Exit 0 means the inventory completed, even when candidates exist. Missing/empty roots, unreadable/invalid Python and invalid configuration fail with a nonzero exit. Scan errors also appear in the report. Symlinks and Windows junctions are not followed. Eval runners are included; separate case/fixture files and test modules are excluded."
+    ]
+  }
+}
