@@ -1,8 +1,14 @@
 """Regression test for tasks.py -- deadline parsing and task matching.
 
 Uses a temp store so it never touches memory/tasks.json.
+
+A unittest module (it was a print-and-sys.exit script, which made
+`unittest discover -p test_tasks.py` error on import); every original check
+is kept as it was.
 """
 import sys
+import tempfile
+import unittest
 from datetime import datetime
 from pathlib import Path
 
@@ -10,68 +16,99 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 import tasks
+import time_parse
 
-fails = []
 # Wednesday 2026-09-23 21:00, so "friday" is 2 days ahead.
 NOW = datetime(2026, 9, 23, 21, 0)
 
-print("== deadline parsing ==")
-cases = [
-    ("before friday", "2026-09-25 23:59"),
-    ("by friday 5pm", "2026-09-25 17:00"),
-    ("friday", "2026-09-25 23:59"),
-    ("next monday 9am", "2026-09-28 09:00"),
-    ("tomorrow 5pm", "2026-09-24 17:00"),
-    ("in 2 hours", "2026-09-23 23:00"),
-    ("wednesday", "2026-09-30 23:59"),   # today is Wed -> next week, not today
-    ("", None),
-    ("sometime whenever", None),
-]
-for text, want in cases:
-    got = tasks.parse_due(text, now=NOW)
-    got_s = got.strftime("%Y-%m-%d %H:%M") if got else None
-    ok = got_s == want
-    print(f"[{'OK ' if ok else 'FAIL'}] {text!r:22} -> {got_s}  (want {want})")
-    if not ok:
-        fails.append(text)
+
+def _fmt(d):
+    return d.strftime("%Y-%m-%d %H:%M") if d else None
 
 
-print("\n== task store and matching ==")
-import tempfile
-tasks.TASKS_FILE = str(Path(tempfile.mkdtemp()) / "tasks.json")
+class DeadlineParsing(unittest.TestCase):
+    cases = [
+        ("before friday", "2026-09-25 23:59"),
+        ("by friday 5pm", "2026-09-25 17:00"),
+        ("friday", "2026-09-25 23:59"),
+        ("next monday 9am", "2026-09-28 09:00"),
+        ("tomorrow 5pm", "2026-09-24 17:00"),
+        ("in 2 hours", "2026-09-23 23:00"),
+        ("wednesday", "2026-09-30 23:59"),   # today is Wed -> next week, not today
+        ("", None),
+        ("sometime whenever", None),
+        # time_parse, through parse_due (2026-11-03): the old weekday regex
+        # read "thursday at 3" as 03:00.
+        ("thursday at 3", "2026-09-24 15:00"),
+        ("tomorrow morning", "2026-09-24 09:00"),
+        ("at half past four", "2026-09-24 16:30"),  # 16:30 today has gone
+        ("on the 12th", "2026-10-12 23:59"),
+        ("in 20 mins", "2026-09-23 21:20"),
+    ]
 
-tasks.add_task("email Sunway about the firm visit", "before friday")
-tasks.add_task("submit the EE problem set", "tomorrow 5pm")
-tasks.add_task("buy a new soldering tip")
+    def test_parse_due(self):
+        for text, want in self.cases:
+            with self.subTest(text=text):
+                self.assertEqual(_fmt(tasks.parse_due(text, now=NOW)), want)
 
-open_now = tasks.list_tasks()
-checks = [
-    ("three open tasks", len(open_now) == 3),
-    ("soonest deadline first", open_now[0]["text"].startswith("submit")),
-    ("undated sorts last", open_now[-1]["text"].startswith("buy")),
-    ("raw phrase kept", open_now[0]["due_text"] == "tomorrow 5pm"),
-]
+    def test_naive_store_times(self):
+        self.assertIsNone(tasks.parse_due("tomorrow 5pm", now=NOW).tzinfo)
 
-# Fuzzy match on words, not the id.
-done = tasks.complete_task("the sunway email")
-checks.append(("fuzzy match completes the right task",
-               done is not None and "Sunway" in done["text"]))
-checks.append(("done task hidden", len(tasks.list_tasks()) == 2))
-checks.append(("done task kept", len(tasks.list_tasks(include_done=True)) == 3))
-checks.append(("completing it again finds nothing",
-               tasks.complete_task("the sunway email") is None))
+    def test_default_clock_is_time_parse_clock(self):
+        with time_parse.fixed_clock(NOW):
+            self.assertEqual(_fmt(tasks.parse_due("friday")), "2026-09-25 23:59")
 
-# Ambiguity must refuse rather than guess.
-tasks.add_task("call mum about the flight")
-tasks.add_task("book the flight")
-checks.append(("ambiguous match refuses", tasks.complete_task("flight") is None))
-checks.append(("specific match still works",
-               tasks.complete_task("book flight") is not None))
 
-for name, ok in checks:
-    print(f"[{'OK ' if ok else 'FAIL'}] {name}")
-    if not ok:
-        fails.append(name)
+class TaskStore(unittest.TestCase):
+    def setUp(self):
+        self._file, self._mirror = tasks.TASKS_FILE, tasks._mirror_to_vault
+        tasks.TASKS_FILE = str(Path(tempfile.mkdtemp()) / "tasks.json")
+        tasks._mirror_to_vault = lambda: None
 
-print("\n" + ("ALL PASS" if not fails else "FAILED: " + ", ".join(map(str, fails))))
-sys.exit(1 if fails else 0)
+    def tearDown(self):
+        tasks.TASKS_FILE, tasks._mirror_to_vault = self._file, self._mirror
+
+    def test_store_and_matching(self):
+        tasks.add_task("email Sunway about the firm visit", "before friday")
+        tasks.add_task("submit the EE problem set", "tomorrow 5pm")
+        tasks.add_task("buy a new soldering tip")
+
+        open_now = tasks.list_tasks()
+        self.assertEqual(len(open_now), 3, "three open tasks")
+        self.assertTrue(open_now[0]["text"].startswith("submit"), "soonest deadline first")
+        self.assertTrue(open_now[-1]["text"].startswith("buy"), "undated sorts last")
+        self.assertEqual(open_now[0]["due_text"], "tomorrow 5pm", "raw phrase kept")
+
+        # Fuzzy match on words, not the id.
+        done = tasks.complete_task("the sunway email")
+        self.assertTrue(done is not None and "Sunway" in done["text"],
+                        "fuzzy match completes the right task")
+        self.assertEqual(len(tasks.list_tasks()), 2, "done task hidden")
+        self.assertEqual(len(tasks.list_tasks(include_done=True)), 3, "done task kept")
+        self.assertIsNone(tasks.complete_task("the sunway email"),
+                          "completing it again finds nothing")
+
+        # Ambiguity must refuse rather than guess.
+        tasks.add_task("call mum about the flight")
+        tasks.add_task("book the flight")
+        self.assertIsNone(tasks.complete_task("flight"), "ambiguous match refuses")
+        self.assertIsNotNone(tasks.complete_task("book flight"), "specific match still works")
+
+    def test_add_task_tool_echoes_and_asks(self):
+        import tools
+
+        with time_parse.fixed_clock(NOW):  # a Wednesday evening
+            said = tools.add_task("call the dentist", "thursday at 3")
+            self.assertEqual(said, "Added: call the dentist -- due Thursday 24 Sep, 15:00.")
+            asked = tools.add_task("water the plants", "wednesday")
+            self.assertTrue(asked.startswith("Not added yet"), asked)
+            self.assertIn("next Wednesday", asked)
+            unread = tools.add_task("tidy the desk", "whenever")
+            self.assertIn("couldn't work out a date", unread)
+        texts = [t["text"] for t in tasks.list_tasks()]
+        self.assertIn("call the dentist", texts)
+        self.assertNotIn("water the plants", texts)  # asked, so nothing was added
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

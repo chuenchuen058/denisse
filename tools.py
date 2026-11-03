@@ -660,10 +660,23 @@ def read_skill(name: str) -> str:
 def add_task(text: str, due: str = "") -> str:
     """Add something Chuen has to do, with an optional deadline in his own
     words. Returns confirmation including how the deadline was understood,
-    so a misread date is visible immediately rather than at the deadline."""
+    so a misread date is visible immediately rather than at the deadline.
+
+    time_parse turns his words into the time, not the model. A phrase that
+    could mean two days ("Thursday at 3" said on Thursday morning) adds
+    nothing and hands the model the question to ask him instead."""
+    import time_parse
+
+    if due and due.strip():
+        parsed = time_parse.parse(due)
+        if parsed.question:
+            return (f"Not added yet: \"{due.strip()}\" is ambiguous. Ask Chuen: "
+                    f"{parsed.question} Then call add_task again with the day he means.")
     t = tasks.add_task(text, due)
     if t["due"]:
-        return f"Added: {tasks.describe(t)}"
+        # In words ("Thursday 5 Nov, 15:00"), so a wrong parse is visible.
+        when = datetime.datetime.fromisoformat(t["due"])
+        return f"Added: {t['text']} -- due {time_parse.describe(when)}."
     if t["due_text"]:
         return (f"Added: {t['text']} -- but I couldn't work out a date from "
                 f"\"{t['due_text']}\", so it has no deadline.")
