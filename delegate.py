@@ -26,12 +26,15 @@ import shutil
 import subprocess
 import threading
 
-HOME = os.path.expanduser("~")
-VAULT = os.path.join(HOME, "OneDrive - King's College London", "Denisse")
+import settings
+
+HOME = settings.home()
+VAULT = settings.vault()
 DRAFTS = os.path.join(VAULT, "Denisse", "Drafts")
-READ_DIRS = [VAULT, os.path.join(HOME, "OneDrive", "Documents"),
-             os.path.join(HOME, "OneDrive", "Desktop"), os.path.join(HOME, "GitHub"),
-             os.path.join(HOME, "OneDrive - King's College London", "Documents")]
+# What a delegated Claude may read: config.json's fixed list, in its order --
+# never discovered, since every folder added widens what it can see.
+READ_DIRS = [settings.expand(d) for d in settings.get("read_dirs", ["{vault}"])]
+LEARNING_NOTE = settings.get("learning_note")
 TIMEOUT_S = 600
 
 ALLOWED = "Read,Glob,Grep,WebSearch,WebFetch"
@@ -41,8 +44,9 @@ DRY_RUN = False   # the eval sets this: decide to hand off, never actually spend
 on_done = None    # tray sets this to show the result when a job finishes
 
 SYSTEM = (
-    "You are doing a job for Chuen Lim, a second-year Biomedical Engineering "
-    "student at King's College London, on behalf of Denisse, his local "
+    f"You are doing a job for {settings.user_name()}"
+    + (f", {settings.get('user_about')}" if settings.get("user_about") else "")
+    + ", on behalf of Denisse, his local "
     "assistant. Do the job fully and well, as the finished deliverable -- he "
     "wants the task done, not a description of how he could do it. You can "
     "read his files and search the web; you cannot edit files, so return the "
@@ -63,8 +67,8 @@ def _prompt(task: str, context: list) -> str:
             f"internship research and CV-related notes.)\n\n"
             f"Before anything external-facing (CV, cover letter, application, email), "
             f"read Atlas/Verified-Claims.md in the vault and state only claims marked "
-            f"verified: true. For anything meant to teach him, follow "
-            f"Atlas/Concepts/Learning/How-Chuen-Learns.md."
+            f"verified: true."
+            + (f" For anything meant to teach him, follow {LEARNING_NOTE}." if LEARNING_NOTE else "")
             + _shared_context())
 
 

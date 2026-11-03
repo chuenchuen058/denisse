@@ -11,5 +11,19 @@
       "env": "DENISSE_WHISPER_MODEL",
       "value": "small.en"
     }
+  },
+  "settings": {
+    "_about": "Who Denisse works for and which of his folders she may hand out (settings.py; AGENTS.md Rule 0). The vault, home and repo are not set here: settings.py takes them from DENISSE_VAULT / DENISSE_HOME / DENISSE_REPO, else discovers them (Obsidian's registered vault, the OS home, this checkout). config.example.json lists every key. '~' = home, '{vault}' = the vault.",
+    "user_name": "Chuen Lim",
+    "user_about": "a second-year Biomedical Engineering student at King's College London",
+    "_read_dirs": "Folders a delegated Claude may READ (delegate.py), in this order. A fixed list on purpose, never discovered: adding a folder widens what it can see (Chuen, 2026-11-03).",
+    "read_dirs": [
+      "{vault}",
+      "~/OneDrive/Documents",
+      "~/OneDrive/Desktop",
+      "~/GitHub",
+      "~/OneDrive - King's College London/Documents"
+    ],
+    "learning_note": "Atlas/Concepts/Learning/How-Chuen-Learns.md"
   }
 }

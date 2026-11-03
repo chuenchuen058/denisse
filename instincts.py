@@ -30,8 +30,9 @@ from contextlib import contextmanager
 
 import brain_rules
 import learning
+import settings
 
-VAULT = os.environ.get("DENISSE_VAULT", r"C:\Users\Xichu\OneDrive - King's College London\Denisse")
+VAULT = settings.vault()
 BRAIN_DIR = os.path.join(VAULT, "Denisse", "Brain")
 INSTINCTS_FILE = os.path.join(BRAIN_DIR, "instincts.json")
 INSTINCTS_MD = os.path.join(BRAIN_DIR, "instincts.md")
