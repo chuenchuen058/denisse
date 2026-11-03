@@ -14,26 +14,34 @@ The open question is process memory, like the one Brain per process
 (conversation.get_brain). It only answers the message right after it: the
 brain passes her previous reply, which must be that exact question. Any
 other message closes it, it expires, and it is taken once.
+
+Softcoded (Rule 0, 2026-11-03): the word lists and limits are in
+dialogue_rules.json ("clarify"). His answer is read by its words, not
+matched against fixed sentences: a short reply made only of agreeing
+words and courtesy filler is a yes ("yeah thats it thanks"), of refusing
+words and filler a no ("nah neither of them"), and a short reply with a
+position or "one"/"other"/"both" in it is a choice. Stretched words and
+typos ("yesss", "corect", "secnd") are matched to the nearest word
+(dialogue_rules.closest). The choice itself stays in code, not the model:
+see above for why.
 """
 import os
 import re
 import threading
 import time
 
-EXPIRY_SECONDS = 600
-_STOP = {"the", "a", "an", "and", "or", "of", "on", "in", "at", "to", "for", "with", "is", "are", "was", "my",
-         "your", "you", "i", "me", "it", "that", "this", "one", "ones", "mean", "meant", "about", "from", "by",
-         "do", "did", "what", "which", "when", "where", "no", "not", "yes", "yeah", "yep", "please", "just",
-         "s", "m", "pm", "am", "note", "notes", "said", "says"}
-_YES = re.compile(r"^\s*(?:yes|yeah|yep|yup|ya|correct|right|exactly|that one|that's the one|that'?s it)"
-                  r"(?:[,.!]?\s*(?:please|thanks))?[.!\s]*$", re.I)
-_NO = re.compile(r"^\s*(?:no|nope|nah|neither|none of (?:them|those|these)|neither of (?:them|those))"
-                 r"(?:[,.!]?\s*(?:not that one|neither))?[.!\s]*$", re.I)
-_ORDINAL = {"first": 0, "1": 0, "1st": 0, "second": 1, "2": 1, "2nd": 1, "third": 2, "3": 2, "3rd": 2,
-            "fourth": 3, "4": 3, "4th": 3}
-# Shaped like an answer to "which one?" -- so it can't be a new request.
-_SELECTION = re.compile(r"^\s*(?:no[,.]?\s+)?(?:the\s+)?(?:\w+\s+){0,2}(?:one|other)\b|^\s*(?:the\s+)?(?:last|other)\b"
-                        r"|^\s*(?:\d|first|second|third|fourth)\b|^\s*both\b", re.I)
+import dialogue_rules
+
+_R = dialogue_rules.get("clarify")
+
+EXPIRY_SECONDS = _R["expiry_seconds"]
+_STOP = frozenset(_R["stop_words"])
+_AFFIRM = frozenset(_R["affirm_words"])
+_NEGATE = frozenset(_R["negate_words"])
+_FILLER = frozenset(_R["reply_filler"])
+_OTHER = frozenset(_R["other_words"])
+_SELECT = frozenset(_R["selection_words"])
+_ORDINAL = dict(_R["ordinals"])
 
 _lock = threading.Lock()
 _pending = None
@@ -41,6 +49,48 @@ _pending = None
 
 def _words(text):
     return re.findall(r"[a-z0-9]+", (text or "").lower().replace("_", " "))
+
+
+def _near(word, vocabulary):
+    return dialogue_rules.closest(word, vocabulary, _R["fuzzy_ratio"], _R["fuzzy_min_len"])
+
+
+def _only(text, vocabulary):
+    """A short reply made of `vocabulary` words (one at least) and filler."""
+    words = _words(text)
+    if not words or len(words) > _R["short_reply_words"]:
+        return False
+    hits = [w for w in words if _near(w, vocabulary)]
+    return bool(hits) and all(w in hits or w in _FILLER for w in words)
+
+
+def _phrase(text):
+    """One of the agreeing phrases with no agreeing word in them."""
+    flat = " ".join(_words(text.replace("'", "")))
+    return any(flat == " ".join(_words(p.replace("'", ""))) for p in _R["affirm_phrases"])
+
+
+def _is_yes(text):
+    return _only(text, _AFFIRM) or _phrase(text)
+
+
+def _is_no(text):
+    return _only(text, _NEGATE)
+
+
+def _ordinal(word):
+    """The index a position word stands for ('secnd' too), or None."""
+    hit = _near(word, [k for k in _ORDINAL if not k.isdigit()]) if not word.isdigit() else word
+    return _ORDINAL.get(hit) if hit else None
+
+
+def _is_selection(text):
+    """Shaped like an answer to "which one?" -- short, with a position or a
+    choosing word in it -- so it can't be a new request."""
+    words = _words(text)
+    core = [w for w in words if w not in _FILLER and w not in _NEGATE and w not in _SELECT]
+    return (0 < len(words) <= _R["short_reply_words"] and len(core) <= _R["selection_core_words"]
+            and any(w in _SELECT or _ordinal(w) is not None for w in words))
 
 
 def _segments(result):
@@ -73,7 +123,7 @@ def _label(title, text, titles, subject=()):
         return m.group(1).replace("_", " ").strip()
     words = []
     for w in text.rstrip(".!?").split()[:6]:
-        if re.search(r"\d", w) or w.lower() in ("on", "at", "is", "was", "due"):
+        if re.search(r"\d", w) or w.lower() in _R["label_stops"]:
             break
         words.append(w.rstrip(",;"))
     lead = " ".join(words)
@@ -221,13 +271,13 @@ def pick(text, p, complaint=False):
     if len(hits) > 1:
         return "ambiguous", hits
     for w in _words(t):
-        if w in _ORDINAL and (_SELECTION.match(t) or len(_words(t)) <= 3):
-            n = _ORDINAL[w]
+        n = _ordinal(w)
+        if n is not None and (_is_selection(t) or len(_words(t)) <= _R["ordinal_alone_words"]):
             return ("pick", options[n]) if n < len(options) else ("unsupported", None)
-    if _YES.match(t) or re.fullmatch(r"(?:the\s+)?other(?:\s+one)?", t):
+    if _is_yes(t) or _only(t, _OTHER):
         return ("pick", options[0]) if len(options) == 1 else ("ambiguous", options)
-    if complaint or _NO.match(t):
+    if complaint or _is_no(t):
         return "none", None
-    if _SELECTION.match(t):
+    if _is_selection(t):
         return "unsupported", None
     return "unrelated", None
