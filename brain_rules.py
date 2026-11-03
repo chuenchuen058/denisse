@@ -11,13 +11,11 @@ import threading
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+import tool_policy
+
 # These permissions cannot be granted by a learned routing preference.
-MUTATING_TOOLS = frozenset({
-    "remember", "add_task", "complete_task", "remove_task", "write_file",
-    "run_shell_command", "open_application", "set_timer", "cancel_timer",
-    "play_song", "pause_music", "resume_music", "skip_song", "previous_song",
-    "clean_temp_files", "disable_startup_program", "restore_startup_program",
-})
+# Every tool whose side_effect in tool_policy.json is "write".
+MUTATING_TOOLS = tool_policy.mutating()
 
 
 @dataclass(frozen=True)
