@@ -153,6 +153,12 @@ GROUPS = {
         # 2026-10-29: "hows my internship tracker" and "the projects im
         # doing" weren't routed here, so she said she had no information.
         r"|internships?|tracker|\bprojects?\b"
+        # 2026-11-03: "which week of signals did we do the laplace
+        # transform" has no "week N", so search_vault was never offered and
+        # she said she didn't recall. Asking WHICH week is asking his notes.
+        # (Bare module names were tried and dropped: "remind me on Thursday
+        # to revise signals" is a reminder, and got the vault offered.)
+        r"|\b(?:which|what) week\b"
         r"|what am i working on|catch up with me|(?:going on|happening) with me",
     ),
     # Added with timers.py, 2026-10-20. "start timer" used to match only
