@@ -1,0 +1,64 @@
+{
+  "_about": "Defaults for standing_instructions.py, conversation.py and runtime_status.py (AGENTS.md Rule 0). Don't edit this file to change a value: copy the key into config.json under settings.runtime (same nesting) and change it there. runtime_config.py checks every value against the one here -- same type, numbers above 0, templates using only the {fields} used here -- and a bad one logs a line and falls back to this default.",
+  "standing_instructions": {
+    "_jobs": "The jobs a fresh tray starts with (memory/standing_instructions.json takes over once it exists). Ids are the code's: task_review, project_review, downloads.",
+    "jobs": [
+      {"id": "task_review", "enabled": true, "every_seconds": 21600,
+       "goal": "Review open tasks and their deadlines. Suggest the next useful task; do not complete or create tasks."},
+      {"id": "project_review", "enabled": true, "every_seconds": 3600,
+       "goal": "Check the project's local Git status. Suggest one next engineering step from the evidence; do not change code or commit."},
+      {"id": "downloads", "enabled": true, "every_seconds": 15,
+       "goal": "Sort quiet loose Downloads files using the existing type rules; preserve subfolders and collisions."}
+    ],
+    "_min_every_seconds": "Shortest interval a job may be set to, per job id; ids not listed use 'other'.",
+    "min_every_seconds": {"downloads": 15, "other": 300},
+    "max_every_seconds": 86400,
+    "max_goal_chars": 600,
+    "max_file_bytes": 16384,
+    "poll_seconds": 5
+  },
+  "conversation": {
+    "_deflection_patterns": "Regexes (case-insensitive) for replies that did nothing for him. Matching turns stay on disk but are left out of replay(). Patterns that don't compile are dropped with a log line.",
+    "deflection_patterns": [
+      "didn'?t\\s+(?:quite\\s+)?catch",
+      "\\brephrase\\b",
+      "say\\s+that\\s+again",
+      "ask\\s+that\\s+again",
+      "i\\s+don'?t\\s+have\\s+(?:any\\s+|enough\\s+)?(?:information|info|details|access)",
+      "can\\s+you\\s+tell\\s+me\\s+(?:more|what)",
+      "i'?m\\s+not\\s+(?:actually\\s+)?able\\s+to",
+      "it\\s+seems\\s+(?:like\\s+)?i\\s+don'?t\\s+have",
+      "i\\s+got\\s+stuck",
+      "i\\s+haven'?t\\s+confirmed\\s+that\\s+action",
+      "i\\s+couldn'?t\\s+complete",
+      "\\b[a-z]+_[a-z_]+'?\\s+tool\\b"
+    ],
+    "_noise_filler_words": "A voice transcript made only of these words is answered but not recorded (looks_like_noise). Keep it to words that are never a request on their own.",
+    "noise_filler_words": ["the", "a", "an", "uh", "um", "ah", "oh", "eh", "hmm", "mm",
+                           "is", "it", "to", "and", "or", "of", "in", "on", "you", "i"]
+  },
+  "runtime_status": {
+    "write_every_seconds": 10,
+    "_stale_after_writes": "The snapshot counts as stale (tray may be hung) after this many missed writes.",
+    "stale_after_writes": 3,
+    "collect_error_chars": 200,
+    "read_attempts": 10,
+    "read_retry_seconds": 0.05,
+    "wording": {
+      "no_status": "no readable status ({error}) -- this tray predates runtime_status, or isn't running",
+      "not_snapshot": "the status file isn't a status snapshot",
+      "exited": "process {pid} isn't running -- the snapshot is from a tray that has exited",
+      "stale": "the snapshot is {age:.0f}s old -- the tray may be hung",
+      "collect_error": "the tray couldn't read its own state: {error}",
+      "timer": "timer running: {label} until {ends_at}",
+      "unnamed_timer": "unnamed",
+      "study": "study mode on: {phase} until {ends_at}",
+      "chat_busy": "a reply is being worked on",
+      "job": "job running: {job}",
+      "no_snapshot": "(no snapshot)",
+      "safe": "Safe to restart: yes",
+      "unsafe": "Safe to restart: no -- {reasons}",
+      "reason_separator": "; "
+    }
+  }
+}
