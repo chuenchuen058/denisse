@@ -19,6 +19,7 @@ Exit status is non-zero if any module fails, times out or tries the guard.
 Real-model evals (eval/run_eval.py) and the healthcheck stay separate.
 """
 import argparse
+from html import escape
 import json
 import os
 from pathlib import Path
@@ -84,6 +85,40 @@ def summary_line(out):
         return tally[-1].strip()[:60]
     lines = [l for l in out.strip().splitlines() if l.strip()]
     return lines[-1].strip()[:60] if lines else ""
+
+
+def test_count(out):
+    """Read unittest's count or the custom scripts' passed/total tally."""
+    ran = re.findall(r"^Ran (\d+) tests?\b", out, re.M)
+    if ran:
+        return int(ran[-1])
+    tally = re.findall(r"^.*\b\d+/(\d+)\b.*(?:passed|ok|OK).*$", out, re.M)
+    return int(tally[-1]) if tally else None
+
+
+def github_summary(rows):
+    """Append a failures-first summary when running inside GitHub Actions."""
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path:
+        return
+    ordered = sorted(rows, key=lambda r: (r["passed"], r["suite"]))
+    lines = ["", "## Offline regression checks", "",
+             "| Module | Result | Seconds | Test count |",
+             "| --- | --- | ---: | ---: |"]
+    for row in ordered:
+        suite = escape(row["suite"]).replace("|", "&#124;")
+        count = test_count(row.get("output", ""))
+        lines.append(f"| <code>{suite}</code> | {row['status']} | {row['seconds']:.1f} | "
+                     f"{count if count is not None else '-'} |")
+    lines += ["", "Test count is `-` when the module did not report a count (including skipped modules).", ""]
+    for row in ordered:
+        if row["passed"]:
+            continue
+        excerpt = "\n".join(row.get("output", "").splitlines()[:20])
+        lines += ["<details>", f"<summary>{escape(row['suite'])} — {row['status']} (first 20 lines)</summary>",
+                  "", f"<pre>{escape(excerpt or '(no output captured)')}</pre>", "", "</details>", ""]
+    with Path(path).open("a", encoding="utf-8") as summary:
+        summary.write("\n".join(lines) + "\n")
 
 
 def run_one(path, env, guard_dir):
@@ -189,6 +224,7 @@ def main():
     print(f"\n{len(rows)} modules: " + ", ".join(f"{n} {k.lower()}" for k, n in sorted(counts.items()))
           + f" -- {wall}s wall, {args.jobs} at a time", flush=True)
 
+    github_summary(rows)
     if args.report:
         report = {"kind": "offline-regressions", "python": sys.version.split()[0],
                   "platform": sys.platform, "fast": args.fast, "wall_seconds": wall,
