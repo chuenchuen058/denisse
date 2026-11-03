@@ -3,6 +3,17 @@
 Instructions for any AI assistant working in this repo. Vendor-neutral;
 `CLAUDE.md` alongside is a pointer to this file.
 
+## Rule 0 — softcode everything (Chuen, 3 Nov 2026; overrides every other rule here)
+
+Never hardcode. No fixed phrases, keyword lists or regexes for what Chuen
+"might say", no literal paths, names, model names, times, thresholds or
+limits buried in code. Values live in config/data files (or are found at
+runtime); understanding what he means is the model's job, given good tool
+descriptions and context — not a pattern match. When you touch code that
+already hardcodes something, move it to config/data or make it general as
+part of the change. Tests and eval fixtures may use literal examples; the
+code they test may not depend on those exact words.
+
 Denisse is Chuen's local Jarvis-style assistant: a Python system-tray app on
 a local Ollama model (`llama3.1:8b`), no cloud LLM calls. `tray.py` is the
 real UI — headless under `pythonw.exe`, no persistent window.
