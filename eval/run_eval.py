@@ -260,7 +260,7 @@ def headless_study(spec: dict):
         yield mode
 
 
-def study_turn(case: dict, mode):
+def study_turn(case: dict, mode=None):
     """Study mode's whole-message fast path: tray.py's chat matches the
     message against study_mode.match_command BEFORE the brain sees it, and
     runs the pomodoro clock itself. A case with a `study` dict goes down
@@ -268,7 +268,8 @@ def study_turn(case: dict, mode):
     [minutes, ...] to step the clock after the command}. Returns (reply,
     tools) when the fast path took the turn, None when the message falls
     through to the model -- which since 2026-11-03 has the study tools and
-    acts on the same clock (`mode`).
+    acts on the same clock (`mode`). With no `mode` given, a headless clock
+    is made for just this call (eval/test_fixture_cases.py).
 
     The reply is the clock's own status line after each step, so a case can
     assert what the tray menu would read; "Study mode off." only when stop
@@ -276,6 +277,9 @@ def study_turn(case: dict, mode):
     import datetime as _dt
     import study_mode
 
+    if mode is None:
+        with headless_study(case["study"]) as own:
+            return study_turn(case, own)
     spec = case["study"]
     what = study_mode.match_command(case["prompt"])
     if what is None:
