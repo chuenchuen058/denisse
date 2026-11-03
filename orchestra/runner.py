@@ -1557,6 +1557,13 @@ def write_vault_note(task: Task, ts: dict, result: str) -> None:
             prompt=h.get("prompt_sha") or "", tokens=h.get("tokens"))
     except Exception as e:  # the vault note must never break the runner
         log(f"vault note failed for {task.slug}: {e}")
+    try:  # hot.md "Waiting on Chuen": Orchestra's own block, regenerated after every task
+        import aftercare
+        lines = aftercare.waiting_lines(queue_dir=QUEUE, parked_dir=PARKED, state=load_state(), now=now())
+        if aftercare.update_waiting(vault, lines):
+            log(f"hot.md waiting list updated ({len(lines)} item(s))")
+    except Exception as e:  # nor must the waiting list
+        log(f"hot.md waiting list failed after {task.slug}: {e}")
 
 
 def reconcile(state: dict) -> dict:

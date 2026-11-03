@@ -156,3 +156,88 @@ def vault_note(vault: Path, *, slug: str, title: str, result: str, lane: str, se
         _git(vault, "add", "--", rel)
         _git(vault, "commit", "-q", "-m", f"Orchestra: {slug} {result}", "--", rel)
     return note
+
+
+# ---------------------------------------------------------------- hot.md "Waiting on Chuen"
+# Chuen, 2 Nov 2026: a draft task, a parked task or a "merge by hand" shouldn't wait hours for
+# the 21:40 night review to put it in hot.md. Orchestra owns only the lines between these
+# markers; every other line of hot.md (his, the night review's) is left byte-for-byte alone.
+WAIT_OPEN, WAIT_CLOSE = "<!-- orchestra:waiting -->", "<!-- /orchestra:waiting -->"
+WAIT_HEADING = "## Waiting on Chuen"
+
+
+def waiting_lines(*, queue_dir: Path, parked_dir: Path, state: dict, now: dt.datetime) -> list[str]:
+    """What Orchestra has waiting on Chuen, one markdown bullet each, from the runner's own files:
+    draft tasks to approve, parked tasks (first line of the why file), PASSes that didn't merge,
+    and lanes limited until a time."""
+    def title(p: Path) -> str:
+        try:
+            first = next((l for l in p.read_text(encoding="utf-8", errors="replace").splitlines()
+                          if l.startswith("# ")), "")
+        except OSError:
+            first = ""
+        return first[2:].strip() or p.stem
+
+    out = []
+    for p in sorted(queue_dir.glob("*.md")) if queue_dir.is_dir() else []:
+        try:
+            head = p.read_text(encoding="utf-8", errors="replace").splitlines()[1:20]
+        except OSError:
+            continue
+        q = next((m.group(1).strip() for l in head if (m := re.match(r"^Queue:\s*(.*)$", l, re.I))), "")
+        if q.lower() == "draft":
+            out.append(f"- Approve draft task \"{title(p)}\": change `Queue: draft` → `Queue: auto` in `{p}`")
+    for why in sorted(parked_dir.glob("*.why.txt")) if parked_dir.is_dir() else []:
+        slug = why.name[: -len(".why.txt")]
+        try:
+            first = (why.read_text(encoding="utf-8", errors="replace").splitlines() or [""])[0]
+        except OSError:
+            first = ""
+        reason = first.split(" ", 1)[-1].strip() if " " in first else first.strip()
+        out.append(f"- Parked \"{title(parked_dir / (slug + '.md'))}\" (`{slug}`): {reason or '(no reason given)'}")
+    for slug, ts in sorted((state.get("tasks") or {}).items()):
+        m = ts.get("merge", "")
+        if m and m not in ("merged", "no commits"):
+            out.append(f"- PASS not merged: `review/{slug}` — {m}")
+    for lane, info in sorted((state.get("lanes") or {}).items()):
+        until = (info or {}).get("limited_until")
+        try:
+            when = dt.datetime.fromisoformat(until) if until else None
+        except ValueError:
+            continue
+        if when and when > now:
+            out.append(f"- Lane {lane} limited until {when:%Y-%m-%d %H:%M}")
+    return out
+
+
+def _render_hot(text: str, lines: list[str]) -> str:
+    """hot.md with the waiting block set to `lines`. Only the block's own lines change; the
+    markers are created once (under the heading, or with a new heading at the end)."""
+    nl = "\r\n" if "\r\n" in text else "\n"
+    block = nl.join([WAIT_OPEN, *lines, WAIT_CLOSE])
+    a, b = text.find(WAIT_OPEN), text.find(WAIT_CLOSE)
+    if a != -1 and b > a:
+        return text[:a] + block + text[b + len(WAIT_CLOSE):]
+    m = re.search(r"^" + re.escape(WAIT_HEADING) + r"[ \t]*(\r?\n|\Z)", text, re.M)
+    if m:
+        end = m.end()
+        sep = "" if m.group(1) else nl
+        return text[:end] + sep + block + nl + text[end:]
+    pre = "" if not text or text.endswith("\n") else nl
+    gap = nl if text else ""
+    return text + pre + gap + WAIT_HEADING + nl + block + nl
+
+
+def update_waiting(vault: Path, lines: list[str]) -> bool:
+    """Rewrite hot.md's Orchestra waiting block; commit only hot.md, only when the block changed.
+    Returns True when hot.md was changed."""
+    hot = vault / "hot.md"
+    old = hot.read_bytes().decode("utf-8") if hot.exists() else ""
+    new = _render_hot(old, lines)
+    if new == old:
+        return False
+    hot.write_bytes(new.encode("utf-8"))  # bytes: keep CRLF exactly as it was
+    if (vault / ".git").exists():
+        _git(vault, "add", "--", "hot.md")
+        _git(vault, "commit", "-q", "-m", "Orchestra: waiting list", "--", "hot.md")
+    return True
