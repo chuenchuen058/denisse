@@ -41,13 +41,34 @@ def _next_weekday(name: str, hour: int, minute: int, now: datetime) -> datetime:
     return day.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
 
+def _local(now: datetime | None) -> datetime:
+    """Naive London wall-clock time -- what the task store holds. Read from
+    time_parse's clock so a pinned clock (tests, the eval) pins tasks too."""
+    import time_parse
+
+    if now is None:
+        now = time_parse.now()
+    if now.tzinfo is not None:
+        now = now.astimezone(time_parse.LONDON).replace(tzinfo=None)
+    return now
+
+
 def parse_due(text: str, now: datetime | None = None) -> datetime | None:
     """Best-effort natural-language deadline. Returns None if unparseable --
     a task with an unreadable deadline is still worth keeping, so callers
     store the raw phrase either way rather than rejecting the task."""
     if not text or not text.strip():
         return None
-    now = now or datetime.now()
+    now = _local(now)
+    # Deterministic parsing first: "thursday at 3" is 15:00 there, where
+    # the weekday regex below read it as 03:00. An ambiguous phrase (the
+    # weekday that is today) falls through to the old next-week reading;
+    # tools.add_task asks Chuen before it ever gets here.
+    import time_parse
+
+    parsed = time_parse.parse(text, now)
+    if parsed.when is not None:
+        return parsed.when.astimezone(time_parse.LONDON).replace(tzinfo=None)
     cleaned = _LEAD.sub("", text.strip())
 
     # "next monday 9am" / "friday" / "this friday 5pm" -- dateparser returns
@@ -115,7 +136,7 @@ def due_from_text(text: str, now: datetime | None = None) -> datetime | None:
     """
     if not text:
         return None
-    now = now or datetime.now()
+    now = _local(now)
     cleaned = re.sub(r"\([^)]*\)", " ", text)
     try:
         from dateparser.search import search_dates
