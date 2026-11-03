@@ -383,6 +383,29 @@ class CrashRecoveryTest(unittest.TestCase):
         wt7, branch7 = self.R.fresh_worktree(task7)
         self.assertEqual(self.R.integrate(task7, branch7, {}), "no commits")
 
+    def test_merge_is_recorded_before_the_push_and_the_archive_moves(self):
+        """A tick killed between its fast-forward and its state save (mini soak, seed 2) left a
+        merge on master that state never recorded; once the task was archived, reconcile had
+        nothing to collect. The record must be on disk the moment master moves."""
+        self.add("t9")
+        os.environ["FAKE_FILE"] = "new.txt"
+        os.environ["FAKE_TEXT"] = "work\n"
+
+        def killed_here(*a, **k):  # the archive move: the first thing after the merge and push
+            raise KeyboardInterrupt("tick killed")
+        self.R.move = killed_here
+        with self.assertRaises(KeyboardInterrupt):
+            self.R.tick()
+        master = self.git("rev-parse", "HEAD")
+        self.assertTrue(self.git("log", "-1", "--format=%s").startswith("orchestra: merge review/t9"))
+        ts = self.state()["tasks"]["t9"]
+        self.assertEqual(ts["merge"], "merged")
+        self.assertEqual(ts["integration"]["commit"], master)
+        self.assertEqual(ts["history"][-1]["integration"]["commit"], master)
+        self.assertTrue(any(c.startswith("gate: pass") for c in ts["integration"]["checks"]))
+        task = next(t for t in self.R.load_queue() if t.slug == "t9")
+        self.assertIn(task.digest, self.state()["done"])
+
     def test_lock_rewrites_are_never_seen_half_written(self):
         """A tick scanning the slots must never read an empty or partial lock while its owner
         rewrites it (write_text truncates first); that hid a running task and it was dispatched twice."""

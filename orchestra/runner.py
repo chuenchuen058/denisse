@@ -1596,6 +1596,15 @@ def _after_pass(task: Task, state: dict, ts: dict, entry: dict, wt: Path, branch
     ts.pop("push", None)
 
     def push():
+        # Master has just been fast-forwarded: write that down before the push, the archive moves
+        # and the worktree removal, which take seconds together. (Mini soak, seed 2, 3 Nov 2026: a
+        # tick killed in that window left a merge on master that state never recorded, and with
+        # the task already archived the next tick's reconcile had nothing to collect.)
+        progress["stage"] = "record"
+        ts["merge"] = "merged"
+        ts["integration"] = entry["integration"] = integ
+        state["done"][task.digest] = now().isoformat()
+        save_state(state)
         progress["stage"] = "push"
         if C.get("auto_push") and aftercare_on():
             try:
