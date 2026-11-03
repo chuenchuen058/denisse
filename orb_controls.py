@@ -1,69 +1,130 @@
-"""Hover-revealed Chat / Voice / Reminders icons beneath Denisse's orb."""
+"""Hover-revealed Chat / Voice / Reminders icons beneath Denisse's orb.
+
+Colours, sizes, timings, the buttons and their labels are in ui_theme.json
+under "dock" (Rule 0), validated by ui_theme.py. A button is identified by
+its action (chat, voice, reminders -- which of tray's callbacks it calls);
+its label and icon are data.
+"""
 
 import time
 import tkinter as tk
 
 from PIL import Image, ImageDraw, ImageTk
 
+import ui_theme
 from reminder_card import _work_area
 
+# Glyphs are drawn on a GLYPH x GLYPH canvas and scaled to the theme's
+# dock.layout.icon_size: the shapes are the icons themselves, not theme.
+GLYPH = 96
+_STROKE = 6
 
-def _icon(label, size, color):
-    """Small antialiased outline icons, independent of installed symbol fonts."""
-    image = Image.new("RGBA", (96, 96))
+
+def _dock() -> dict:
+    return ui_theme.get("dock")
+
+
+def _icon(icon, size, color):
+    """Small antialiased outline icons, independent of installed symbol fonts.
+    `icon` is a ui_theme.DOCK_ICONS name."""
+    image = Image.new("RGBA", (GLYPH, GLYPH))
     d = ImageDraw.Draw(image)
-    if label == "Chat":
-        d.rounded_rectangle((17, 19, 79, 66), radius=12, outline=color, width=6)
-        d.line((29, 66, 25, 79, 44, 66), fill=color, width=6, joint="curve")
-    elif label == "Voice":
-        d.rounded_rectangle((36, 13, 60, 57), radius=12, outline=color, width=6)
-        d.arc((24, 29, 72, 71), 0, 180, fill=color, width=6)
-        d.line((48, 71, 48, 83), fill=color, width=6)
-        d.line((35, 83, 61, 83), fill=color, width=6)
-    else:
-        d.arc((24, 17, 72, 65), 180, 360, fill=color, width=6)
+    w = _STROKE
+    if icon == "chat":
+        d.rounded_rectangle((17, 19, 79, 66), radius=12, outline=color, width=w)
+        d.line((29, 66, 25, 79, 44, 66), fill=color, width=w, joint="curve")
+    elif icon == "mic":
+        d.rounded_rectangle((36, 13, 60, 57), radius=12, outline=color, width=w)
+        d.arc((24, 29, 72, 71), 0, 180, fill=color, width=w)
+        d.line((48, 71, 48, 83), fill=color, width=w)
+        d.line((35, 83, 61, 83), fill=color, width=w)
+    else:  # bell
+        d.arc((24, 17, 72, 65), 180, 360, fill=color, width=w)
         d.line((24, 41, 24, 60, 16, 70, 80, 70, 72, 60, 72, 41),
-               fill=color, width=6, joint="curve")
-        d.arc((39, 69, 57, 85), 0, 180, fill=color, width=6)
-        d.line((48, 11, 48, 17), fill=color, width=6)
+               fill=color, width=w, joint="curve")
+        d.arc((39, 69, 57, 85), 0, 180, fill=color, width=w)
+        d.line((48, 11, 48, 17), fill=color, width=w)
     return image.resize((size, size), Image.Resampling.LANCZOS)
 
 
+def _dock_size(scale):
+    lay = _dock()["layout"]
+    return round(lay["width"] * scale), round(lay["height"] * scale)
+
+
 def _dock_frame(scale, hovered=None, active=False, pressed=None):
-    """Render one compact pill; shared by the live dock and visual previews."""
-    ss = 3
-    w, h = round(144 * scale), round(46 * scale)
+    """Render one compact pill; shared by the live dock and visual previews.
+    hovered/pressed are button actions; active lights the voice button."""
+    dock = _dock()
+    lay, col = dock["layout"], dock["colours"]
+    ss = lay["supersample"]
+    w, h = _dock_size(scale)
     image = Image.new("RGBA", (w * ss, h * ss))
     d = ImageDraw.Draw(image)
     k = scale * ss
     def box(coords):
         return tuple(round(v * k) for v in coords)
-    d.rounded_rectangle(box((2, 2, 142, 44)), radius=round(21*k),
-                        fill="#100d19", outline="#49345f", width=max(1, round(k)))
-    d.line(box((30, 3, 114, 3)), fill="#6c4b89", width=max(1, round(k/2)))
-    for i, label in enumerate(("Chat", "Voice", "Reminders")):
-        cx = 28 + i * 44
-        is_active = label == "Voice" and active
-        if label == hovered or is_active:
-            fill = "#462c60" if label == pressed else "#2d203f" if label == hovered else "#142d2c"
-            d.rounded_rectangle(box((cx-18, 5, cx+18, 41)),
-                                radius=round(14*k), fill=fill)
-        color = "#80e4c4" if is_active else "#faf2ff" if label == hovered else "#c2b1d5"
-        icon = _icon(label, round(22*k), color)
-        image.alpha_composite(icon, (round((cx-11)*k), round(11*k)))
+    inset, lw, lh = lay["inset"], lay["width"], lay["height"]
+    d.rounded_rectangle(box((inset, inset, lw - inset, lh - inset)), radius=round(lay["radius"]*k),
+                        fill=col["fill"], outline=col["outline"],
+                        width=max(1, round(k * lay["outline_width"])))
+    hy = lay["highlight_y"]
+    d.line(box((lay["highlight_inset"], hy, lw - lay["highlight_inset"], hy)),
+           fill=col["highlight"], width=max(1, round(k * lay["highlight_width"])))
+    top, bottom, half = lay["button_top"], lh - lay["button_top"], lay["half_width"]
+    icon_px = lay["icon_size"]
+    for i, button in enumerate(dock["buttons"]):
+        action = button["action"]
+        cx = lay["first_x"] + i * lay["pitch"]
+        is_active = action == "voice" and active
+        if action == hovered or is_active:
+            fill = (col["pressed_bg"] if action == pressed
+                    else col["hover_bg"] if action == hovered else col["active_bg"])
+            d.rounded_rectangle(box((cx-half, top, cx+half, bottom)),
+                                radius=round(lay["button_radius"]*k), fill=fill)
+        color = col["icon_active"] if is_active else col["icon_hover"] if action == hovered else col["icon"]
+        icon = _icon(button["icon"], round(icon_px*k), color)
+        image.alpha_composite(icon, (round((cx-icon_px/2)*k), round(lay["icon_top"]*k)))
         if is_active:
-            d.ellipse(box((cx+9, 9, cx+12, 12)), fill="#80e4c4")
+            dx, dy, ds = lay["dot_dx"], lay["dot_y"], lay["dot_size"]
+            d.ellipse(box((cx+dx, dy, cx+dx+ds, dy+ds)), fill=col["icon_active"])
     return image.resize((w, h), Image.Resampling.LANCZOS)
 
 
-class OrbControls:
-    LABELS = ("Chat", "Voice", "Reminders")
+def _button_at(scale, x, y):
+    """The action of the button under dock-relative pixel (x, y), or None."""
+    dock = _dock()
+    lay = dock["layout"]
+    x, y = x/scale, y/scale
+    if not lay["button_top"] <= y <= lay["height"] - lay["button_top"]:
+        return None
+    for i, button in enumerate(dock["buttons"]):
+        cx = lay["first_x"] + i * lay["pitch"]
+        if cx - lay["half_width"] <= x <= cx + lay["half_width"]:
+            return button["action"]
+    return None
 
+
+def _tip_text(action, voice_on):
+    """Tooltip for a button: its label, or the voice_on_tip wording."""
+    dock = _dock()
+    label = next(b["label"] for b in dock["buttons"] if b["action"] == action)
+    if action == "voice" and voice_on:
+        return dock["voice_on_tip"].format(label=label)
+    return label
+
+
+class OrbControls:
     def __init__(self, root, orb, on_chat, on_voice, on_reminders,
-                 voice_active, font_family="Segoe UI"):
+                 voice_active, font_family=None):
+        dock = _dock()
+        lay, col = dock["layout"], dock["colours"]
+        key = ui_theme.colour("transparent_key")
         self.root, self.orb = root, orb
         self.voice_active = voice_active
-        self.actions = dict(zip(self.LABELS, (on_chat, on_voice, on_reminders)))
+        callbacks = {"chat": on_chat, "voice": on_voice, "reminders": on_reminders}
+        self.order = tuple(b["action"] for b in dock["buttons"])
+        self.actions = {a: callbacks[a] for a in self.order}
         self._job = None
         self._closed = False
         self._visible = False
@@ -74,13 +135,13 @@ class OrbControls:
         self._cache = {}
         self.win = tk.Toplevel(root)
         self.win.withdraw()
-        self.win.title("Denisse controls")
+        self.win.title(dock["title"])
         self.win.overrideredirect(True)
         self.win.attributes("-topmost", True)
-        self.win.configure(bg="#010203")
-        self.w, self.h = round(144*orb._scale), round(46*orb._scale)
+        self.win.configure(bg=key)
+        self.w, self.h = _dock_size(orb._scale)
         self.canvas = tk.Canvas(self.win, width=self.w, height=self.h,
-                                bg="#010203", bd=0, highlightthickness=0,
+                                bg=key, bd=0, highlightthickness=0,
                                 takefocus=True, cursor="hand2")
         self.canvas.pack()
         self._image_id = self.canvas.create_image(0, 0, anchor="nw")
@@ -95,32 +156,28 @@ class OrbControls:
             if self._painter is not None:
                 self._painter.close()
             self._painter = None
-            self.win.attributes("-transparentcolor", "#010203")
+            self.win.attributes("-transparentcolor", key)
+        first = self.order[0]
         self.canvas.bind("<ButtonPress-1>", self._press)
         self.canvas.bind("<ButtonRelease-1>", self._release)
         self.canvas.bind("<Right>", lambda e: self._keyboard_step(1))
         self.canvas.bind("<Left>", lambda e: self._keyboard_step(-1))
-        self.canvas.bind("<Return>", lambda e: self._invoke(self._hovered or "Chat"))
-        self.canvas.bind("<space>", lambda e: self._invoke(self._hovered or "Chat"))
+        self.canvas.bind("<Return>", lambda e: self._invoke(self._hovered or first))
+        self.canvas.bind("<space>", lambda e: self._invoke(self._hovered or first))
         self.canvas.bind("<Escape>", lambda e: self._hide())
         self.tip = tk.Toplevel(root)
         self.tip.withdraw()
         self.tip.overrideredirect(True)
         self.tip.attributes("-topmost", True)
-        self._tip_label = tk.Label(self.tip, bg="#191222", fg="#e6d9f4",
-                                   font=(font_family, 8), padx=8, pady=4)
+        self._tip_label = tk.Label(self.tip, bg=col["tip_bg"], fg=col["tip_fg"],
+                                   font=(font_family or ui_theme.get("fonts")["family"], lay["tip_font_size"]),
+                                   padx=lay["tip_padx"], pady=lay["tip_pady"])
         self._tip_label.pack()
         self.win.update_idletasks()
         self._follow()
 
     def _button_at(self, x, y):
-        x, y = x/self.orb._scale, y/self.orb._scale
-        if not 5 <= y <= 41:
-            return None
-        for i, label in enumerate(self.LABELS):
-            if 10+i*44 <= x <= 46+i*44:
-                return label
-        return None
+        return _button_at(self.orb._scale, x, y)
 
     def _press(self, event):
         self._pressed = self._button_at(event.x, event.y)
@@ -128,20 +185,20 @@ class OrbControls:
         self._draw()
 
     def _release(self, event):
-        label, self._pressed = self._pressed, None
-        if label is not None and label == self._button_at(event.x, event.y):
-            self._invoke(label)
+        action, self._pressed = self._pressed, None
+        if action is not None and action == self._button_at(event.x, event.y):
+            self._invoke(action)
         self._draw()
 
-    def _invoke(self, label):
-        self.orb.react("happy", 1.0)
-        self.actions[label]()
+    def _invoke(self, action):
+        self.orb.react("happy", ui_theme.get("interaction")["react_dock_s"])
+        self.actions[action]()
         self.tip.withdraw()
         self._draw()
 
     def _keyboard_step(self, delta):
-        i = self.LABELS.index(self._hovered) if self._hovered else 0
-        self._hovered = self.LABELS[(i+delta) % 3]
+        i = self.order.index(self._hovered) if self._hovered else 0
+        self._hovered = self.order[(i+delta) % len(self.order)]
         self._draw()
         return "break"
 
@@ -155,7 +212,8 @@ class OrbControls:
                 self._cache[state] = self._convert(frame)
             else:
                 from floating_orb import _flatten
-                self._cache[state] = ImageTk.PhotoImage(_flatten(frame, matte=(16, 13, 25)))
+                matte = ui_theme.rgb(_dock()["colours"]["fill"])
+                self._cache[state] = ImageTk.PhotoImage(_flatten(frame, matte=matte))
         if self._painter is not None:
             self._painter.show(self._cache[state])
         else:
@@ -176,11 +234,13 @@ class OrbControls:
             if not self.orb.win.winfo_exists():
                 self.close()
                 return
+            dock = _dock()
+            lay, timing = dock["layout"], dock["timing"]
             w, h = self.w, self.h
             ox, oy = self.orb.win.winfo_x(), self.orb.win.winfo_y()
             left, top, right, bottom = _work_area(
                 self.win.winfo_screenwidth(), self.win.winfo_screenheight())
-            gap = round(2 * self.orb._scale)
+            gap = round(lay["gap"] * self.orb._scale)
             x = max(left, min(ox + self.orb.total_px // 2 - w // 2, right - w))
             y = oy + self.orb.total_px + gap
             if y + h > bottom:
@@ -197,17 +257,17 @@ class OrbControls:
                 self._hovered = hovered
                 self._hover_since = now
                 self.tip.withdraw()
-            if hovered and now-self._hover_since > .6:
-                text = "Voice: listening on" if hovered == "Voice" and self.voice_active() else hovered
-                self._tip_label.config(text=text)
+            if hovered and now-self._hover_since > timing["tip_delay_s"]:
+                self._tip_label.config(text=_tip_text(hovered, self.voice_active()))
                 self.tip.update_idletasks()
                 tw, th = self.tip.winfo_reqwidth(), self.tip.winfo_reqheight()
+                tg = lay["tip_gap"]
                 tx = max(left, min(px-tw//2, right-tw))
-                ty = y+h+3 if y+h+th+3 < bottom else y-th-3
+                ty = y+h+tg if y+h+th+tg < bottom else y-th-tg
                 self.tip.geometry(f"+{tx}+{max(top, ty)}")
                 self.tip.deiconify()
             self._draw()
-            self._job = self.root.after(75, self._follow)
+            self._job = self.root.after(timing["follow_ms"], self._follow)
         except tk.TclError:
             self.close()
 
@@ -221,7 +281,7 @@ class OrbControls:
             if not self._visible:
                 self.win.deiconify()
                 self._visible = True
-        elif self._visible and now-self._last_hover > .4:
+        elif self._visible and now-self._last_hover > _dock()["timing"]["hide_delay_s"]:
             self._hide()
 
     def close(self):
