@@ -248,5 +248,58 @@ class TimerDuration(unittest.TestCase):
         self.assertEqual(timers.active(), [])
 
 
+class ConfigTest(unittest.TestCase):
+    """Rule 0: the words and defaults come from time_parse.json."""
+
+    def test_defaults_come_from_the_json(self):
+        cfg = tp.CONFIG
+        self.assertEqual(str(tp.TZ), cfg["timezone"])
+        for part, hhmm in cfg["day_parts"].items():
+            self.assertEqual(tp.part_time(part).strftime("%H:%M"), hhmm)
+        self.assertEqual(tp.WEEKDAYS, cfg["weekdays"])
+        self.assertEqual(tp.MONTHS, cfg["months"])
+
+
+class PartSourceTest(unittest.TestCase):
+    """The hook the learner model will use to say what 'morning' means for
+    Chuen. The learner isn't wired; a fake belief stands in for it."""
+
+    def tearDown(self):
+        tp.set_part_source(None)
+
+    @staticmethod
+    def _from_beliefs(beliefs):
+        # Stand-in for whatever turns learner beliefs into day-part times.
+        def source():
+            return {b["part"]: b["time"] for b in beliefs if b.get("status") == "current"}
+        return source
+
+    def test_a_belief_moves_morning(self):
+        belief = {"claim": "Chuen is never up before 10", "part": "morning",
+                  "time": "10:30", "status": "current"}
+        tp.set_part_source(self._from_beliefs([belief]))
+        self.assertEqual(resolved("tomorrow morning"), "2026-11-04 10:30")
+        # Parts the belief says nothing about keep the JSON default.
+        self.assertEqual(resolved("tomorrow evening"),
+                         "2026-11-04 " + tp.CONFIG["day_parts"]["evening"])
+
+    def test_removing_the_source_restores_the_default(self):
+        tp.set_part_source(lambda: {"morning": "10:30"})
+        tp.set_part_source(None)
+        self.assertEqual(resolved("tomorrow morning"),
+                         "2026-11-04 " + tp.CONFIG["day_parts"]["morning"])
+
+    def test_a_broken_source_falls_back(self):
+        def boom():
+            raise RuntimeError("learner store unreadable")
+        default = "2026-11-04 " + tp.CONFIG["day_parts"]["morning"]
+        tp.set_part_source(boom)
+        self.assertEqual(resolved("tomorrow morning"), default)
+        tp.set_part_source(lambda: {"morning": "25:99"})
+        self.assertEqual(resolved("tomorrow morning"), default)
+        tp.set_part_source(lambda: {"morning": 7})
+        self.assertEqual(resolved("tomorrow morning"), default)
+
+
 if __name__ == "__main__":
     unittest.main()
