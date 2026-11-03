@@ -669,13 +669,21 @@ def _alive(pid, created) -> bool:
     return got == created
 
 
-def read_lock(path: Path) -> dict | None:
-    """The lock's JSON, or None if it can't be read or parsed (then only the age rule applies)."""
-    try:
-        info = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    return info if isinstance(info, dict) else None
+def read_lock(path: Path, tries: int = 5) -> dict | None:
+    """The lock's JSON, or None if it can't be read or parsed (then only the age rule applies).
+    A lock being rewritten by its owner is empty or partial for an instant (write_text truncates
+    first); a tick scanning the slots at that instant saw no task and dispatched the running task
+    again (soak test, seed 1, 3 Nov 2026). So an unreadable lock is re-read a few times, 20 ms
+    apart, before it counts as unreadable. (An atomic rename is no better here: on Windows the
+    target vanishes for a moment and readers get FileNotFoundError.)"""
+    for i in range(tries):
+        try:
+            info = json.loads(path.read_text(encoding="utf-8"))
+            return info if isinstance(info, dict) else None
+        except (OSError, ValueError):
+            if i < tries - 1:
+                time.sleep(0.02)
+    return None
 
 
 def lock_status(info: dict | None) -> str:
@@ -727,8 +735,15 @@ def take_lock(state: dict) -> bool:
     return False
 
 
+def write_lock(path: Path, info: dict) -> None:
+    """Rewrite a lock in place, in one write. The empty-then-full instant this leaves is covered
+    by read_lock()'s re-read; a temp file + os.replace was tried and is worse on Windows (the
+    target is briefly absent, and the rename fails outright while a reader has the file open)."""
+    path.write_text(json.dumps(info), encoding="utf-8")
+
+
 def set_lock_task(slug: str, lane: str = "") -> None:
-    LOCK_FILE.write_text(json.dumps(_my_lock(task=slug, lane=lane)), encoding="utf-8")
+    write_lock(LOCK_FILE, _my_lock(task=slug, lane=lane))
 
 
 def update_lock(**extra) -> None:
@@ -736,7 +751,7 @@ def update_lock(**extra) -> None:
     info = read_lock(LOCK_FILE)
     if info is not None and info.get("pid") == os.getpid():
         info.update(extra)
-        LOCK_FILE.write_text(json.dumps(info), encoding="utf-8")
+        write_lock(LOCK_FILE, info)
 
 
 def release_lock() -> None:
@@ -1704,8 +1719,7 @@ def reconcile(state: dict) -> dict:
                 if read_lock(lf) != info:
                     continue
                 log(f"RECONCILE dead owner {info['pid']} for {slug}")
-                lf.write_text(json.dumps(_my_lock(task=slug, lane=info.get("lane", ""), reconciling=True)),
-                              encoding="utf-8")
+                write_lock(lf, _my_lock(task=slug, lane=info.get("lane", ""), reconciling=True))
         except TimeoutError:
             continue
         try:

@@ -233,6 +233,9 @@ class Soak:
         e.update(ORCHESTRA_REPO=str(self.repo), ORCHESTRA_AFTERCARE="1", ORCHESTRA_VAULT_DIR="",
                  ORCHESTRA_LANE_SLOTS=json.dumps(SLOTS), ORCHESTRA_LANE_FALLBACK=json.dumps(FALLBACK),
                  ORCHESTRA_TIMEOUT_S=json.dumps(TIMEOUTS), ORCHESTRA_GATE_TIMEOUT_S="60",
+                 # after 20 measured runs the timeout becomes max(floor, 3 x p95); the default floor
+                 # of 300 s let the "hang" task run five minutes past the end of a 2-minute soak
+                 ORCHESTRA_TIMEOUT_FLOOR_S=str(TIMEOUTS["light"]),
                  ORCHESTRA_BACKOFF_MIN="0", ORCHESTRA_DAILY_SPEND_CAP_USD="1000", ORCHESTRA_POWER=power,
                  SOAK_ROOT=str(self.root), PYTHONDONTWRITEBYTECODE="1", **GIT_ID)
         return e
@@ -293,6 +296,8 @@ class Soak:
                 break
             if not spawning and now > deadline + TIMEOUTS["heavy"] + 90:
                 for t in live:  # a tick still running this long after the end is itself a finding
+                    t["drain_task"] = [R.read_lock(lf).get("task") for lf in self.review.glob("runner*.lock")
+                                       if R.read_lock(lf) and R.read_lock(lf).get("pid") == t["proc"].pid]
                     t["proc"].kill()
                     t["drain_killed"] = True
                 self.reap()
@@ -505,7 +510,8 @@ class Soak:
     def inv_ticks_clean(self):
         for t in self.ticks:
             if t.get("drain_killed"):
-                yield f"tick {t['n']} was still running {TIMEOUTS['heavy'] + 90}s after the end; killed by the harness"
+                yield (f"tick {t['n']} was still running {TIMEOUTS['heavy'] + 90}s after the end "
+                       f"(task {t.get('drain_task')}); killed by the harness")
             if t["killed"]:
                 continue
             text = self._tick_output(t)

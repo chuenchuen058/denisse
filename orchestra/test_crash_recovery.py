@@ -363,6 +363,31 @@ class CrashRecoveryTest(unittest.TestCase):
         wt7, branch7 = self.R.fresh_worktree(task7)
         self.assertEqual(self.R.integrate(task7, branch7, {}), "no commits")
 
+    def test_lock_rewrites_are_never_seen_half_written(self):
+        """A tick scanning the slots must never read an empty or partial lock while its owner
+        rewrites it (write_text truncates first); that hid a running task and it was dispatched twice."""
+        self.R.LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+        self.R.set_lock_task("busy", "fake")
+        seen, stop = [], threading.Event()
+
+        def reader():
+            while not stop.is_set():
+                info = self.R.read_lock(self.R.LOCK_FILE)
+                seen.append(bool(info and info.get("task") == "busy"))
+        th = threading.Thread(target=reader)
+        th.start()
+        try:
+            for i in range(300):
+                self.R.update_lock(before=[f"f{i}"] * 20, lane_pid=i)
+        finally:
+            stop.set()
+            th.join()
+        self.assertGreater(len(seen), 50, "the reader did run alongside the writes")
+        self.assertTrue(all(seen), f"{seen.count(False)} of {len(seen)} reads saw no task")
+        self.assertEqual(self.R.read_lock(self.R.LOCK_FILE)["lane_pid"], 299)
+        self.assertEqual(list(self.R.REVIEW.glob("*.tmp")), [], "no temp file left behind")
+        self.R.release_lock()
+
     def test_empty_env_override_does_not_crash_config_load(self):
         os.environ["ORCHESTRA_VAULT_DIR"] = ""
         try:
