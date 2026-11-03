@@ -47,41 +47,66 @@ Two carry-overs, in code (follow-up, 2026-11-02 night):
                  half-named.
 
 DENISSE_PLAN_CARRY=0 turns both off (the control arm of that A/B).
+
+Softcoded (Rule 0, 2026-11-03): every word list and limit is in
+dialogue_rules.json ("multistep"). Whether a part is an action is decided
+by sentence structure, not by his wording: it starts with a known action
+verb -- or a misspelling of one ("remnd") -- OR it has the shape of an
+imperative, verb + object word ("grab my notes", "ping me"), and its first
+word is not a pronoun, question word or auxiliary. Splitting is on
+conjunctions and punctuation. Whether it is worth planning stays with
+tool_router's cues, and the steps themselves with the model.
 """
+import calendar
 import json
 import logging
 import os
 import re
 
-MAX_STEPS = 5
-SUMMARY_CHARS = 240   # per earlier step, in the next step's context
-FILE_CHARS = 4000     # of a found file, in the step that uses it
+import dialogue_rules
+
+_R = dialogue_rules.get("multistep")
+
+MAX_STEPS = _R["max_steps"]
+SUMMARY_CHARS = _R["summary_chars"]   # per earlier step, in the next step's context
+FILE_CHARS = _R["file_chars"]         # of a found file, in the step that uses it
+
+
+def _alternation(phrases) -> str:
+    """Phrases as one regex alternation, longest first, any whitespace
+    between their words."""
+    return "|".join(r"\s+".join(re.escape(w) for w in p.split())
+                    for p in sorted(phrases, key=len, reverse=True))
+
 
 # Leading words that don't change what is being asked.
-_LEAD = re.compile(
-    r"^(?:(?:hey|hi|ok(?:ay)?|so|right|also|then|and|please|pls|plz|denisse|now|next"
-    r"|after(?:\s+that|wards)?|finally|first(?:ly)?|can\s+you|could\s+you|would\s+you|will\s+you"
-    r"|i\s+(?:want|need)\s+you\s+to|i'?d\s+like\s+you\s+to|go\s+and|just)[\s,]+)+",
-    re.IGNORECASE)
+_LEAD = re.compile(r"^(?:(?:" + _alternation(_R["lead_words"]) + r")[\s,]+)+", re.IGNORECASE)
 
-# Where one action ends and the next begins.
-_SPLIT = re.compile(
-    r"\s*(?:[,;]\s*(?:and\s+)?(?:then\s+)?|\.\s+|\b(?:and\s+then|and\s+also|and\s+after\s+that"
-    r"|after\s+that|then|and|plus)\b\s*)",
-    re.IGNORECASE)
+# Where one action ends and the next begins: , ; or ". ", then any
+# joining word, or a joining word on its own.
+_CONNECT = _alternation(_R["connectors"])
+_SPLIT = re.compile(r"\s*(?:[,;]\s*(?:(?:" + _CONNECT + r")\s+)*|\.\s+|\b(?:" + _CONNECT + r")\b\s*)",
+                    re.IGNORECASE)
 
-# Imperative verbs Denisse could act on. A part only counts as an action
-# when it starts with one of these AND says what to act on (two words or
-# more): "find and open my cv" is one job, not two.
-_VERBS = {
-    "find", "locate", "search", "look", "make", "create", "write", "draft", "remind",
-    "add", "set", "start", "move", "put", "sort", "organise", "organize", "tidy", "tell",
-    "list", "show", "check", "open", "read", "play", "pause", "skip", "give", "save",
-    "summarise", "summarize", "plan", "schedule", "note", "tick", "mark", "complete",
-    "delete", "remove", "cancel", "copy", "rename", "get", "pull", "bring", "work",
-    "compare", "count", "clean", "turn", "stop", "resume", "remember", "email", "send",
-    "let", "jot", "book", "figure",
-}
+# A part only counts as an action when it says what to act on (two words
+# or more): "find and open my cv" is one job, not two.
+_VERBS = frozenset(_R["action_verbs"])
+_OBJECT = frozenset(_R["object_markers"])
+_NOT_VERB = frozenset(_R["not_verbs"])
+
+
+def _verb(word: str):
+    """The action verb `word` is, allowing a typo; None if it isn't one."""
+    return dialogue_rules.closest(word, _VERBS, _R["fuzzy_ratio"], _R["fuzzy_min_len"])
+
+
+def _is_action(words: list) -> bool:
+    """Structure, not wording: a known verb (or a misspelling of one), or
+    an imperative's shape -- a first word that isn't a pronoun, question
+    word or auxiliary, followed by its object ('grab my', 'ping me')."""
+    if len(words) < _R["min_action_words"] or words[0] in _NOT_VERB:
+        return False
+    return bool(_verb(words[0])) or (words[1] in _OBJECT and words[0] not in _OBJECT)
 
 _PLAN_SCHEMA = {
     "type": "object", "additionalProperties": False, "required": ["steps"],
@@ -101,7 +126,7 @@ _PLAN_PROMPT = (
     "what they refer to. Only what he asked for. Don't answer anything. Reply "
     "with JSON only: {\"steps\": [\"...\", \"...\"]}"
 )
-_STOP = {"this", "that", "them", "then", "with", "from", "into", "what", "have", "about", "your", "please"}
+_STOP = frozenset(_R["stop_words"])
 
 
 def enabled() -> bool:
@@ -121,7 +146,7 @@ def action_parts(text: str) -> list:
     out = []
     for part in _parts(text):
         words = re.findall(r"[a-z']+", part.lower())
-        if len(words) >= 2 and words[0] in _VERBS:
+        if _is_action(words):
             out.append(part)
     return out
 
@@ -131,7 +156,7 @@ def is_multistep(text: str) -> bool:
     needs a tool. A false negative is today's behaviour; a false positive
     costs a model call and splits one job in two."""
     text = (text or "").strip()
-    if not text or len(text) > 400 or "\n" in text:
+    if not text or len(text) > _R["max_request_chars"] or "\n" in text:
         return False
     if len(action_parts(text)) < 2:
         return False
@@ -148,7 +173,7 @@ def _his_words(step: str, request: str) -> bool:
     task..." was planned as "Open the computer and navigate to the folder
     where the Japan flight documents are stored" -- 2 of 8 words his."""
     own = _words(step)
-    return bool(own) and len(own & _words(request)) * 5 >= len(own) * 3
+    return bool(own) and len(own & _words(request)) >= len(own) * _R["own_words_ratio"] - 1e-9
 
 
 def parse_plan(raw, request: str | None = None) -> list | None:
@@ -238,7 +263,9 @@ def failure(reply: str, calls: list) -> str | None:
 
 
 _FOR_THE_MODEL = re.compile(
-    r"\s*\b(?:Tell (?:the user|him)|Do not|Don'?t|Call '|Answer the|Use )\b.*$", re.I | re.S)
+    r"\s*\b(?:" + "|".join(re.escape(p) + (r"\b" if p[-1:].isalnum() else "")
+                           for p in sorted(_R["model_instruction_starts"], key=len, reverse=True))
+    + r").*$", re.I | re.S)
 
 
 def plain(result: str) -> str:
@@ -299,7 +326,7 @@ def _compose(replies: list) -> str:
 
 # Text read_file can usefully return. A PDF or .docx comes back as bytes,
 # which is worse than nothing in a step's context.
-_TEXT_EXT = (".md", ".txt", ".csv", ".json", ".py", ".tex", ".rst", ".log", ".yaml", ".yml", ".ini", ".html")
+_TEXT_EXT = tuple(_R["text_extensions"])
 # find_files gives one path per line; elsewhere a path can sit mid-sentence
 # (lazy, so it ends at its extension). "King's College" is in his paths.
 _ABS_LINE = re.compile(r"^\s*((?:[A-Za-z]:[\\/]|\\\\)[^\r\n\"<>|?*]+?)\s*$", re.M)
@@ -308,9 +335,8 @@ _ABS_PATH = re.compile(r"(?:[A-Za-z]:[\\/]|\\\\)[^\r\n\"<>|?*]+?\.[A-Za-z0-9]{1,
 # own (vault_search.py), or in brackets ("From your notes (Atlas/.../x.md):").
 _VAULT_NOTE = re.compile(r"(?:^\s*|\()([^\n()\"]+?\.md)(?=\s*$|\))", re.M)
 # Steps that make something out of what an earlier step found.
-_CONTENT_VERBS = {"make", "create", "write", "draft", "summarise", "summarize", "plan", "compare",
-                  "count", "work", "figure", "jot", "note", "give", "tell", "read", "turn", "list"}
-_REFERS_BACK = re.compile(r"\b(?:it|its|them|that|this|those|these|from)\b", re.I)
+_CONTENT_VERBS = frozenset(_R["content_verbs"])
+_REFERS_BACK = re.compile(r"\b(?:" + _alternation(_R["refers_back"]) + r")\b", re.I)
 
 
 def found_path(calls: list) -> str | None:
@@ -339,7 +365,7 @@ def uses_found(step: str, part: str, finder: str) -> bool:
     found a file) turned up? An action like "remind me on Thursday" doesn't."""
     for text in (step, part):
         words = re.findall(r"[a-z']+", (text or "").lower())
-        if words and words[0] in _CONTENT_VERBS and (
+        if words and dialogue_rules.closest(words[0], _CONTENT_VERBS, _R["fuzzy_ratio"], _R["fuzzy_min_len"]) and (
                 _REFERS_BACK.search(text) or _words(text) & _words(finder)):
             return True
     return False
@@ -364,11 +390,12 @@ def _file_note(path: str, text: str) -> str:
 
 # ---- his details -> the step that needs them --------------------------------
 
-_DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
-_MONTHS = ("january", "february", "march", "april", "may", "june", "july", "august",
-           "september", "october", "november", "december")
+# Day and month names from the calendar, not typed in here.
+_DAYS = tuple(d.lower() for d in calendar.day_name)
+_MONTHS = tuple(m.lower() for m in calendar.month_name if m)
 _DETAIL = re.compile(
-    r"\"([^\"]{2,60})\"|\b(\d+(?:[.:]\d+)?)\b|\b(" + "|".join(_DAYS + _MONTHS[:4] + _MONTHS[5:]) + r")\b",
+    r"\"([^\"]{2,60})\"|\b(\d+(?:[.:]\d+)?)\b|\b("
+    + "|".join(n for n in _DAYS + _MONTHS if n not in _R["ambiguous_month_names"]) + r")\b",
     re.I)
 
 
@@ -386,7 +413,8 @@ def details(part: str) -> list:
         w = m.group(0)
         if any(a <= m.start() < b for a, b in quoted):
             continue
-        if i and w[0].isupper() and w not in ("I", "I'm", "I'll", "I've", "I'd") \
+        # "I" and its contractions are capitalised by grammar, not names.
+        if i and w[0].isupper() and w.split("'")[0] != "I" \
                 and w.lower() not in _DAYS + _MONTHS:
             out.append(w)
     seen, uniq = set(), []
@@ -439,8 +467,7 @@ def keep_details(reply: str, wanted: list, calls: list) -> str:
     return keep_task_names(reply, calls)
 
 
-_TASK_FILLER = {"overdue", "today", "tomorrow", "task", "tasks", "with", "from", "that", "this",
-                "about", "into", "have"} | set(_DAYS) | set(_MONTHS)
+_TASK_FILLER = set(_R["task_filler"]) | set(_DAYS) | set(_MONTHS)
 
 
 def keep_task_names(reply: str, calls: list) -> str:
