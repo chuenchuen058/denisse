@@ -1,0 +1,166 @@
+{
+  "_doc": "Look and feel of Denisse's own windows: the floating orb (floating_orb.py) and the hover dock under it (orb_controls.py), loaded by ui_theme.py. Edit ui_theme.json, not this file: this one holds the shipped defaults, and any value in ui_theme.json that is missing or invalid is logged and replaced by its default here. Colours are #rrggbb. Sizes are logical pixels (multiplied by the screen's DPI scale). Times say their unit in the key name. Read once at start-up.",
+
+  "palette": {
+    "_doc": "Colours shared across windows. reminder_card.py and study_mode.py take the orb's colours from floating_orb, which takes them from here.",
+    "accent": "#a855f7",
+    "accent_bright": "#c9a3ff",
+    "accent_deep": "#4c1d95",
+    "ring_violet": "#7c3aed",
+    "transparent_key": "#010203"
+  },
+
+  "fonts": {
+    "_doc": "family is used when the caller doesn't pass one (tray.py passes its own FONT_FAMILY).",
+    "family": "Segoe UI"
+  },
+
+  "files": {
+    "_doc": "Relative to the repo folder.",
+    "orb_position": "memory/orb_position.json"
+  },
+
+  "orb": {
+    "_doc": "The orb widget. Window side = size + 2 * glow_pad.",
+    "size": 34,
+    "glow_pad": 12,
+    "ring_gap": 5,
+    "supersample": 4,
+    "ring_supersample": 6,
+    "alpha_snap_threshold": 14,
+    "flatten_alpha": 110,
+    "start_bottom_margin": 72,
+    "core": {
+      "_doc": "Glossy sphere. Radius = half the core * (radius_rest + radius_swing * breath); keep rest + swing <= 1 or the core clips. The highlight sits up-left of centre by highlight_dx/dy radii, highlight_radius radii across.",
+      "radius_rest": 0.8152,
+      "radius_swing": 0.1848,
+      "highlight_radius": 0.42,
+      "highlight_dx": 0.62,
+      "highlight_dy": 0.68,
+      "highlight_alpha": 130,
+      "highlight_blur": 0.05
+    },
+    "glow": {
+      "_doc": "Soft halo: radius_frac of the core's diameter, alpha alpha_rest + alpha_swing * breath (0-255), blurred by blur of the frame size.",
+      "radius_frac": 0.6,
+      "alpha_rest": 150,
+      "alpha_swing": 79.2,
+      "blur": 0.05
+    },
+    "ring": {
+      "_doc": "The rotating targeting ring: arcs in degrees from the ring's current angle; colour names a palette entry.",
+      "stroke": 3.5,
+      "arcs": [
+        {"start": 0, "length": 150, "colour": "accent_bright"},
+        {"start": 180, "length": 60, "colour": "ring_violet"}
+      ]
+    }
+  },
+
+  "animation": {
+    "_doc": "tick_ms is the frame timer; one breath is breath_frames ticks, one ring turn 360 / ring_deg_per_tick ticks. speed is frames advanced per tick for each mood (default for any other). motion moves the orb inside its window by mood: kind is shake (x = amplitude * sin(t * rate)), bounce (y = -amplitude * |sin(t * rate)|), orbit (a circle of radius amplitude), lift (y = -amplitude), bob (y = amplitude * sin(t * rate)) or still.",
+    "tick_ms": 50,
+    "breath_frames": 24,
+    "ring_deg_per_tick": 3,
+    "sleepy_after_s": 180,
+    "speed": {
+      "sleepy": 0.2,
+      "thinking": 2.0,
+      "listening": 1.5,
+      "happy": 1.4,
+      "held": 1.5,
+      "default": 0.6
+    },
+    "motion": {
+      "held": {"kind": "shake", "amplitude": 2.0, "rate": 16.0},
+      "happy": {"kind": "bounce", "amplitude": 3.0, "rate": 7.0},
+      "thinking": {"kind": "orbit", "amplitude": 1.5, "rate": 4.0},
+      "curious": {"kind": "lift", "amplitude": 2.0, "rate": 1.0},
+      "listening": {"kind": "lift", "amplitude": 2.0, "rate": 1.0},
+      "idle": {"kind": "bob", "amplitude": 2.0, "rate": 1.8},
+      "sleepy": {"kind": "still", "amplitude": 1.0, "rate": 1.0}
+    }
+  },
+
+  "interaction": {
+    "_doc": "Dragging the orb and how long each little reaction lasts.",
+    "drag_threshold_px": 4,
+    "drag_min_interval_s": 0.016,
+    "react_press_s": 1.0,
+    "react_release_s": 1.2,
+    "react_hover_s": 0.8,
+    "react_default_s": 2.0,
+    "react_dock_s": 1.0
+  },
+
+  "bubble": {
+    "_doc": "The orb's 'here's what I heard' speech bubble.",
+    "bg": "#0d0916",
+    "fg": "#ffffff",
+    "border": "#a855f7",
+    "border_width": 1,
+    "font_size": 9,
+    "padx": 10,
+    "pady": 6,
+    "wrap": 220,
+    "gap": 8,
+    "screen_margin": 4,
+    "duration_ms": 4000
+  },
+
+  "dock": {
+    "_doc": "Hover dock under the orb. buttons run left to right; action is which of tray's callbacks it calls (chat, voice, reminders), icon which glyph it draws (chat, mic, bell). The button whose action is voice lights up while wake-word listening is on.",
+    "title": "Denisse controls",
+    "buttons": [
+      {"action": "chat", "label": "Chat", "icon": "chat"},
+      {"action": "voice", "label": "Voice", "icon": "mic"},
+      {"action": "reminders", "label": "Reminders", "icon": "bell"}
+    ],
+    "voice_on_tip": "{label}: listening on",
+    "colours": {
+      "fill": "#100d19",
+      "outline": "#49345f",
+      "highlight": "#6c4b89",
+      "hover_bg": "#2d203f",
+      "pressed_bg": "#462c60",
+      "active_bg": "#142d2c",
+      "icon": "#c2b1d5",
+      "icon_hover": "#faf2ff",
+      "icon_active": "#80e4c4",
+      "tip_bg": "#191222",
+      "tip_fg": "#e6d9f4"
+    },
+    "layout": {
+      "_doc": "Logical px. Button i is centred at first_x + i * pitch; it spans button_top..height - button_top and half_width either side.",
+      "width": 144,
+      "height": 46,
+      "supersample": 3,
+      "inset": 2,
+      "radius": 21,
+      "outline_width": 1.0,
+      "highlight_inset": 30,
+      "highlight_y": 3,
+      "highlight_width": 0.5,
+      "first_x": 28,
+      "pitch": 44,
+      "half_width": 18,
+      "button_top": 5,
+      "button_radius": 14,
+      "icon_size": 22,
+      "icon_top": 11,
+      "dot_dx": 9,
+      "dot_y": 9,
+      "dot_size": 3,
+      "gap": 2,
+      "tip_gap": 3,
+      "tip_font_size": 8,
+      "tip_padx": 8,
+      "tip_pady": 4
+    },
+    "timing": {
+      "follow_ms": 75,
+      "tip_delay_s": 0.6,
+      "hide_delay_s": 0.4
+    }
+  }
+}
