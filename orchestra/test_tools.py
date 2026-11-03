@@ -263,6 +263,56 @@ class ToolsTest(unittest.TestCase):
 
     # --- status
 
+    def test_status_running_shows_requested_and_actual_models(self):
+        (self.R.REVIEW / "runner.claude.2.lock").write_text(
+            json.dumps({"pid": 7, "since": "now", "task": "busy"}), encoding="utf-8")
+        (self.R.QUEUE / "busy.md").write_text(
+            TASK.format(written="2026-11-02T19:45").replace("Lane: claude", "Lane: claude\nModel: fable"),
+            encoding="utf-8")
+        (self.R.REPORTS / "busy.lane.log").write_text(
+            'profile noise\n{partial\n[]\n{"type":"assistant","model":"ignore-me"}\n'
+            '{"type":"system","subtype":"init","model":"claude-fable-actual"}\n', encoding="utf-8")
+        snapshot = {p: p.read_bytes() for p in self.R.REVIEW.rglob("*") if p.is_file()}
+        s = self.S.collect()
+        self.assertEqual(s["running"][0]["model"], "fable")
+        self.assertEqual(s["running"][0]["actual_model"], "claude-fable-actual")
+        self.assertIn("claude slot 2: busy since now model fable (actual claude-fable-actual)", self.S.render(s))
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(self.S.main(["--json"]), 0)
+        row = json.loads(out.getvalue())["running"][0]
+        self.assertEqual((row["model"], row["actual_model"]), ("fable", "claude-fable-actual"))
+        self.assertEqual(snapshot, {p: p.read_bytes() for p in self.R.REVIEW.rglob("*") if p.is_file()})
+
+    def test_status_running_defaults_for_missing_blank_and_starting_tasks(self):
+        for slot, slug in (("claude", "no-header"), ("claude.2", "blank-header"),
+                          ("claude.3", "missing-task"), ("codex", "plain-log"), ("codex.2", None)):
+            (self.R.REVIEW / f"runner.{slot}.lock").write_text(json.dumps({"task": slug}), encoding="utf-8")
+        for slug, header in (("no-header", ""), ("blank-header", "Model:   \n")):
+            (self.R.QUEUE / f"{slug}.md").write_text("# Task\n" + header, encoding="utf-8")
+        (self.R.REPORTS / "plain-log.lane.log").write_text("plain Codex output\n", encoding="utf-8")
+        s = self.S.collect()
+        self.assertEqual(len(s["running"]), 5)
+        for row in s["running"]:
+            self.assertEqual((row["model"], row["actual_model"]), ("default", None))
+        self.assertEqual(self.S.render(s).count("model default"), 5)
+        self.assertNotIn("(actual", self.S.render(s))
+
+    def test_status_running_keeps_requested_model_until_init_appears(self):
+        (self.R.REVIEW / "runner.claude.lock").write_text(json.dumps({"task": "busy"}), encoding="utf-8")
+        (self.R.QUEUE / "busy.md").write_text("# Task\nModel: fable\n", encoding="utf-8")
+        row = self.S.collect()["running"][0]
+        self.assertEqual((row["model"], row["actual_model"]), ("fable", None))
+        log = self.R.REPORTS / "busy.lane.log"
+        prefix = '{"type":"system","subtype":"init","model":'
+        log.write_text(prefix, encoding="utf-8")
+        self.assertIsNone(self.S.collect()["running"][0]["actual_model"])
+        log.write_text(prefix + '"actual-id"}\n', encoding="utf-8")
+        self.assertEqual(self.S.collect()["running"][0]["actual_model"], "actual-id")
+        (self.R.QUEUE / "busy.md").unlink()
+        row = self.S.collect()["running"][0]
+        self.assertEqual((row["model"], row["actual_model"]), ("default", "actual-id"))
+
     def test_status_reports_everything(self):
         self.park()
         (self.R.REVIEW / "runner.claude.lock").write_text(

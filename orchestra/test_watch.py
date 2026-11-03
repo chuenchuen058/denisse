@@ -16,6 +16,10 @@ sys.path.insert(0, str(HERE))
 import watch  # noqa: E402
 
 
+def init(model):
+    return json.dumps({"type": "system", "subtype": "init", "model": model})
+
+
 def assistant(*content):
     return json.dumps({
         "type": "assistant", "session_id": "test-session", "parent_tool_use_id": None,
@@ -24,6 +28,14 @@ def assistant(*content):
 
 
 class DescribeTest(unittest.TestCase):
+    def test_session_model_only_uses_valid_init_models(self):
+        self.assertEqual(watch.session_model(init(" fable ")), "fable")
+        for line in ("plain Codex output", "{partial", "[]", "null", init(None), init(""),
+                     init("  "), init(42), '{"type":"system","subtype":"init"}',
+                     '{"type":"assistant","model":"ignore-me"}'):
+            with self.subTest(line=line):
+                self.assertIsNone(watch.session_model(line))
+
     def test_system_init(self):
         line = json.dumps({"type": "system", "subtype": "init", "model": "claude-sonnet-4-5",
                            "session_id": "test-session", "tools": ["Bash", "Read"]})
@@ -137,6 +149,59 @@ class RunningTest(ReviewTest):
 
 class PollTest(ReviewTest):
     slug = "2026-11-02T2254-watch-task"
+
+    def test_init_model_survives_initial_tail_and_later_polls(self):
+        self.lock("claude", task=self.slug)
+        self.log(self.slug, init("fable"), assistant({"type": "text", "text": "First"}))
+        state = watch.WatchState(tail=1)
+        prefix = f"{watch.COLOURS[0]}[{self.slug[17:45]} · fable]{watch.RESET} "
+        first = self.poll(state)
+        self.assertNotIn("session started", first)
+        self.assertIn(prefix + "💬 First\n", first)
+        self.log(self.slug, assistant({"type": "text", "text": "Next"},
+                                      {"type": "tool_use", "name": "Read", "input": {"file_path": "x.py"}}),
+                 append=True)
+        self.assertEqual(self.poll(state), prefix + "💬 Next\n" + prefix + "🔧 Read x.py\n")
+
+    def test_init_arriving_after_first_poll_updates_prefix(self):
+        self.lock("claude", task=self.slug)
+        self.log(self.slug, "starting")
+        state = watch.WatchState()
+        self.poll(state)
+        self.log(self.slug, init("claude-sonnet-4-5"), "working", append=True)
+        output = self.poll(state)
+        prefix = f"[{self.slug[17:45]} · claude-sonnet-4-5]{watch.RESET} "
+        self.assertIn(prefix + "▶ session started (claude-sonnet-4-5)", output)
+        self.assertIn(prefix + "working", output)
+
+    def test_models_are_per_task_and_codex_slots_use_codex(self):
+        state = watch.WatchState()
+        tasks = (("claude", "fable"), ("claude.2", "claude-sonnet-4-5"),
+                 ("codex", "codex"), ("codex.2", "codex"))
+        for slot, model in tasks:
+            slug = f"2026-11-02T2254-task-{slot}"
+            self.lock(slot, task=slug)
+            lines = ["plain Codex output"] if model == "codex" else [init(model), "working"]
+            self.log(slug, *lines)
+        output = self.poll(state)
+        for slot, model in tasks:
+            slug = f"2026-11-02T2254-task-{slot}"
+            self.assertIn(f"[{slug[17:45]} · {model}]", output)
+            self.log(slug, "next event", append=True)
+        output = self.poll(state)
+        for slot, model in tasks:
+            slug = f"2026-11-02T2254-task-{slot}"
+            self.assertIn(f"[{slug[17:45]} · {model}]{watch.RESET} next event", output)
+
+    def test_truncation_clears_old_model_until_new_init(self):
+        self.lock("claude", task=self.slug)
+        self.log(self.slug, init("old-model"), "long event " * 30)
+        state = watch.WatchState()
+        self.poll(state)
+        self.log(self.slug, "restarting")
+        self.assertNotIn("old-model", self.poll(state))
+        self.log(self.slug, init("new-model"), "working", append=True)
+        self.assertIn(f"[{self.slug[17:45]} · new-model]", self.poll(state))
 
     def test_follow_prints_only_appended_events(self):
         self.lock("claude", task=self.slug)
