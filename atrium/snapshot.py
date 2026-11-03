@@ -154,6 +154,21 @@ def _config() -> dict:
         return {}
 
 
+def _slots() -> dict:
+    """Lane slots in force now: an enabled, unexpired campaign's override, else config.json."""
+    slots = _config().get("lane_slots") or {"claude": 1, "codex": 1}
+    try:
+        c = json.loads((REVIEW / "campaign.json").read_text(encoding="utf-8"))
+        stop = c.get("stop_at")
+        live = c.get("enabled") and (not stop or dt.datetime.fromisoformat(stop.replace("Z", "+00:00"))
+                                     > dt.datetime.now(dt.timezone.utc))
+        if live and (c.get("overrides") or {}).get("lane_slots"):
+            slots = c["overrides"]["lane_slots"]
+    except (OSError, ValueError, TypeError):
+        pass
+    return slots
+
+
 def _running() -> list[dict]:
     """Tasks the runner's slots hold right now (from .review/runner.*.lock)."""
     rows, now = [], dt.datetime.now()
@@ -181,7 +196,7 @@ def _running() -> list[dict]:
     # One row per configured slot, idle ones included: the hub can't read an empty file
     # (3 Nov 2026: "Tasks running now" showed "failed" whenever nothing ran).
     taken = {(r["lane"], r["slot"]) for r in rows}
-    for lane, n in (_config().get("lane_slots") or {"claude": 1, "codex": 1}).items():
+    for lane, n in _slots().items():
         for slot in range(1, int(n) + 1):
             if (lane, slot) not in taken:
                 rows.append({"id": f"idle:{lane}:{slot}", "task": "", "lane": lane, "slot": slot,
@@ -203,14 +218,7 @@ def _usage(running: list[dict]) -> list[dict]:
     expose a remaining-allowance figure to the CLI, so its row shows activity, not a %."""
     st, cfg = _state(), _config()
     today = dt.date.today().isoformat()
-    slots = cfg.get("lane_slots", {})
-    campaign = {}
-    try:
-        campaign = json.loads((REVIEW / "campaign.json").read_text(encoding="utf-8"))
-        if campaign.get("enabled") and campaign.get("overrides", {}).get("lane_slots"):
-            slots = campaign["overrides"]["lane_slots"]
-    except (OSError, ValueError):
-        pass
+    slots = _slots()
     per = {}
     for ts in st.get("tasks", {}).values():
         for h in ts.get("history", []):
@@ -257,7 +265,8 @@ def _usage(running: list[dict]) -> list[dict]:
         pass
     busy = {}
     for r in running:
-        busy[r["lane"]] = busy.get(r["lane"], 0) + 1
+        if r["task"]:  # idle slot rows don't count
+            busy[r["lane"]] = busy.get(r["lane"], 0) + 1
     try:
         import urllib.request
         with urllib.request.urlopen("http://127.0.0.1:11434/api/ps", timeout=2) as resp:
