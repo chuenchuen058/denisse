@@ -216,5 +216,58 @@ class IsForegroundTests(unittest.TestCase):
         self.assertFalse(hotkey.is_foreground(5, self.U(0, 0)))
 
 
+def _write_config(test, edit):
+    import json
+    import tempfile
+    with open(hotkey.CONFIG_FILE, encoding="utf-8") as f:
+        data = json.load(f)
+    edit(data)
+    fd, path = tempfile.mkstemp(suffix=".json")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+    test.addCleanup(os.remove, path)
+    return path
+
+
+class ConfigData(unittest.TestCase):
+    """hotkeys.json drives the combos and words: change the data, change the behaviour."""
+
+    def tearDown(self):
+        hotkey.configure(hotkey.CONFIG_FILE)
+
+    def test_shipped_file_equals_defaults(self):
+        import json
+        strip = lambda d: {k: strip(v) for k, v in d.items() if not k.startswith("_")} \
+            if isinstance(d, dict) else d
+        with open(hotkey.CONFIG_FILE, encoding="utf-8") as a, \
+                open(hotkey.DEFAULTS_FILE, encoding="utf-8") as b:
+            self.assertEqual(strip(json.load(a)), strip(json.load(b)))
+
+    def test_combo_modifier_and_off_words_from_the_data(self):
+        def edit(d):
+            d["summon"]["combo"] = "cmd+shift+k"
+            d["modifiers"]["win"].append("cmd")
+            d["off_words"].append("nope")
+        hotkey.configure(_write_config(self, edit))
+        self.assertEqual(parse_hotkey(None), (MOD_WIN | MOD_SHIFT, ord("K")))
+        self.assertIsNone(parse_hotkey("nope"))
+        self.assertEqual(hotkey.describe("cmd+shift+k"), "Cmd+Shift+K")
+
+    def test_bad_values_fall_back_with_a_log_line(self):
+        def edit(d):
+            d["summon"]["combo"] = "ctrl+bogus"
+            d["modifiers"]["alt"] = []
+            d["summon"]["register_timeout_s"] = -1
+        from unittest import mock
+        lines = []
+        with mock.patch.object(hotkey, "_log", lines.append):
+            hotkey.configure(_write_config(self, edit))
+        text = "\n".join(lines)
+        for key in ("summon.combo", "modifiers", "register_timeout_s"):
+            self.assertIn(key, text)
+        self.assertEqual(parse_hotkey(None), (MOD_CONTROL | MOD_ALT, ord("D")))
+        self.assertEqual(hotkey.CONFIG["summon"]["register_timeout_s"], 2.0)
+
+
 if __name__ == "__main__":
     unittest.main()

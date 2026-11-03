@@ -1,7 +1,7 @@
 """One key for "explain this": send the front app's selection to Denisse.
 
-A second global hotkey (default Ctrl+Alt+E, ``DENISSE_EXPLAIN_HOTKEY``,
-``off`` disables) built from the two pieces already there:
+A second global hotkey (``explain.combo`` in hotkeys.json, shipped as
+Ctrl+Alt+E; ``DENISSE_EXPLAIN_HOTKEY`` overrides it, ``off`` disables) built from the two pieces already there:
 
   hotkey.GlobalHotkey          registration, parsing, its own message loop
   desktop_context              the selection / clipboard / privacy rules
@@ -16,7 +16,7 @@ What a press does:
   privacy block    front window or the text looks like a password manager,
                    sign-in page or bank -> chat opens with a one-line note,
                    nothing is sent and the text is never shown
-  selection        "Explain this:" + selection (cut to MAX_CHARS), sent
+  selection        explain.prefix + selection (cut to max_chars), sent
   no selection     same with the clipboard text
   nothing at all   the chat just opens, as Ctrl+Alt+D would
   reading off      DENISSE_DESKTOP_CONTEXT=0 -> chat opens with a note
@@ -36,12 +36,33 @@ from typing import Callable, NamedTuple, Optional
 import desktop_context
 import hotkey
 
-DEFAULT_HOTKEY = "ctrl+alt+e"
 ENV_VAR = "DENISSE_EXPLAIN_HOTKEY"
 HOTKEY_ID = 0xD15F  # differs from hotkey.GlobalHotkey.HOTKEY_ID
-PREFIX = "Explain this:"
-RELEASE_WAIT = 1.0  # seconds to wait for Alt/Shift/Win to come up
-OFF_NOTE = "Reading the screen is switched off (DENISSE_DESKTOP_CONTEXT=0), so I didn't look."
+
+# Values from hotkeys.json's "explain" section (hotkey.configure() loads and
+# checks it); configure() here re-reads them after hotkey.configure().
+DEFAULT_HOTKEY = PREFIX = OFF_NOTE = ""
+RELEASE_WAIT = RELEASE_POLL = SEND_WAIT = 0.0
+SEND_RETRY_MS = 0
+
+
+def configure(path=None) -> dict:
+    """Reload hotkeys.json (via hotkey.configure) and take the explain values."""
+    global DEFAULT_HOTKEY, PREFIX, OFF_NOTE, RELEASE_WAIT, RELEASE_POLL, SEND_WAIT, SEND_RETRY_MS
+    if path is not None:
+        hotkey.configure(path)
+    cfg = hotkey.CONFIG["explain"]
+    DEFAULT_HOTKEY = cfg["combo"]
+    PREFIX = cfg["prefix"]
+    OFF_NOTE = cfg["off_note"]
+    RELEASE_WAIT = cfg["release_wait_s"]
+    RELEASE_POLL = cfg["release_poll_s"]
+    SEND_WAIT = cfg["send_wait_s"]
+    SEND_RETRY_MS = cfg["send_retry_ms"]
+    return cfg
+
+
+configure()
 
 
 class Grab(NamedTuple):
@@ -63,10 +84,11 @@ def resolve_spec(spec: Optional[str] = None) -> str:
     return spec if spec and spec.strip() else DEFAULT_HOTKEY
 
 
-def wait_for_release(held: Callable[[], bool] = None, timeout: float = RELEASE_WAIT,
+def wait_for_release(held: Callable[[], bool] = None, timeout: Optional[float] = None,
                      sleep: Callable[[float], None] = time.sleep) -> bool:
     """Poll until Alt/Shift/Win are up. True if released in time."""
     held = held or desktop_context._w32_modifiers_held
+    timeout = RELEASE_WAIT if timeout is None else timeout
     deadline = time.monotonic() + timeout
     while True:
         try:
@@ -76,7 +98,7 @@ def wait_for_release(held: Callable[[], bool] = None, timeout: float = RELEASE_W
             return False
         if time.monotonic() >= deadline:
             return False
-        sleep(0.02)
+        sleep(RELEASE_POLL)
 
 
 def grab(wait: Callable[[], bool] = wait_for_release) -> Grab:
@@ -95,7 +117,7 @@ def grab(wait: Callable[[], bool] = wait_for_release) -> Grab:
     if dc.is_private(title, proc):
         return Grab("blocked")
     text, source = None, ""
-    if win and not dc._own_window(win) and proc.lower() not in dc._TERMINALS:
+    if win and not dc._own_window(win) and not dc.is_terminal(proc):
         wait()
         text, source = dc.selected_text(), "selection"
     if not text:
@@ -141,9 +163,6 @@ def make_handler(deliver: Callable[[Request], None],
     return on_press
 
 
-SEND_WAIT = 30.0  # seconds a fresh chat may take to connect to the brain
-
-
 def send_when_ready(get_popup: Callable[[], object], text: str,
                     after: Callable[[int, Callable[[], None]], None],
                     deadline: Optional[float] = None,
@@ -151,7 +170,7 @@ def send_when_ready(get_popup: Callable[[], object], text: str,
     """Put ``text`` in the chat's input and send it once the chat can send.
 
     A freshly opened chat connects to the brain in the background and its
-    send is a no-op until then, so retry every 200 ms. If the popup closes
+    send is a no-op until then, so retry every SEND_RETRY_MS. If the popup closes
     meanwhile, drop it; if it never connects in SEND_WAIT, leave the text
     in the box for him to send by hand. Runs on the Tk thread.
     """
@@ -162,7 +181,7 @@ def send_when_ready(get_popup: Callable[[], object], text: str,
         return
     ready = getattr(popup, "brain", None) is not None and not getattr(popup, "busy", False)
     if not ready and clock() < deadline:
-        after(200, lambda: _retry(get_popup, popup, text, after, deadline, clock))
+        after(SEND_RETRY_MS, lambda: _retry(get_popup, popup, text, after, deadline, clock))
         return
     entry = popup.entry
     entry.config(state="normal")
