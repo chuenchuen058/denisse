@@ -1,0 +1,15 @@
+{
+  "_about": "Denisse's model choices, in one place (AGENTS.md Rule 0). Each entry: why, the env var that overrides it (still wins when set), and the value used otherwise. model_config.py reads this; DENISSE_CONFIG points at another copy (tests, a private tweak).",
+  "models": {
+    "chat": {
+      "why": "The Ollama model the brain talks to. Must be pulled locally; num_ctx 8192 must fit the 8 GB GPU (AGENTS.md). Change it only after scripts/model_bakeoff.py and eval/run_eval.py.",
+      "env": "DENISSE_MODEL",
+      "value": "llama3.1:8b"
+    },
+    "whisper": {
+      "why": "faster-whisper size for speech-to-text. small.en is ~480 MB, downloaded once; it shares the GPU with the chat model (stt_whisper.py docstring).",
+      "env": "DENISSE_WHISPER_MODEL",
+      "value": "small.en"
+    }
+  }
+}

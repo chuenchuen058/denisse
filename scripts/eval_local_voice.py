@@ -255,7 +255,8 @@ def _time_stream_open(sink):
 
 def _model_times(prompt):
     import ollama
-    model = os.environ.get("DENISSE_MODEL", "llama3.1:8b")
+    import model_config
+    model = model_config.model("chat")
     t = time.perf_counter()
     first = first_sentence = None
     text = ""

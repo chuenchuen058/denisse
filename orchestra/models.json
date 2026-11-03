@@ -1,0 +1,5 @@
+{
+  "_about": "Orchestra's model choices, in one place (AGENTS.md Rule 0). Kept apart from config.json so model changes don't collide with limit changes. Read by orchestra/local_team/core.py load_config(); a key here wins over the same key in config.json. Claude-lane models are picked per task by a 'Model:' header (runner.py), and the claude CLI's own default applies otherwise, so there is no claude/codex id here.",
+  "local_team_model": "llama3.1:8b",
+  "_local_team_model": "Installed Ollama model the local team (scout/planner/librarian) calls; it never pulls one. See config.json's _local_team_model for the GPU-busy rules."
+}

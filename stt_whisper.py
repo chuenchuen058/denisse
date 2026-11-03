@@ -10,10 +10,10 @@ the wake-word path keeps Vosk. Pick with DENISSE_STT=whisper|vosk (default
 whisper when faster-whisper is installed; any Whisper failure falls back to
 Vosk in voice_mode.listen()).
 
-Model: DENISSE_WHISPER_MODEL (default "small.en", ~480 MB, downloaded once to
-the Hugging Face cache). Runs on the GPU (float16) when CUDA libraries load,
-otherwise on the CPU (int8). The GPU is shared with Ollama's llama3.1:8b
-(~5.6 GB of 8 GB), and small.en in float16 needs about 1 GB.
+Model: config.json's models.whisper (DENISSE_WHISPER_MODEL overrides it;
+downloaded once to the Hugging Face cache). Runs on the GPU (float16) when
+CUDA libraries load, otherwise on the CPU (int8). The GPU is shared with the
+Ollama chat model (~5.6 GB of 8 GB), and small.en in float16 needs about 1 GB.
 Everything stays on this machine.
 """
 from __future__ import annotations
@@ -27,11 +27,12 @@ import time
 
 import numpy as np
 
+import model_config
 import stt_vosk  # reuse its mic-picking and downmix/resample (see its 48 kHz note)
 import voice_pipeline
 
 SAMPLE_RATE = stt_vosk.SAMPLE_RATE  # 16 kHz, what Whisper expects
-MODEL_NAME = os.environ.get("DENISSE_WHISPER_MODEL", "small.en")
+MODEL_NAME = model_config.model("whisper")
 DEVICE = os.environ.get("DENISSE_WHISPER_DEVICE", "auto")  # auto | cuda | cpu
 CHUNK_FRAMES = 1024
 # Endpointing lives in voice_pipeline.Endpointer: DENISSE_END_SILENCE_S is
