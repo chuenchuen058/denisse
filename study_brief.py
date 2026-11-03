@@ -177,6 +177,92 @@ def schedule(work: list, today: dt.date, due: dt.date) -> list:
     return out
 
 
+# -- how he learns (read-only from the learner model) ----------------------
+#
+# Beliefs come from learner.core -- the store, never the rendered note -- and
+# only change the brief through the fixed rules below, so the same beliefs
+# always give the same brief. No belief, or none a rule recognises: the brief
+# is exactly what it was before the learner model existed. Nothing here
+# writes to the store or infers a belief from what the brief says.
+
+_FORMAT_WORDS = {"example": re.compile(r"(?i)\bexamples?\b"),
+                 "diagram": re.compile(r"(?i)\b(diagrams?|pictures?|visuals?)\b"),
+                 "theory": re.compile(r"(?i)\b(theory|derivations?|proofs?)\b")}
+_DURATION = re.compile(r"(?i)(\d+(?:\.\d+)?)\s*(minutes?|mins?|hours?|hrs?|h)\b")
+_EXAMPLE_SOURCE = re.compile(r"(?i)\b(tutorial|example|past paper|problem sheet|worksheet|exercise)")
+
+
+def learner_beliefs() -> list:
+    """Current beliefs from the learner store, in store order. Any trouble
+    reading it means no beliefs -- the brief never fails because of it."""
+    try:
+        from learner import core as learner_core
+        data = learner_core.load()
+    except Exception:  # noqa: BLE001 -- a missing or broken store = today's brief
+        return []
+    return [b for b in data.get("beliefs", [])
+            if isinstance(b, dict) and b.get("status") == "current" and b.get("id")]
+
+
+def _session_minutes(claim: str) -> int | None:
+    found = [float(n) * (60 if u.lower().startswith("h") else 1) for n, u in _DURATION.findall(claim)]
+    return int(min(found)) if found else None
+
+
+def _format_first(claim: str) -> str | None:
+    """Which of example / diagram / theory the claim names first, if any."""
+    hits = [(m.start(), kind) for kind, rx in _FORMAT_WORDS.items() for m in [rx.search(claim)] if m]
+    return min(hits)[1] if hits else None
+
+
+def learner_shape(beliefs: list) -> dict:
+    """The adaptations these beliefs call for. Areas: `format` (worked example
+    or diagram before theory), `attention` (shorter sections), `study` (his
+    session length = pace: how many plan items one session covers). Other
+    areas, and claims no rule recognises, change nothing and aren't listed."""
+    shape = {"example_first": None, "diagram_first": None, "short": None, "pace": None}
+    for b in beliefs:
+        area, claim = b.get("area"), str(b.get("claim", ""))
+        if area == "format":
+            first = _format_first(claim)
+            if first == "example" and not shape["example_first"]:
+                shape["example_first"] = b
+            elif first == "diagram" and not shape["diagram_first"]:
+                shape["diagram_first"] = b
+        elif area == "attention" and claim.strip() and not shape["short"]:
+            shape["short"] = b
+        elif area == "study":
+            mins = _session_minutes(claim)
+            if mins:  # the latest stated length wins
+                shape["pace"] = {**b, "minutes": mins,
+                                 "per_session": 1 if mins <= 30 else 2 if mins <= 60 else 3}
+    return {k: v for k, v in shape.items() if v}
+
+
+def _examples_first(revise: str) -> str:
+    """'Wk 4 lecture; Wk 4 tutorial' -> 'Wk 4 tutorial; Wk 4 lecture'."""
+    parts = [p.strip() for p in revise.split(";")]
+    return "; ".join([p for p in parts if _EXAMPLE_SOURCE.search(p)]
+                     + [p for p in parts if not _EXAMPLE_SOURCE.search(p)])
+
+
+def _shaped_by(shape: dict) -> list:
+    def cite(b):
+        return f"{b['id']}: \"{_clip(str(b.get('claim', '')), 60)}\""
+    lines = ["", "## Shaped by", ""]
+    if "example_first" in shape:
+        lines.append(f"- Worked example before theory — {cite(shape['example_first'])}")
+    if "diagram_first" in shape:
+        lines.append(f"- Picture before theory — {cite(shape['diagram_first'])}")
+    if "short" in shape:
+        lines.append(f"- Shorter sections — {cite(shape['short'])}")
+    if "pace" in shape:
+        p = shape["pace"]
+        lines.append(f"- {p['per_session']} plan item(s) per session of about {p['minutes']} min — {cite(p)}")
+    lines.append("- Wrong? `python -m learner supersede <id> \"what's true\"` and ask again.")
+    return lines
+
+
 # -- the job ---------------------------------------------------------------
 
 def _job_file(module: str) -> str:
@@ -207,7 +293,9 @@ def _load(module: str, now: dt.datetime) -> dict:
             "status": "running", "done": {}, "errors": {}, "resumed": False}
 
 
-def _brief_text(job: dict, today: dt.date) -> str:
+def _brief_text(job: dict, today: dt.date, shape: dict | None = None) -> str:
+    shape = shape or {}
+    short = "short" in shape
     d, cw, weeks = job["done"]["deadline"], job["done"]["coursework"], job["done"]["weeks"]
     due = dt.date.fromisoformat(d["due"])
     mod = job["module"]
@@ -238,15 +326,25 @@ def _brief_text(job: dict, today: dt.date) -> str:
     gaps = [w for w in weeks if not w["written"]]
     if gaps:
         lines.append("- Not written up yet: " + ", ".join(
-            f"[[{w['note']}|Week {w['week']}]] ({w['status']})" for w in gaps) + ".")
-    if job["done"]["tasks"]:
+            f"[[{w['note']}|Week {w['week']}]]" + ("" if short else f" ({w['status']})") for w in gaps) + ".")
+    if job["done"]["tasks"] and short:
+        lines.append(f"- On your task list already: {len(job['done']['tasks'])}.")
+    elif job["done"]["tasks"]:
         lines.append(f"- On your task list already: {len(job['done']['tasks'])} — "
                      + "; ".join(t["text"][:60] for t in job["done"]["tasks"][:3]) + ".")
     lines += ["", "## What's left", ""]
+    if "example_first" in shape:
+        lines += ["Start each item from a worked example (tutorial sheet or past paper), "
+                  "then the theory it uses.", ""]
+    if "diagram_first" in shape:
+        lines += ["Start each item from a sketch or diagram of the problem, then the theory it uses.", ""]
     if cw["has_questions"]:
         lines += ["| Item | Marks | Revise from |", "|---|---|---|"]
         for i in todo:
-            lines.append(f"| {i['text']} | {i.get('marks', '')} | {i.get('revise', '')} |")
+            revise = i.get('revise', '')
+            if "example_first" in shape:
+                revise = _examples_first(revise)
+            lines.append(f"| {i['text']} | {i.get('marks', '')} | {revise} |")
     else:
         lines += [f"- [ ] {i['text']}" for i in todo]
     needed = {w for i in todo for w in i.get("weeks", [])}
@@ -259,16 +357,28 @@ def _brief_text(job: dict, today: dt.date) -> str:
         listed = [w for w in missing if w not in planned]
         note = (f"{_weeks_phrase(missing)} {'isn' if len(missing) == 1 else 'aren'}'t written up, "
                 "and questions below need them -- do the write-up before the question.")
-        if listed:
+        if short:
+            note = f"Write up {_weeks_phrase(missing)} before the questions that need {'it' if len(missing) == 1 else 'them'}."
+        elif listed:
             note += f" {_weeks_phrase(listed)} {'is' if len(listed) == 1 else 'are'} already on your task list."
         lines += [note, ""]
     for when, text in job["done"]["plan"]:
         lines.append(f"- by **{dt.date.fromisoformat(when):%a %d %b}** — {text}")
+    if "pace" in shape:
+        per, plan = shape["pace"]["per_session"], job["done"]["plan"]
+        lines += ["", "## Sessions", "",
+                  f"About {shape['pace']['minutes']} min a session, {per} plan item{'s' if per > 1 else ''} each:", ""]
+        for n, k in enumerate(range(0, len(plan), per), 1):
+            group = plan[k:k + per]
+            lines.append(f"- Session {n} (by {dt.date.fromisoformat(group[-1][0]):%a %d %b}): "
+                         + "; ".join(t for _, t in group))
     untaught = [i["text"] for i in todo if i.get("question") and not i.get("weeks")]
     lines += ["", "## What I don't know", ""]
     if untaught:
         lines.append("- Not linked to a taught week yet: " + "; ".join(t[:50] for t in untaught) + ".")
     lines.append("- Your lecture timetable and exam dates — the plan covers this coursework only.")
+    if shape:
+        lines += _shaped_by(shape)
     return "\n".join(lines) + "\n"
 
 
@@ -418,7 +528,7 @@ def run(text: str, now: dt.datetime | None = None) -> str:
             if os.path.exists(path) and _hash(path) != _written().get(path):
                 path = path[:-3] + " (2).md"
             with open(path, "w", encoding="utf-8") as f:
-                f.write(_brief_text(job, today))
+                f.write(_brief_text(job, today, learner_shape(learner_beliefs())))
             _remember_written(path)
             return path
 
