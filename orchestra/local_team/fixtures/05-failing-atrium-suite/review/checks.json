@@ -1,0 +1,31 @@
+{
+  "kind": "offline-regressions",
+  "python": "3.12",
+  "modules": 3,
+  "passed_suites": 1,
+  "results": [
+    {
+      "suite": "atrium/test_atrium.py",
+      "status": "FAIL",
+      "passed": false,
+      "exit_code": 1,
+      "seconds": 0.4,
+      "tally": "Ran 6 tests: FAILED (errors=6) ModuleNotFoundError: No module named 'atrium'"
+    },
+    {
+      "suite": "atrium/test_import_chats.py",
+      "status": "FAIL",
+      "passed": false,
+      "exit_code": 1,
+      "seconds": 0.4,
+      "tally": "FAILED (errors=9) ModuleNotFoundError: No module named 'atrium'"
+    },
+    {
+      "suite": "orchestra/test_power.py",
+      "status": "PASS",
+      "passed": true,
+      "exit_code": 0,
+      "seconds": 0.3
+    }
+  ]
+}

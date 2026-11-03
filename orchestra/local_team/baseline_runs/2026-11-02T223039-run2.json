@@ -1,0 +1,3838 @@
+{
+  "started": "2026-11-02T22:19:04",
+  "finished": "2026-11-02T22:30:39",
+  "rounds": 3,
+  "plans_per_fixture": 2,
+  "model": "llama3.1:8b",
+  "roles": {
+    "scout": "1",
+    "planner": "1"
+  },
+  "score": {
+    "fixture_runs": 36,
+    "fixture_accuracy_pct": 50,
+    "candidates": 147,
+    "candidate_precision_pct": 42,
+    "planned": 66,
+    "planner_bad_output": 0,
+    "admitted": 11,
+    "admission_pass_pct": 17,
+    "false_admissions": 3,
+    "admission_kinds": {
+      "admitted": 11,
+      "gate": 6,
+      "path": 49
+    },
+    "admitted_with_missing_scope_file": 4,
+    "duplicate_fixture_packets": 18,
+    "duplicate_packets_reaching_dedupe": 7,
+    "duplicates_caught": 0,
+    "gate_refused": 6,
+    "gate_checked_and_passed": 11,
+    "gate_expected": 20,
+    "gate_expected_pct": 30,
+    "latency": {
+      "planner": {
+        "n": 66,
+        "median_s": 6.1,
+        "max_s": 7.4
+      },
+      "scout": {
+        "n": 36,
+        "median_s": 6.5,
+        "max_s": 9.6
+      }
+    },
+    "lease_sampled_calls": 102,
+    "lease_held_all_sampled": true,
+    "lease_held_at_every_inference": true,
+    "lease_released_every_call": true,
+    "per_fixture": {
+      "01-parked-generic-why": [
+        "false-alarm",
+        "false-alarm",
+        "false-alarm"
+      ],
+      "02-hub-jobs-pruning": [
+        "hit",
+        "hit",
+        "hit"
+      ],
+      "03-orphan-lane-timeout": [
+        "hit",
+        "hit",
+        "hit"
+      ],
+      "04-naive-timestamps": [
+        "hit",
+        "hit",
+        "hit"
+      ],
+      "05-failing-atrium-suite": [
+        "hit",
+        "hit",
+        "hit"
+      ],
+      "06-multistep-revision": [
+        "hit",
+        "hit",
+        "hit"
+      ],
+      "07-local-team-baseline": [
+        "hit",
+        "hit",
+        "hit"
+      ],
+      "08-noisy-log-resolved": [
+        "false-alarm",
+        "false-alarm",
+        "false-alarm"
+      ],
+      "09-noisy-log-no-report": [
+        "false-alarm",
+        "false-alarm",
+        "false-alarm"
+      ],
+      "10-human-only": [
+        "false-alarm",
+        "false-alarm",
+        "false-alarm"
+      ],
+      "11-done-as-asked": [
+        "false-alarm",
+        "false-alarm",
+        "false-alarm"
+      ],
+      "12-needs-real-data": [
+        "false-alarm",
+        "false-alarm",
+        "false-alarm"
+      ]
+    }
+  },
+  "lease_probes": [
+    {
+      "ran": true,
+      "respected": true,
+      "why": "GPU lease held by baseline-probe (stands in for eval/run_eval.py) (pid 5552)"
+    },
+    {
+      "ran": true,
+      "respected": true,
+      "why": "GPU lease held by baseline-probe (stands in for eval/run_eval.py) (pid 5552)"
+    },
+    {
+      "ran": true,
+      "respected": true,
+      "why": "GPU lease held by baseline-probe (stands in for eval/run_eval.py) (pid 5552)"
+    }
+  ],
+  "skips": [],
+  "runs": [
+    {
+      "fixture": "01-parked-generic-why",
+      "evidence_items": 1,
+      "candidates": [
+        {
+          "problem": "A task failed and its report indicates a blind re-run won't change the result, suggesting a problem with the task itself or its dependencies.",
+          "evidence": [
+            "E1"
+          ],
+          "area_hint": ".review",
+          "worth": "high"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "A task failed and its report indicates a blind re-run won't change the result, suggesting a problem with the task itself or its dependencies.",
+          "title": "Task runner reports task failure",
+          "scope_paths": [
+            "orchestra/",
+            ".review/parked/2026-11-02T2145-multistep-read-found-file.why.txt"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": null,
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        }
+      ],
+      "round": 1,
+      "seconds": 8.9,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 2.01,
+          "lease_samples": 9,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.92,
+          "lease_samples": 33,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "02-hub-jobs-pruning",
+      "evidence_items": 6,
+      "candidates": [
+        {
+          "problem": "The task 'split_tasks' is still blocking, despite the task not listing it, and can still exceed 60 seconds.",
+          "evidence": [
+            "E1"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "Old job files in .review/hub/jobs are not being pruned, as jobs() only filters to 24 hours.",
+          "evidence": [
+            "E2"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "The report 'hub-async-jobs.report.md' has an ODD line: 'FOR MEMORY is filed when the job finishes, not at job_result time'.",
+          "evidence": [
+            "E4"
+          ],
+          "area_hint": "orchestra",
+          "worth": "low"
+        },
+        {
+          "problem": "The fake_agent.mjs file has a detached grandchild that is not being killed properly.",
+          "evidence": [
+            "E5"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "A job is only considered failed if every agent in it failed, which means partial ask_all failures are incorrectly marked as done.",
+          "evidence": [
+            "E6"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "The task 'split_tasks' is still blocking, despite the task not listing it, and can still exceed 60 seconds.",
+          "title": "split_tasks no longer blocks",
+          "scope_paths": [
+            "orchestra/",
+            "orchestra/test_runner.py"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        },
+        {
+          "problem": "A job is only considered failed if every agent in it failed, which means partial ask_all failures are incorrectly marked as done.",
+          "title": "Partial ask_all failures are marked as done",
+          "scope_paths": [
+            "orchestra/agent_hub/test_hub.mjs",
+            "orchestra/test_runner.py"
+          ],
+          "gate": {
+            "id": "node-test",
+            "arg": "orchestra/agent_hub/test_hub.mjs"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "admitted",
+            "reason": "admitted as Queue: draft (needs promotion)"
+          }
+        }
+      ],
+      "round": 1,
+      "seconds": 19.2,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 6.8,
+          "lease_samples": 33,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.19,
+          "lease_samples": 30,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.17,
+          "lease_samples": 30,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "03-orphan-lane-timeout",
+      "evidence_items": 6,
+      "candidates": [
+        {
+          "problem": "A hung orphan lane blocks its slot until it exits or is killed, causing a task to hang indefinitely.",
+          "evidence": [
+            "E1"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The 0-byte lane log is not addressed, causing collection to read whatever the orphan wrote.",
+          "evidence": [
+            "E2"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "Old-format locks without a \"created\" field can't be verified, causing liveness to fall back to the pid alone.",
+          "evidence": [
+            "E3"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "Stray writes by an orphan can't be attributed when a lock has no recorded \"before\" status.",
+          "evidence": [
+            "E4"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "A lock that names a fallback lane doesn't restore lane/lane-from on the reconstructed Task, causing history to be incorrect.",
+          "evidence": [
+            "E5"
+          ],
+          "area_hint": "orchestra",
+          "worth": "low"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "A hung orphan lane blocks its slot until it exits or is killed, causing a task to hang indefinitely.",
+          "title": "Orphan lanes exit on timeout",
+          "scope_paths": [
+            "orchestra/agent_hub/test_hub.mjs",
+            "orchestra/test_runner.py",
+            "orchestra/"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        },
+        {
+          "problem": "The 0-byte lane log is not addressed, causing collection to read whatever the orphan wrote.",
+          "title": "Fix 0-byte lane log",
+          "scope_paths": [
+            "orchestra/"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        }
+      ],
+      "round": 1,
+      "seconds": 19.5,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 6.41,
+          "lease_samples": 31,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.0,
+          "lease_samples": 29,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 7.03,
+          "lease_samples": 34,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "04-naive-timestamps",
+      "evidence_items": 6,
+      "candidates": [
+        {
+          "problem": "The state.json timestamps are still naive local time, not UTC, which might cause issues with comparisons.",
+          "evidence": [
+            "E1"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "The campaign seed is not properly copied to .review/campaign.json, which might cause issues with the seed mechanism.",
+          "evidence": [
+            "E2",
+            "E3"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "The task does not properly stop dispatch at the deadline, and a hard halt is not implemented.",
+          "evidence": [
+            "E4"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The `resume` command is refused after the deadline, and a pause made after the sprint could never be undone.",
+          "evidence": [
+            "E5"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The `stop` command does not properly record the campaign as ended in campaign.json, and a later `resume` restarts dispatch but the campaign stays ended.",
+          "evidence": [
+            "E6"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "The task does not properly stop dispatch at the deadline, and a hard halt is not implemented.",
+          "title": "Stop dispatch at deadline",
+          "scope_paths": [
+            "orchestra/config.json",
+            "orchestra/master_prompt.py",
+            "orchestra/agent_hub/test_hub.mjs"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/config.json' is a policy file; only a human or a Claude chat changes it"
+          }
+        },
+        {
+          "problem": "The `resume` command is refused after the deadline, and a pause made after the sprint could never be undone.",
+          "title": "Resume command after deadline",
+          "scope_paths": [
+            "orchestra/config.json"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/config.json' is a policy file; only a human or a Claude chat changes it"
+          }
+        }
+      ],
+      "round": 1,
+      "seconds": 18.1,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 6.95,
+          "lease_samples": 34,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.02,
+          "lease_samples": 29,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 5.06,
+          "lease_samples": 24,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "05-failing-atrium-suite",
+      "evidence_items": 2,
+      "candidates": [
+        {
+          "problem": "Some test suites in the atrium module failed with exit code 1.",
+          "evidence": [
+            "E1",
+            "E2"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "Some test suites in the atrium module failed with exit code 1.",
+          "title": "Atrium test suites pass",
+          "scope_paths": [
+            "atrium/test_atrium.py",
+            "atrium/test_import_chats.py"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "atrium.test_atrium"
+          },
+          "area": "atrium",
+          "admission": {
+            "kind": "admitted",
+            "reason": "admitted as Queue: draft (needs promotion)"
+          }
+        }
+      ],
+      "round": 1,
+      "seconds": 8.0,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 1.7,
+          "lease_samples": 8,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.31,
+          "lease_samples": 31,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "06-multistep-revision",
+      "evidence_items": 6,
+      "candidates": [
+        {
+          "problem": "The unit test for runtime status fails because it checks if `.git` is a directory, but in a worktree it's a file.",
+          "evidence": [
+            "E5"
+          ],
+          "area_hint": "scripts",
+          "worth": "medium"
+        },
+        {
+          "problem": "The unit test for brain guards ends with a bare `sys.exit()` at import, causing `unittest discover` to always report an import error.",
+          "evidence": [
+            "E4"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The multi_signals_revision is still 0/3 in both arms, and the code doesn't read the file step 1 found.",
+          "evidence": [
+            "E1"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The multi_tasks_timer is 3/6 in the planner arm, and the timer reply sometimes drops \"25\" or the task names.",
+          "evidence": [
+            "E2"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The vault roadmap was not updated because the task didn't ask for it, and the vault is outside this worktree.",
+          "evidence": [
+            "E3"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "The unit test for brain guards ends with a bare `sys.exit()` at import, causing `unittest discover` to always report an import error.",
+          "title": "Fix bare sys.exit() in test_brain_guards.py",
+          "scope_paths": [
+            "orchestra/test_brain_guards.py"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "admitted",
+            "reason": "admitted as Queue: draft (needs promotion)"
+          }
+        },
+        {
+          "problem": "The multi_signals_revision is still 0/3 in both arms, and the code doesn't read the file step 1 found.",
+          "title": "Read file step 1 in multi_signals_revision",
+          "scope_paths": [
+            "orchestra/"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        }
+      ],
+      "round": 1,
+      "seconds": 19.6,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 7.64,
+          "lease_samples": 37,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 5.94,
+          "lease_samples": 29,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 5.92,
+          "lease_samples": 29,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "07-local-team-baseline",
+      "evidence_items": 6,
+      "candidates": [
+        {
+          "problem": "The runner doesn't read the sidecar (base revision, evidence fingerprint) from the .review/local_team/packets folder.",
+          "evidence": [
+            "E2"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "There is no measured quality baseline for llama3.1:8b proposals beyond one smoke run.",
+          "evidence": [
+            "E3"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "The local model's proposals are low quality, causing draft to be the default.",
+          "evidence": [
+            "E4"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "The file orchestra/runner.py is missing from admission's policy-file list.",
+          "evidence": [
+            "E5"
+          ],
+          "area_hint": "orchestra",
+          "worth": "low"
+        },
+        {
+          "problem": "Refusals for invalid/path/gate/premise are not remembered against their evidence fingerprint.",
+          "evidence": [
+            "E6"
+          ],
+          "area_hint": "orchestra",
+          "worth": "low"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "The runner doesn't read the sidecar (base revision, evidence fingerprint) from the .review/local_team/packets folder.",
+          "title": "Reads sidecar from .review/local_team/packets",
+          "scope_paths": [
+            "orchestra/",
+            ".review/local_team/packets/"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": null,
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        },
+        {
+          "problem": "There is no measured quality baseline for llama3.1:8b proposals beyond one smoke run.",
+          "title": "Measured quality baseline for llama3.1:8b proposals",
+          "scope_paths": [
+            "orchestra/local_team/test_baseline.py",
+            "orchestra/"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        }
+      ],
+      "round": 1,
+      "seconds": 19.4,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 6.56,
+          "lease_samples": 32,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.14,
+          "lease_samples": 30,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.67,
+          "lease_samples": 32,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "08-noisy-log-resolved",
+      "evidence_items": 4,
+      "candidates": [
+        {
+          "problem": "Some tasks are not fully completed, specifically '2026-11-02T1952-voice-latency' and '2026-11-02T1951-demo-pack' are only partially done.",
+          "evidence": [
+            "E1",
+            "E3"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "Some tasks are parked, which may indicate a problem with the task runner or the tasks themselves.",
+          "evidence": [
+            "E2",
+            "E4"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "Some tasks are not fully completed, specifically '2026-11-02T1952-voice-latency' and '2026-11-02T1951-demo-pack' are only partially done.",
+          "title": "Tasks are fully completed",
+          "scope_paths": [
+            "orchestra/runner.py",
+            ".review/runner.log",
+            "orchestra/exams/"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": null,
+          "admission": {
+            "kind": "path",
+            "reason": "'.review/runner.log' is in a directory the local team may not scope"
+          }
+        },
+        {
+          "problem": "Some tasks are parked, which may indicate a problem with the task runner or the tasks themselves.",
+          "title": "No parked tasks",
+          "scope_paths": [
+            "orchestra/",
+            ".review/runner.log"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": null,
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        }
+      ],
+      "round": 1,
+      "seconds": 15.7,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 3.45,
+          "lease_samples": 17,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.02,
+          "lease_samples": 29,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.2,
+          "lease_samples": 30,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "09-noisy-log-no-report",
+      "evidence_items": 4,
+      "candidates": [
+        {
+          "problem": "The task 'atlas-vault-paths' failed to write a report after two attempts.",
+          "evidence": [
+            "E1",
+            "E2"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The task 'atlas-vault-paths' was parked due to a missing codex on the PATH.",
+          "evidence": [
+            "E4"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The task 'atlas-vault-paths' was parked due to NO_REPORT after two attempts.",
+          "evidence": [
+            "E3"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The task 'atlas-vault-paths' failed to write a report due to NO_REPORT.",
+          "evidence": [
+            "E1"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "The task 'atlas-vault-paths' was parked due to LANE_MISSING.",
+          "evidence": [
+            "E4"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "The task 'atlas-vault-paths' failed to write a report after two attempts.",
+          "title": "Write report after task",
+          "scope_paths": [
+            "orchestra/",
+            ".review/runner.log"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": null,
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        },
+        {
+          "problem": "The task 'atlas-vault-paths' was parked due to a missing codex on the PATH.",
+          "title": "codex on PATH",
+          "scope_paths": [
+            "orchestra/"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        }
+      ],
+      "round": 1,
+      "seconds": 18.0,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 6.36,
+          "lease_samples": 31,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 5.95,
+          "lease_samples": 29,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 5.7,
+          "lease_samples": 27,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "10-human-only",
+      "evidence_items": 10,
+      "candidates": [
+        {
+          "problem": "The hotkey thread calls AllowSetForegroundWindow(ASFW_ANY) on each press, and a root.after(50) focus() runs after _open_chat. Without that, a new popup's focus_set() does nothing while another app is in front.",
+          "evidence": [
+            "E4"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "Re-registering the scheduled task (the task said not to; needs the owner or the coordinator after merge).",
+          "evidence": [
+            "E6"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "parse_hotkey rejects a combo with no modifier, so a bare system-wide key can't swallow that key in every other app.",
+          "evidence": [
+            "E3"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "The registration-failure log line goes to stdout via print. Under pythonw nothing captures it; I found no logging framework in tray.py to use instead.",
+          "evidence": [
+            "E5"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "battery_floor_percent: running lanes are never killed for power. So the floor only matters when dispatch_on_battery is true: at or under the floor, no new dispatch. With the default (false) nothing dispatches on battery at all, so the floor has no effect.",
+          "evidence": [
+            "E7"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "The hotkey thread calls AllowSetForegroundWindow(ASFW_ANY) on each press, and a root.after(50) focus() runs after _open_chat. Without that, a new popup's focus_set() does nothing while another app is in front.",
+          "title": "AllowSetForegroundWindow is called on each hotkey press",
+          "scope_paths": [
+            "orchestra/test_runner.py",
+            "orchestra/agent_hub/test_hub.mjs",
+            "orchestra/exams/test_exams.py"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "admitted",
+            "reason": "admitted as Queue: draft (needs promotion)"
+          }
+        },
+        {
+          "problem": "Re-registering the scheduled task (the task said not to; needs the owner or the coordinator after merge).",
+          "title": "Re-register scheduled task",
+          "scope_paths": [
+            "orchestra/"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        }
+      ],
+      "round": 1,
+      "seconds": 20.7,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 8.51,
+          "lease_samples": 41,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 7.0,
+          "lease_samples": 34,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 5.05,
+          "lease_samples": 24,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "11-done-as-asked",
+      "evidence_items": 16,
+      "candidates": [
+        {
+          "problem": "The task to run migration, theme, nightly and contract writer scripts was not done.",
+          "evidence": [
+            "E1"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The importer for past chats is not running against the real vault.",
+          "evidence": [
+            "E5"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The nightly chat import task is not running the step against the real vault.",
+          "evidence": [
+            "E11"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The nightly chat import task is skipping exports in Downloads modified in the last 30 minutes.",
+          "evidence": [
+            "E13"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "The nightly chat import task is not filling claude-code first, then codex, then exports.",
+          "evidence": [
+            "E15"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "The task to run migration, theme, nightly and contract writer scripts was not done.",
+          "title": "Run migration, theme, nightly and contract writer scripts",
+          "scope_paths": [
+            "orchestra/",
+            "scripts/"
+          ],
+          "gate": {
+            "id": "script-test",
+            "arg": "scripts/test_script.py"
+          },
+          "area": null,
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        },
+        {
+          "problem": "The importer for past chats is not running against the real vault.",
+          "title": "Past chats import runs against real vault",
+          "scope_paths": [
+            "orchestra/importer.py",
+            "orchestra/vault.py",
+            "orchestra/config.py"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_importer"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "gate",
+            "reason": "argument 'orchestra.test_importer': orchestra/test_importer.py doesn't exist"
+          }
+        }
+      ],
+      "round": 1,
+      "seconds": 19.0,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 6.45,
+          "lease_samples": 31,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.11,
+          "lease_samples": 29,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.38,
+          "lease_samples": 31,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "12-needs-real-data",
+      "evidence_items": 12,
+      "candidates": [
+        {
+          "problem": "The report for lane rate limits does not capture real Claude or Gemini limit output, and does not check for TIMEOUT runs.",
+          "evidence": [
+            "E1",
+            "E2"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "Lanes not in the pattern table are checked against every lane's patterns.",
+          "evidence": [
+            "E3"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "A time zone in the message is ignored, and dated times in the past fall back to +60 min.",
+          "evidence": [
+            "E4"
+          ],
+          "area_hint": "orchestra",
+          "worth": "low"
+        },
+        {
+          "problem": "A run that hit its limit is still charged as usual.",
+          "evidence": [
+            "E5"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "Old history entries are not backfilled.",
+          "evidence": [
+            "E7"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "The report for lane rate limits does not capture real Claude or Gemini limit output, and does not check for TIMEOUT runs.",
+          "title": "Capture real Claude and Gemini limit output and check for TIMEOUT runs",
+          "scope_paths": [
+            "orchestra/agent_hub/test_hub.mjs",
+            "orchestra/exams/test_exams.py",
+            "orchestra/test_runner.py",
+            "scripts/run_checks.py"
+          ],
+          "gate": {
+            "id": "unittest-discover",
+            "arg": "orchestra/exams"
+          },
+          "area": null,
+          "admission": {
+            "kind": "path",
+            "reason": "scope spans areas ['orchestra', 'scripts']; one task, one area"
+          }
+        },
+        {
+          "problem": "A run that hit its limit is still charged as usual.",
+          "title": "Lane rate limits are charged as usual",
+          "scope_paths": [
+            "orchestra/"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        }
+      ],
+      "round": 1,
+      "seconds": 19.2,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 5.8,
+          "lease_samples": 28,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.84,
+          "lease_samples": 33,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.5,
+          "lease_samples": 31,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "01-parked-generic-why",
+      "evidence_items": 1,
+      "candidates": [
+        {
+          "problem": "A task failed and its report indicates that a blind re-run won't change the result, suggesting a problem with the task itself or its dependencies.",
+          "evidence": [
+            "E1"
+          ],
+          "area_hint": ".review",
+          "worth": "high"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "A task failed and its report indicates that a blind re-run won't change the result, suggesting a problem with the task itself or its dependencies.",
+          "title": "Task runner reports task failure without blind re-run change",
+          "scope_paths": [
+            "orchestra/",
+            "orchestra/test_runner.py"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        }
+      ],
+      "round": 2,
+      "seconds": 8.2,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 1.97,
+          "lease_samples": 9,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.22,
+          "lease_samples": 30,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "02-hub-jobs-pruning",
+      "evidence_items": 6,
+      "candidates": [
+        {
+          "problem": "The task 'split_tasks' is still blocking, but it was not listed in the task, and it can still exceed 60 seconds.",
+          "evidence": [
+            "E1"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "Old job files in .review/hub/jobs are not being pruned, and jobs() only filters to 24 hours.",
+          "evidence": [
+            "E2"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "The report 'hub-async-jobs.report.md' mentions that the task was not tried against the live desktop bridge or real CLIs.",
+          "evidence": [
+            "E3"
+          ],
+          "area_hint": "orchestra",
+          "worth": "low"
+        },
+        {
+          "problem": "The file 'hub-async-jobs.report.md' mentions that 'FOR MEMORY' is filed when the job finishes, not at job_result time.",
+          "evidence": [
+            "E4"
+          ],
+          "area_hint": "orchestra",
+          "worth": "low"
+        },
+        {
+          "problem": "The file 'fake_agent.mjs' spawns a grandchild detached, but a non-detached node grandchild dies with a plain child.kill() anyway.",
+          "evidence": [
+            "E5"
+          ],
+          "area_hint": "scripts",
+          "worth": "low"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "The task 'split_tasks' is still blocking, but it was not listed in the task, and it can still exceed 60 seconds.",
+          "title": "split_tasks is listed in the task",
+          "scope_paths": [
+            "orchestra/tasks.py",
+            "orchestra/task_runner.py"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "admitted",
+            "reason": "admitted as Queue: draft (needs promotion)"
+          }
+        },
+        {
+          "problem": "Old job files in .review/hub/jobs are not being pruned, and jobs() only filters to 24 hours.",
+          "title": "Prune old job files in .review/hub/jobs",
+          "scope_paths": [
+            "orchestra/",
+            ".review/hub/jobs"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": null,
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        }
+      ],
+      "round": 2,
+      "seconds": 18.2,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 6.72,
+          "lease_samples": 33,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 5.59,
+          "lease_samples": 27,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 5.89,
+          "lease_samples": 28,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "03-orphan-lane-timeout",
+      "evidence_items": 6,
+      "candidates": [
+        {
+          "problem": "A hung orphan lane blocks its slot until it exits or is killed, causing a task to hang indefinitely.",
+          "evidence": [
+            "E1"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The 0-byte lane log (claude buffering) is not addressed, causing collection to read whatever the orphan wrote.",
+          "evidence": [
+            "E2"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "Old-format locks without a \"created\" field can't be verified, causing liveness to fall back to the pid alone.",
+          "evidence": [
+            "E3"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "Stray writes by an orphan can't be attributed when a lock has no recorded \"before\" status.",
+          "evidence": [
+            "E4"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "A lock that names a fallback lane doesn't restore lane/lane-from on the reconstructed Task, causing history to be incorrect.",
+          "evidence": [
+            "E5"
+          ],
+          "area_hint": "orchestra",
+          "worth": "low"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "A hung orphan lane blocks its slot until it exits or is killed, causing a task to hang indefinitely.",
+          "title": "Orphan lanes exit on timeout",
+          "scope_paths": [
+            "orchestra/agent_hub/test_hub.mjs",
+            "orchestra/test_runner.py",
+            "orchestra/"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        },
+        {
+          "problem": "The 0-byte lane log (claude buffering) is not addressed, causing collection to read whatever the orphan wrote.",
+          "title": "Fix 0-byte lane log issue",
+          "scope_paths": [
+            "orchestra/"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        }
+      ],
+      "round": 2,
+      "seconds": 20.9,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 8.61,
+          "lease_samples": 42,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.12,
+          "lease_samples": 30,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.09,
+          "lease_samples": 29,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "04-naive-timestamps",
+      "evidence_items": 6,
+      "candidates": [
+        {
+          "problem": "The state.json timestamps are still naive local time, not UTC, which might cause issues with comparisons.",
+          "evidence": [
+            "E1"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "The campaign seed is not properly copied to .review/campaign.json, which might cause issues with the seed mechanism.",
+          "evidence": [
+            "E2",
+            "E3"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "The task does not properly stop dispatch at the deadline, and a hard halt is not implemented.",
+          "evidence": [
+            "E4"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The `resume` command is refused after the deadline, and a pause made after the sprint could never be undone.",
+          "evidence": [
+            "E5"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The `stop` command does not properly record the campaign as ended in campaign.json, and a later `resume` restarts dispatch but the campaign stays ended.",
+          "evidence": [
+            "E6"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "The task does not properly stop dispatch at the deadline, and a hard halt is not implemented.",
+          "title": "Stop dispatch at deadline",
+          "scope_paths": [
+            "orchestra/config.json",
+            "orchestra/master_prompt.py",
+            "orchestra/agent_hub/test_hub.mjs"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/config.json' is a policy file; only a human or a Claude chat changes it"
+          }
+        },
+        {
+          "problem": "The `resume` command is refused after the deadline, and a pause made after the sprint could never be undone.",
+          "title": "Resume command after deadline",
+          "scope_paths": [
+            "orchestra/config.json"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/config.json' is a policy file; only a human or a Claude chat changes it"
+          }
+        }
+      ],
+      "round": 2,
+      "seconds": 19.0,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 7.64,
+          "lease_samples": 37,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 5.97,
+          "lease_samples": 29,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 5.3,
+          "lease_samples": 25,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "05-failing-atrium-suite",
+      "evidence_items": 2,
+      "candidates": [
+        {
+          "problem": "Some test suites in the atrium module failed with exit code 1.",
+          "evidence": [
+            "E1",
+            "E2"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "Some test suites in the atrium module failed with exit code 1.",
+          "title": "Atrium test suites pass",
+          "scope_paths": [
+            "atrium/test_atrium.py",
+            "atrium/test_import_chats.py"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "atrium"
+          },
+          "area": "atrium",
+          "admission": {
+            "kind": "gate",
+            "reason": "'atrium' is not a test module (last part must start with test_)"
+          }
+        }
+      ],
+      "round": 2,
+      "seconds": 7.7,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 1.75,
+          "lease_samples": 8,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 5.89,
+          "lease_samples": 29,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "06-multistep-revision",
+      "evidence_items": 6,
+      "candidates": [
+        {
+          "problem": "The task 'multi_signals_revision' is still 0/3 in both arms, and step 2 writes a generic revision list without reading the file step 1 found.",
+          "evidence": [
+            "E1"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The timer reply sometimes drops '25' or the task names in the 'multi_tasks_timer' task.",
+          "evidence": [
+            "E2"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The vault roadmap was not updated.",
+          "evidence": [
+            "E3"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "The test 'test_brain_guards.py' ended with a bare 'sys.exit()' at import, causing 'unittest discover' to always report an import error.",
+          "evidence": [
+            "E4"
+          ],
+          "area_hint": "scripts",
+          "worth": "high"
+        },
+        {
+          "problem": "The script 'test_runtime_status.py' fails 1 of 12 due to a code version mismatch.",
+          "evidence": [
+            "E5"
+          ],
+          "area_hint": "scripts",
+          "worth": "low"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "The task 'multi_signals_revision' is still 0/3 in both arms, and step 2 writes a generic revision list without reading the file step 1 found.",
+          "title": "Read revision file in multi_signals_revision",
+          "scope_paths": [
+            "orchestra/agent_hub/test_hub.mjs",
+            "orchestra/test_runner.py",
+            "orchestra/exams/test_exams.py"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "admitted",
+            "reason": "admitted as Queue: draft (needs promotion)"
+          }
+        },
+        {
+          "problem": "The timer reply sometimes drops '25' or the task names in the 'multi_tasks_timer' task.",
+          "title": "Timer reply task names are correctly formatted",
+          "scope_paths": [
+            "orchestra/planner.py",
+            "orchestra/timer.py",
+            "orchestra/task.py",
+            "orchestra/agent_hub/test_hub.mjs"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "admitted",
+            "reason": "admitted as Queue: draft (needs promotion)"
+          }
+        }
+      ],
+      "round": 2,
+      "seconds": 19.5,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 7.09,
+          "lease_samples": 34,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.24,
+          "lease_samples": 30,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.09,
+          "lease_samples": 29,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "07-local-team-baseline",
+      "evidence_items": 6,
+      "candidates": [
+        {
+          "problem": "The runner itself doesn't read the sidecar (base revision, evidence fingerprint); it stays in .review/local_team/packets for the promoting chat.",
+          "evidence": [
+            "E2"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "No measured quality baseline for llama3.1:8b proposals beyond one smoke run.",
+          "evidence": [
+            "E3"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "The local model's proposals are low quality; that's why draft is the right default.",
+          "evidence": [
+            "E4"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "Removed orchestra/runner.py from admission's policy-file list: runner fixes are the scout's main finding, and runner diffs already go to the reviewer lane.",
+          "evidence": [
+            "E5"
+          ],
+          "area_hint": "orchestra",
+          "worth": "low"
+        },
+        {
+          "problem": "Refusals for invalid/path/gate/premise are remembered against their evidence fingerprint for 30 days, so re-proposing the same evidence with new wording is refused as a duplicate.",
+          "evidence": [
+            "E6"
+          ],
+          "area_hint": "orchestra",
+          "worth": "low"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "The runner itself doesn't read the sidecar (base revision, evidence fingerprint); it stays in .review/local_team/packets for the promoting chat.",
+          "title": "Runner reads sidecar",
+          "scope_paths": [
+            "orchestra/",
+            ".review/local_team/packets"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": null,
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        },
+        {
+          "problem": "No measured quality baseline for llama3.1:8b proposals beyond one smoke run.",
+          "title": "Measured quality baseline for llama3.1:8b proposals",
+          "scope_paths": [
+            "orchestra/local_team/test_baseline.py",
+            "orchestra/local_team/test_local_team.py"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra/local_team/test_baseline.py"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "gate",
+            "reason": "argument 'orchestra/local_team/test_baseline.py' doesn't match the test_module pattern"
+          }
+        }
+      ],
+      "round": 2,
+      "seconds": 20.0,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 7.89,
+          "lease_samples": 38,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 5.61,
+          "lease_samples": 27,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.45,
+          "lease_samples": 31,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "08-noisy-log-resolved",
+      "evidence_items": 4,
+      "candidates": [
+        {
+          "problem": "Some tasks are parked, which means they were interrupted and need to be resumed.",
+          "evidence": [
+            "E2",
+            "E4"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "Some tasks are only partially done, which may indicate a problem with the task or the environment.",
+          "evidence": [
+            "E1",
+            "E3"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "Some tasks are parked, which means they were interrupted and need to be resumed.",
+          "title": "Resume parked tasks",
+          "scope_paths": [
+            "orchestra/"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        },
+        {
+          "problem": "Some tasks are only partially done, which may indicate a problem with the task or the environment.",
+          "title": "Tasks are marked as partially done",
+          "scope_paths": [
+            "orchestra/",
+            ".review/runner.log"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra/test_runner.py"
+          },
+          "area": null,
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        }
+      ],
+      "round": 2,
+      "seconds": 14.3,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 3.01,
+          "lease_samples": 14,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 5.17,
+          "lease_samples": 25,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.06,
+          "lease_samples": 29,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "09-noisy-log-no-report",
+      "evidence_items": 4,
+      "candidates": [
+        {
+          "problem": "The task 'atlas-vault-paths' failed to write a report after two attempts.",
+          "evidence": [
+            "E1",
+            "E2"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The task 'atlas-vault-paths' was parked due to a missing codex on the PATH.",
+          "evidence": [
+            "E4"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The task 'atlas-vault-paths' was parked due to NO_REPORT after two attempts.",
+          "evidence": [
+            "E3"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The task 'atlas-vault-paths' failed to write a report due to NO_REPORT.",
+          "evidence": [
+            "E1"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "The task 'atlas-vault-paths' was parked due to LANE_MISSING.",
+          "evidence": [
+            "E4"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "The task 'atlas-vault-paths' failed to write a report after two attempts.",
+          "title": "Write report after task",
+          "scope_paths": [
+            "orchestra/",
+            ".review/runner.log"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": null,
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        },
+        {
+          "problem": "The task 'atlas-vault-paths' was parked due to a missing codex on the PATH.",
+          "title": "codex on PATH",
+          "scope_paths": [
+            "orchestra/"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        }
+      ],
+      "round": 2,
+      "seconds": 17.9,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 6.62,
+          "lease_samples": 32,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 5.78,
+          "lease_samples": 28,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 5.44,
+          "lease_samples": 26,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "10-human-only",
+      "evidence_items": 10,
+      "candidates": [
+        {
+          "problem": "The hotkey thread calls AllowSetForegroundWindow(ASFW_ANY) on each press, and a root.after(50) focus() runs after _open_chat. Without that, a new popup's focus_set() does nothing while another app is in front.",
+          "evidence": [
+            "E4"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "Re-registering the scheduled task (the task said not to; needs the owner or the coordinator after merge).",
+          "evidence": [
+            "E6"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "parse_hotkey rejects a combo with no modifier, so a bare system-wide key can't swallow that key in every other app.",
+          "evidence": [
+            "E3"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "The registration-failure log line goes to stdout via print. Under pythonw nothing captures it; I found no logging framework in tray.py to use instead.",
+          "evidence": [
+            "E5"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "battery_floor_percent: running lanes are never killed for power. So the floor only matters when dispatch_on_battery is true: at or under the floor, no new dispatch. With the default (false) nothing dispatches on battery at all, so the floor has no effect.",
+          "evidence": [
+            "E7"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "The hotkey thread calls AllowSetForegroundWindow(ASFW_ANY) on each press, and a root.after(50) focus() runs after _open_chat. Without that, a new popup's focus_set() does nothing while another app is in front.",
+          "title": "AllowSetForegroundWindow is called on each hotkey press",
+          "scope_paths": [
+            "orchestra/test_runner.py",
+            "orchestra/agent_hub/test_hub.mjs",
+            "orchestra/exams/test_exams.py"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "admitted",
+            "reason": "admitted as Queue: draft (needs promotion)"
+          }
+        },
+        {
+          "problem": "Re-registering the scheduled task (the task said not to; needs the owner or the coordinator after merge).",
+          "title": "Re-register scheduled task",
+          "scope_paths": [
+            "orchestra/"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        }
+      ],
+      "round": 2,
+      "seconds": 19.9,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 7.81,
+          "lease_samples": 38,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 7.0,
+          "lease_samples": 34,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 5.08,
+          "lease_samples": 24,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "11-done-as-asked",
+      "evidence_items": 16,
+      "candidates": [
+        {
+          "problem": "The task to run migration, theme, nightly and contract writer scripts was not done.",
+          "evidence": [
+            "E1"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The importer for past chats is not running against the real vault.",
+          "evidence": [
+            "E5"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The nightly chat import task is not running the step against the real vault.",
+          "evidence": [
+            "E11"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The nightly chat import task is skipping exports in Downloads modified in the last 30 minutes.",
+          "evidence": [
+            "E13"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "The nightly chat import task is not filling claude-code first, then codex, then exports.",
+          "evidence": [
+            "E15"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "The task to run migration, theme, nightly and contract writer scripts was not done.",
+          "title": "Run migration, theme, nightly and contract writer scripts",
+          "scope_paths": [
+            "orchestra/",
+            "scripts/"
+          ],
+          "gate": {
+            "id": "script-test",
+            "arg": "scripts/test_script.py"
+          },
+          "area": null,
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        },
+        {
+          "problem": "The importer for past chats is not running against the real vault.",
+          "title": "Past chats import runs against real vault",
+          "scope_paths": [
+            "orchestra/importer.py",
+            "orchestra/vault.py",
+            "orchestra/config.py"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_importer"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "gate",
+            "reason": "argument 'orchestra.test_importer': orchestra/test_importer.py doesn't exist"
+          }
+        }
+      ],
+      "round": 2,
+      "seconds": 18.0,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 5.7,
+          "lease_samples": 27,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.0,
+          "lease_samples": 29,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.23,
+          "lease_samples": 30,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "12-needs-real-data",
+      "evidence_items": 12,
+      "candidates": [
+        {
+          "problem": "The report for lane rate limits does not capture real Claude or Gemini limit output, and does not check for TIMEOUT runs.",
+          "evidence": [
+            "E1",
+            "E2"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "Lanes not in the pattern table are checked against every lane's patterns.",
+          "evidence": [
+            "E3"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "A time zone in the message is ignored, and dated times in the past fall back to +60 min.",
+          "evidence": [
+            "E4"
+          ],
+          "area_hint": "orchestra",
+          "worth": "low"
+        },
+        {
+          "problem": "A run that hit its limit is still charged as usual.",
+          "evidence": [
+            "E5"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "Old history entries are not backfilled.",
+          "evidence": [
+            "E7"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "The report for lane rate limits does not capture real Claude or Gemini limit output, and does not check for TIMEOUT runs.",
+          "title": "Capture real Claude and Gemini limit output and check for TIMEOUT runs",
+          "scope_paths": [
+            "orchestra/agent_hub/test_hub.mjs",
+            "orchestra/exams/test_exams.py",
+            "orchestra/test_runner.py",
+            "scripts/run_checks.py"
+          ],
+          "gate": {
+            "id": "unittest-discover",
+            "arg": "orchestra/exams"
+          },
+          "area": null,
+          "admission": {
+            "kind": "path",
+            "reason": "scope spans areas ['orchestra', 'scripts']; one task, one area"
+          }
+        },
+        {
+          "problem": "A run that hit its limit is still charged as usual.",
+          "title": "Lane rate limits are charged as usual",
+          "scope_paths": [
+            "orchestra/"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        }
+      ],
+      "round": 2,
+      "seconds": 19.2,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 5.91,
+          "lease_samples": 29,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.89,
+          "lease_samples": 33,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.38,
+          "lease_samples": 31,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "01-parked-generic-why",
+      "evidence_items": 1,
+      "candidates": [
+        {
+          "problem": "A task failed and its report indicates a blind re-run won't change the result, suggesting a problem with the task itself or its dependencies.",
+          "evidence": [
+            "E1"
+          ],
+          "area_hint": ".review",
+          "worth": "high"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "A task failed and its report indicates a blind re-run won't change the result, suggesting a problem with the task itself or its dependencies.",
+          "title": "Task runner reports task failure",
+          "scope_paths": [
+            "orchestra/",
+            ".review/parked/2026-11-02T2145-multistep-read-found-file.why.txt"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": null,
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        }
+      ],
+      "round": 3,
+      "seconds": 8.9,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 2.2,
+          "lease_samples": 10,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.66,
+          "lease_samples": 32,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "02-hub-jobs-pruning",
+      "evidence_items": 6,
+      "candidates": [
+        {
+          "problem": "The task 'split_tasks' is still blocking, despite the task not listing it, and can still exceed 60 seconds.",
+          "evidence": [
+            "E1"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "Old job files in .review/hub/jobs are not being pruned, as jobs() only filters to 24 hours.",
+          "evidence": [
+            "E2"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "The report 'hub-async-jobs.report.md' has an ODD line: 'FOR MEMORY is filed when the job finishes, not at job_result time'.",
+          "evidence": [
+            "E4"
+          ],
+          "area_hint": "orchestra",
+          "worth": "low"
+        },
+        {
+          "problem": "The fake_agent.mjs file has a detached grandchild that is not being killed properly.",
+          "evidence": [
+            "E5"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "A job is only considered failed if every agent in it failed, which means partial ask_all failures are incorrectly marked as done.",
+          "evidence": [
+            "E6"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "The task 'split_tasks' is still blocking, despite the task not listing it, and can still exceed 60 seconds.",
+          "title": "split_tasks no longer blocks",
+          "scope_paths": [
+            "orchestra/",
+            "orchestra/test_runner.py"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        },
+        {
+          "problem": "A job is only considered failed if every agent in it failed, which means partial ask_all failures are incorrectly marked as done.",
+          "title": "Partial ask_all failures are marked as done",
+          "scope_paths": [
+            "orchestra/agent_hub/test_hub.mjs",
+            "orchestra/test_runner.py"
+          ],
+          "gate": {
+            "id": "node-test",
+            "arg": "orchestra/agent_hub/test_hub.mjs"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "admitted",
+            "reason": "admitted as Queue: draft (needs promotion)"
+          }
+        }
+      ],
+      "round": 3,
+      "seconds": 20.2,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 7.39,
+          "lease_samples": 36,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.3,
+          "lease_samples": 30,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.44,
+          "lease_samples": 31,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "03-orphan-lane-timeout",
+      "evidence_items": 6,
+      "candidates": [
+        {
+          "problem": "A hung orphan lane blocks its slot until it exits or is killed, causing a task to hang indefinitely.",
+          "evidence": [
+            "E1"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The 0-byte lane log is not addressed, causing collection to read whatever the orphan wrote.",
+          "evidence": [
+            "E2"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "Old-format locks without a \"created\" field can't be verified, causing liveness to fall back to the pid alone.",
+          "evidence": [
+            "E3"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "Stray writes by an orphan can't be attributed when a lock has no recorded \"before\" status.",
+          "evidence": [
+            "E4"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "A lock that names a fallback lane doesn't restore lane/lane-from on the reconstructed Task, causing history to be incorrect.",
+          "evidence": [
+            "E5"
+          ],
+          "area_hint": "orchestra",
+          "worth": "low"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "A hung orphan lane blocks its slot until it exits or is killed, causing a task to hang indefinitely.",
+          "title": "Orphan lanes exit on timeout",
+          "scope_paths": [
+            "orchestra/agent_hub/test_hub.mjs",
+            "orchestra/test_runner.py",
+            "orchestra/"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        },
+        {
+          "problem": "The 0-byte lane log is not addressed, causing collection to read whatever the orphan wrote.",
+          "title": "Fix 0-byte lane log",
+          "scope_paths": [
+            "orchestra/"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        }
+      ],
+      "round": 3,
+      "seconds": 19.1,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 7.02,
+          "lease_samples": 34,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 5.92,
+          "lease_samples": 29,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.16,
+          "lease_samples": 30,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "04-naive-timestamps",
+      "evidence_items": 6,
+      "candidates": [
+        {
+          "problem": "The state.json timestamps are still naive local time, not UTC, which might cause issues with comparisons.",
+          "evidence": [
+            "E1"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "The campaign seed is not properly copied to .review/campaign.json, which might cause issues with the seed mechanism.",
+          "evidence": [
+            "E2",
+            "E3"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "The task does not properly stop dispatch at the deadline, and a hard halt is not implemented.",
+          "evidence": [
+            "E4"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The `resume` command is refused after the deadline, and a pause made after the sprint could never be undone.",
+          "evidence": [
+            "E5"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The `stop` command does not properly record the campaign as ended in campaign.json, and a later `resume` restarts dispatch but the campaign stays ended.",
+          "evidence": [
+            "E6"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "The task does not properly stop dispatch at the deadline, and a hard halt is not implemented.",
+          "title": "Stop dispatch at deadline",
+          "scope_paths": [
+            "orchestra/config.json",
+            "orchestra/master_prompt.py",
+            "orchestra/agent_hub/test_hub.mjs"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/config.json' is a policy file; only a human or a Claude chat changes it"
+          }
+        },
+        {
+          "problem": "The `resume` command is refused after the deadline, and a pause made after the sprint could never be undone.",
+          "title": "Resume command after deadline",
+          "scope_paths": [
+            "orchestra/config.json"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/config.json' is a policy file; only a human or a Claude chat changes it"
+          }
+        }
+      ],
+      "round": 3,
+      "seconds": 19.2,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 7.3,
+          "lease_samples": 35,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.47,
+          "lease_samples": 31,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 5.41,
+          "lease_samples": 26,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "05-failing-atrium-suite",
+      "evidence_items": 2,
+      "candidates": [
+        {
+          "problem": "Some test suites in the atrium module failed with exit code 1.",
+          "evidence": [
+            "E1",
+            "E2"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "Some test suites in the atrium module failed with exit code 1.",
+          "title": "Atrium test suites pass",
+          "scope_paths": [
+            "atrium/test_atrium.py",
+            "atrium/test_import_chats.py"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "atrium"
+          },
+          "area": "atrium",
+          "admission": {
+            "kind": "gate",
+            "reason": "'atrium' is not a test module (last part must start with test_)"
+          }
+        }
+      ],
+      "round": 3,
+      "seconds": 7.6,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 1.72,
+          "lease_samples": 8,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 5.83,
+          "lease_samples": 28,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "06-multistep-revision",
+      "evidence_items": 6,
+      "candidates": [
+        {
+          "problem": "The unit test for runtime status fails because it checks if `.git` is a directory, but in a worktree it's a file.",
+          "evidence": [
+            "E5"
+          ],
+          "area_hint": "scripts",
+          "worth": "medium"
+        },
+        {
+          "problem": "The unit test for brain guards ends with a bare `sys.exit()` at import, causing `unittest discover` to always report an import error.",
+          "evidence": [
+            "E4"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The multi_signals_revision is still 0/3 in both arms, and the code doesn't read the file step 1 found.",
+          "evidence": [
+            "E1"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The multi_tasks_timer is 3/6 in the planner arm, and the timer reply sometimes drops \"25\" or the task names.",
+          "evidence": [
+            "E2"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The vault roadmap was not updated because the task didn't ask for it, and the vault is outside this worktree.",
+          "evidence": [
+            "E3"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "The unit test for brain guards ends with a bare `sys.exit()` at import, causing `unittest discover` to always report an import error.",
+          "title": "Fix bare sys.exit() in test_brain_guards.py",
+          "scope_paths": [
+            "orchestra/test_brain_guards.py"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "admitted",
+            "reason": "admitted as Queue: draft (needs promotion)"
+          }
+        },
+        {
+          "problem": "The multi_signals_revision is still 0/3 in both arms, and the code doesn't read the file step 1 found.",
+          "title": "Read file step 1 in multi_signals_revision",
+          "scope_paths": [
+            "orchestra/"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        }
+      ],
+      "round": 3,
+      "seconds": 18.8,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 7.69,
+          "lease_samples": 37,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 5.75,
+          "lease_samples": 28,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 5.33,
+          "lease_samples": 26,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "07-local-team-baseline",
+      "evidence_items": 6,
+      "candidates": [
+        {
+          "problem": "The runner doesn't read the sidecar (base revision, evidence fingerprint) from the .review/local_team/packets folder.",
+          "evidence": [
+            "E2"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "There is no measured quality baseline for llama3.1:8b proposals beyond one smoke run.",
+          "evidence": [
+            "E3"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "The local model's proposals are low quality, causing draft to be the default.",
+          "evidence": [
+            "E4"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "The file orchestra/runner.py is missing from admission's policy-file list.",
+          "evidence": [
+            "E5"
+          ],
+          "area_hint": "orchestra",
+          "worth": "low"
+        },
+        {
+          "problem": "Refusals for invalid/path/gate/premise are not remembered against their evidence fingerprint.",
+          "evidence": [
+            "E6"
+          ],
+          "area_hint": "orchestra",
+          "worth": "low"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "The runner doesn't read the sidecar (base revision, evidence fingerprint) from the .review/local_team/packets folder.",
+          "title": "Reads sidecar from .review/local_team/packets",
+          "scope_paths": [
+            "orchestra/",
+            ".review/local_team/packets/"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": null,
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        },
+        {
+          "problem": "There is no measured quality baseline for llama3.1:8b proposals beyond one smoke run.",
+          "title": "Measured quality baseline for llama3.1:8b proposals",
+          "scope_paths": [
+            "orchestra/local_team/test_baseline.py",
+            "orchestra/"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        }
+      ],
+      "round": 3,
+      "seconds": 18.9,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 5.92,
+          "lease_samples": 29,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.25,
+          "lease_samples": 30,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.66,
+          "lease_samples": 32,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "08-noisy-log-resolved",
+      "evidence_items": 4,
+      "candidates": [
+        {
+          "problem": "Some tasks are not fully completed, specifically '2026-11-02T1952-voice-latency' and '2026-11-02T1951-demo-pack' are only partially done.",
+          "evidence": [
+            "E1",
+            "E3"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "Some tasks are parked, which may indicate a problem with the task runner or the tasks themselves.",
+          "evidence": [
+            "E2",
+            "E4"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "Some tasks are not fully completed, specifically '2026-11-02T1952-voice-latency' and '2026-11-02T1951-demo-pack' are only partially done.",
+          "title": "Tasks are fully completed",
+          "scope_paths": [
+            "orchestra/runner.py",
+            ".review/runner.log",
+            "orchestra/exams/"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": null,
+          "admission": {
+            "kind": "path",
+            "reason": "'.review/runner.log' is in a directory the local team may not scope"
+          }
+        },
+        {
+          "problem": "Some tasks are parked, which may indicate a problem with the task runner or the tasks themselves.",
+          "title": "No parked tasks",
+          "scope_paths": [
+            "orchestra/",
+            ".review/runner.log"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": null,
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        }
+      ],
+      "round": 3,
+      "seconds": 15.2,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 3.49,
+          "lease_samples": 17,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.0,
+          "lease_samples": 29,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 5.67,
+          "lease_samples": 27,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "09-noisy-log-no-report",
+      "evidence_items": 4,
+      "candidates": [
+        {
+          "problem": "The task 'atlas-vault-paths' failed to write a report after two attempts.",
+          "evidence": [
+            "E1",
+            "E2"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The task 'atlas-vault-paths' was parked due to a missing codex on the PATH.",
+          "evidence": [
+            "E4"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The task 'atlas-vault-paths' was parked due to NO_REPORT after two attempts.",
+          "evidence": [
+            "E3"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The task 'atlas-vault-paths' failed to write a report due to NO_REPORT.",
+          "evidence": [
+            "E1"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "The task 'atlas-vault-paths' was parked due to LANE_MISSING.",
+          "evidence": [
+            "E4"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "The task 'atlas-vault-paths' failed to write a report after two attempts.",
+          "title": "Write report after task",
+          "scope_paths": [
+            "orchestra/",
+            ".review/runner.log"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": null,
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        },
+        {
+          "problem": "The task 'atlas-vault-paths' was parked due to a missing codex on the PATH.",
+          "title": "codex on PATH",
+          "scope_paths": [
+            "orchestra/"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        }
+      ],
+      "round": 3,
+      "seconds": 16.9,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 5.95,
+          "lease_samples": 29,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 5.64,
+          "lease_samples": 27,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 5.27,
+          "lease_samples": 25,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "10-human-only",
+      "evidence_items": 10,
+      "candidates": [
+        {
+          "problem": "The hotkey thread calls AllowSetForegroundWindow(ASFW_ANY) on each press, and a root.after(50) focus() runs after _open_chat. Without that, a new popup's focus_set() does nothing while another app is in front.",
+          "evidence": [
+            "E4"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "Re-registering the scheduled task (the task said not to; needs the owner or the coordinator after merge).",
+          "evidence": [
+            "E6"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "parse_hotkey rejects a combo with no modifier, so a bare system-wide key can't swallow that key in every other app.",
+          "evidence": [
+            "E3"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "The registration-failure log line goes to stdout via print. Under pythonw nothing captures it; I found no logging framework in tray.py to use instead.",
+          "evidence": [
+            "E5"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "battery_floor_percent: running lanes are never killed for power. So the floor only matters when dispatch_on_battery is true: at or under the floor, no new dispatch. With the default (false) nothing dispatches on battery at all, so the floor has no effect.",
+          "evidence": [
+            "E7"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "The hotkey thread calls AllowSetForegroundWindow(ASFW_ANY) on each press, and a root.after(50) focus() runs after _open_chat. Without that, a new popup's focus_set() does nothing while another app is in front.",
+          "title": "AllowSetForegroundWindow is called on each hotkey press",
+          "scope_paths": [
+            "orchestra/test_runner.py",
+            "orchestra/agent_hub/test_hub.mjs",
+            "orchestra/exams/test_exams.py"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "admitted",
+            "reason": "admitted as Queue: draft (needs promotion)"
+          }
+        },
+        {
+          "problem": "Re-registering the scheduled task (the task said not to; needs the owner or the coordinator after merge).",
+          "title": "Re-register scheduled task",
+          "scope_paths": [
+            "orchestra/"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        }
+      ],
+      "round": 3,
+      "seconds": 22.3,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 9.59,
+          "lease_samples": 47,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 7.44,
+          "lease_samples": 36,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 5.24,
+          "lease_samples": 25,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "11-done-as-asked",
+      "evidence_items": 16,
+      "candidates": [
+        {
+          "problem": "The task to run migration, theme, nightly and contract writer scripts was not done.",
+          "evidence": [
+            "E1"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The importer for past chats is not running against the real vault.",
+          "evidence": [
+            "E5"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The nightly chat import task is not running the step against the real vault.",
+          "evidence": [
+            "E11"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "The nightly chat import task is skipping exports in Downloads modified in the last 30 minutes.",
+          "evidence": [
+            "E13"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "The nightly chat import task is not filling claude-code first, then codex, then exports.",
+          "evidence": [
+            "E15"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "The task to run migration, theme, nightly and contract writer scripts was not done.",
+          "title": "Run migration, theme, nightly and contract writer scripts",
+          "scope_paths": [
+            "orchestra/",
+            "scripts/"
+          ],
+          "gate": {
+            "id": "script-test",
+            "arg": "scripts/test_script.py"
+          },
+          "area": null,
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        },
+        {
+          "problem": "The importer for past chats is not running against the real vault.",
+          "title": "Past chats import runs against real vault",
+          "scope_paths": [
+            "orchestra/importer.py",
+            "orchestra/vault.py",
+            "orchestra/config.py"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_importer"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "gate",
+            "reason": "argument 'orchestra.test_importer': orchestra/test_importer.py doesn't exist"
+          }
+        }
+      ],
+      "round": 3,
+      "seconds": 19.4,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 6.59,
+          "lease_samples": 32,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.12,
+          "lease_samples": 30,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 6.69,
+          "lease_samples": 32,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    },
+    {
+      "fixture": "12-needs-real-data",
+      "evidence_items": 12,
+      "candidates": [
+        {
+          "problem": "The report for lane rate limits does not capture real Claude or Gemini limit output, and does not check for TIMEOUT runs.",
+          "evidence": [
+            "E1",
+            "E2"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "Lanes not in the pattern table are checked against every lane's patterns.",
+          "evidence": [
+            "E3"
+          ],
+          "area_hint": "orchestra",
+          "worth": "medium"
+        },
+        {
+          "problem": "A time zone in the message is ignored, and dated times in the past fall back to +60 min.",
+          "evidence": [
+            "E4"
+          ],
+          "area_hint": "orchestra",
+          "worth": "low"
+        },
+        {
+          "problem": "A run that hit its limit is still charged as usual.",
+          "evidence": [
+            "E5"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        },
+        {
+          "problem": "Old history entries are not backfilled.",
+          "evidence": [
+            "E7"
+          ],
+          "area_hint": "orchestra",
+          "worth": "high"
+        }
+      ],
+      "nothing_because": "",
+      "plans": [
+        {
+          "problem": "The report for lane rate limits does not capture real Claude or Gemini limit output, and does not check for TIMEOUT runs.",
+          "title": "Capture real Claude and Gemini limit output and check for TIMEOUT runs",
+          "scope_paths": [
+            "orchestra/agent_hub/test_hub.mjs",
+            "orchestra/exams/test_exams.py",
+            "orchestra/test_runner.py",
+            "scripts/run_checks.py"
+          ],
+          "gate": {
+            "id": "unittest-discover",
+            "arg": "orchestra/exams"
+          },
+          "area": null,
+          "admission": {
+            "kind": "path",
+            "reason": "scope spans areas ['orchestra', 'scripts']; one task, one area"
+          }
+        },
+        {
+          "problem": "A run that hit its limit is still charged as usual.",
+          "title": "Lane rate limits are charged as usual",
+          "scope_paths": [
+            "orchestra/"
+          ],
+          "gate": {
+            "id": "unittest",
+            "arg": "orchestra.test_runner"
+          },
+          "area": "orchestra",
+          "admission": {
+            "kind": "path",
+            "reason": "'orchestra/' is a folder; scope names files"
+          }
+        }
+      ],
+      "round": 3,
+      "seconds": 18.8,
+      "calls": [
+        {
+          "role": "scout",
+          "ok": true,
+          "seconds": 6.17,
+          "lease_samples": 30,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 7.05,
+          "lease_samples": 34,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        },
+        {
+          "role": "planner",
+          "ok": true,
+          "seconds": 5.52,
+          "lease_samples": 27,
+          "lease_held": true,
+          "lease_at_inference": true,
+          "released": true
+        }
+      ]
+    }
+  ]
+}

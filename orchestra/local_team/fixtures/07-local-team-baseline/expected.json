@@ -1,0 +1,20 @@
+{
+  "candidate": true,
+  "area": "orchestra",
+  "gates": [
+    {
+      "id": "unittest",
+      "arg": "orchestra.test_admission"
+    },
+    {
+      "id": "unittest-discover",
+      "arg": "orchestra/local_team"
+    },
+    {
+      "id": "unittest",
+      "arg": "orchestra.test_runner"
+    }
+  ],
+  "duplicate": true,
+  "why": "Real gaps, but the queued baseline task covers them: a proposal should be refused as a duplicate."
+}

@@ -1,0 +1,16 @@
+{
+  "candidate": true,
+  "area": "orchestra",
+  "gates": [
+    {
+      "id": "unittest",
+      "arg": "orchestra.test_runner"
+    },
+    {
+      "id": "unittest",
+      "arg": "orchestra.test_supervision"
+    }
+  ],
+  "duplicate": false,
+  "why": "Real gap in orchestra/runner.py: a hung orphan lane blocks its slot forever."
+}

@@ -86,6 +86,32 @@ class AdmissionTest(unittest.TestCase):
         rec = json.loads((self.repo / ".review" / "local_team" / "admission.jsonl").read_text("utf-8").splitlines()[-1])
         self.assertEqual(rec["kind"], "admitted")
 
+    def test_sidecar_fingerprints_evidence_and_runner_agrees(self):
+        r = self.admit(self.packet())
+        side = json.loads((self.repo / ".review" / "local_team" / "packets" / f"{r['slug']}.json").read_text("utf-8"))
+        log = self.repo / ".review" / "runner.log"
+        self.assertEqual(side["evidence_files"], {".review/runner.log": admission.file_print(log)})
+        import importlib
+        import os
+        old = os.environ.get("ORCHESTRA_REPO")
+        os.environ["ORCHESTRA_REPO"] = str(self.repo)
+        try:
+            import runner
+            R = importlib.reload(runner)
+            task = R.parse_task(self.repo / r["path"])
+            self.assertIsNone(R.premise_moved(task))
+            with log.open("a", encoding="utf-8") as f:
+                f.write("2026-11-02T21:30:00 START later\n")
+            self.assertIsNone(R.premise_moved(task), "an appended log line is not a moved premise")
+            log.write_text(log.read_text("utf-8").replace("widget-retry", "widget-fixed"), encoding="utf-8")
+            self.assertIn("premise moved, re-check", R.premise_moved(task))
+        finally:
+            if old is None:
+                os.environ.pop("ORCHESTRA_REPO", None)
+            else:
+                os.environ["ORCHESTRA_REPO"] = old
+            importlib.reload(runner)
+
     def test_auto_admit_area_writes_queue_auto(self):
         r = self.admit(self.packet(), auto_admit_areas=["orchestra"])
         self.assertEqual(r["queue"], "auto")

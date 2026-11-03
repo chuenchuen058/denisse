@@ -1,0 +1,2 @@
+2026-11-02T21:44:58 FAIL: a blind re-run won't change it (see report)
+To run it again: edit the task, then move it back to .review/queue/.

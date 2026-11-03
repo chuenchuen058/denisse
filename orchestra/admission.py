@@ -15,7 +15,9 @@ Deterministic, no model. A packet (usually from the local team's planner) is adm
      were admitted in the last hour
 Admitted tasks are written as `Queue: draft` unless the area is in config `auto_admit_areas`.
 Every decision is appended to .review/local_team/admission.jsonl; the full packet goes in a
-sidecar .review/local_team/packets/<slug>.json.
+sidecar .review/local_team/packets/<slug>.json, with a fingerprint of each evidence file
+(`evidence_files`). The runner refuses to dispatch the task if any of those files changed
+since admission ("premise moved, re-check"); see runner.premise_moved.
 
     from orchestra.admission import admit
     result = admit(packet, repo)      # -> {"admitted": bool, "kind": ..., "reason": ..., "path": ...}
@@ -238,6 +240,32 @@ def norm_title(t: str) -> str:
 def evidence_fp(evidence: list) -> str:
     keys = sorted(f"{str(e['path']).replace(chr(92), '/')}|{_flat(e['quote'])}" for e in evidence)
     return hashlib.sha1("\n".join(keys).encode("utf-8")).hexdigest()
+
+
+def file_print(full: Path, size: int | None = None) -> dict | None:
+    """{"size", "sha1"} of a file's first `size` bytes (all of it if None); None if unreadable.
+    Prefix, not whole file: runner.log is append-only, and a line appended after admission
+    doesn't move the premise, but an edit to what was there does. orchestra/runner.py's
+    premise_moved() computes the same thing (test_admission checks they agree)."""
+    try:
+        with open(full, "rb") as f:
+            data = f.read() if size is None else f.read(size)
+    except OSError:
+        return None
+    if size is not None and len(data) < size:
+        return {"size": len(data), "sha1": None}  # truncated or rotated
+    return {"size": len(data), "sha1": hashlib.sha1(data).hexdigest()}
+
+
+def evidence_files(evidence: list, repo: Path) -> dict:
+    """{repo-relative path: file_print} for each evidence file, taken at admission."""
+    out = {}
+    for ev in evidence:
+        rel = str(ev.get("path", "")).replace("\\", "/")
+        fp = file_print(Path(repo) / rel)
+        if fp:
+            out[rel] = fp
+    return out
 
 
 def _overlap(a: set, b: set) -> float:
@@ -464,7 +492,7 @@ def _decide(packet, repo, cfg, gates, lane, when) -> dict:
     (side / f"{path.stem}.json").write_text(json.dumps(
         {"packet": packet, "area": area, "gate_command": cmd, "queue": queue, "evidence_fp": fp,
          "goal": sorted(tokens(packet["title"] + " " + packet["objective"])), "admitted": when.isoformat(),
-         "base": _head(repo)}, indent=2, ensure_ascii=False), encoding="utf-8")
+         "base": _head(repo), "evidence_files": evidence_files(packet["evidence"], repo)}, indent=2, ensure_ascii=False), encoding="utf-8")
     return {"admitted": True, "kind": "admitted", "path": f".review/queue/{path.name}", "slug": path.stem,
             "queue": queue, "area": area, "gate": cmd,
             "reason": f"admitted as Queue: {queue} ({'auto_admit_areas' if queue == 'auto' else 'needs promotion'})"}
