@@ -1,0 +1,90 @@
+{
+  "_help": [
+    "Loaded at import; restart the job after editing. Module titles come from folder names, not a fixed list.",
+    "Regex flags are inline. Keep capture group 1 for week_dir, frontmatter, todo, wikilink, concept_heading and week_reference.",
+    "week_reference and score_word use format placeholders {title} and {word}; runtime values are regex-escaped. Double any other braces in these two patterns.",
+    "Naming and text templates use Python format placeholders. Keep week_note, week_reference, prep_stem and displayed week labels consistent.",
+    "The default vault is shared with vault_search; --vault overrides it. Paths below are relative to that vault."
+  ],
+  "paths": {
+    "modules": ["Atlas", "Academic", "SEM 1 Modules"],
+    "drafts": ["Denisse", "Drafts"]
+  },
+  "patterns": {
+    "week_dir": "^Week (\\d+)$",
+    "frontmatter": "(?s)\\A---\\s*\\n(.*?)\\n---",
+    "todo": "(?mi)^>\\s*\\[!todo\\][+-]?\\s*(.*?)\\s*$",
+    "wikilink": "\\[\\[([^]|#]+)(?:#[^]|]*)?(?:\\|[^]]*)?\\]\\]",
+    "concept_heading": "(?m)^###\\s+(.+?)\\s*$",
+    "section_boundary": "(?m)^##\\s",
+    "module_code": "^[0-9A-Z]{5,}$",
+    "module_suffix": "\\s*\\([^)]*\\)\\s*$",
+    "generic_topic": "(?i)^(notes|slides|questions|problems|problem sheet|solutions?|answers|handout|worked examples?|tutorial \\d+|lecture \\d+)\\b.*$",
+    "week_reference": "\\[\\[{title} Week (\\d+)",
+    "score_word": "\\b{word}"
+  },
+  "naming": {
+    "module_separator": " ",
+    "week_note": "{title} Week {week}.md",
+    "hub_note": "{title} notes.md",
+    "notes_glob": "*.md",
+    "file_topic_separator": " - ",
+    "skip_prefixes": ["."],
+    "prep_stem": "{title} Week {week} prep.md",
+    "dated_prep": "{date} {stem}",
+    "existing_prep_glob": "* {stem}"
+  },
+  "week_rules": {
+    "status_field": "status",
+    "pending_statuses": ["files-only"],
+    "date_fields": ["lecture_date", "date"],
+    "soon_days": 3,
+    "prior_week_offset": 1
+  },
+  "limits": {"topics": 5, "earlier": 2},
+  "topics": {
+    "metadata_field": "topic",
+    "file_kinds": ["Lecture", "Tutorial", "Notes", "Walkthrough"]
+  },
+  "concepts": {
+    "name_suffixes": ["concepts"],
+    "tags_field": "tags",
+    "tag_fragments": ["concept"],
+    "heading_weight": 3
+  },
+  "templates": {
+    "week_link": "[[{path}|{title} Week {week}]]",
+    "topic_item": "- **{label}** — {source}",
+    "metadata_source": "`{field}:` in {week_link}",
+    "file_source": "file name `{filename}`",
+    "concept_source": "[[{note}#{heading}|{note}]] (already written)",
+    "header": [
+      "---",
+      "name: {date} {title} Week {week} prep",
+      "description: \"Prep for {title} Week {week}: topics from the week's file names and notes, what is still open from Week {prior_week}, and earlier ideas to have ready. Built by Denisse from titles only.\"",
+      "updated: {date}",
+      "type: draft",
+      "---",
+      "",
+      "# {title} Week {week} — prep",
+      "",
+      "> [!info] Titles only",
+      "> Every line below is a file name, a note title, a heading or a line already in your notes. Nothing here says what the lecture contains — that is for you to write up in {week_link}.",
+      "",
+      "## Topics",
+      ""
+    ],
+    "no_topics": "- None: the week folder has no lecture or tutorial file with a topic in its name.",
+    "prior_heading": "## Still open from Week {prior_week}",
+    "todo_item": "- {todo} — {link}",
+    "no_prior_week": "- There is no Week {prior_week} note.",
+    "no_todos": "- Nothing marked `[!todo]` in the Week {prior_week} note.",
+    "earlier_heading": "## Earlier ideas to have ready",
+    "earlier_item": "- [[{note}#{heading}|{heading}]] — first met Week {first}",
+    "no_earlier": "- No earlier concept section shares a word with this week's topics.",
+    "log_heading": "== prep ==",
+    "log_failure": "  next_lecture failed: {error_type}: {error}",
+    "log_status": "  {status:<12}{path}",
+    "cli_status": "{status:<12}{path}"
+  }
+}
