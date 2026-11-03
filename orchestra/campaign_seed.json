@@ -1,0 +1,13 @@
+{
+  "_about": "The Max-plan sprint Chuen set in chat on 2 Nov 2026. The runner copies this to .review/campaign.json once (only if that file is missing and this id was never installed), so editing .review/campaign.json is how to change it. See orchestra/campaign.py.",
+  "schema": 1,
+  "id": "max-plan-sprint-2026-11",
+  "purpose": "use the new Claude Max allowance on Orchestra/Atrium work before the weekly reset",
+  "enabled": true,
+  "started_at": "2026-11-02T20:00:00Z",
+  "stop_at": "2026-11-04T18:00:00Z",
+  "stop_at_source": "Chuen in chat, 2 Nov",
+  "timezone": "Europe/London",
+  "overrides": {"lane_slots": {"claude": 3, "codex": 1}, "daily_spend_cap_usd": 400},
+  "restart_after_stop": false
+}

@@ -68,22 +68,38 @@ Read `.review/parked/<slug>.why.txt` and the parked report first. A blind re-run
 PARTIAL or FAIL has never come back PASS; the note is how you change the outcome. Never
 edit `state.json` by hand.
 
-Pause, resume and stop (PowerShell; there is no Orchestra command for these yet):
+Pause, resume and stop (`orchestra/campaign.py`; the runner itself enforces these, and
+only `resume` undoes them — no tick, watchdog or logon clears a pause):
 
 ```commands
-Disable-ScheduledTask -TaskName "Denisse Orchestra"
-Enable-ScheduledTask -TaskName "Denisse Orchestra"
-Stop-ScheduledTask -TaskName "Denisse Orchestra"
-Get-ScheduledTask -TaskName "Denisse Orchestra"
+.venv\Scripts\python.exe orchestra\campaign.py status
+.venv\Scripts\python.exe orchestra\campaign.py pause
+.venv\Scripts\python.exe orchestra\campaign.py resume
+.venv\Scripts\python.exe orchestra\campaign.py stop
+.venv\Scripts\python.exe orchestra\campaign.py emergency-stop
+.venv\Scripts\python.exe orchestra\campaign.py disable-schedule
 ```
 
-- **Pause** = disable the task. Running sessions finish, but nothing collects them until
-  you resume; the next tick then gates and merges them.
-- **Resume** = enable it. The next tick reconciles before it starts anything new.
-- **Stop now** = stop the running tick. Each session runs inside a Windows Job Object, so
-  ending the runner ends the whole session tree with it. The next tick finds the dead lock
-  and collects whatever report exists (none: one infra retry).
+- **status** = the campaign (deadline in London time, time left, the slots and cap in
+  force), each lane slot and what runs in it, and whether dispatch is blocked.
+- **pause** = no new session starts (queue reason `paused by Chuen`). Running sessions
+  finish and are still gated, merged and pushed.
+- **resume** = dispatch again. Refused once the campaign's deadline has passed;
+  `resume --after-deadline` says explicitly to go on with `config.json`'s normal limits.
+- **stop** = pause, and end the campaign: its raised limits lapse at once (reason
+  `campaign ended`).
+- **emergency-stop** = stop, then kill the session trees named in the runner's own lock
+  files (never a claude/python/ollama it merely finds running) and park those tasks as
+  "cancelled by Chuen", branches kept.
+- **disable-schedule** = every tick exits at once until `resume`. Same effect as
+  `Disable-ScheduledTask -TaskName "Denisse Orchestra"`, but it survives a re-register
+  and shows in `status`.
 - **Hold one task** = change its `Queue: auto` back to `Queue: draft`.
+
+A **campaign** (`.review/campaign.json`) is a time-boxed raise of the limits — the Max-plan
+sprint is Claude ×3 and a $400/day cap until Wed 4 Nov 2026 18:00 London. At its `stop_at`
+the runner goes back to `config.json`'s values by itself; nothing needs editing. STATE NOW
+shows it as a `**Sprint:**` line. Details and the file's schema: `orchestra/README.md`.
 
 Other occasional commands:
 

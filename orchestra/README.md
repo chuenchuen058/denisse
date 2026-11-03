@@ -15,6 +15,7 @@ command and mechanism.
 | `python -m orchestra.exams canary [--agent codex]` | Daily health check: one 30-second exam per agent; updates the scores and `<vault>/Dev/Agent-Scores.md` |
 | `python -m orchestra.exams run [--agent X] [--category Y] [--include-claude]` | The full exam bank on every available agent (codex, copilot, gemini, `local:<model>`; claude only with `--include-claude`) |
 | `python -m orchestra.exams best <category>` | The best working agent for `code-edit`, `debug`, `writing`, `study` or `extract` |
+| `python orchestra\campaign.py status\|pause\|resume\|stop\|emergency-stop\|disable-schedule` | Campaign deadline and Chuen's dispatch controls; see below |
 
 | `python -m orchestra.local_team produce` | One producer pass on the local model: librarian, scout, planner, admission (Task Scheduler every 30 min with `install_task.ps1 -Producer`) |
 | `python -m orchestra.local_team scout\|planner\|librarian\|status` | One role on its own (see "Local team and producer" below) |
@@ -172,3 +173,64 @@ parked still holds in its header, e.g. a `Written:` date past `stale_days`:
 re-date the task in the queue.
 
 Tests: `python -m unittest orchestra.test_tools orchestra.test_runner`.
+
+## Campaigns and the dispatch controls (`campaign.py`)
+
+A campaign is a time-boxed change to the limits — e.g. the Max-plan sprint,
+Claude ×3 and a $400/day notional cap until Wed 4 Nov 18:00 London. The
+deadline lives in code, not in a chat that has to remember to edit
+`config.json`. `config.json` always holds the **normal** values.
+
+**`.review/campaign.json`** (private, git-ignored), schema 1:
+
+```json
+{"schema": 1, "id": "max-plan-sprint-2026-11", "purpose": "...", "enabled": true,
+ "started_at": "2026-11-02T20:00:00Z", "stop_at": "2026-11-04T18:00:00Z",
+ "stop_at_source": "Chuen in chat, 2 Nov", "timezone": "Europe/London",
+ "overrides": {"lane_slots": {"claude": 3, "codex": 1}, "daily_spend_cap_usd": 400},
+ "restart_after_stop": false}
+```
+
+- Times are UTC with an explicit offset (`Z`); a naive time is refused.
+  `timezone` is for display only. Keys starting `_` are comments.
+- While `enabled` and `started_at <= now < stop_at`, `overrides` win over
+  `config.json` (`lane_slots` merges per lane). Only `lane_slots` and
+  `daily_spend_cap_usd` can be overridden. After `stop_at`, or when disabled
+  or stopped, `config.json` applies again — the runner re-reads its limits
+  every tick, so nothing needs editing. `ORCHESTRA_<KEY>` env vars still win
+  for a single run.
+- Validated on every load. Anything wrong (bad JSON, unknown or missing
+  field, naive time, slots outside 1–8…) → the **whole file is ignored** and
+  the reason goes to `.review/runner.log`. Never half applied, never a crash.
+- `orchestra/campaign_seed.json` is the tracked copy of the sprint Chuen set
+  in chat. The runner installs it as `.review/campaign.json` once — only if
+  that file is missing and the seed's id was never installed — so deleting
+  `.review/campaign.json` sticks. To change the campaign, edit
+  `.review/campaign.json`.
+
+**Controls**, which write `.review/control.json`:
+
+| Command | Effect |
+|---|---|
+| `status` | Campaign, deadline and time left (London), the limits in force, each lane slot and its running task, whether dispatch is blocked |
+| `pause` | No new task starts; running tasks finish. Reason in the queue: `paused by Chuen` |
+| `resume` | Clears pause / stop / schedule-off. **Refused after the campaign's `stop_at`** (exit 2); `resume --after-deadline` is the explicit way to dispatch again on `config.json`'s normal values |
+| `stop` | Pause, and end the campaign: its overrides stop at once. Reason: `campaign ended`. A later `resume` restarts dispatch but the campaign stays ended unless `restart_after_stop` is true |
+| `emergency-stop` | `stop`, then kill the process trees named in the runner's own lock files (`.review/runner*.lock`: the lane PID and the tick waiting on it) and park those tasks as "cancelled by Chuen" with branch and worktree kept. Never touches a process it only finds running. A lane PID is only killed while its runner PID is alive (afterwards the number may be anyone's) |
+| `disable-schedule` | Every tick (Task Scheduler, logon, by hand) starts nothing until `resume`. The scheduled task still fires and exits at once |
+
+A pause, stop or schedule-off persists in `control.json`: no tick, watchdog,
+reload or logon trigger clears it — only `resume`. The runner checks it in
+`why_not_runnable` before every dispatch, and once more just before the lane
+starts (a pause landing while the worktree was being made un-counts the
+attempt). STATE NOW shows a `**Sprint:**` line (`ends Wed 18:00, 1 d 22 h
+left, Claude ×3, Codex ×1, $400/day`, plus any block).
+
+Workers can't change any of this: `hooks/guard.py` denies writes to
+`campaign.json`, `control.json` and `campaign_seed.json`, Bash commands that
+look like they write them, and `campaign.py` with any command but `status`.
+That is a guard rail, not a sandbox (`python -c` with an obfuscated path
+would get past it); the runner's gate re-run and PASS-only merge still apply.
+
+Tests: `python -m unittest orchestra.test_campaign -v` (fake clock, fake lane,
+mocked process kill).

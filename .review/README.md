@@ -11,6 +11,10 @@ Copied from Thomas van Pul's Atrium core loop (31 Oct 2026), rebuilt for Windows
   `.claude/commands/review.md` if you want `/review` in interactive sessions too.
 - `STATE_NOW.md` is regenerated after every tick; `runner.log` has one line
   per event.
+- `campaign.json` is the current campaign (a time-boxed raise of the limits,
+  with its deadline) and `control.json` Chuen's pause / stop; both are written
+  by `orchestra/campaign.py` and enforced by the runner itself. Workers may
+  not touch either (`orchestra/hooks/guard.py`).
 
 **How to run it day to day** (writing a task, status, requeue, pause, what
 each log line means): `docs/operator_guide.md`. Every command:
