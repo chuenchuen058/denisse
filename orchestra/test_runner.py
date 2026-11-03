@@ -681,6 +681,107 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("no runs", r.stdout)
 
+    # ------------------------------------------------ daily exams (orchestra/exams/daily.py)
+
+    def exam_spawns(self):
+        calls = []
+        return calls, lambda argv, env: calls.append((argv, env)) or 4242
+
+    def test_exams_run_once_a_day_on_a_fake_clock(self):
+        self.R.C.update(exams_daily_at="07:10", exams_agents=["codex", "copilot", "local", "claude"])
+        calls, spawn = self.exam_spawns()
+        state = self.R.load_state()
+        day = dt.datetime(2026, 11, 3)
+        self.assertIn("before 07:10", self.R.exams_step(state, at=day.replace(hour=7, minute=5), spawn=spawn))
+        self.assertEqual(self.R.exams_step(state, at=day.replace(hour=7, minute=11), spawn=spawn), "started 4242")
+        self.assertIn("not due", self.R.exams_step(state, at=day.replace(hour=7, minute=13), spawn=spawn))
+        self.R.EXAMS_LOCK.unlink()  # that run finished
+        self.assertIn("already ran today", self.R.exams_step(state, at=day.replace(hour=20), spawn=spawn))
+        self.assertEqual(len(calls), 1)
+        argv, env = calls[0]
+        self.assertEqual(argv[1:3], ["-m", "orchestra.exams.daily"])
+        self.assertEqual(argv[argv.index("--agents") + 1], "codex,copilot,local", "claude needs exams_include_claude")
+        self.assertEqual(Path(argv[argv.index("--scores") + 1]), self.repo / ".review" / "exams" / "scores.json")
+        self.assertEqual(env["ORCHESTRA_EXAMS_SCORES"], str(self.R.EXAMS_SCORES))
+        self.assertNotIn("--vault", argv, "a test repo never writes the real vault")
+        self.assertIn("EXAMS started pid=4242", self.R.LOG_FILE.read_text())
+        self.assertEqual(self.R.exams_step(state, at=day.replace(day=4, hour=7, minute=10), spawn=spawn),
+                         "started 4242")
+        self.assertEqual(len(calls), 2)
+
+    def test_exams_skip_while_a_lane_is_limited(self):
+        self.R.C.update(exams_daily_at="07:10")
+        calls, spawn = self.exam_spawns()
+        state = self.R.load_state()
+        state["lanes"]["codex"] = {"limited_until": (dt.datetime.now() + dt.timedelta(hours=1)).isoformat()}
+        self.assertEqual(self.R.exams_step(state, at=dt.datetime.now().replace(hour=23, minute=0), spawn=spawn),
+                         "not due: lane limited: codex")
+        self.assertEqual(calls, [])
+        self.assertFalse(self.R.EXAMS_LAST.exists(), "a skipped day is tried again once the limit lifts")
+
+    def test_exams_respect_the_lock(self):
+        self.R.C.update(exams_daily_at="00:00")
+        calls, spawn = self.exam_spawns()
+        self.R.EXAMS_LOCK.write_text(json.dumps({"since": dt.datetime.now().isoformat(), "token": "other"}))
+        self.assertIn("lock held", self.R.exams_step(self.R.load_state(), spawn=spawn))
+        self.assertEqual(calls, [])
+        self.assertEqual(json.loads(self.R.EXAMS_LOCK.read_text())["token"], "other")
+
+    def test_exams_never_block_a_tick(self):
+        """A real detached child that sleeps: the tick still runs its task and returns at once,
+        and the exam run holds no lane slot."""
+        self.R.C.update(exams_daily_at="00:00", exams_agents=["codex"])
+        self.R.exams_enabled = lambda: True
+        sys.path.insert(0, str(HERE))
+        from exams import daily
+        pids = []
+
+        def spawn(argv, env):
+            pids.append(daily.spawn([sys.executable, "-c", "import time; time.sleep(60)"], cwd=self.repo, env=env))
+            return pids[-1]
+
+        self.R.exams_spawn = spawn
+        self.add("a")
+        os.environ["FAKE_COMMIT"] = "1"
+        try:
+            t0 = dt.datetime.now()
+            self.assertEqual(self.R.tick(), "PASS")
+            self.assertLess((dt.datetime.now() - t0).total_seconds(), 55, "the tick waited for the exams")
+            self.assertEqual(len(pids), 1)
+            alive = subprocess.run(["tasklist", "/FI", f"PID eq {pids[0]}"], capture_output=True, text=True).stdout \
+                if os.name == "nt" else ""
+            if os.name == "nt":
+                self.assertIn(str(pids[0]), alive, "the exam child should outlive the tick")
+            self.assertTrue(self.R.EXAMS_LOCK.exists())
+            self.assertEqual(list(self.R.REVIEW.glob("runner*.lock")), [], "no lane slot held")
+            # the next tick: already ran today, nothing spawned, dispatch carries on
+            self.add("b", title="another task")
+            os.environ.pop("FAKE_COMMIT")  # done.txt is on main now; a PARTIAL still proves dispatch
+            os.environ["FAKE_RESULT"] = "PARTIAL"
+            self.assertEqual(self.R.tick(), "PARTIAL")
+            self.assertEqual(len(pids), 1)
+        finally:
+            for pid in pids:
+                if os.name == "nt":
+                    subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
+                else:
+                    os.kill(pid, 9)
+
+    def test_a_failing_exam_start_does_not_stop_dispatch(self):
+        self.R.C.update(exams_daily_at="00:00")
+        self.R.exams_enabled = lambda: True
+
+        def spawn(argv, env):
+            raise OSError("no python")
+
+        self.R.exams_spawn = spawn
+        self.add("a")
+        os.environ["FAKE_COMMIT"] = "1"
+        self.assertEqual(self.R.tick(), "PASS")
+        self.assertIn("EXAMS not started", self.R.LOG_FILE.read_text())
+        self.assertFalse(self.R.EXAMS_LOCK.exists(), "a failed start frees the lock")
+        self.assertIn("already ran today", self.R.exams_step(self.R.load_state(), spawn=spawn))
+
 
 class GuardTest(unittest.TestCase):
     main = os.path.abspath("/x/GitHub/denisse")
