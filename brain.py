@@ -579,6 +579,7 @@ TOOL_DEFINITIONS = [
                     "minutes": {"type": "number", "description": "Length in minutes, e.g. 10 or 1.5."},
                     "seconds": {"type": "number", "description": "Extra seconds, or the whole length for a short timer."},
                     "label": {"type": "string", "description": "What it's for, in a few words, e.g. 'oven'. Optional."},
+                    "duration": {"type": "string", "description": "Or the length in his own words, e.g. '20 mins', 'an hour and a half' -- used when minutes/seconds aren't given."},
                 },
             },
         },

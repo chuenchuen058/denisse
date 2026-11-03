@@ -106,14 +106,35 @@ def _num(v):
         raise ValueError(f"{v!r} isn't a number")
 
 
+def _num_or_none(v):
+    try:
+        return _num(v) or None
+    except ValueError:
+        return v  # not a number -- let set_timer report it
+
+
 def active() -> list:
     """Running timers, soonest first, as plain dicts."""
     with _lock:
         return sorted((dict(t) for t in _timers.values()), key=lambda t: t["ends_at"])
 
 
-def set_timer(minutes=None, seconds=None, label: str = "") -> str:
-    """Start a countdown. Returns what actually happened, in plain words."""
+def set_timer(minutes=None, seconds=None, label: str = "", duration: str = "") -> str:
+    """Start a countdown. Returns what actually happened, in plain words.
+
+    `duration` is his own words ("20 mins", "an hour and a half") and is
+    turned into a length by time_parse, so the model needn't do the sums.
+    Used only when no number was given; a phrase that isn't a length is
+    refused rather than guessed at."""
+    if duration and str(duration).strip() and _num_or_none(minutes) is None \
+            and _num_or_none(seconds) is None:
+        import time_parse
+
+        span = time_parse.parse_duration(str(duration))
+        if span is None:
+            return (f"No timer started: couldn't read \"{duration}\" as a length. "
+                    "Ask Chuen how long the timer should be.")
+        minutes, seconds = span.total_seconds() / 60, None
     try:
         total = _num(minutes) + _num(seconds) / 60
     except ValueError as e:

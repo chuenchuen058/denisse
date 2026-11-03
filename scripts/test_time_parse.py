@@ -223,5 +223,30 @@ class EchoAndClock(unittest.TestCase):
                          tp.parse("in 20 mins", at(2026, 11, 3, 10, 0)).when)
 
 
+class TimerDuration(unittest.TestCase):
+    """timers.set_timer(duration=...) -- his words, parsed here, not by the model."""
+
+    def tearDown(self):
+        import timers
+        timers.cancel_timer("all")
+
+    def test_words_become_the_length(self):
+        import timers
+        said = timers.set_timer(duration="an hour and a half", label="oven")
+        self.assertTrue(said.startswith("'oven' timer started: 1 hour 30 minutes"), said)
+        self.assertEqual(timers.active()[0]["minutes"], 90)
+
+    def test_numbers_win_over_words(self):
+        import timers
+        timers.set_timer(minutes=5, duration="20 mins")
+        self.assertEqual(timers.active()[0]["minutes"], 5)
+
+    def test_unreadable_length_starts_nothing(self):
+        import timers
+        said = timers.set_timer(duration="a while")
+        self.assertTrue(said.startswith("No timer started"), said)
+        self.assertEqual(timers.active(), [])
+
+
 if __name__ == "__main__":
     unittest.main()
