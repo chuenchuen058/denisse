@@ -36,8 +36,13 @@ logs/
 
 # Scratch a Claude session wrote to do one job (fetchers, scanners, one-off
 # probes). Leading underscore marks it as throwaway, never part of the repo.
+# Not Python's package files: `_*.py` also matched __init__.py / __main__.py, so
+# two Orchestra sessions committed orchestra/soak/ without them and the runner's
+# fresh integration checkout had no package to run (3 Nov 2026).
 _*.py
 _*.ps1
+!__init__.py
+!__main__.py
 Claude outputs/
 
 # invest.py: his watchlist, alerts, cached quotes and briefs; and the

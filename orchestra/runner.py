@@ -41,6 +41,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -76,7 +77,7 @@ PROMPT_FILE = REPO / "orchestra" / "review_prompt.md"  # also usable as .claude/
 GUARD = HERE / "hooks" / "guard.py"
 PRE_PUSH = HERE / "hooks" / "pre-push"  # tracked; installed into the main .git/hooks each tick
 WORKTREES = REPO.parent / f"{REPO.name}-wt"
-INFRA = ("TIMEOUT", "NO_REPORT", "LANE_MISSING", "WORKTREE_FAILED")
+INFRA = ("TIMEOUT", "NO_REPORT", "LANE_MISSING", "WORKTREE_FAILED", "RUNNER_CRASH")
 
 # A lane's usage limit is "come back later", not a failed attempt (2 Nov 2026: Codex printed
 # the line below, the runner logged NO_REPORT, spent the retry and parked the task).
@@ -111,7 +112,9 @@ def load_config(now_utc: dt.datetime | None = None, log_fn=None) -> dict:
     for k, v in list(cfg.items()):
         env = os.environ.get(f"ORCHESTRA_{k.upper()}")
         if env is not None:
-            cfg[k] = json.loads(env) if env[:1] in "{[" else type(v)(env) if not isinstance(v, dict) else v
+            # ("{", "[") not the string "{[": "" is in every string, and ORCHESTRA_VAULT_DIR="" (vault
+            # notes off) then crashed every tick at import with json.loads("") (soak test, 3 Nov 2026)
+            cfg[k] = json.loads(env) if env[:1] in ("{", "[") else type(v)(env) if not isinstance(v, dict) else v
     return cfg
 
 
@@ -250,7 +253,13 @@ def parse_task(path: Path) -> Task:
 
 def load_queue() -> list[Task]:
     QUEUE.mkdir(parents=True, exist_ok=True)
-    return [parse_task(p) for p in sorted(QUEUE.glob("*.md"))]
+    tasks = []
+    for p in sorted(QUEUE.glob("*.md")):
+        try:
+            tasks.append(parse_task(p))
+        except OSError:  # another tick is parking or archiving it this instant (soak test, 3 Nov 2026)
+            continue
+    return tasks
 
 
 # ---------------------------------------------------------------- state
@@ -269,8 +278,24 @@ def load_state() -> dict:
 _BASE: dict | None = None  # state as this process loaded it; set by tick() when lanes run in parallel
 
 
+def unlink_retry(path: Path, tries: int = 20, pause: float = 0.05) -> bool:
+    """Delete a file another tick may be reading right now. On Windows a file open elsewhere
+    can't be deleted (WinError 32), and a tick died of that in reconcile() during the soak test
+    (3 Nov 2026): wait the read out instead. False, logged, if it never could."""
+    for _ in range(tries):
+        try:
+            path.unlink(missing_ok=True)
+            return True
+        except PermissionError:
+            time.sleep(pause)
+    log(f"could not remove {path.name}: still open in another process")
+    return False
+
+
 class _FileLock:
-    """Spin on an O_EXCL file; a lock older than `stale` seconds is taken over."""
+    """Spin on an O_EXCL file holding the owner's pid + creation time. A lock whose owner is
+    gone is taken over at once (a tick killed inside save_state or integrate used to stall every
+    other tick for `stale` seconds, soak test 3 Nov 2026); an unreadable one after `stale` seconds."""
     def __init__(self, path: Path, wait: float = 300, stale: float = 900):
         self.path, self.wait, self.stale = path, wait, stale
 
@@ -278,12 +303,19 @@ class _FileLock:
         end = time.time() + self.wait
         while True:
             try:
-                os.close(os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+                fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(_my_lock(), f)
                 return self
             except FileExistsError:
+                info = read_lock(self.path)
+                if lock_status(info) == "dead":
+                    log(f"{self.path.name}: holder {info['pid']} is gone; taken over")
+                    unlink_retry(self.path)
+                    continue
                 try:
                     if time.time() - self.path.stat().st_mtime > self.stale:
-                        self.path.unlink(missing_ok=True)
+                        unlink_retry(self.path)
                         continue
                 except FileNotFoundError:
                     continue
@@ -292,7 +324,7 @@ class _FileLock:
                 time.sleep(0.5)
 
     def __exit__(self, *exc):
-        self.path.unlink(missing_ok=True)
+        unlink_retry(self.path)
 
 
 def _merge_into(fresh: dict, state: dict, base: dict) -> dict:
@@ -483,7 +515,10 @@ def route(tasks: list[Task], state: dict) -> list[Task]:
 
 def header_problem(task: Task) -> str | None:
     """Refuse, don't coerce (Thomas, 9 Oct: tasks with a date line first or no Queue line)."""
-    first = task.path.read_text(encoding="utf-8").lstrip().splitlines()[:1]
+    try:
+        first = task.path.read_text(encoding="utf-8").lstrip().splitlines()[:1]
+    except OSError as e:  # being moved by another tick right now; it is not runnable *this* tick
+        return f"file unreadable right now ({e.__class__.__name__}); another tick may be moving it"
     if not first or not first[0].startswith("# "):
         return "first line must be '# <title>'"
     if "queue" not in task.fields:
@@ -634,13 +669,21 @@ def _alive(pid, created) -> bool:
     return got == created
 
 
-def read_lock(path: Path) -> dict | None:
-    """The lock's JSON, or None if it can't be read or parsed (then only the age rule applies)."""
-    try:
-        info = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    return info if isinstance(info, dict) else None
+def read_lock(path: Path, tries: int = 5) -> dict | None:
+    """The lock's JSON, or None if it can't be read or parsed (then only the age rule applies).
+    A lock being rewritten by its owner is empty or partial for an instant (write_text truncates
+    first); a tick scanning the slots at that instant saw no task and dispatched the running task
+    again (soak test, seed 1, 3 Nov 2026). So an unreadable lock is re-read a few times, 20 ms
+    apart, before it counts as unreadable. (An atomic rename is no better here: on Windows the
+    target vanishes for a moment and readers get FileNotFoundError.)"""
+    for i in range(tries):
+        try:
+            info = json.loads(path.read_text(encoding="utf-8"))
+            return info if isinstance(info, dict) else None
+        except (OSError, ValueError):
+            if i < tries - 1:
+                time.sleep(0.02)
+    return None
 
 
 def lock_status(info: dict | None) -> str:
@@ -679,7 +722,7 @@ def take_lock(state: dict) -> bool:
                 # e.g. Task Scheduler killed the tick when the laptop went onto battery (2 Nov).
                 # reconcile() has already collected a task the lock named.
                 log(f"RECONCILE dead owner {info['pid']} for {info.get('task') or '-'} ({LOCK_FILE.name})")
-                LOCK_FILE.unlink(missing_ok=True)
+                unlink_retry(LOCK_FILE)
                 continue
             try:
                 age = time.time() - LOCK_FILE.stat().st_mtime
@@ -688,12 +731,19 @@ def take_lock(state: dict) -> bool:
             if age < max_age:
                 return False
             log(f"stale lock ({int(age)}s old) removed")
-            LOCK_FILE.unlink(missing_ok=True)
+            unlink_retry(LOCK_FILE)
     return False
 
 
+def write_lock(path: Path, info: dict) -> None:
+    """Rewrite a lock in place, in one write. The empty-then-full instant this leaves is covered
+    by read_lock()'s re-read; a temp file + os.replace was tried and is worse on Windows (the
+    target is briefly absent, and the rename fails outright while a reader has the file open)."""
+    path.write_text(json.dumps(info), encoding="utf-8")
+
+
 def set_lock_task(slug: str, lane: str = "") -> None:
-    LOCK_FILE.write_text(json.dumps(_my_lock(task=slug, lane=lane)), encoding="utf-8")
+    write_lock(LOCK_FILE, _my_lock(task=slug, lane=lane))
 
 
 def update_lock(**extra) -> None:
@@ -701,11 +751,11 @@ def update_lock(**extra) -> None:
     info = read_lock(LOCK_FILE)
     if info is not None and info.get("pid") == os.getpid():
         info.update(extra)
-        LOCK_FILE.write_text(json.dumps(info), encoding="utf-8")
+        write_lock(LOCK_FILE, info)
 
 
 def release_lock() -> None:
-    LOCK_FILE.unlink(missing_ok=True)
+    unlink_retry(LOCK_FILE)
 
 
 def start_watchdog(seconds: int) -> threading.Timer:
@@ -723,8 +773,12 @@ def start_watchdog(seconds: int) -> threading.Timer:
 # ---------------------------------------------------------------- git + worktrees
 
 def git(*args: str, cwd: Path = REPO, check: bool = True) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True,
-                          timeout=C["git_timeout_s"], check=check)
+    # git's output is UTF-8; without saying so, text=True decodes it as the console code page
+    # (cp1252 here). A diff with a curly quote (byte 0x9d) then blew up subprocess's reader
+    # thread, .stdout came back None, run_reviewer() crashed on len(None) and the tick died
+    # silently -- the 2 Nov 2026 incident (reproduced by the soak test on 3 Nov).
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, encoding="utf-8",
+                          errors="replace", timeout=C["git_timeout_s"], check=check)
 
 
 def is_link(p: Path) -> bool:
@@ -843,6 +897,15 @@ def integration_tree(task: Task, base: str, branch: str) -> tuple[Path, str | No
     return wt, git("rev-parse", "HEAD", cwd=wt).stdout.strip(), "merged in the integration tree"
 
 
+def merged_already(branch: str) -> str | None:
+    """The merge commit of `branch`'s current tip on master's first-parent line, if it is there."""
+    for sha in git("rev-list", "--first-parent", "--merges", f"--grep=^orchestra: merge {re.escape(branch)}$",
+                   "HEAD", check=False).stdout.split():
+        if git("rev-parse", f"{sha}^2", check=False).stdout.strip() == git("rev-parse", branch, check=False).stdout.strip():
+            return sha
+    return None
+
+
 def integrate(task: Task, branch: str, rec: dict, on_merged=None) -> str:
     """Test branch + current master together, then fast-forward master to that tested commit.
     Fills `rec` (stored in state) with base, commit, checks and tries. Returns the merge
@@ -850,7 +913,20 @@ def integrate(task: Task, branch: str, rec: dict, on_merged=None) -> str:
     `on_merged` runs inside the merge lock right after a fast-forward (the aftercare push)."""
     ahead = git("rev-list", "--count", f"HEAD..{branch}", check=False).stdout.strip()
     if ahead in ("", "0"):
-        return "no commits"
+        found = merged_already(branch)
+        if not found:
+            return "no commits"
+        # A tick killed between its fast-forward and its state save (soak test, seed 2, 3 Nov 2026)
+        # left the tested merge on master with nothing in state and no push; the recovered run then
+        # saw "no commits". Carry on from that merge: record it and push it.
+        rec.update(base=git("rev-parse", f"{found}^1").stdout.strip(), commit=found, tries=0,
+                   checks=["recovered: this merge was already on master (a tick died after its fast-forward); "
+                           "its combined-tree checks ran before that fast-forward"])
+        log(f"integration {task.slug}: merge {found[:8]} already on master; recovering")
+        with _FileLock(REVIEW / "merge.lock", wait=600, stale=900):
+            if on_merged:
+                on_merged()
+        return "merged"
     clash = dirty_clash(branch)
     if clash:
         return f"main checkout has uncommitted changes to {', '.join(clash)}; merge by hand"
@@ -1208,6 +1284,12 @@ def run_lane(task: Task, wt: Path, report: Path, timeout: int, prov: dict | None
     shutil.copyfile(task.path, local / "task.md")
     local_report = local / "report.md"
     local_report.unlink(missing_ok=True)
+    # And the main copy: an earlier attempt whose tick died after PASS left its report here
+    # (never archived, parked or renamed), and finish() reads whatever is there. On 3 Nov 2026 a
+    # session that wrote nothing was logged PASS on the previous attempt's report, then failed
+    # the gate in its bare worktree (docs/orchestra_soak.md, bug 10). A lane that writes nothing
+    # must be NO_REPORT.
+    unlink_retry(report)
     argv = list(argv)
     if task.lane == "claude":
         argv += ["--settings", str(hook_settings(wt))]
@@ -1364,8 +1446,16 @@ def needs_human(human: str) -> bool:
 def move(src: Path, dest_dir: Path, name: str | None = None) -> Path:
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / (name or src.name)
-    if src.exists():
-        os.replace(src, dest)
+    for i in range(20):  # a tick listing the queue may have the file open: Windows then refuses the rename
+        if not src.exists():
+            break
+        try:
+            os.replace(src, dest)
+            break
+        except PermissionError:
+            if i == 19:
+                raise
+            time.sleep(0.05)
     return dest
 
 
@@ -1431,67 +1521,22 @@ def finish(task: Task, state: dict, wt: Path, branch: str, outcome: str, seconds
         f"prompt {entry['prompt_sha'] or '?'} {fmt_tokens(entry['tokens'])} {info['note']}".rstrip())
 
     if info["result"] == "PASS":
-        problems = []
-        if stray:
-            problems.append(f"files changed in the main checkout during the run: {', '.join(stray)}")
-        if not hooks_loaded:
-            problems.append("the guard hook never fired, so its limits weren't enforced")
-        verdict, detail = run_gate(task, wt)
-        entry["runner_gate"] = f"{verdict}: {detail}"
-        log(f"runner gate {task.slug}: {verdict}: {detail}")
-        if verdict != "pass":
-            problems.append(f"runner's own gate check: {verdict}: {detail}")
-        if problems:
-            park(task, "session said PASS, but " + "; ".join(problems) + f". Branch {branch} kept.", report)
-            return "PASS-REJECTED"
-
-        # Reviewer lane: risky diffs get a fresh read-only reviewer before integration.
-        why_risky = risk(branch) if C.get("review_risky", True) else None
-        if why_risky:
-            log(f"review {task.slug}: {why_risky}")
-            rv = run_reviewer(task, wt, branch, report, why_risky)
-            rv["spent"] = charge(state, task, rv["seconds"], rv.pop("cost_usd", None), lane="claude")
-            rv["why"] = why_risky
-            log(f"review {task.slug}: {rv['verdict']} after {rv['seconds']}s ({rv['spent']})")
-        else:
-            rv = {"verdict": "skipped", "why": "review_risky is off" if not C.get("review_risky", True)
-                  else "not risky"}
-        ts["review"] = entry["review"] = rv
-        if rv["verdict"] == "block":
-            PARKED.mkdir(parents=True, exist_ok=True)
-            (PARKED / f"{task.slug}.review.md").write_text(
-                f"# Reviewer: VERDICT: block\nWhy reviewed: {why_risky}\n\n{rv['reasons']}\n", encoding="utf-8")
-            park(task, f"reviewer blocked it ({rv['reasons'].splitlines()[0][:200] if rv['reasons'] else 'no reason'});"
-                       f" review in {task.slug}.review.md. Branch {branch} kept.", report)
-            return "REVIEW-BLOCKED"
-
-        ts.pop("push", None)
-
-        def push():
-            if C.get("auto_push") and aftercare_on():
-                try:
-                    import aftercare
-                    ts["push"] = aftercare.push(REPO)
-                except Exception as e:  # a push problem must never lose the merge
-                    ts["push"] = f"push step crashed: {e}"
-                log(f"push {task.slug}: {ts['push']}")
-
-        integ: dict = {}
-        merge = integrate(task, branch, integ, on_merged=push)
-        ts["integration"] = entry["integration"] = integ
-        log(f"merge {branch}: {merge}")
-        if merge.startswith("parked:"):
-            ts.pop("merge", None)  # the park reason already says it; STATE NOW would list it twice
-            park(task, f"integration: {merge[len('parked:'):].strip()}. Master untouched; branch {branch} kept.", report)
-            return "INTEGRATION-REJECTED"
-        ts["merge"] = merge
-        state["done"][task.digest] = now().isoformat()
-        day = ARCHIVE / now().date().isoformat()
-        move(task.path, day)
-        move(report, day, f"{task.slug}.report.md")
-        if merge in ("merged", "no commits"):
-            remove_worktree(wt, branch, delete_branch=True)
-        return "PASS"
+        # Everything after the session's PASS runs inside one try: a runner bug here (2 Nov 2026,
+        # run_reviewer) used to kill the tick with no log line and no state change, so the task was
+        # dispatched again while its finished branch still stood -- then hit the retry limit with
+        # its PASS never merged. Now it parks with the branch kept and the traceback in runner.log.
+        progress = {"stage": "gate"}
+        try:
+            return _after_pass(task, state, ts, entry, wt, branch, report, stray, hooks_loaded, progress)
+        except Exception as e:
+            stage = progress["stage"]
+            log(f"RUNNER CRASHED {task.slug}: {type(e).__name__} during {stage} after the session's PASS: {e}\n"
+                + indent(traceback.format_exc()))
+            entry["crash"] = f"{stage}: {e!r}"
+            ts["last_result"] = "RUNNER_CRASH"
+            park(task, f"the runner itself crashed during {stage} after the session's PASS ({e!r}; traceback in "
+                       f"runner.log). Branch {branch} kept: fix the runner, then requeue.py {task.slug} --merge-only", report)
+            return "RUNNER-CRASHED"
     if needs_human(info["human"]):
         park(task, f"waiting on Chuen: {info['human']}", report)
     elif info["result"] in ("PARTIAL", "FAIL"):
@@ -1501,6 +1546,92 @@ def finish(task: Task, state: dict, wt: Path, branch: str, outcome: str, seconds
     elif report.exists():
         os.replace(report, REPORTS / f"{task.slug}.attempt{ts['attempts']}.md")
     return info["result"]
+
+
+def indent(text: str) -> str:
+    """Traceback lines under a log event, indented so line-based readers of runner.log skip them."""
+    return "\n".join("    " + l for l in text.rstrip().splitlines())
+
+
+def _after_pass(task: Task, state: dict, ts: dict, entry: dict, wt: Path, branch: str, report: Path,
+                stray: list[str], hooks_loaded: bool, progress: dict) -> str:
+    """Gate re-run, reviewer, combined-tree integration, archive. `progress["stage"]` names the
+    step under way, for the crash log if one of them raises."""
+    problems = []
+    if stray:
+        problems.append(f"files changed in the main checkout during the run: {', '.join(stray)}")
+    if not hooks_loaded:
+        problems.append("the guard hook never fired, so its limits weren't enforced")
+    verdict, detail = run_gate(task, wt)
+    entry["runner_gate"] = f"{verdict}: {detail}"
+    log(f"runner gate {task.slug}: {verdict}: {detail}")
+    if verdict != "pass":
+        problems.append(f"runner's own gate check: {verdict}: {detail}")
+    if problems:
+        park(task, "session said PASS, but " + "; ".join(problems) + f". Branch {branch} kept.", report)
+        return "PASS-REJECTED"
+
+    # Reviewer lane: risky diffs get a fresh read-only reviewer before integration.
+    progress["stage"] = "review"
+    why_risky = risk(branch) if C.get("review_risky", True) else None
+    if why_risky:
+        log(f"review {task.slug}: {why_risky}")
+        rv = run_reviewer(task, wt, branch, report, why_risky)
+        rv["spent"] = charge(state, task, rv["seconds"], rv.pop("cost_usd", None), lane="claude")
+        rv["why"] = why_risky
+        log(f"review {task.slug}: {rv['verdict']} after {rv['seconds']}s ({rv['spent']})")
+    else:
+        rv = {"verdict": "skipped", "why": "review_risky is off" if not C.get("review_risky", True)
+              else "not risky"}
+    ts["review"] = entry["review"] = rv
+    if rv["verdict"] == "block":
+        PARKED.mkdir(parents=True, exist_ok=True)
+        (PARKED / f"{task.slug}.review.md").write_text(
+            f"# Reviewer: VERDICT: block\nWhy reviewed: {why_risky}\n\n{rv['reasons']}\n", encoding="utf-8")
+        park(task, f"reviewer blocked it ({rv['reasons'].splitlines()[0][:200] if rv['reasons'] else 'no reason'});"
+                   f" review in {task.slug}.review.md. Branch {branch} kept.", report)
+        return "REVIEW-BLOCKED"
+
+    progress["stage"] = "integration"
+    ts.pop("push", None)
+
+    def push():
+        # Master has just been fast-forwarded: write that down before the push, the archive moves
+        # and the worktree removal, which take seconds together. (Mini soak, seed 2, 3 Nov 2026: a
+        # tick killed in that window left a merge on master that state never recorded, and with
+        # the task already archived the next tick's reconcile had nothing to collect.)
+        progress["stage"] = "record"
+        ts["merge"] = "merged"
+        ts["integration"] = entry["integration"] = integ
+        state["done"][task.digest] = now().isoformat()
+        save_state(state)
+        progress["stage"] = "push"
+        if C.get("auto_push") and aftercare_on():
+            try:
+                import aftercare
+                ts["push"] = aftercare.push(REPO)
+            except Exception as e:  # a push problem must never lose the merge
+                ts["push"] = f"push step crashed: {e}"
+            log(f"push {task.slug}: {ts['push']}")
+        progress["stage"] = "archive"
+
+    integ: dict = {}
+    merge = integrate(task, branch, integ, on_merged=push)
+    ts["integration"] = entry["integration"] = integ
+    log(f"merge {branch}: {merge}")
+    if merge.startswith("parked:"):
+        ts.pop("merge", None)  # the park reason already says it; STATE NOW would list it twice
+        park(task, f"integration: {merge[len('parked:'):].strip()}. Master untouched; branch {branch} kept.", report)
+        return "INTEGRATION-REJECTED"
+    progress["stage"] = "archive"
+    ts["merge"] = merge
+    state["done"][task.digest] = now().isoformat()
+    day = ARCHIVE / now().date().isoformat()
+    move(task.path, day)
+    move(report, day, f"{task.slug}.report.md")
+    if merge in ("merged", "no commits"):
+        remove_worktree(wt, branch, delete_branch=True)
+    return "PASS"
 
 
 def _limited(task: Task, state: dict, ts: dict, hit: str, seconds: int, spent: str,
@@ -1578,6 +1709,16 @@ def reconcile(state: dict) -> dict:
     Worktrees are kept; unreadable locks are left to take_lock's age rule.
     Returns {slug: outcome}."""
     out: dict = {}
+    # The brief locks (state, merge, reconcile, dispatch) name their holder too. One left by a dead
+    # process is swept here rather than waiting for the next contender (soak test, seed 2: a tick
+    # killed inside the merge lock left merge.lock behind for good).
+    for lf in sorted(REVIEW.glob("*.lock")):
+        if lf.name.startswith("runner"):
+            continue
+        info = read_lock(lf)
+        if lock_status(info) == "dead":
+            log(f"RECONCILE {lf.name}: holder {info['pid']} is gone; removed")
+            unlink_retry(lf)
     for lf in sorted(REVIEW.glob("runner*.lock")):
         info = read_lock(lf)
         status = lock_status(info)
@@ -1593,8 +1734,7 @@ def reconcile(state: dict) -> dict:
                 if read_lock(lf) != info:
                     continue
                 log(f"RECONCILE dead owner {info['pid']} for {slug}")
-                lf.write_text(json.dumps(_my_lock(task=slug, lane=info.get("lane", ""), reconciling=True)),
-                              encoding="utf-8")
+                write_lock(lf, _my_lock(task=slug, lane=info.get("lane", ""), reconciling=True))
         except TimeoutError:
             continue
         try:
@@ -1603,7 +1743,7 @@ def reconcile(state: dict) -> dict:
             log(f"RECONCILE {slug} failed: {e!r}; worktree kept")
             out[slug] = f"error: {e}"
         finally:
-            lf.unlink(missing_ok=True)
+            unlink_retry(lf)  # another tick may be reading it this instant (WinError 32)
     return out
 
 
@@ -1681,7 +1821,7 @@ def battery_pause() -> str | None:
     why = power.dispatch_block(st, C)
     if not why:
         if POWER_FILE.exists():
-            POWER_FILE.unlink(missing_ok=True)
+            unlink_retry(POWER_FILE)
             log(f"POWER: {power.describe(st, C).replace(' (dispatching)', '')}; dispatching again")
         return None
     try:
@@ -1760,6 +1900,47 @@ def exams_step(state: dict, at: dt.datetime | None = None, spawn=None) -> str:
 
 
 def tick(dry_run: bool = False) -> str:
+    """One tick. Any exception reaches runner.log with its traceback before the process exits:
+    under pythonw there is no stderr, and on 2 Nov 2026 a tick died between PASS and merge with
+    no trace at all. Re-raised afterwards, so a console run still shows it and exits non-zero."""
+    try:
+        return _tick(dry_run)
+    except Exception as e:
+        log(f"TICK CRASHED: {type(e).__name__}: {e}\n" + indent(traceback.format_exc()))
+        raise
+
+
+def running_tasks() -> set[str]:
+    """Tasks named in any slot lock right now (another slot is running, or reconciling, them)."""
+    out = set()
+    for lf in REVIEW.glob("runner*.lock"):
+        info = read_lock(lf)
+        if info and info.get("task"):
+            out.add(info["task"])
+    return out
+
+
+def _record_crash(state: dict, task: Task, e: BaseException) -> None:
+    """The runner raised while a task was dispatched: one counted attempt, like a lane that died,
+    so the INFRA backoff and retry limit apply instead of an immediate re-dispatch."""
+    try:
+        ts = task_state(state, task)
+        end = now().isoformat()
+        ts["history"].append({"end": end, "result": "RUNNER_CRASH", "seconds": 0, "lane": task.lane,
+                              "weight": task.weight, "note": f"runner crashed: {type(e).__name__}: {e}"[:300],
+                              "premise": "not stated", "spent": "unknown", "denied": [],
+                              "main_checkout_changed": [], "hooks_loaded": None,
+                              **provenance_fields(task.lane, None, {})})
+        ts.update(last_end=end, last_result="RUNNER_CRASH")
+        if ts["attempts"] > C["infra_retries"]:
+            park(task, f"the runner crashed {ts['attempts']} times while running it ({type(e).__name__}: {e}); "
+                       "traceback in runner.log", None)
+        save_state(state)
+    except Exception as e2:  # the original exception is the one worth seeing
+        log(f"could not record the crash for {task.slug}: {e2!r}")
+
+
+def _tick(dry_run: bool = False) -> str:
     for d in (QUEUE, REPORTS, ARCHIVE, PARKED):
         d.mkdir(parents=True, exist_ok=True)
     if aftercare_on() and not dry_run:  # the real repo only: a campaign Chuen set in chat, installed once
@@ -1805,13 +1986,6 @@ def tick(dry_run: bool = False) -> str:
             if t.lane not in order:
                 order.append(t.lane)
         slots = C.get("lane_slots", {})
-        # Tasks another slot of the same lane is already running (named in its lock file).
-        running = set()
-        for lf in REVIEW.glob("runner.*.lock"):
-            try:
-                running.add(json.loads(lf.read_text(encoding="utf-8")).get("task"))
-            except (OSError, ValueError):
-                pass
         chosen = None
         for lane in order:
             for slot in range(1, int(slots.get(lane, 1)) + 1):
@@ -1820,24 +1994,41 @@ def tick(dry_run: bool = False) -> str:
                     chosen = lane
                     break
             if chosen:
-                tasks = [t for t in tasks if t.lane == lane and t.slug not in running]
+                tasks = [t for t in tasks if t.lane == lane]
                 break
         else:
             return "busy" if order else "idle"
     elif not take_lock(state):
         return "busy"
+    task = None
     try:
-        task = pick(tasks, state)
-        if not task:
-            save_state(state)
-            return "idle"
-        timeout = timeout_for(task.weight, state)
+        # Pick and claim under one dispatch lock, and read the other slots' locks *there*: two
+        # ticks starting together each scanned before the other had written its task, took
+        # different slots and both picked the same top task (race seen in review, soak 3 Nov 2026).
+        with _FileLock(REVIEW / "dispatch.lock", wait=60, stale=120):
+            running = running_tasks()
+            # Then re-read the state, under the lock: the tick that just freed a slot saved its
+            # entry (LIMITED, NO_REPORT, ...) after this one loaded its copy. Dispatching from the
+            # stale copy overwrote that task record wholesale (save_state merges per task) and ran
+            # the task on the very lane it had just found limited (soak test, seed 1, 3 Nov 2026).
+            # Everything this tick changed so far (reconcile) was saved already, so nothing is lost.
+            state = load_state()
+            if parallel:
+                _BASE = json.loads(json.dumps(state))
+            lane_of = {t.slug: t.lane for t in tasks}  # the lane this slot was taken for, after route()
+            tasks = [t for t in route(load_queue(), state)
+                     if lane_of.get(t.slug) == t.lane and t.slug not in running]
+            task = pick(tasks, state)
+            if not task:
+                save_state(state)
+                return "idle"
+            timeout = timeout_for(task.weight, state)
+            ts = task_state(state, task)
+            ts["attempts"] += 1
+            ts["last_start"] = now().isoformat()
+            save_state(state)  # count the attempt before running, so a crash still counts
+            set_lock_task(task.slug, task.lane)
         start_watchdog(timeout + C["tick_watchdog_extra_s"])
-        ts = task_state(state, task)
-        ts["attempts"] += 1
-        ts["last_start"] = now().isoformat()
-        save_state(state)  # count the attempt before running, so a crash still counts
-        set_lock_task(task.slug, task.lane)
         fb = ""
         if task.fields.get("lane-from"):
             fb = (f" (fallback: lane {task.fields['lane-from']} limited until "
@@ -1874,6 +2065,10 @@ def tick(dry_run: bool = False) -> str:
         save_state(state)
         write_vault_note(task, ts, result)
         return result
+    except Exception as e:
+        if task is not None:  # dispatched, then the runner itself failed: count it, don't just re-dispatch
+            _record_crash(state, task, e)
+        raise
     finally:
         release_lock()
         write_state_now()

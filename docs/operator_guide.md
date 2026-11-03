@@ -116,11 +116,16 @@ Other occasional commands:
 .venv\Scripts\python.exe -m atrium credits --days 7
 .venv\Scripts\python.exe -m atrium.import_chats --source codex --vault "C:\Users\Xichu\OneDrive - King's College London\Denisse"
 .venv\Scripts\python.exe scripts\run_checks.py --fast
+.venv\Scripts\python.exe -m orchestra.soak --minutes 5 --seed 1
 powershell -ExecutionPolicy Bypass -File orchestra\install_task.ps1
 ```
 
 `atrium.import_chats` is a dry run until you add `--apply`. `install_task.ps1`
 re-registers "Denisse Orchestra" in place (add `-Canary` / `-Producer` for those tasks).
+`orchestra.soak` runs the whole runner against a throwaway repo with fake lanes, concurrent
+ticks, kills and power flips, and checks invariants at the end; run it (a few seeds) after
+touching the runner's locking or integration. Details and the bugs it found:
+[`docs/orchestra_soak.md`](orchestra_soak.md).
 
 ## How results reach you
 
@@ -190,3 +195,8 @@ because power-aware dispatch (which logs `ON BATTERY`) only landed that evening.
 | `push … not pushed: an added line looks like a key or token` | The privacy check refused the push. The merge stands locally. | Look at the outgoing diff (`git log origin/master..master -p`). If it's a false alarm, push by hand from the main checkout. |
 | `worktree failed for <slug>: … exit status 3221225794` | `git worktree add` crashed at start-up (Windows, 0xC0000142). | Usually transient; the next tick retries. |
 | `PARTIAL` / `FAIL … a blind re-run won't change it` | The session couldn't finish. | Read the report's NOT DONE and ODD lines, then requeue with a note that changes the task. |
+| `TICK CRASHED: <Error>: ...` with an indented traceback | The runner itself raised. Before 3 Nov 2026 this was silent (pythonw has no stderr) and the task was dispatched again at once. If a task was running, its state says `RUNNER_CRASH`: one retry, then parked. | Read the traceback, fix the runner, requeue. |
+| `RUNNER CRASHED <slug>: <Error> during review\|integration after the session's PASS` then `PARKED` | The session's work is done and on `review/<slug>`; the runner failed after it. This is what killed the 2 Nov `multistep-read-found-file` run (a curly quote in the diff under the cp1252 console code page). | Fix the cause, then `requeue.py <slug> --merge-only`. Nothing is lost. |
+| `<name>.lock: holder <pid> is gone; taken over` / `RECONCILE <name>.lock: holder <pid> is gone; removed` | A tick died holding a brief lock (state, merge, dispatch, reconcile). | Nothing: the next tick takes it over or sweeps it. |
+| `could not remove <name>: still open in another process` | Windows refused to delete a lock another tick was reading for a whole second. | Nothing; the next tick retries. If it repeats, look for a stuck process holding `.review/` files open. |
+| `integration <slug>: merge <sha> already on master; recovering` | A tick died between its fast-forward and its state save; the merge was on master but unrecorded and unpushed. | Nothing: it is recorded as `recovered:` and pushed. |

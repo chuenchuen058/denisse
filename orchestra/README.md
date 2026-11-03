@@ -18,6 +18,7 @@ command and mechanism.
 | `python orchestra\campaign.py status\|pause\|resume\|stop\|emergency-stop\|disable-schedule` | Campaign deadline and Chuen's dispatch controls; see below |
 
 | `python -m orchestra.local_team produce` | One producer pass on the local model: librarian, scout, planner, admission (Task Scheduler every 30 min with `install_task.ps1 -Producer`) |
+| `python -m orchestra.soak --minutes 5 --seed 1` | Soak test: the whole runner against a temp repo with fake lanes, concurrent ticks, kills and power flips; invariants checked at the end (`docs/orchestra_soak.md`) |
 | `python -m orchestra.local_team scout\|planner\|librarian\|status` | One role on its own (see "Local team and producer" below) |
 
 Use the venv python (`.venv\Scripts\python.exe`) for all of them.
