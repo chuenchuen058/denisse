@@ -445,6 +445,41 @@ class RunnerTest(unittest.TestCase):
         until = dt.datetime.fromisoformat(self.state()["lanes"]["codex"]["limited_until"])
         self.assertAlmostEqual((until - before).total_seconds(), 3600, delta=120)
 
+    # --- expired sign-in (3 Nov 2026: Claude's OAuth expired at 18:06; 9 tasks parked as NO_REPORT)
+
+    AUTH_TEXT = "Failed to authenticate: OAuth session expired and could not be refreshed"
+
+    def test_auth_patterns_come_from_config(self):
+        log = self.tmp / "a.lane.log"
+        log.write_text("starting\n" + self.AUTH_TEXT + "\n", encoding="utf-8")
+        self.assertTrue(self.R.detect_auth("claude", log))
+        self.assertIsNone(self.R.detect_limit("claude", log), "a sign-in failure is not a usage limit")
+        log.write_text(json.dumps({"type": "result", "is_error": True, "result": self.AUTH_TEXT}) + "\n",
+                       encoding="utf-8")
+        self.assertTrue(self.R.detect_auth("claude", log), "stream-json result line")
+        log.write_text("all fine, no report though\n", encoding="utf-8")
+        self.assertIsNone(self.R.detect_auth("claude", log))
+        old = self.R.C.get("auth_patterns")
+        self.addCleanup(self.R.C.__setitem__, "auth_patterns", old)
+        self.R.C["auth_patterns"] = {"claude": ["custom sign-in wording"]}
+        log.write_text("Custom sign-in wording here\n", encoding="utf-8")
+        self.assertTrue(self.R.detect_auth("claude", log), "patterns are data, not code")
+
+    def test_expired_sign_in_is_not_an_attempt(self):
+        self.lanes_with("codex", fallback={})
+        self.add("auth1", lane="codex")
+        os.environ["FAKE_LIMIT"] = "Error: not logged in. Please log in with `codex login`."
+        old = self.R.C.get("auth_retry_min")
+        self.addCleanup(self.R.C.__setitem__, "auth_retry_min", old)
+        self.R.C["auth_retry_min"] = 7
+        before = dt.datetime.now()
+        self.assertEqual(self.R.tick(), "LIMITED")
+        st = self.state()
+        self.assertEqual(st["tasks"]["auth1"]["attempts"], 0, "the attempt isn't counted")
+        until = dt.datetime.fromisoformat(st["lanes"]["codex"]["limited_until"])
+        self.assertAlmostEqual((until - before).total_seconds(), 7 * 60, delta=120)
+        self.assertIn("sign", st["lanes"]["codex"]["message"].lower())
+
     # --- reconcile after a killed tick (2 Nov 2026: on battery the ticks died, their lanes didn't)
 
     def dead_pid(self):

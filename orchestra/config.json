@@ -32,6 +32,16 @@
   "lane_fallback": {"codex": "claude"},
   "_lane_fallback": "While a lane is limited (usage limit seen in its log, see LIMIT_PATTERNS in runner.py), its tasks run on this lane instead, unless the task header says Lane-Fixed: yes. The fallback lane's slots still apply. {} turns it off.",
 
+  "auth_patterns": {
+    "claude": ["failed to authenticate", "oauth session expired", "please run /login", "invalid api key", "not logged in"],
+    "codex": ["not logged in", "please (log|sign) in", "401 unauthorized", "authentication (failed|required)"],
+    "copilot": ["not logged in", "please (log|sign) in", "authentication (failed|required)", "no authentication"],
+    "gemini": ["authentication (failed|required)", "please (log|sign) in"]
+  },
+  "auth_retry_min": 15,
+  "auth_fix_hint": "sign-in expired: open a terminal, run the lane's CLI (e.g. `claude`) and sign in (`/login`)",
+  "_auth_patterns": "A run that dies because the lane's CLI isn't signed in (3 Nov 2026, 18:06: Claude's OAuth sign-in expired and 9 tasks were parked as NO_REPORT in an hour) is treated like a usage limit: the attempt isn't counted and the lane waits auth_retry_min before the next try. Patterns are case-insensitive regexes against the tail of the lane log. A reviewer that can't sign in parks the PASS for a --merge-only re-run instead of blocking it.",
+
   "daily_spend_cap_usd": 5.0,
   "_daily_spend_cap_usd_note": "The normal cap. The sprint's $400 (2 Nov 2026: spare Claude allowance before it resets; claude -p's total_cost_usd is notional on his plan) is a campaign override that ends at its stop_at by itself.",
   "_daily_spend_cap_usd": "Summed from claude -p total_cost_usd. Runs killed before reporting are charged an estimate from minutes x today's cost per minute. Thomas's ledger saw under half of a 20-hour spend.",

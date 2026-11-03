@@ -440,6 +440,25 @@ def detect_limit(lane: str, lane_log: Path) -> str | None:
     return None
 
 
+def detect_auth(lane: str, lane_log: Path) -> str | None:
+    """The matching line if the lane log shows an expired/missing sign-in, else None. Patterns are
+    data: config.json "auth_patterns" (3 Nov 2026: the Claude CLI's sign-in expired at 18:06,
+    every run then died in 1 s as NO_REPORT and 9 tasks were parked within an hour)."""
+    table = C.get("auth_patterns") or {}
+    pats = table.get(lane) or [p for ps in table.values() for p in ps]
+    for line in reversed(_limit_text(lane_log).splitlines()):
+        if any(re.search(p, line, re.I) for p in pats):
+            return line.strip()
+    return None
+
+
+def auth_hit(text: str) -> str:
+    """A sign-in failure as a limit message the LIMITED path understands: retry after
+    auth_retry_min, with the fix spelled out for status, hot.md and the dashboard."""
+    mins = int(C.get("auth_retry_min", 15))
+    return f"{text[:200]} | {C.get('auth_fix_hint', 'sign in again')}; try again in {mins} minutes"
+
+
 _MONTHS = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug",
                                        "sep", "oct", "nov", "dec"), 1)}
 _WHEN = r"(?:try again|resets?|available again)\s*(?:at|after|on)?\s*"
@@ -1059,6 +1078,9 @@ def run_reviewer(task: Task, wt: Path, branch: str, report: Path, why: str) -> d
         return {"verdict": "block", "reasons": f"reviewer timed out after {timeout}s", "seconds": seconds,
                 "cost_usd": cost}
     verdict, reasons = parse_verdict(text)
+    if verdict is None and detect_auth("claude", log_path):
+        return {"verdict": "unavailable", "reasons": auth_hit(detect_auth("claude", log_path)),
+                "seconds": seconds, "cost_usd": cost}
     if verdict is None:
         return {"verdict": "block", "reasons": "reviewer gave no VERDICT line: " + reasons[-300:],
                 "seconds": seconds, "cost_usd": cost}
@@ -1504,6 +1526,9 @@ def finish(task: Task, state: dict, wt: Path, branch: str, outcome: str, seconds
             state["durations"].setdefault(task.weight, []).append(seconds)
     if info["result"] in ("NO_REPORT", "TIMEOUT"):
         hit = detect_limit(task.lane, REPORTS / f"{task.slug}.lane.log")
+        auth = None if hit else detect_auth(task.lane, REPORTS / f"{task.slug}.lane.log")
+        if auth:
+            hit = auth_hit(auth)
         if hit:
             return _limited(task, state, ts, hit, seconds, spent, provenance)
     stray = sorted(main_checkout_status() - before_status)
@@ -1584,6 +1609,12 @@ def _after_pass(task: Task, state: dict, ts: dict, entry: dict, wt: Path, branch
         rv = {"verdict": "skipped", "why": "review_risky is off" if not C.get("review_risky", True)
               else "not risky"}
     ts["review"] = entry["review"] = rv
+    if rv["verdict"] == "unavailable":
+        # Not a judgement on the diff: the reviewer couldn't sign in. Keep the PASS for a
+        # merge-only re-run once the sign-in works.
+        park(task, f"reviewer couldn't run ({rv['reasons'][:200]}). The PASS stands: after signing in, "
+                   f"`python orchestra\\requeue.py {task.slug} --merge-only`. Branch {branch} kept.", report)
+        return "REVIEW-UNAVAILABLE"
     if rv["verdict"] == "block":
         PARKED.mkdir(parents=True, exist_ok=True)
         (PARKED / f"{task.slug}.review.md").write_text(
