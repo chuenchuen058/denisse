@@ -373,6 +373,13 @@ def _limit_text(lane_log: Path) -> str:
             except ValueError:
                 out.append(s)
                 continue
+            if isinstance(data, dict) and data.get("type") == "rate_limit_event":
+                # stream-json says it directly (3 Nov 2026: the 5-hour window was hit and 7 tasks
+                # were parked as NO_REPORT because only text messages were recognised)
+                info = data.get("rate_limit_info") or {}
+                if info.get("status") == "rejected" and info.get("resetsAt"):
+                    out.append(f"Claude usage limit reached ({info.get('rateLimitType', '?')})|{int(info['resetsAt'])}")
+                continue
             if isinstance(data, dict) and data.get("type") in ("result", "error"):
                 out.append(str(data.get("result") or data.get("error") or data.get("message") or ""))
             continue
