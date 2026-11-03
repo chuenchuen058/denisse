@@ -160,7 +160,8 @@ def _fixture():
             "command": "python demo/run_demo.py", "git": {"commit": "abcdef1234", "branch": "b"},
             "machine": {"model": "llama3.1:8b", "gpu": "Test GPU", "num_ctx": 8192, "ollama_version": "0.1"},
             "parts": {"suite": {"status": "ran", "seconds": 12.5, **suite},
-                      "voice": {"status": "skipped", "reason": "Kokoro model files not found"}}}
+                      "voice": {"status": "skipped", "reason": "Kokoro model files not found"},
+                      "voice_stages": {"status": "skipped", "reason": "Kokoro model files not found"}}}
 
 
 class Report(unittest.TestCase):
@@ -191,6 +192,80 @@ class Report(unittest.TestCase):
         for banned in ("revolutionary", "cutting-edge", "seamless", "blazing"):
             self.assertNotIn(banned, md.lower())
 
+    def test_areas_stages_and_since_last_run(self):
+        data = _fixture()
+        recs = [{"round": r, "id": i, "passed": not (i == "look_not_this_is_fine" and r == 1),
+                 "tools": [], "seconds": 1.0, "failures": ["called look_at_this"]}
+                for r in (1, 2, 3) for i in ("multi_tasks_timer", "look_not_this_is_fine", "look_not_here")]
+        data["parts"]["suite"] = {"status": "ran", "seconds": 9.0, **evidence.shape_suite(recs)}
+        data["parts"]["voice_stages"] = {"status": "ran", "seconds": 1.0, **evidence.shape_voice_stages(
+            {"turns": 4, "sources": {"wake_word": {"stt_done": {"n": 4, "p50": 0.61, "p95": 0.9}}}})}
+        old = _fixture()
+        old["git"]["commit"] = "0123456789"
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "2026-11-02.json").write_text(json.dumps(old), encoding="utf-8")
+            new = Path(tmp) / "2026-11-03.json"
+            self.assertEqual(report.previous(new).name, "2026-11-02.json")
+            md = report.render(data, new, Path(tmp) / "doc.md")
+        self.assertIn("| look_at_this, wrong use (must not read it) | [2](2026-11-03.json)", md)
+        self.assertIn("| transcript ready (`stt_done`) | [4](2026-11-03.json)", md)
+        self.assertIn("## Since last run", md)
+        self.assertIn("commit `0123456`", md)
+        # old suite had 2 cases, new has 3; a part only one side ran shows a dash
+        self.assertIn("| `suite` | `cases` | [2](2026-11-02.json) | [3](2026-11-03.json) | +1 |", md)
+        self.assertIn("| `suite.areas.multistep` | `cases` | — | [1](2026-11-03.json) |  |", md)
+
+    def test_no_previous_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            md = report.render(_fixture(), Path(tmp) / "2026-11-02.json", Path(tmp) / "doc.md")
+        self.assertIn("No earlier results file to compare with.", md)
+
+
+class NewAreas(unittest.TestCase):
+    def test_suite_areas_use_exact_ids(self):
+        cases = evidence.per_case([{"id": i, "passed": True, "failures": []}
+                                   for i in ("vault_deadline", "vault_week_topic", "study_start", "greet_hey")])
+        areas = evidence.suite_areas(cases)
+        self.assertEqual(areas["vault"]["ids"], ["vault_week_topic"])  # not the real-vault vault_deadline
+        self.assertEqual(areas["study"]["cases"], 1)
+        self.assertNotIn("multistep", areas)  # absent ids are not counted, not zero-filled
+        every = [i for _, _, ids in evidence.SUITE_AREAS for i in ids]
+        self.assertEqual(len(every), len(set(every)), "a case is in two areas")
+        from eval.cases import CASES
+        known = {c["id"] for c in CASES}
+        self.assertEqual([i for i in every if i not in known], [], "area names a case eval/cases.py lacks")
+
+    def test_voice_stages_shape_keeps_only_numbers(self):
+        v = evidence.shape_voice_stages({"turns": 2, "sources": {"voice_mode": {
+            "stt_done": {"n": 2, "p50": 0.5, "p95": 0.7, "text": "SECRET"}}}})
+        self.assertNotIn("SECRET", json.dumps(v))
+        self.assertEqual(v["summary"], {"turns": 2, "sources": ["voice_mode"]})
+
+    def test_zero_turns_is_skipped_not_measured(self):
+        part = run_demo.no_stage_turns({"status": "ran", "command": "c", "summary": {"turns": 0}})
+        self.assertEqual(part["status"], "skipped")
+        self.assertNotIn("summary", part)
+        ran = {"status": "ran", "summary": {"turns": 3}}
+        self.assertIs(run_demo.no_stage_turns(ran), ran)
+
+    def test_voice_stages_worker(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log, out = Path(tmp) / "turns.jsonl", Path(tmp) / "o.json"
+            log.write_text("\n".join(json.dumps({"source": "wake_word", "deltas": {"stt_done": x}})
+                                     for x in (0.4, 0.6)) + "\nnot json\n", encoding="utf-8")
+            entry = run_demo.run_part("voice_stages", [PY, str(ROOT / "demo" / "voice_stages.py"),
+                                                       "--out", str(out), "--log", str(log)],
+                                      out, evidence.shape_voice_stages, 120)
+        self.assertEqual(entry["status"], "ran", entry.get("reason"))
+        self.assertEqual(entry["summary"]["turns"], 2)
+        self.assertEqual(entry["sources"]["wake_word"]["stt_done"]["n"], 2)
+
+    def test_diff_rows_keep_a_part_that_stopped_running(self):
+        old = {"parts": {"voice": {"status": "ran", "summary": {"cases": 1, "attempts": 1, "passes": 1}}}}
+        new = {"parts": {"voice": {"status": "skipped", "reason": "x"}}}
+        rows = evidence.diff_rows(old, new)
+        self.assertIn(("voice", "cases", 1, None), rows)
+
 
 class Committed(unittest.TestCase):
     """The committed pack must be private-data clean and in sync."""
@@ -205,7 +280,10 @@ class Committed(unittest.TestCase):
             keys = {k for k, _ in _walk(data)}
             self.assertFalse(keys & {"reply", "suggestion", "steps", "evidence", "whisper", "vosk"}, f.name)
             self.assertNotRegex(text, r"[A-Za-z]:\\\\Users\\\\", f.name)
-            for name in run_demo.PARTS:
+            # The latest file must record every part; an older one predates
+            # parts added since (voice_stages) and is kept as it was written.
+            names = run_demo.PARTS if f == self.files[-1] else list(data["parts"])
+            for name in names:
                 part = data["parts"][name]
                 self.assertIn(part["status"], ("ran", "skipped", "error"))
                 if part["status"] != "ran":
