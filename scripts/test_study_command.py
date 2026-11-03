@@ -112,4 +112,19 @@ for text, active, want in context_cases:
 cases = cases + context_cases
 
 print(f"\n{len(cases) - len(fails)}/{len(cases)} passed.")
-sys.exit(1 if fails else 0)
+
+
+# The same checks, visible to `unittest discover` (an Orchestra gate runs it
+# that way). Until 2026-11-03 the module-level sys.exit made discover report
+# an import error -- exit 1 even with every phrase passing.
+import unittest  # noqa: E402
+
+
+class StudyCommandPhrases(unittest.TestCase):
+    def test_every_phrase_matches(self):
+        self.assertEqual(fails, [])
+        self.assertGreaterEqual(len(cases), 58)  # the 2026-11-03 table; a lost block fails here
+
+
+if __name__ == "__main__":
+    sys.exit(1 if fails else 0)
