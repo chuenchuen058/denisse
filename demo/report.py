@@ -14,7 +14,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "demo"))
+sys.path.insert(1, str(ROOT))
 import evidence  # noqa: E402
+import model_config  # noqa: E402
 
 RESULTS = ROOT / "demo" / "results"
 DOC = ROOT / "docs" / "denisse_evidence.md"
@@ -280,7 +282,7 @@ def render(data: dict, results_path: Path, doc_path: Path = DOC) -> str:
           "## Reproduce", "",
           "Windows, Python 3.12, [Ollama](https://ollama.com) running with the model pulled:", "",
           "```powershell",
-          "ollama pull llama3.1:8b",
+          f"ollama pull {m.get('model') or model_config.model('chat')}",  # what the run reported
           ".venv\\Scripts\\python.exe demo\\run_demo.py --rounds 3",
           "# fewer rounds, or without parts:  --rounds 1 --skip voice learning",
           "# voice models elsewhere:          --models-dir C:\\path\\to\\models",

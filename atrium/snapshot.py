@@ -12,6 +12,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 from .context import VAULT, _read, _section, _bullets
@@ -19,6 +20,18 @@ from .context import VAULT, _read, _section, _bullets
 REPO = Path(__file__).resolve().parent.parent
 REVIEW = REPO / ".review"
 HOME = Path.home()
+
+
+def _denisse_models() -> str:
+    """The chat and Whisper models Denisse is configured to use (config.json, with the
+    DENISSE_MODEL / DENISSE_WHISPER_MODEL overrides), never a guessed name."""
+    if str(REPO) not in sys.path:
+        sys.path.insert(0, str(REPO))
+    try:
+        import model_config
+        return f"{model_config.model('chat')}, Whisper {model_config.model('whisper')}"
+    except (ImportError, OSError, ValueError, KeyError) as exc:
+        return f"model config unreadable: {type(exc).__name__}"
 
 
 def _task_rows() -> list[dict]:
@@ -74,7 +87,7 @@ def _agents() -> list[dict]:
          "role": "Free tier no longer serves Gemini CLI (2 Nov 2026); its jobs go to Codex"},
         {"agent": "Copilot", "status": "ready" if exists(".copilot/config.json") else "sign-in needed",
          "role": "GitHub, shell commands, quick code"},
-        {"agent": "Denisse", "status": tray, "role": "Local voice assistant (llama3.1:8b, Whisper, Kokoro)"},
+        {"agent": "Denisse", "status": tray, "role": f"Local voice assistant ({_denisse_models()}, Kokoro)"},
         {"agent": "Orchestra", "status": sched, "role": "Runs queued tasks in their own worktrees"},
     ]
 

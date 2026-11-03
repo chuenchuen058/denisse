@@ -1,0 +1,10 @@
+{
+  "_about": "Candidate local models for scripts/model_bakeoff.py's doc table. Sizes as published by Ollama (ollama.com/library) for the default (Q4) tag's download, written down from the library listing, NOT re-checked or pulled on this machine; treat them as approximate. The first entry is the example in the doc's 'to try one' command.",
+  "candidates": [
+    {"name": "qwen2.5:7b", "size": "4.7 GB", "note": "tool calling; strong on structured output"},
+    {"name": "qwen3:8b", "size": "5.2 GB", "note": "tool calling; has a thinking mode to keep off"},
+    {"name": "mistral:7b", "size": "4.1 GB", "note": "tool calling (v0.3); smaller, older"},
+    {"name": "granite3.3:8b", "size": "4.9 GB", "note": "IBM; tool calling, 128K context"},
+    {"name": "llama3.2:3b", "size": "2.0 GB", "note": "same family, much smaller; a speed floor, not a rival"}
+  ]
+}

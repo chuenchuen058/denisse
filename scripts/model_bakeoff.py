@@ -48,27 +48,24 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-DEFAULT_MODEL = "llama3.1:8b"
+import model_config  # noqa: E402
+
+# The baseline is whatever Denisse is configured to run (config.json, DENISSE_MODEL).
+DEFAULT_MODEL = model_config.model("chat")
 DOC = ROOT / "docs" / "model_bakeoff.md"
 RAW_DIR = ROOT / "eval" / "bakeoff"
 VRAM_BUDGET_GB = 8.0
 
-# Cases whose expectation is about llama3.1:8b specifically, so a candidate
+# Cases whose expectation is about the current default model specifically, so a candidate
 # of another size fails them by design, not by being worse.
 MODEL_SPECIFIC_CASES = {
     "self_parameters": "expects '8 billion' / '8b' in the reply",
 }
 
-# As published by Ollama (ollama.com/library) for the default (Q4) tag's
-# download, written down from the library listing, NOT re-checked or pulled
-# on this machine. Treat the sizes as approximate.
-CANDIDATES = [
-    ("qwen2.5:7b", "4.7 GB", "tool calling; strong on structured output"),
-    ("qwen3:8b", "5.2 GB", "tool calling; has a thinking mode to keep off"),
-    ("mistral:7b", "4.1 GB", "tool calling (v0.3); smaller, older"),
-    ("granite3.3:8b", "4.9 GB", "IBM; tool calling, 128K context"),
-    ("llama3.2:3b", "2.0 GB", "same family, much smaller; a speed floor, not a rival"),
-]
+# Candidates (name, size, note) live in model_bakeoff_candidates.json, with
+# where the sizes came from.
+CANDIDATES = [(c["name"], c["size"], c["note"]) for c in json.loads(
+    (Path(__file__).with_name("model_bakeoff_candidates.json")).read_text(encoding="utf-8"))["candidates"]]
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -319,7 +316,7 @@ def render(summaries: list[dict], stamp: str, raw_rel: str) -> str:
     L += [
         "## Model-specific cases",
         "",
-        "These expect llama3.1:8b by name or size, so a different candidate fails "
+        "These expect the baseline model by name or size, so a different candidate fails "
         "them by design. Discount them when comparing:",
         "",
     ]
@@ -344,8 +341,8 @@ def render(summaries: list[dict], stamp: str, raw_rel: str) -> str:
         "To try one, Chuen runs (this harness never pulls):",
         "",
         "```",
-        "ollama pull qwen2.5:7b",
-        f".venv\\Scripts\\python.exe scripts\\model_bakeoff.py --models {DEFAULT_MODEL},qwen2.5:7b --rounds 3",
+        f"ollama pull {CANDIDATES[0][0]}",
+        f".venv\\Scripts\\python.exe scripts\\model_bakeoff.py --models {DEFAULT_MODEL},{CANDIDATES[0][0]} --rounds 3",
         "```",
         "",
         "Remove a loser with `ollama rm <name>` to keep disk use down. Adopting "
