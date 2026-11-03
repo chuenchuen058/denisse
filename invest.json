@@ -1,0 +1,78 @@
+{
+  "_about": "invest.py's values (AGENTS.md Rule 0). Loaded once at import and checked: a bad value logs one warning naming the key and the default used instead (the defaults are invest_defaults.json, the same values this file ships with; scripts/test_invest_config.py keeps the two equal). DENISSE_INVEST_CONFIG points at another file. Keys starting with _ are notes.",
+  "paths": {
+    "_about": "Relative to the repo. Both are gitignored: this repo is public.",
+    "data_dir": "memory/invest",
+    "fixture_dir": "memory/invest-fixtures"
+  },
+  "provider": {
+    "_about": "Alpha Vantage GLOBAL_QUOTE. Free tier is end of day, so quotes are 'delayed' and a recent one is reused for reuse_hours to spare the daily quota.",
+    "name": "Alpha Vantage GLOBAL_QUOTE",
+    "url": "https://www.alphavantage.co/query",
+    "source_url": "https://www.alphavantage.co/documentation/#latestprice",
+    "key_env": "ALPHAVANTAGE_API_KEY",
+    "key_help": "free key: alphavantage.co/support/#api-key",
+    "request_timeout_s": 15,
+    "reuse_hours": 6
+  },
+  "quotes": {
+    "_about": "stale_days: an end-of-day quote older than this (weekend + a holiday) is stale. latest_utc_offset_hours: the furthest-ahead clock on Earth, used when an exchange's timezone is unknown.",
+    "stale_days": 4,
+    "latest_utc_offset_hours": 14
+  },
+  "alerts": {
+    "_about": "cooldown_hours: the same alert rule stays quiet this long after a delivered alert. delivered_kept: how many delivered alert ids are remembered.",
+    "cooldown_hours": 24,
+    "delivered_kept": 500,
+    "currency_hint": "GBX is pence: 300 GBX = 3.00 GBP",
+    "currency_warning": "pence and pounds differ by 100x",
+    "example_currency": "GBX"
+  },
+  "store": {
+    "_about": "The watchlist lock: tries lock_attempts times, lock_wait_s apart, then says it's busy.",
+    "lock_attempts": 200,
+    "lock_wait_s": 0.025
+  },
+  "chat": {
+    "_about": "Exact watchlist commands, answered with no model call. Each pattern is a case-insensitive regex; {sym} stands for a ticker. A pattern must keep its capture groups (search: query; add/remove: symbol; alert: symbol, above|below, level, currency; cancel: symbol, above|below, level; alerts: none). Anything else (\"should I buy X\", \"what is a watchlist\") goes to the model.",
+    "pending_minutes": 10,
+    "options_shown": 5,
+    "summary_limit": 8,
+    "symbol": "([A-Za-z0-9][A-Za-z0-9.\\-]{0,14})",
+    "patterns": {
+      "search": "^\\s*(?:find|look\\s+up|search(?:\\s+for)?)\\s+(?:the\\s+)?(?:ticker|instrument|stock|share)s?\\s+(?:for\\s+)?(.+?)\\s*[.?!]*$",
+      "add": "^\\s*(?:please\\s+)?(?:add|watch)\\s+{sym}\\s+(?:to|on)\\s+my\\s+watchlist\\s*[.!]*$",
+      "remove": "^\\s*(?:please\\s+)?(?:remove|delete|drop)\\s+{sym}\\s+from\\s+my\\s+watchlist\\s*[.!]*$",
+      "alert": "^\\s*(?:set\\s+an?\\s+alert\\s+(?:for|on)|alert\\s+me\\s+(?:if|when))\\s+{sym}\\s+(?:goes\\s+|is\\s+|gets\\s+)?(above|below)\\s+([0-9][0-9.,]*)\\s*([A-Za-z]{3})?\\s*[.!]*$",
+      "cancel": "^\\s*(?:cancel|remove|delete)\\s+(?:the\\s+|my\\s+)?{sym}\\s+alert\\s+(above|below)\\s+([0-9][0-9.,]*)\\s*[.!]*$",
+      "alerts": "^\\s*(?:list|show)\\s+my\\s+(?:price\\s+)?alerts\\s*[.?!]*$|^\\s*what\\s+alerts\\s+do\\s+i\\s+have\\s*\\??$"
+    }
+  },
+  "brief": {
+    "_about": "move_sizes: a one-day % move below 'below' (absolute) gets that word; anything larger gets move_largest. freshness_words: how each status reads in chat.",
+    "move_sizes": [
+      {"below": 1, "word": "a small"},
+      {"below": 3, "word": "a noticeable"}
+    ],
+    "move_largest": "a large",
+    "freshness_words": {
+      "live": "live",
+      "delayed": "end of day",
+      "cached": "provider failed, last good quote"
+    },
+    "headings": {
+      "observations": "## Observations (from the source named on each line)",
+      "alerts": "## Alerts",
+      "interpretation": "## Interpretation (mine, not a fact and not advice)",
+      "background": "## Background"
+    },
+    "background": "Background, not advice: one company's price can swing a lot day to day (volatility); spreading money across many holdings (diversification) means no single swing decides the outcome; fees compound against you over years; and the longer the time horizon, the more room there is to ride out falls. None of this says what you should buy."
+  },
+  "text_limits": {
+    "_about": "Provider text is data: cut to one short line before it's shown.",
+    "provider_text": 120,
+    "name": 80,
+    "region": 40,
+    "problem_in_chat": 100
+  }
+}

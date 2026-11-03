@@ -25,14 +25,23 @@ FixtureProvider is synthetic test data and every quote it makes says so.
 Everything lives in memory/invest/ (gitignored): this repo is public.
 --fixtures uses memory/invest-fixtures/ instead, never the real watchlist.
 
+Every value -- paths, provider URLs and timeouts, cache and staleness times,
+alert cooldown, lock limits, the chat command patterns, the brief's wording
+and size bands -- is in invest.json beside this file (AGENTS.md Rule 0),
+loaded once at import and checked against invest_defaults.json (the same
+values): a bad value logs one warning and its default is used. Nothing
+here raises over a bad value.
+
     python invest.py search tesco
     python invest.py add TSCO.LON
     python invest.py alert TSCO.LON above 300 GBX
     python invest.py list | remove TSCO.LON
     python invest.py brief            # --fixtures for the synthetic provider
 """
+import copy
 import datetime as dt
 import json
+import logging
 import math
 import os
 import re
@@ -43,12 +52,155 @@ import time
 from contextlib import contextmanager
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, "memory", "invest")
-# --fixtures keeps its own store, so a demo never lands on the real watchlist.
-FIXTURE_DIR = os.path.join(BASE_DIR, "memory", "invest-fixtures")
-STALE_DAYS = 4        # an end-of-day quote older than this (weekend + a holiday) is stale
-COOLDOWN_HOURS = 24   # the same alert rule stays quiet this long after a delivered alert
-LATEST_UTC_OFFSET = 14  # UTC+14 is the furthest-ahead clock on Earth
+log = logging.getLogger("denisse.invest")
+
+# -- config (invest.json) ----------------------------------------------------
+# invest_defaults.json holds the documented defaults -- the values invest.json
+# ships with (scripts/test_invest_config.py keeps the two equal). They are
+# used only for a key that is missing or invalid in invest.json.
+DEFAULTS_PATH = os.path.splitext(os.path.abspath(__file__))[0] + "_defaults.json"
+
+
+def _read_defaults():
+    try:
+        with open(DEFAULTS_PATH, encoding="utf-8-sig") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+        log.error("invest config: %s is not a JSON object; invest.json is used unchecked", DEFAULTS_PATH)
+    except (OSError, ValueError) as e:
+        log.error("invest config: %s unreadable (%s); invest.json is used unchecked", DEFAULTS_PATH, e)
+    return {}
+
+
+DEFAULTS = {k: v for k, v in _read_defaults().items() if not k.startswith("_")}
+MAY_BE_ZERO = {"reuse_hours"}  # every other number must be above 0
+SYM_SLOT = "{sym}"             # where chat.symbol goes in a chat pattern
+
+
+def config_path():
+    return os.environ.get("DENISSE_INVEST_CONFIG") or os.path.splitext(os.path.abspath(__file__))[0] + ".json"
+
+
+def _is_number(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def _groups(pattern, sym):
+    """(capture-group count, None) for a chat pattern, or (None, why it can't be used)."""
+    try:
+        return re.compile(pattern.replace(SYM_SLOT, sym), re.I).groups, None
+    except (re.error, TypeError, AttributeError) as e:
+        return None, f"is not a valid regex ({type(e).__name__})"
+
+
+def _check(key, value, default):
+    """(value, None) if `value` has the shape of `default`, else (None, why)."""
+    if key == "move_sizes":
+        ok = (isinstance(value, list) and all(
+            isinstance(b, dict) and _is_number(b.get("below")) and b["below"] > 0 and isinstance(b.get("word"), str)
+            for b in value) and all(a["below"] < b["below"] for a, b in zip(value, value[1:])))
+        return (value, None) if ok else (None, "must be a list of {below: number > 0, word: text}, smallest first")
+    if isinstance(default, (int, float)) and not isinstance(default, bool):
+        if not _is_number(value):
+            return None, "must be a number"
+        if isinstance(default, int) and not float(value).is_integer():
+            return None, "must be a whole number"
+        if value < 0 or (value == 0 and key not in MAY_BE_ZERO):
+            return None, "must not be negative" if key in MAY_BE_ZERO else "must be above 0"
+        return (int(value) if isinstance(default, int) else float(value)), None
+    if isinstance(default, str):
+        return (value, None) if isinstance(value, str) and value.strip() else (None, "must be non-empty text")
+    return value, None
+
+
+def _merge(defaults, data, where):
+    """`defaults` overlaid with every valid value in `data`; one warning per bad one."""
+    out = copy.deepcopy(defaults)
+    if not isinstance(data, dict):
+        log.warning("invest config: %s is not an object; using its defaults", where or "the file")
+        return out
+    for key, value in data.items():
+        name = f"{where}.{key}" if where else key
+        if key.startswith("_"):
+            continue
+        if key not in defaults:
+            log.warning("invest config: unknown key %s ignored", name)
+        elif key == "patterns":
+            out[key] = value  # checked in _check_patterns, once chat.symbol is known
+        elif isinstance(defaults[key], dict):
+            out[key] = _merge(defaults[key], value, name)
+        else:
+            good, why = _check(key, value, defaults[key])
+            if why:
+                log.warning("invest config: %s %s; using the default %r", name, why, defaults[key])
+            else:
+                out[key] = good
+    return out
+
+
+def _check_patterns(chat):
+    """Every chat pattern compiles and keeps the default's capture groups."""
+    n, why = _groups(chat["symbol"], "")
+    if why or n != 1:
+        log.warning("invest config: chat.symbol %s; using the default",
+                    why or "must have exactly one capture group")
+        chat["symbol"] = DEFAULTS["chat"]["symbol"]
+    sym, given = chat["symbol"], chat["patterns"]
+    pats = copy.deepcopy(DEFAULTS["chat"]["patterns"])
+    if not isinstance(given, dict):
+        log.warning("invest config: chat.patterns is not an object; using the defaults")
+        given = {}
+    for kind, pattern in given.items():
+        if kind.startswith("_"):
+            continue
+        if kind not in pats:
+            log.warning("invest config: unknown chat command chat.patterns.%s ignored", kind)
+            continue
+        want = _groups(pats[kind], sym)[0]
+        got, why = _groups(pattern, sym) if isinstance(pattern, str) else (None, "must be text")
+        if why or got != want:
+            log.warning("invest config: chat.patterns.%s %s; using the default", kind,
+                        why or f"must have {want} capture group(s), not {got}")
+        else:
+            pats[kind] = pattern
+    chat["patterns"] = pats
+
+
+def load_config(path=None):
+    """invest.json (or `path`) checked and merged over DEFAULTS. Never raises."""
+    path = path or config_path()
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        log.warning("invest config: %s unreadable (%s); using every default", path, type(e).__name__)
+        data = {}
+    if not DEFAULTS:  # no reference to check against (logged at import): take the file as written
+        return data
+    cfg = _merge(DEFAULTS, data, "")
+    _check_patterns(cfg["chat"])
+    return cfg
+
+
+def configure(path=None):
+    """Load invest.json (or `path`) and set the module's values from it.
+    Called once at import; tests call it again with another file."""
+    global CONFIG, DATA_DIR, FIXTURE_DIR, STALE_DAYS, COOLDOWN_HOURS, LATEST_UTC_OFFSET, PENDING_MINUTES, _CHAT
+    CONFIG = load_config(path)
+    # Relative to the repo; an absolute path is used as it is.
+    DATA_DIR = os.path.join(BASE_DIR, os.path.normpath(CONFIG["paths"]["data_dir"]))
+    # --fixtures keeps its own store, so a demo never lands on the real watchlist.
+    FIXTURE_DIR = os.path.join(BASE_DIR, os.path.normpath(CONFIG["paths"]["fixture_dir"]))
+    STALE_DAYS = CONFIG["quotes"]["stale_days"]
+    COOLDOWN_HOURS = CONFIG["alerts"]["cooldown_hours"]
+    LATEST_UTC_OFFSET = CONFIG["quotes"]["latest_utc_offset_hours"]
+    PENDING_MINUTES = CONFIG["chat"]["pending_minutes"]
+    sym = CONFIG["chat"]["symbol"]
+    _CHAT = [(kind, re.compile(p.replace(SYM_SLOT, sym), re.I)) for kind, p in CONFIG["chat"]["patterns"].items()]
+    AlphaVantage.configure(CONFIG["provider"])
+    return CONFIG
+
 
 FIXTURE_LABEL = "SYNTHETIC FIXTURE -- not market data"
 
@@ -163,7 +315,7 @@ def _locked():
     """One read-modify-write at a time, across the CLI and the tray."""
     os.makedirs(DATA_DIR, exist_ok=True)
     with _thread_lock, open(_path(".lock"), "a+b") as lock:
-        for _ in range(200):
+        for _ in range(CONFIG["store"]["lock_attempts"]):
             try:
                 lock.seek(0)
                 if os.name == "nt":
@@ -174,7 +326,7 @@ def _locked():
                     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
             except OSError:
-                time.sleep(.025)
+                time.sleep(CONFIG["store"]["lock_wait_s"])
         else:
             raise StoreError("the watchlist is busy in another window; try again")
         try:
@@ -210,9 +362,9 @@ def _price(value):
     return float(value) if math.isfinite(value) and value > 0 else None
 
 
-def _clean(text, n=120):
+def _clean(text, n=None):
     """Provider text is data: one line, short, never instructions."""
-    return " ".join(str(text).split())[:n]
+    return " ".join(str(text).split())[:n or CONFIG["text_limits"]["provider_text"]]
 
 
 def _offset_hours(tz):
@@ -231,24 +383,28 @@ class ProviderError(Exception):
 
 
 class AlphaVantage:
-    name = "Alpha Vantage GLOBAL_QUOTE"
-    url = "https://www.alphavantage.co/query"
-    source_url = "https://www.alphavantage.co/documentation/#latestprice"
+    # name, url, source_url, reuse_hours (end-of-day data: don't spend the
+    # daily quota refetching it), key_env, key_help and the request timeout
+    # come from invest.json "provider", set by configure().
     freshness = "delayed"  # free tier: end of day
-    reuse_hours = 6        # end-of-day data: don't spend the daily quota refetching it
+
+    @classmethod
+    def configure(cls, p):
+        cls.name, cls.url, cls.source_url, cls.reuse_hours = p["name"], p["url"], p["source_url"], p["reuse_hours"]
+        cls.key_env, cls.key_help, cls.timeout = p["key_env"], p["key_help"], p["request_timeout_s"]
 
     def __init__(self, key=None, get=None):
-        self.key = key if key is not None else os.environ.get("ALPHAVANTAGE_API_KEY", "")
+        self.key = key if key is not None else os.environ.get(self.key_env, "")
         self._get = get
 
     def _call(self, params):
         if not self.key:
-            raise ProviderError("no ALPHAVANTAGE_API_KEY configured -- add ALPHAVANTAGE_API_KEY=<your key> "
-                                "to .env (free key: alphavantage.co/support/#api-key)")
+            raise ProviderError(f"no {self.key_env} configured -- add {self.key_env}=<your key> "
+                                f"to .env ({self.key_help})")
         get = self._get
         if get is None:
             import requests
-            get = lambda u, p: requests.get(u, params=p, timeout=15).json()
+            get = lambda u, p: requests.get(u, params=p, timeout=self.timeout).json()
         try:
             data = get(self.url, {**params, "apikey": self.key})
         except Exception as e:  # its text can carry the URL, key included
@@ -262,8 +418,9 @@ class AlphaVantage:
 
     def search(self, keywords):
         data = self._call({"function": "SYMBOL_SEARCH", "keywords": keywords})
-        return [{"symbol": m.get("1. symbol"), "name": _clean(m.get("2. name") or "", 80),
-                 "type": m.get("3. type"), "region": _clean(m.get("4. region") or "", 40),
+        lim = CONFIG["text_limits"]
+        return [{"symbol": m.get("1. symbol"), "name": _clean(m.get("2. name") or "", lim["name"]),
+                 "type": m.get("3. type"), "region": _clean(m.get("4. region") or "", lim["region"]),
                  "currency": m.get("8. currency"), "timezone": m.get("7. timezone")}
                 for m in data.get("bestMatches") or [] if m.get("1. symbol")]
 
@@ -309,6 +466,9 @@ def provider(fixtures=False):
     return AlphaVantage()
 
 
+configure()  # once, at import (after AlphaVantage, which it sets up)
+
+
 # -- watchlist --------------------------------------------------------------
 
 def watchlist():
@@ -339,7 +499,8 @@ def add(query, prov=None):
     if len(exact) != 1:
         if not matches:
             return f"The provider has no instrument matching {query}. Nothing added."
-        options = "; ".join(f"{m['symbol']} ({m['name']}, {m['region']}, {m['currency']})" for m in matches[:5])
+        options = "; ".join(f"{m['symbol']} ({m['name']}, {m['region']}, {m['currency']})"
+                            for m in matches[:CONFIG["chat"]["options_shown"]])
         return (f"{query} isn't one exact instrument -- it could be: {options}. "
                 "Add the exact symbol you mean. Nothing added.")
     m = exact[0]
@@ -393,7 +554,7 @@ def set_alert(symbol, direction, level, currency):
                 return f"{symbol} isn't on your watchlist; add it first."
             if (currency or "").upper() != inst["currency"].upper():
                 return (f"{inst['symbol']} is priced in {inst['currency']}, not {currency}. Give the level in "
-                        f"{inst['currency']} (GBX is pence: 300 GBX = 3.00 GBP).")
+                        f"{inst['currency']} ({CONFIG['alerts']['currency_hint']}).")
             rule = {"direction": direction, "level": lvl, "currency": inst["currency"]}
             if rule not in inst["alerts"]:
                 inst["alerts"].append(rule)
@@ -536,7 +697,7 @@ def _acknowledge(events, now, brief_path=""):
             state[e["id"].rsplit("|", 1)[0]] = {"market_date": e["id"].rsplit("|", 1)[1],
                                                 "at": now.isoformat(timespec="seconds"),
                                                 "brief": os.path.basename(brief_path)}
-        state["delivered"] = delivered[-500:]
+        state["delivered"] = delivered[-CONFIG["alerts"]["delivered_kept"]:]
         _save("alert_state.json", state)
 
 
@@ -579,10 +740,11 @@ def _alert_line(e):
             f"your {e['level']:g} {e['currency']} level. [event {e['id']}]")
 
 
-_LEARN = ("Background, not advice: one company's price can swing a lot day to day (volatility); "
-          "spreading money across many holdings (diversification) means no single swing decides "
-          "the outcome; fees compound against you over years; and the longer the time horizon, "
-          "the more room there is to ride out falls. None of this says what you should buy.")
+def _move_size(cp):
+    """The word for a one-day move of cp percent (invest.json brief.move_sizes)."""
+    b = CONFIG["brief"]
+    return next((s["word"] for s in b["move_sizes"] if abs(cp) < s["below"]), b["move_largest"])
+
 
 last_observations = []  # the structured observations behind the last brief
 
@@ -613,7 +775,7 @@ def brief(prov=None, now=None, out_dir=None):
             events += evaluate(inst, q, now)
             cp = q.get("change_percent")
             if q["status"] in ("live", "delayed") and not q.get("stale") and cp is not None:
-                size = "a small" if abs(cp) < 1 else "a noticeable" if abs(cp) < 3 else "a large"
+                size = _move_size(cp)
                 notes.append(f"- {inst['symbol']} moved {cp:+.2f}% on its last trading day -- {size} one-day "
                              "move for a single share. The size alone doesn't say why it moved, and one day "
                              "says little about the long run.")
@@ -631,13 +793,14 @@ def brief(prov=None, now=None, out_dir=None):
     last_observations = obs
     fixture = any(FIXTURE_LABEL in o["source"] for o in obs)
     stamp = now.strftime("%Y-%m-%d %H:%M UTC")
+    head = CONFIG["brief"]["headings"]
     text = "\n".join([
         f"# Watchlist brief -- {stamp}", "",
         *([f"> **{FIXTURE_LABEL}.** Every number below is made up for testing.", ""] if fixture else []),
-        "## Observations (from the source named on each line)", "", *[_obs_line(o, o["name"]) for o in obs], "",
-        "## Alerts", "", *([_alert_line(e) for e in events] or ["- None fired."]), "",
-        "## Interpretation (mine, not a fact and not advice)", "", *(notes or ["- Nothing to interpret."]), "",
-        "## Background", "", _LEARN, "",
+        head["observations"], "", *[_obs_line(o, o["name"]) for o in obs], "",
+        head["alerts"], "", *([_alert_line(e) for e in events] or ["- None fired."]), "",
+        head["interpretation"], "", *(notes or ["- Nothing to interpret."]), "",
+        head["background"], "", CONFIG["brief"]["background"], "",
     ])
     try:
         os.makedirs(out_dir, exist_ok=True)
@@ -665,20 +828,18 @@ def brief(prov=None, now=None, out_dir=None):
             + (" These are synthetic fixtures, not market data." if fixture else ""))
 
 
-_FRESHNESS = {"live": "live", "delayed": "end of day", "cached": "provider failed, last good quote"}
-
-
-def _chat_summary(obs, events, fixture, limit=8):
+def _chat_summary(obs, events, fixture, limit=None):
     """The brief in chat, from the same observations the saved report was
     verified against. Bounded, and it never gives a reason for a move."""
+    limit = limit or CONFIG["chat"]["summary_limit"]
     lines = ["Watchlist brief" + (f" ({FIXTURE_LABEL})" if fixture else "") + ":"]
     for o in obs[:limit]:
         if o.get("price") is None:
-            lines.append(f"- {o['symbol']}: no usable price ({_clean(o.get('problem') or o['status'], 100)}).")
+            lines.append(f"- {o['symbol']}: no usable price ({_clean(o.get('problem') or o['status'], CONFIG['text_limits']['problem_in_chat'])}).")
             continue
         when = _when(o["retrieved"])
         when = f"{when.astimezone(dt.timezone.utc):%Y-%m-%d %H:%M} UTC" if when else o["retrieved"]
-        fresh = ("stale, " if o.get("stale") else "") + _FRESHNESS.get(o["status"], o["status"])
+        fresh = ("stale, " if o.get("stale") else "") + CONFIG["brief"]["freshness_words"].get(o["status"], o["status"])
         lines.append(f"- {o['symbol']}: {_fmt(o['price'], o['currency'])}, market date {o['market_date']} "
                      f"({fresh}; retrieved {when}).")
     if len(obs) > limit:
@@ -705,9 +866,9 @@ def verify(path, obs, events=()):
     problems = [f"{o['symbol']}: the saved line doesn't match what was fetched"
                 for o in obs if _obs_line(o, o["name"]) not in saved]
     problems += [f"alert {e['id']} is missing or changed" for e in events if _alert_line(e) not in saved]
-    heads = [line for line in saved if line.startswith("## ")]
-    if heads[:2] != ["## Observations (from the source named on each line)", "## Alerts"] \
-            or "## Interpretation (mine, not a fact and not advice)" not in heads:
+    head = CONFIG["brief"]["headings"]
+    heads = [line for line in saved if line in head.values()]
+    if heads[:2] != [head["observations"], head["alerts"]] or head["interpretation"] not in heads:
         problems.append("observations and interpretation are not separated")
     return problems
 
@@ -733,18 +894,10 @@ def cancel_alert(symbol, direction, level):
 # -- chat: a few exact commands, no model call -------------------------------
 # Watching only. "what is a watchlist" and "should i buy X" are not commands
 # and go to the model. An ambiguous add is held as a pending choice tied to
-# that request; only a listed symbol or its number answers it.
-
-_SYM = r"([A-Za-z0-9][A-Za-z0-9.\-]{0,14})"
-_CHAT = [
-    ("search", re.compile(rf"^\s*(?:find|look\s+up|search(?:\s+for)?)\s+(?:the\s+)?(?:ticker|instrument|stock|share)s?\s+(?:for\s+)?(.+?)\s*[.?!]*$", re.I)),
-    ("add", re.compile(rf"^\s*(?:please\s+)?(?:add|watch)\s+{_SYM}\s+(?:to|on)\s+my\s+watchlist\s*[.!]*$", re.I)),
-    ("remove", re.compile(rf"^\s*(?:please\s+)?(?:remove|delete|drop)\s+{_SYM}\s+from\s+my\s+watchlist\s*[.!]*$", re.I)),
-    ("alert", re.compile(rf"^\s*(?:set\s+an?\s+alert\s+(?:for|on)|alert\s+me\s+(?:if|when))\s+{_SYM}\s+(?:goes\s+|is\s+|gets\s+)?(above|below)\s+([0-9][0-9.,]*)\s*([A-Za-z]{{3}})?\s*[.!]*$", re.I)),
-    ("cancel", re.compile(rf"^\s*(?:cancel|remove|delete)\s+(?:the\s+|my\s+)?{_SYM}\s+alert\s+(above|below)\s+([0-9][0-9.,]*)\s*[.!]*$", re.I)),
-    ("alerts", re.compile(r"^\s*(?:list|show)\s+my\s+(?:price\s+)?alerts\s*[.?!]*$|^\s*what\s+alerts\s+do\s+i\s+have\s*\??$", re.I)),
-]
-PENDING_MINUTES = 10
+# that request; only a listed symbol or its number answers it. The command
+# patterns (_CHAT) and PENDING_MINUTES come from invest.json "chat", set by
+# configure(): they are the grammar of a few exact commands that write to
+# the watchlist, not a guess at meaning -- anything else is the model's.
 
 
 def _pending_choice(text, now, last_said=None):
@@ -797,12 +950,13 @@ def chat(text, prov=None, now=None, last_said=None):
             except ProviderError as e:
                 return f"I couldn't search the data provider: {e}."
             return ("No instrument matches that." if not found else "Matches: " + "; ".join(
-                f"{f['symbol']} ({f['name']}, {f['region']}, {f['currency']})" for f in found[:5]) + ".")
+                f"{f['symbol']} ({f['name']}, {f['region']}, {f['currency']})"
+                for f in found[:CONFIG["chat"]["options_shown"]]) + ".")
         if kind == "add":
             reply = add(m.group(1), prov)
             if "isn't one exact instrument" in reply:
                 try:
-                    options = [f["symbol"].upper() for f in prov.search(m.group(1))][:5]
+                    options = [f["symbol"].upper() for f in prov.search(m.group(1))][:CONFIG["chat"]["options_shown"]]
                 except ProviderError:
                     return reply
                 question = (reply.replace(" Add the exact symbol you mean. Nothing added.", "") + " Which one? Say its "
@@ -822,7 +976,8 @@ def chat(text, prov=None, now=None, last_said=None):
             sym, direction, level, cur = m.group(1), m.group(2).lower(), m.group(3).replace(",", ""), m.group(4)
             if not cur:
                 return (f"Which currency is {level} in? Say it with the currency, e.g. 'alert me if {sym} goes "
-                        f"{direction} {level} GBX' -- pence and pounds differ by 100x, so I won't guess.")
+                        f"{direction} {level} {CONFIG['alerts']['example_currency']}' -- "
+                        f"{CONFIG['alerts']['currency_warning']}, so I won't guess.")
             return set_alert(sym, direction, level, cur.upper())
         if kind == "cancel":
             return cancel_alert(m.group(1), m.group(2).lower(), m.group(3).replace(",", ""))
