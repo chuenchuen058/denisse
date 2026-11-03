@@ -29,10 +29,9 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PENDING_FILE = os.path.join(BASE_DIR, "memory", "pending_plan.json")
 PENDING_MINUTES = 30  # a "yes" an hour later is not about this plan
 
-try:
-    from vault_search import VAULT
-except Exception:  # pragma: no cover -- vault_search always has it today
-    VAULT = r"C:\Users\Xichu\OneDrive - King's College London\Denisse"
+from settings import vault as _vault
+
+VAULT = _vault()
 
 _DUE = re.compile(
     r"\bdue\s+(?:\*\*)?(?:(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\s+)?"

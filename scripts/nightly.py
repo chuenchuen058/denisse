@@ -48,7 +48,10 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="repla
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
-VAULT = r"C:\Users\Xichu\OneDrive - King's College London\Denisse"
+sys.path.insert(0, REPO)
+import settings  # noqa: E402
+
+VAULT = settings.vault()
 MODULES = os.path.join(VAULT, "Atlas", "Academic", "SEM 1 Modules")
 LOG = os.path.join(REPO, "logs", "nightly.log")
 DRY = "--dry" in sys.argv

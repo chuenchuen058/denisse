@@ -17,13 +17,15 @@ import json
 import os
 import re
 
+import settings
+
 # The vault is Claude's memory bank, not Denisse's -- Denisse is one section
 # inside it (restructured 2026-09-04). The folder is still named "Denisse"
 # because it's the registered Obsidian vault path; only the layout moved.
 # DENISSE_VAULT overrides it, as in vault_search/instincts: tests point it at
 # a temp folder (before 2026-11-02 this ignored it, and test runs overwrote
 # the real Denisse/Brain/conversation.json and read the real Tasks.md).
-VAULT_DIR = os.environ.get("DENISSE_VAULT", r"C:\Users\Xichu\OneDrive - King's College London\Denisse")
+VAULT_DIR = settings.vault()  # DENISSE_VAULT, config.json, or Obsidian's own registry
 DENISSE_DIR = os.path.join(VAULT_DIR, "Denisse")
 BRAIN_DIR = os.path.join(DENISSE_DIR, "Brain")
 CLAUDE_MEMORY_DIR = os.path.join(VAULT_DIR, "Dev", "Memory")

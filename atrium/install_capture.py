@@ -1,15 +1,18 @@
 # Adds the Atrium capture hook to Claude Code's user settings (~/.claude/settings.json).
 # Backs the file up, keeps every existing key, and only adds three hook entries
 # (Stop, PreCompact, SessionEnd) if they aren't there yet. Safe to run twice.
-import json, os, shutil, time
+import json, os, shutil, sys, time
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import settings  # noqa: E402  (the repo root, found from this file)
 s = Path.home() / ".claude" / "settings.json"
 data = json.loads(s.read_text(encoding="utf-8")) if s.exists() else {}
 if s.exists():
     shutil.copyfile(s, str(s) + ".bak-" + time.strftime("%Y%m%d-%H%M%S"))
 # Forward slashes and no `cd`: Claude Code on Windows may run hooks through Git Bash,
 # where `cd /d` fails silently (found 2 Nov 2026).
-cmd = '"C:/Users/Xichu/GitHub/denisse/.venv/Scripts/python.exe" "C:/Users/Xichu/GitHub/denisse/atrium/hook.py"'
+repo = Path(settings.repo()).as_posix()
+cmd = f'"{repo}/.venv/Scripts/python.exe" "{repo}/atrium/hook.py"'
 hooks = data.setdefault("hooks", {})
 for ev in ("Stop", "PreCompact", "SessionEnd"):
     lst = hooks.setdefault(ev, [])

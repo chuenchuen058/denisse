@@ -1,0 +1,12 @@
+{
+  "_about": "Every key settings.py reads under \"settings\", with example values. config.json holds the real ones; copy a key there (or point DENISSE_CONFIG at your own copy) to pin a value instead of letting it be discovered. An environment variable still wins over any of these.",
+  "settings": {
+    "vault": "~/OneDrive - Example University/Denisse",
+    "home": "C:/Users/example",
+    "repo": "~/GitHub/denisse",
+    "user_name": "Alex Example",
+    "user_about": "a second-year engineering student at Example University",
+    "read_dirs": ["{vault}", "~/OneDrive/Documents", "~/GitHub"],
+    "learning_note": "Atlas/Concepts/Learning/How-I-Learn.md"
+  }
+}

@@ -22,11 +22,9 @@ import re
 import datetime
 
 import brain_rules
+import settings
 
-VAULT = os.environ.get(
-    "DENISSE_VAULT",
-    r"C:\Users\Xichu\OneDrive - King's College London\Denisse",
-)
+VAULT = settings.vault()  # DENISSE_VAULT, config.json, or Obsidian's own registry
 
 # Machine-written noise. Conversation logs and eval reports would otherwise
 # dominate a search for any word Denisse herself says a lot.
