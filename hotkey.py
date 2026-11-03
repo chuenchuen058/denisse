@@ -121,9 +121,17 @@ class GlobalHotkey:
 
     def __init__(self, callback: Callable[[], None], spec: Optional[str],
                  schedule: Callable[[Callable[[], None]], None],
-                 user32=None, kernel32=None, log: Callable[[str], None] = _log):
+                 user32=None, kernel32=None, log: Callable[[str], None] = _log,
+                 env_var: str = ENV_VAR, name: str = "denisse-hotkey",
+                 hotkey_id: Optional[int] = None):
+        # env_var/name/hotkey_id let a second hotkey (explain_hotkey.py)
+        # reuse this class with its own setting name in the log lines.
         self.callback = callback
         self.spec = spec
+        self.env_var = env_var
+        self.name = name
+        if hotkey_id is not None:
+            self.HOTKEY_ID = hotkey_id
         self.schedule = schedule
         self._user32 = user32
         self._kernel32 = kernel32
@@ -149,14 +157,14 @@ class GlobalHotkey:
         try:
             parsed = parse_hotkey(self.spec)
         except ValueError as e:
-            self._log(f"{e}; global hotkey disabled (set {ENV_VAR}, e.g. ctrl+alt+space)")
+            self._log(f"{e}; global hotkey disabled (set {self.env_var}, e.g. ctrl+alt+space)")
             return False
         if parsed is None:
             return False
         if self._user32 is None and sys.platform != "win32":
             return False
         self._thread = threading.Thread(target=self._run, args=parsed,
-                                        name="denisse-hotkey", daemon=True)
+                                        name=self.name, daemon=True)
         self._thread.start()
         self._ready.wait(timeout)
         return self.registered

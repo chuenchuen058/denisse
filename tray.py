@@ -64,6 +64,7 @@ import wake_word
 import speech_control
 import voice_pipeline
 import hotkey
+import explain_hotkey
 from floating_orb import FloatingOrb
 from orb_controls import OrbControls
 from reminder_card import TYPING_MS, ReminderCard, ThinkingBubble, _place, _work_area
@@ -1036,6 +1037,8 @@ def _quit(icon, item):
     _stop_news_briefing()
     if _global_hotkey is not None:
         _global_hotkey.stop()
+    if _explain_hotkey is not None:
+        _explain_hotkey.stop()
     icon.stop()
     root.after(0, root.quit)
 
@@ -1758,6 +1761,32 @@ def _on_global_hotkey():
     root.after(50, _focus_input)  # after _open_chat's own root.after(0, ...)
 
 
+_explain_hotkey = None  # explain_hotkey's GlobalHotkey once registered
+
+
+def _on_explain_hotkey(req):
+    """DENISSE_EXPLAIN_HOTKEY pressed. The selection was already read on
+    the hotkey thread (explain_hotkey.grab) while the front app still had
+    the focus; now open the chat and send "Explain this: ..." -- or show
+    the one-line privacy note and send nothing."""
+    _open_chat()
+
+    def _deliver():
+        popup = _chat_popup
+        if popup is None:
+            return
+        try:
+            popup.focus()
+            if req.note:
+                popup._add_system(req.note)
+            elif req.message:
+                explain_hotkey.send_when_ready(lambda: _chat_popup, req.message, root.after)
+        except tk.TclError:
+            pass
+
+    root.after(50, _deliver)  # after _open_chat's own root.after(0, ...)
+
+
 def _toggle_pet_motion(icon=None, item=None):
     def toggle():
         if _floating_orb is not None:
@@ -1783,6 +1812,14 @@ def main():
     except Exception:
         _global_hotkey = None
     hotkey_label = hotkey.describe() if _global_hotkey is not None else ""
+    # "Explain this" key (DENISSE_EXPLAIN_HOTKEY, default Ctrl+Alt+E): reads
+    # the selection on its own thread, then opens and sends on Tk.
+    global _explain_hotkey
+    try:
+        _explain_hotkey = explain_hotkey.start_from_env(
+            _on_explain_hotkey, lambda fn: root.after(0, fn))
+    except Exception:
+        _explain_hotkey = None
 
     menu = pystray.Menu(
         pystray.MenuItem(f"Talk to Denisse ({hotkey_label})" if hotkey_label else "Talk to Denisse",

@@ -26,6 +26,19 @@ If another app already owns the combination, the tray logs one line and
 starts without it. The tray tooltip and the **Talk to Denisse** menu item
 show the active hotkey.
 
+### Explain this
+
+Select text in any app and press **Ctrl+Alt+E**: the chat opens and sends
+"Explain this:" with the selection (cut to the same 4000 characters
+`look_at_this` uses). With nothing selected it uses the clipboard text;
+with neither it just opens the chat. The selection is read before the chat
+takes the focus, and the clipboard is put back afterwards. Password
+managers, sign-in pages, banks and credential-looking text are never read:
+the chat opens with a one-line note and nothing is sent. Choose another
+combination with `DENISSE_EXPLAIN_HOTKEY`, or set it to `off`. It must
+differ from `DENISSE_HOTKEY`; if it doesn't, it is skipped with a log line.
+`DENISSE_DESKTOP_CONTEXT=0` makes it open the chat with a note instead.
+
 ## Stop speech
 
 - Click **Stop voice** in the chat header or reply bubble.
