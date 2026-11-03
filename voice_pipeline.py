@@ -17,6 +17,9 @@ What lives here:
 - BargeInDetector: the same energy gate, used while Denisse is speaking.
 
 Measured numbers and the reasoning behind the defaults: docs/voice_latency.md.
+The values themselves (thresholds, rates, timeouts, abbreviations) live in
+voice.json "pipeline" (AGENTS.md Rule 0); the DENISSE_* environment variables
+below still override them.
 """
 from __future__ import annotations
 
@@ -28,9 +31,12 @@ import threading
 import time
 from typing import Callable, Iterable
 
+import voice_config
+
+_CFG = voice_config.section("pipeline")
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 LATENCY_LOG = os.environ.get("DENISSE_VOICE_LATENCY_LOG",
-                             os.path.join(_ROOT, "logs", "voice_latency.jsonl"))
+                             os.path.join(_ROOT, os.path.normpath(_CFG["latency_log"])))
 
 # The order a turn passes through. "speech_last_voice" is the last chunk that
 # was loud -- roughly when he actually stopped talking -- and is what every
@@ -151,14 +157,9 @@ def breakdown(rows: list[dict], source: str | None = None) -> dict[str, dict]:
 # -- sentence splitting -------------------------------------------------------
 
 # Words that end in a full stop without ending the sentence.
-_ABBREV = {
-    "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "vs", "etc", "eg", "ie",
-    "e.g", "i.e", "a.m", "p.m", "am", "pm", "no", "fig", "approx", "dept", "est",
-    "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
-    "mon", "tue", "wed", "thu", "fri", "sat", "sun", "u.s", "u.k",
-}
+_ABBREV = {w.lower().strip(".") for w in _CFG["abbreviations"]}
 _END = re.compile(r"[.!?…]+[\"')\]]*")
-MAX_SENTENCE_CHARS = 300
+MAX_SENTENCE_CHARS = _CFG["max_sentence_chars"]
 
 
 class SentenceSplitter:
@@ -252,12 +253,13 @@ def split_sentences(text: str) -> list[str]:
 
 # -- endpointing (when has he stopped talking?) -------------------------------
 
-# 0.6, down from 0.9: same WER on the eval set at 0.4-0.9, 0.3 cuts words
-# off; the longest synthetic pause was 0.38 s and real pauses run longer,
-# so 0.6 keeps a margin. docs/voice_latency.md.
-END_SILENCE_S = _env_float("DENISSE_END_SILENCE_S", 0.6)
-MIN_SPEECH_RMS = _env_float("DENISSE_MIN_SPEECH_RMS", 300)
-CALIBRATE_S = 0.4
+# Why 0.6 s: voice.json pipeline._why_endpoint and docs/voice_latency.md.
+END_SILENCE_S = _env_float("DENISSE_END_SILENCE_S", _CFG["end_silence_s"])
+MIN_SPEECH_RMS = _env_float("DENISSE_MIN_SPEECH_RMS", _CFG["min_speech_rms"])
+CALIBRATE_S = _CFG["calibrate_s"]
+NOISE_GATE_FACTOR = _CFG["noise_gate_factor"]
+LISTEN_TIMEOUT_S = _CFG["listen_timeout_s"]
+PHRASE_TIME_LIMIT_S = _CFG["phrase_time_limit_s"]
 
 
 class Endpointer:
@@ -267,13 +269,15 @@ class Endpointer:
     "timeout" (no speech at all)."""
 
     def __init__(self, chunk_s: float, end_silence_s: float | None = None,
-                 min_rms: float | None = None, timeout: float = 8.0,
-                 phrase_time_limit: float = 15.0, calibrate_s: float = CALIBRATE_S):
+                 min_rms: float | None = None, timeout: float = LISTEN_TIMEOUT_S,
+                 phrase_time_limit: float = PHRASE_TIME_LIMIT_S, calibrate_s: float = CALIBRATE_S,
+                 noise_factor: float = NOISE_GATE_FACTOR):
         self.chunk_s = chunk_s
         self.end_silence_s = END_SILENCE_S if end_silence_s is None else end_silence_s
         self.min_rms = MIN_SPEECH_RMS if min_rms is None else min_rms
         self.timeout = timeout
         self.phrase_time_limit = phrase_time_limit
+        self.noise_factor = noise_factor
         self.n_cal = max(1, int(calibrate_s / chunk_s))
         self.noise: list[float] = []
         self.started_at = None
@@ -284,7 +288,7 @@ class Endpointer:
     @property
     def gate(self) -> float:
         floor = sum(self.noise) / len(self.noise) if self.noise else 0.0
-        return max(self.min_rms, 3 * floor)
+        return max(self.min_rms, self.noise_factor * floor)
 
     def calibrating(self) -> bool:
         return len(self.noise) < self.n_cal
@@ -317,9 +321,13 @@ class Endpointer:
 
 # -- barge-in -----------------------------------------------------------------
 
-BARGE_IN = os.environ.get("DENISSE_BARGE_IN", "0").lower() in ("1", "true", "yes", "on")
-BARGE_IN_MIN_S = _env_float("DENISSE_BARGE_IN_MIN_S", 0.3)
-BARGE_IN_FACTOR = _env_float("DENISSE_BARGE_IN_FACTOR", 4.0)
+_barge_env = os.environ.get("DENISSE_BARGE_IN", "").strip().lower()
+BARGE_IN = (_barge_env in ("1", "true", "yes", "on")) if _barge_env else _CFG["barge_in"]
+BARGE_IN_MIN_S = _env_float("DENISSE_BARGE_IN_MIN_S", _CFG["barge_in_min_s"])
+BARGE_IN_FACTOR = _env_float("DENISSE_BARGE_IN_FACTOR", _CFG["barge_in_factor"])
+BARGE_IN_CALIBRATE_S = _CFG["barge_in_calibrate_s"]
+MIC_CHUNK_FRAMES = _CFG["mic_chunk_frames"]
+MIC_BASE_RATE = _CFG["mic_base_rate"]
 
 
 class BargeInDetector:
@@ -332,7 +340,7 @@ class BargeInDetector:
 
     def __init__(self, chunk_s: float, min_loud_s: float = BARGE_IN_MIN_S,
                  factor: float = BARGE_IN_FACTOR, min_rms: float | None = None,
-                 calibrate_s: float = 0.3):
+                 calibrate_s: float = BARGE_IN_CALIBRATE_S):
         self.chunk_s = chunk_s
         self.need = max(1, int(round(min_loud_s / chunk_s)))
         self.factor = factor
@@ -374,7 +382,7 @@ class MicBargeIn:
             pa = pyaudio.PyAudio()
             try:
                 index, rate, channels = stt_vosk._pick_input_device(pa)
-                chunk = max(1, int(1024 * rate / 16000))
+                chunk = max(1, int(MIC_CHUNK_FRAMES * rate / MIC_BASE_RATE))
                 stream = pa.open(format=pyaudio.paInt16, channels=channels, rate=rate, input=True,
                                  input_device_index=index, frames_per_buffer=chunk)
                 det = BargeInDetector(chunk_s=chunk / rate)
@@ -395,8 +403,10 @@ class MicBargeIn:
 
 # -- streaming speech ---------------------------------------------------------
 
-LEAD_IN_S = _env_float("DENISSE_TTS_LEAD_IN_S", 0.03)
-BLOCK_S = 0.05
+LEAD_IN_S = _env_float("DENISSE_TTS_LEAD_IN_S", _CFG["lead_in_s"])
+BLOCK_S = _CFG["block_s"]
+SYNTH_AHEAD = _CFG["synth_ahead"]
+QUEUE_POLL_S = _CFG["queue_poll_s"]
 
 
 class PyAudioSink:
@@ -471,7 +481,7 @@ class StreamingSpeaker:
     so a stop never leaves the GPU busy on text nobody will hear."""
 
     def __init__(self, synthesize, sink, trace: LatencyTrace | None = None,
-                 should_stop: Callable[[], bool] | None = None, ahead: int = 2,
+                 should_stop: Callable[[], bool] | None = None, ahead: int = SYNTH_AHEAD,
                  lead_in_s: float = LEAD_IN_S, block_s: float = BLOCK_S,
                  on_start: Callable[[], None] | None = None):
         self.synthesize = synthesize
@@ -505,7 +515,7 @@ class StreamingSpeaker:
                 self.trace.mark("tts_first_chunk")
                 while not halt.is_set():
                     try:
-                        q.put((s, audio), timeout=0.05)
+                        q.put((s, audio), timeout=QUEUE_POLL_S)
                         break
                     except queue.Full:
                         pass
@@ -525,7 +535,7 @@ class StreamingSpeaker:
         finally:
             while True:
                 try:
-                    q.put(_DONE, timeout=0.05)
+                    q.put(_DONE, timeout=QUEUE_POLL_S)
                     return
                 except queue.Full:
                     if halt.is_set():
@@ -550,7 +560,7 @@ class StreamingSpeaker:
                     self.interrupted = True
                     break
                 try:
-                    item = q.get(timeout=0.05)
+                    item = q.get(timeout=QUEUE_POLL_S)
                 except queue.Empty:
                     continue
                 if item is _DONE:

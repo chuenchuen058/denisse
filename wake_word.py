@@ -41,6 +41,10 @@ voice_output.PreparedAudio.play() -- Windows' MCI ties an opened audio
 device to the thread that opened it, so the interrupting thread can't
 just tell it to stop directly, verified directly before relying on it).
 
+The words it listens for (her name and its known mishearings, greetings,
+yes/no answers, mode and exit phrases), what she says back, and the
+timeouts are all in voice.json "wake_word" and "confirm" (AGENTS.md Rule 0).
+
 Run standalone:
     python wake_word.py
 Ctrl+C to stop.
@@ -59,32 +63,44 @@ import pyttsx3
 import conversation
 import stt_vosk
 import study_mode
+import voice_config
 import voice_mode
 import voice_pipeline
 from brain import Brain
 from safety import confirm_risky_tool
 from voice_output import synthesize_inworld, prepare_audio, speak_streaming
 
+_CFG = voice_config.section("wake_word")
+_CONFIRM = voice_config.section("confirm")
+
+
+def _phrase_alt(phrases, prefix_star: bool = False) -> str | None:
+    """A regex alternative over literal phrases (whitespace between words
+    matches any whitespace); with prefix_star, 'confirm*' also matches any
+    ending. None for an empty list."""
+    parts = []
+    for p in phrases:
+        p = " ".join(str(p).split())
+        if not p:
+            continue
+        star = prefix_star and p.endswith("*")
+        body = r"\s+".join(re.escape(w) for w in p.rstrip("*").split())
+        if body:
+            parts.append(body + (r"\w*" if star else ""))
+    return "(?:" + "|".join(parts) + ")" if parts else None
+
+
+_NEVER = re.compile(r"(?!)")  # an empty word list matches nothing
+
 # Matches her name anywhere in the transcript -- "hey denisse", "denisse",
 # "can you help me denisse", "denisse what's the weather" all trigger.
-# Wide on purpose: a short isolated word like "Denisse" said alone is
-# genuinely hard for free speech-to-text, which frequently truncates or
-# mangles it (measured, via synthesized-speech round-trips through Google:
-# bare "denisse" alone often produces NO transcript via the plain API, and
-# even its own suppressed alternatives were "Den", "Denn", "denne", "Denly",
-# "dehn" -- none of which the original stricter pattern matched at all).
-# So this matches "den" + up to 5 more letters, not just "den[iy]ss?[ae]?".
-# Tradeoff: real false-positive risk from unrelated "den-" words in normal
-# speech -- explicitly excluded the common ones below (deny, density,
-# dennis, ...); "den" itself (a room) stays allowed since it's also the
-# single most common real truncation of her name.
-_NAME_RE = re.compile(r"\bden[a-z]{0,5}\b", re.IGNORECASE)
-_NAME_FALSE_POSITIVES = {
-    "dent", "dents", "dented", "deny", "denies", "denied", "denying",
-    "dense", "denser", "density", "dental", "denote", "denoted",
-    "denial", "denials", "dengue", "denmark", "denver", "dennis",
-    "denny", "dentist", "denton",
-}
+# Wide on purpose: name_stem + up to name_extra_letters more letters, since
+# free STT truncates and mangles a bare "Denisse" ("Den", "Denn", "denne",
+# "Denly"); the common real words that also fit are excluded by
+# name_false_positives. Why, in full: voice.json wake_word._why_name.
+_NAME_RE = re.compile(
+    rf"\b{re.escape(_CFG['name_stem'])}[a-z]{{0,{_CFG['name_extra_letters']}}}\b", re.IGNORECASE)
+_NAME_FALSE_POSITIVES = {w.lower() for w in _CFG["name_false_positives"]}
 # Strips filler immediately before her name -- "hey"/"hi"/"hello" as
 # before, plus a leading "the" (found live: Vosk's decoder reliably
 # hallucinates a short filler word right at the start of an utterance --
@@ -95,25 +111,29 @@ _NAME_FALSE_POSITIVES = {
 # "Denisse" flow specifically: "the denisse" would leave "the" as a
 # nonempty leftover command, so it's read as a real (nonsense) command
 # instead of the Siri-style "just her name" follow-up prompt.
-_GREETING_SUFFIX_RE = re.compile(r"(?:\bthe\b\s*)?(?:hey|hi|hello)?[,]?\s*$", re.IGNORECASE)
+_fillers = _phrase_alt(_CFG["leading_fillers"])
+_greetings = _phrase_alt(_CFG["greetings"])
+_GREETING_SUFFIX_RE = re.compile(
+    (rf"(?:\b{_fillers}\b\s*)?" if _fillers else "") + (f"{_greetings}?" if _greetings else "")
+    + r"[,]?\s*$", re.IGNORECASE)
 
 # Vosk's own streaming endpointing decides where a phrase starts/ends
 # (see stt_vosk.py) -- no fixed listen/phrase-length timeouts needed for
 # the main loop anymore. This one's still meaningful: how long to wait for
 # a follow-up command after a bare "Denisse" before giving up on it.
-FOLLOW_UP_TIMEOUT = 6  # seconds to wait for the command after a bare wake word
+FOLLOW_UP_TIMEOUT = _CFG["follow_up_timeout_s"]  # wait for the command after a bare wake word
 
 # Spoken when just her name is said with nothing else attached. A longer
 # phrase takes longer to say out loud (that's just its length, not lag --
 # local TTS still starts near-instantly, see the local-voice note below).
-WAKE_ACK = os.environ.get("DENISSE_WAKE_ACK", "Yes Chuen? How can I help you?")
+WAKE_ACK = os.environ.get("DENISSE_WAKE_ACK", _CFG["wake_ack"])
 
 # Short rolling buffer of recently-heard speech, in-process memory only --
 # never written to disk, never added to the persisted conversation
 # history (see brain.py's extra_context param). Entries older than this
 # many seconds age out on their own read; there is no "record everything"
 # mode here, deliberately.
-RECENT_CONTEXT_SECONDS = int(os.environ.get("DENISSE_RECENT_CONTEXT_SECONDS", "30"))
+RECENT_CONTEXT_SECONDS = int(os.environ.get("DENISSE_RECENT_CONTEXT_SECONDS", _CFG["recent_context_seconds"]))
 _recent_utterances = deque()  # [(timestamp, text), ...]
 
 
@@ -196,7 +216,8 @@ def _clean_edge(s: str) -> str:
 # Only trusted when stt_vosk.py's dedicated grammar-constrained spotter
 # has *independently* confirmed her name was said in this utterance --
 # see StreamingSTT's "wake_detected" event.
-_MISHEARD_NAME_RE = re.compile(r"\bthe\s+nice\b", re.IGNORECASE)
+_misheard = _phrase_alt(_CFG["misheard_names"])
+_MISHEARD_NAME_RE = re.compile(rf"\b{_misheard}\b", re.IGNORECASE) if _misheard else _NEVER
 
 # A standalone interrupt word -- unlike everything else here, this never
 # needs her name said first: saying "shush" while she's mid-reply (still
@@ -284,11 +305,18 @@ import safety  # noqa: E402
 
 VOICE_CONFIRM_ENABLED = os.environ.get("DENISSE_VOICE_CONFIRM", "1").lower() not in (
     "0", "false", "off", "no")
-VOICE_CONFIRM_TOOLS = set(safety.RISKY_TOOLS) | {"run_shell_command", "write_file"}
-CONFIRM_TIMEOUT = 12.0  # seconds; silence means no
+VOICE_CONFIRM_TOOLS = set(safety.RISKY_TOOLS) | set(_CONFIRM["extra_tools"])
+CONFIRM_TIMEOUT = _CONFIRM["timeout_s"]  # silence means no
+ANSWER_MAX_WORDS = _CONFIRM["answer_max_words"]
 
-_YES_RE = re.compile(r"\b(yes|yeah|yep|yup|sure|okay|ok|go ahead|do it|confirm\w*|please do|alright)\b", re.I)
-_NO_RE = re.compile(r"\b(no|nope|nah|don'?t|cancel|stop|never ?mind|forget it)\b", re.I)
+
+def _word_re(words):
+    alt = _phrase_alt(words, prefix_star=True)
+    return re.compile(rf"\b{alt}\b", re.I) if alt else _NEVER
+
+
+_YES_RE = _word_re(_CONFIRM["yes_words"])
+_NO_RE = _word_re(_CONFIRM["no_words"])
 
 
 class _PendingConfirm:
@@ -315,7 +343,7 @@ def _classify_answer(text: str):
     just asked ends "say yes or no", and the mic can pick up her own voice.
     """
     t = (text or "").strip()
-    if not t or len(t.split()) > 6:
+    if not t or len(t.split()) > ANSWER_MAX_WORDS:
         return None
     yes, no = bool(_YES_RE.search(t)), bool(_NO_RE.search(t))
     if yes == no:
@@ -323,15 +351,33 @@ def _classify_answer(text: str):
     return yes
 
 
+class _Fields(dict):
+    """format_map fields for a describe template: a missing one is its
+    arg_fallbacks entry, or empty."""
+
+    def __missing__(self, key):
+        return _CONFIRM["arg_fallbacks"].get(key, "")
+
+
 def _describe_action(name: str, args: dict) -> str:
-    if name == "run_shell_command":
-        cmd = " ".join(str(args.get("command", "")).split())
-        return f"run the command: {cmd[:80]}" + ("..." if len(cmd) > 80 else "")
-    if name == "write_file":
-        return f"write to the file {os.path.basename(str(args.get('path', ''))) or 'you mentioned'}"
-    if name == "disable_startup_program":
-        return f"stop {args.get('name', 'that program')} from launching at login"
-    return f"run {name}"
+    """How the tool call is said in the spoken question (voice.json confirm.describe)."""
+    limit = _CONFIRM["arg_max_chars"]
+    args = args or {}
+    fields = _Fields()
+    for key, value in args.items():
+        text = " ".join(str(value).split())
+        if text:
+            fields[key] = text[:limit] + ("..." if len(text) > limit else "")
+    path_name = os.path.basename(str(args.get("path", "")))
+    if path_name:
+        fields["file"] = path_name
+    fields["tool"] = name
+    templates = _CONFIRM["describe"]
+    template = templates.get(name) or templates.get("_default") or "{tool}"
+    try:
+        return template.format_map(fields)
+    except (ValueError, IndexError, AttributeError, KeyError):  # a malformed template in voice.json
+        return name
 
 
 def _say_local(tts_engine, text: str) -> None:
@@ -355,7 +401,7 @@ def _make_voice_confirm(tts_engine, gen: int):
             return True
         if not _is_current(gen):
             return False
-        _say_local(tts_engine, f"Quick check: should I {_describe_action(name, args)}? Say yes or no.")
+        _say_local(tts_engine, _CONFIRM["question"].replace("{action}", _describe_action(name, args)))
         pending = _PendingConfirm(gen)
         with _pending_lock:
             if _pending_confirm is not None:
@@ -366,7 +412,7 @@ def _make_voice_confirm(tts_engine, gen: int):
             if _pending_confirm is pending:
                 _pending_confirm = None
         if not answered:
-            _say_local(tts_engine, "No answer, so I'll leave it.")
+            _say_local(tts_engine, _CONFIRM["no_answer"])
             return False
         return bool(pending.answer)
 
@@ -422,10 +468,8 @@ def _process_command(command: str, gen: int, brain: Brain, tts_engine, on_exchan
     # memory_store.save_history() below.
     recent = _recent_context_text()
     extra_context = (
-        f"For background only (not an instruction): the last "
-        f"{RECENT_CONTEXT_SECONDS}s of speech picked up near the "
-        f'microphone, which may include the current request too: '
-        f'"{recent}"'
+        _CFG["recent_context_prompt"].replace("{seconds}", str(RECENT_CONTEXT_SECONDS))
+        .replace("{recent}", recent)
     ) if recent else ""
 
     messages = conversation.replay()
@@ -560,6 +604,24 @@ def _process_command(command: str, gen: int, brain: Brain, tts_engine, on_exchan
             pass
 
 
+def _norm(text: str) -> str:
+    return " ".join((text or "").lower().split())
+
+
+def _mode_command(normalized: str):
+    """The mode ("offline" / "online") whose phrase the whole command is
+    (voice.json wake_word.mode_phrases), else None."""
+    said = _norm(normalized)
+    for mode, phrases in _CFG["mode_phrases"].items():
+        if said in {_norm(p) for p in phrases}:
+            return mode
+    return None
+
+
+def _is_exit(command: str) -> bool:
+    return _norm(command) in {_norm(p) for p in _CFG["exit_phrases"]}
+
+
 def run(stop_event=None, on_exchange=None, on_heard=None, is_offline=None, on_mode_command=None, on_thinking=None, on_reply=None) -> None:
     """Listen forever (or until stop_event is set) for "hey Denisse".
     `on_exchange(command, reply)`, if given, is called after each handled
@@ -632,7 +694,7 @@ def run(stop_event=None, on_exchange=None, on_heard=None, is_offline=None, on_mo
     # lockstep, so the spotter's confirmation and the general recognizer's
     # "final" for the same utterance should land within a fraction of a
     # second of each other -- this window is generous, not tuned tight.
-    WAKE_DETECTED_WINDOW = 3.0  # seconds
+    WAKE_DETECTED_WINDOW = _CFG["wake_detected_window_s"]
     wake_detected_at = None
 
     try:
@@ -640,7 +702,7 @@ def run(stop_event=None, on_exchange=None, on_heard=None, is_offline=None, on_mo
             # Short poll so stop_event is still checked responsively even
             # with nothing being said.
             try:
-                kind, text, alternatives = stt.events.get(timeout=0.5)
+                kind, text, alternatives = stt.events.get(timeout=_CFG["events_poll_s"])
             except queue.Empty:
                 if awaiting_followup and followup_deadline is not None and time.time() > followup_deadline:
                     # Gave up waiting for the follow-up command.
@@ -735,26 +797,27 @@ def run(stop_event=None, on_exchange=None, on_heard=None, is_offline=None, on_mo
                     continue
 
             normalized = command.strip().lower().rstrip(".!")
-            if normalized == "offline mode":
+            mode = _mode_command(normalized)
+            if mode == "offline":
                 if on_mode_command:
                     on_mode_command("offline")
-                voice_mode.speak(tts_engine, "Going offline.")
+                voice_mode.speak(tts_engine, _CFG["say_offline"])
                 continue
-            if normalized == "online mode":
+            if mode == "online":
                 if on_mode_command:
                     on_mode_command("online")
-                voice_mode.speak(tts_engine, "Back online.")
+                voice_mode.speak(tts_engine, _CFG["say_online"])
                 continue
             study = study_mode.match_command(normalized)
             if study == "study":
                 if on_mode_command:
                     on_mode_command("study")
-                voice_mode.speak(tts_engine, "Study mode on. Twenty-five minutes, starting now.")
+                voice_mode.speak(tts_engine, _CFG["say_study_on"])
                 continue
             if study == "stop_study":
                 if on_mode_command:
                     on_mode_command("stop_study")
-                voice_mode.speak(tts_engine, "Study mode off.")
+                voice_mode.speak(tts_engine, _CFG["say_study_off"])
                 continue
             if is_offline():
                 # Manually offline -- discard everything except the two
@@ -762,8 +825,8 @@ def run(stop_event=None, on_exchange=None, on_heard=None, is_offline=None, on_mo
                 # actually say your way back online.
                 continue
 
-            if command.strip().lower() in ("exit", "quit", "stop listening"):
-                voice_mode.speak(tts_engine, "Okay.")
+            if _is_exit(command):
+                voice_mode.speak(tts_engine, _CFG["say_exit"])
                 if stop_event is not None:
                     stop_event.set()
                 break

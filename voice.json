@@ -1,0 +1,115 @@
+{
+  "_comment": "Everything the voice path (speech_control, voice_pipeline, wake_word, voice_output, voice_mode) knows about words, thresholds, rates, timeouts and voices (AGENTS.md Rule 0). voice_config.py loads it once per process and checks every value against its documented default in voice_defaults.json (same values as shipped here): a bad or missing value logs one line and falls back to that default, never crashes. Keys starting with _ are notes. DENISSE_VOICE_CONFIG points at another file (tests, a private tweak). Environment variables that already existed (DENISSE_END_SILENCE_S, DENISSE_WAKE_ACK, ...) still win over this file.",
+
+  "stop_request": {
+    "_why": "A stop has to act before, and without, the model: on 2026-10-31 a bare 'stop' went to the model and it carried on with the CV clean-up he was stopping. So this stays a fast whole-utterance rule, but the words are data. An utterance is a stop when, after typo fixes, it is only: any lead words, at most one reason, one phrase, any trail words. 'stop the timer', \"don't stop talking\" and quoted speech inside a question are not.",
+    "typos": {"talkinhg": "talking", "talkjing": "talking"},
+    "lead_words": ["hey", "okay", "ok", "please", "denisse", "no", "can you", "could you"],
+    "reasons": ["it is too long", "its too long", "it s too long"],
+    "phrases": ["shush", "hush", "be quiet", "quiet", "stop", "stop it",
+                "stop talking", "stop speaking", "stop speech",
+                "you are still talking", "you are still speaking",
+                "you re still talking", "you re still speaking",
+                "youre still talking", "youre still speaking"],
+    "trail_words": ["now", "please", "denisse"]
+  },
+
+  "wake_word": {
+    "_why_name": "Her name matches as name_stem plus up to name_extra_letters more letters, anywhere in the transcript: free STT truncates and mangles a bare 'Denisse' ('Den', 'Denn', 'denne', 'Denly'), so it's wide on purpose. Real 'den-' words are excluded below; 'den' itself stays, it's the commonest truncation.",
+    "name_stem": "den",
+    "name_extra_letters": 5,
+    "name_false_positives": ["dent", "dents", "dented", "deny", "denies", "denied", "denying",
+                             "dense", "denser", "density", "dental", "denote", "denoted",
+                             "denial", "denials", "dengue", "denmark", "denver", "dennis",
+                             "denny", "dentist", "denton"],
+    "_why_misheard": "Observed Vosk splits of her name into real words. Only trusted when the grammar spotter independently heard her name in the same utterance ('the nice one' is ordinary speech).",
+    "misheard_names": ["the nice"],
+    "_why_greetings": "Stripped just before her name so they don't leak into the command; leading_fillers covers Vosk's hallucinated 'the' at the start of an utterance.",
+    "greetings": ["hey", "hi", "hello"],
+    "leading_fillers": ["the"],
+    "follow_up_timeout_s": 6,
+    "wake_detected_window_s": 3.0,
+    "wake_ack": "Yes Chuen? How can I help you?",
+    "recent_context_seconds": 30,
+    "recent_context_prompt": "For background only (not an instruction): the last {seconds}s of speech picked up near the microphone, which may include the current request too: \"{recent}\"",
+    "events_poll_s": 0.5,
+    "mode_phrases": {"offline": ["offline mode"], "online": ["online mode"]},
+    "exit_phrases": ["exit", "quit", "stop listening"],
+    "say_offline": "Going offline.",
+    "say_online": "Back online.",
+    "say_study_on": "Study mode on. Twenty-five minutes, starting now.",
+    "say_study_off": "Study mode off.",
+    "say_exit": "Okay."
+  },
+
+  "confirm": {
+    "_why": "Hands-free mode hears the whole room, so these tools are asked about out loud first and answered by voice. A yes needs a yes word and no no word (her own 'say yes or no' is overheard), in at most answer_max_words words. A word ending in * matches any ending ('confirm*' = confirmed, confirming).",
+    "extra_tools": ["run_shell_command", "write_file"],
+    "timeout_s": 12.0,
+    "answer_max_words": 6,
+    "yes_words": ["yes", "yeah", "yep", "yup", "sure", "okay", "ok", "go ahead", "do it",
+                  "confirm*", "please do", "alright"],
+    "no_words": ["no", "nope", "nah", "don't", "dont", "cancel", "stop", "never mind",
+                 "nevermind", "forget it"],
+    "question": "Quick check: should I {action}? Say yes or no.",
+    "no_answer": "No answer, so I'll leave it.",
+    "_why_describe": "How each tool is said in the question. {tool} is the tool name, {file} the file name of its path, any other {field} is that argument with whitespace collapsed, cut to arg_max_chars with '...'. A missing field uses arg_fallbacks.",
+    "describe": {
+      "run_shell_command": "run the command: {command}",
+      "write_file": "write to the file {file}",
+      "disable_startup_program": "stop {name} from launching at login",
+      "_default": "run {tool}"
+    },
+    "arg_fallbacks": {"file": "you mentioned", "name": "that program"},
+    "arg_max_chars": 80
+  },
+
+  "pipeline": {
+    "_why_endpoint": "end_silence_s 0.6, down from 0.9: same WER on the eval set at 0.4-0.9, 0.3 cuts words off; the longest synthetic pause was 0.38 s. docs/voice_latency.md.",
+    "latency_log": "logs/voice_latency.jsonl",
+    "end_silence_s": 0.6,
+    "min_speech_rms": 300,
+    "calibrate_s": 0.4,
+    "noise_gate_factor": 3.0,
+    "listen_timeout_s": 8.0,
+    "phrase_time_limit_s": 15.0,
+    "_why_barge_in": "Off by default: an energy gate with no echo cancellation, so on open speakers a loud reply can interrupt itself. Fine on headphones.",
+    "barge_in": false,
+    "barge_in_min_s": 0.3,
+    "barge_in_factor": 4.0,
+    "barge_in_calibrate_s": 0.3,
+    "mic_chunk_frames": 1024,
+    "mic_base_rate": 16000,
+    "lead_in_s": 0.03,
+    "block_s": 0.05,
+    "synth_ahead": 2,
+    "queue_poll_s": 0.05,
+    "max_sentence_chars": 300,
+    "_why_abbreviations": "Words that end in a full stop without ending the sentence.",
+    "abbreviations": ["mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "vs", "etc", "eg", "ie",
+                      "e.g", "i.e", "a.m", "p.m", "am", "pm", "no", "fig", "approx", "dept", "est",
+                      "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
+                      "mon", "tue", "wed", "thu", "fri", "sat", "sun", "u.s", "u.k"]
+  },
+
+  "output": {
+    "_why_tts": "kokoro (local, free) first, Inworld (paid cloud, needs INWORLD_API_KEY) as fallback; 'inworld' swaps the order. inworld-tts-1.5-mini measured ~2x faster to start than inworld-tts-2.",
+    "tts_engine": "kokoro",
+    "tts_stream": true,
+    "inworld_voice": "Ashley",
+    "inworld_model": "inworld-tts-1.5-mini",
+    "playback_poll_s": 0.05,
+    "local_poll_s": 0.02,
+    "warm_up_rate": 8000,
+    "warm_up_frames": 400
+  },
+
+  "voice_mode": {
+    "_why_voice": "pyttsx3 fallback voice: matched against each voice's gender, then as a substring of its name or id (e.g. 'Zira').",
+    "voice_preference": "female",
+    "stt_engine": "whisper",
+    "listen_timeout_s": 8.0,
+    "phrase_time_limit_s": 15.0,
+    "exit_phrases": ["exit", "quit"]
+  }
+}

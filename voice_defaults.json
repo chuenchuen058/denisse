@@ -1,0 +1,242 @@
+{
+  "_comment": "The documented fallback for every voice.json value (voice_config.py). A value missing from voice.json, or one that fails its check, uses the one here. Keep equal to the shipped voice.json (scripts/test_voice_config.py checks); the reasons for each value are the _why notes in voice.json.",
+  "stop_request": {
+    "typos": {
+      "talkinhg": "talking",
+      "talkjing": "talking"
+    },
+    "lead_words": [
+      "hey",
+      "okay",
+      "ok",
+      "please",
+      "denisse",
+      "no",
+      "can you",
+      "could you"
+    ],
+    "reasons": [
+      "it is too long",
+      "its too long",
+      "it s too long"
+    ],
+    "phrases": [
+      "shush",
+      "hush",
+      "be quiet",
+      "quiet",
+      "stop",
+      "stop it",
+      "stop talking",
+      "stop speaking",
+      "stop speech",
+      "you are still talking",
+      "you are still speaking",
+      "you re still talking",
+      "you re still speaking",
+      "youre still talking",
+      "youre still speaking"
+    ],
+    "trail_words": [
+      "now",
+      "please",
+      "denisse"
+    ]
+  },
+  "wake_word": {
+    "name_stem": "den",
+    "name_extra_letters": 5,
+    "name_false_positives": [
+      "dent",
+      "dents",
+      "dented",
+      "deny",
+      "denies",
+      "denied",
+      "denying",
+      "dense",
+      "denser",
+      "density",
+      "dental",
+      "denote",
+      "denoted",
+      "denial",
+      "denials",
+      "dengue",
+      "denmark",
+      "denver",
+      "dennis",
+      "denny",
+      "dentist",
+      "denton"
+    ],
+    "misheard_names": [
+      "the nice"
+    ],
+    "greetings": [
+      "hey",
+      "hi",
+      "hello"
+    ],
+    "leading_fillers": [
+      "the"
+    ],
+    "follow_up_timeout_s": 6.0,
+    "wake_detected_window_s": 3.0,
+    "wake_ack": "Yes Chuen? How can I help you?",
+    "recent_context_seconds": 30,
+    "recent_context_prompt": "For background only (not an instruction): the last {seconds}s of speech picked up near the microphone, which may include the current request too: \"{recent}\"",
+    "events_poll_s": 0.5,
+    "mode_phrases": {
+      "offline": [
+        "offline mode"
+      ],
+      "online": [
+        "online mode"
+      ]
+    },
+    "exit_phrases": [
+      "exit",
+      "quit",
+      "stop listening"
+    ],
+    "say_offline": "Going offline.",
+    "say_online": "Back online.",
+    "say_study_on": "Study mode on. Twenty-five minutes, starting now.",
+    "say_study_off": "Study mode off.",
+    "say_exit": "Okay."
+  },
+  "confirm": {
+    "extra_tools": [
+      "run_shell_command",
+      "write_file"
+    ],
+    "timeout_s": 12.0,
+    "answer_max_words": 6,
+    "yes_words": [
+      "yes",
+      "yeah",
+      "yep",
+      "yup",
+      "sure",
+      "okay",
+      "ok",
+      "go ahead",
+      "do it",
+      "confirm*",
+      "please do",
+      "alright"
+    ],
+    "no_words": [
+      "no",
+      "nope",
+      "nah",
+      "don't",
+      "dont",
+      "cancel",
+      "stop",
+      "never mind",
+      "nevermind",
+      "forget it"
+    ],
+    "question": "Quick check: should I {action}? Say yes or no.",
+    "no_answer": "No answer, so I'll leave it.",
+    "describe": {
+      "run_shell_command": "run the command: {command}",
+      "write_file": "write to the file {file}",
+      "disable_startup_program": "stop {name} from launching at login",
+      "_default": "run {tool}"
+    },
+    "arg_fallbacks": {
+      "file": "you mentioned",
+      "name": "that program"
+    },
+    "arg_max_chars": 80
+  },
+  "pipeline": {
+    "latency_log": "logs/voice_latency.jsonl",
+    "end_silence_s": 0.6,
+    "min_speech_rms": 300.0,
+    "calibrate_s": 0.4,
+    "noise_gate_factor": 3.0,
+    "listen_timeout_s": 8.0,
+    "phrase_time_limit_s": 15.0,
+    "barge_in": false,
+    "barge_in_min_s": 0.3,
+    "barge_in_factor": 4.0,
+    "barge_in_calibrate_s": 0.3,
+    "mic_chunk_frames": 1024,
+    "mic_base_rate": 16000,
+    "lead_in_s": 0.03,
+    "block_s": 0.05,
+    "synth_ahead": 2,
+    "queue_poll_s": 0.05,
+    "max_sentence_chars": 300,
+    "abbreviations": [
+      "mr",
+      "mrs",
+      "ms",
+      "dr",
+      "prof",
+      "sr",
+      "jr",
+      "st",
+      "vs",
+      "etc",
+      "eg",
+      "ie",
+      "e.g",
+      "i.e",
+      "a.m",
+      "p.m",
+      "am",
+      "pm",
+      "no",
+      "fig",
+      "approx",
+      "dept",
+      "est",
+      "jan",
+      "feb",
+      "mar",
+      "apr",
+      "jun",
+      "jul",
+      "aug",
+      "sep",
+      "sept",
+      "oct",
+      "nov",
+      "dec",
+      "mon",
+      "tue",
+      "wed",
+      "thu",
+      "fri",
+      "sat",
+      "sun",
+      "u.s",
+      "u.k"
+    ]
+  },
+  "output": {
+    "tts_engine": "kokoro",
+    "tts_stream": true,
+    "inworld_voice": "Ashley",
+    "inworld_model": "inworld-tts-1.5-mini",
+    "playback_poll_s": 0.05,
+    "local_poll_s": 0.02,
+    "warm_up_rate": 8000,
+    "warm_up_frames": 400
+  },
+  "voice_mode": {
+    "voice_preference": "female",
+    "stt_engine": "whisper",
+    "listen_timeout_s": 8.0,
+    "phrase_time_limit_s": 15.0,
+    "exit_phrases": [
+      "exit",
+      "quit"
+    ]
+  }
+}
