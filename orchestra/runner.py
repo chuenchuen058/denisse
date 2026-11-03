@@ -23,6 +23,8 @@ What a tick does with a session's result (after Thomas's review, 31 Oct 2026):
   * a campaign (.review/campaign.json) raises lane_slots / the spend cap until its stop_at,
     and Chuen's pause / stop (.review/control.json) block dispatch until he resumes; both
     are re-read every tick and enforced here (orchestra/campaign.py, 2 Nov 2026)
+  * once a day (exams_daily_at) a hidden background process gives each agent one canary exam
+    (orchestra/exams/daily.py), unless a lane is limited; it takes no lane slot (3 Nov 2026)
   * every limit lives in orchestra/config.json with its reason
 """
 from __future__ import annotations
@@ -1695,6 +1697,61 @@ def write_state_now() -> None:
         log(f"state_now failed: {e}")
 
 
+# ---------------------------------------------------------------- daily exams
+# Once a day the agents sit one canary exam each (orchestra/exams/daily.py), so the score-based
+# router has real scores. A detached background process with its own lock: it never takes a
+# lane slot and the tick never waits for it (3 Nov 2026).
+
+EXAMS_LOCK = REVIEW / "exams.lock"
+EXAMS_LAST = REVIEW / "exams" / "last_run.json"
+EXAMS_SCORES = REVIEW / "exams" / "scores.json"
+
+
+def exams_enabled() -> bool:
+    """The real repo only (tests patch this): a test's temp repo never examines real agents."""
+    return aftercare_on()
+
+
+def exams_spawn(argv: list[str], env: dict) -> int:
+    from exams import daily
+    return daily.spawn(argv, cwd=HERE.parent, env=env)
+
+
+def exams_step(state: dict, at: dt.datetime | None = None, spawn=None) -> str:
+    """Start today's exam run if it is due. Returns what it did, for the log and the tests.
+    Never raises: a failure here must not stop a tick from dispatching."""
+    try:
+        from exams import daily
+        at = at or now()
+        limited = sorted(l for l in state.get("lanes", {}) if lane_limited(state, l))
+        why = daily.due(C, EXAMS_LAST, EXAMS_LOCK, at, limited)
+        if why is None:
+            why = campaign.dispatch_block(REVIEW)
+        if why:
+            return f"not due: {why}"
+        agents = daily.agents_for(C)
+        token = daily.claim(EXAMS_LOCK, EXAMS_LAST, at, agents)
+        if not token:
+            return "not due: another tick took the exam lock"
+        vault = Path(os.path.expandvars(os.path.expanduser(C.get("vault_dir", "") or "")))
+        vault = vault if C.get("vault_dir") and aftercare_on() and vault.is_dir() else None
+        argv = daily.child_argv(sys.executable, agents=agents, scores=EXAMS_SCORES, lock=EXAMS_LOCK,
+                                token=token, last_run=EXAMS_LAST, log=LOG_FILE, vault=vault,
+                                cap=float(C.get("exams_cap_s", daily.CAP_S)),
+                                include_claude=bool(C.get("exams_include_claude")))
+        env = {**os.environ, "ORCHESTRA_EXAMS_SCORES": str(EXAMS_SCORES)}
+        try:
+            pid = (spawn or exams_spawn)(argv, env)
+        except Exception:
+            EXAMS_LOCK.unlink(missing_ok=True)  # today stays marked: one failed start, not one per tick
+            raise
+        log(f"EXAMS started pid={pid} agents={','.join(agents)} cap={int(C.get('exams_cap_s', daily.CAP_S))}s")
+        return f"started {pid}"
+    except Exception as e:
+        log(f"EXAMS not started: {e!r}")
+        return f"error: {e!r}"
+
+
 def tick(dry_run: bool = False) -> str:
     for d in (QUEUE, REPORTS, ARCHIVE, PARKED):
         d.mkdir(parents=True, exist_ok=True)
@@ -1729,6 +1786,8 @@ def tick(dry_run: bool = False) -> str:
         save_state(state)
         write_state_now()
         return "on battery"
+    if exams_enabled():  # background; returns at once, holds no lane slot
+        exams_step(state)
     tasks = [t for t in route(load_queue(), state) if t.slug not in orphans]
     if parallel:
         # One runner per lane at a time (Chuen, 2 Nov 2026: use Claude and Codex together).

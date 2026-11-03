@@ -18,7 +18,7 @@ command blocks exists.
 | **Task sessions** | Each in its own worktree, `..\denisse-wt\<slug>`, on branch `review/<slug>` | Started by a tick. Up to 3 Claude and 1 Codex at once (`lane_slots`). |
 | **Power** | The runner checks the battery itself (`orchestra/power.py`) | On battery, ticks still run and finish off completed work (gate, merge, push), but **no new task starts** until you are back on mains. Running tasks are never killed for power. |
 | **Producer** (local team, optional) | Task "Denisse Orchestra Producer", local Ollama model | Every 30 min if registered. Writes draft tasks only. |
-| **Canary** (optional) | Task "Denisse Agent Canary" | Daily 07:10 if registered. One short exam per agent. |
+| **Exams** | The runner, as a hidden background process (`orchestra/exams/daily.py`, lock `.review/exams.lock`) | First tick after 07:10 (`exams_daily_at`), once a day, not while any lane is limited. One canary exam each for `exams_agents` (codex, copilot, local; claude only with `exams_include_claude`), 15 min cap in all. Writes `.review/exams/scores.json`, `Dev/Agent-Scores.md`, and a line in runner.log and the Orchestra day note. Takes no lane slot. The older opt-in Task "Denisse Agent Canary" (`install_task.ps1 -Canary`) is now redundant. |
 | **Atrium capture** | A Claude Code hook (Stop, PreCompact, SessionEnd) | At the end of each Claude Code session; saves it into the vault. |
 
 A tick: tidy up dead locks and finished lanes, then pick the top runnable task (urgent
