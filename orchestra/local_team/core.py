@@ -22,8 +22,8 @@ HERE = Path(__file__).resolve().parent
 ROLES = HERE / "roles"
 DEFAULT_REPO = HERE.parent.parent
 
+# Model choices are in orchestra/models.json, not here (AGENTS.md Rule 0).
 DEFAULTS = {
-    "local_team_model": "llama3.1:8b",
     "local_team_timeout_s": 240,
     "local_team_num_ctx": 8192,
     "local_team_gpu_busy_pct": 60,
@@ -47,12 +47,15 @@ def now() -> dt.datetime:
 
 
 def load_config(repo: Path) -> dict:
+    """DEFAULTS, then config.json, then models.json: each read from `repo`'s orchestra/ if
+    present, else this checkout's. models.json wins for the keys it holds."""
     cfg = dict(DEFAULTS)
-    for path in (Path(repo) / "orchestra" / "config.json", HERE.parent / "config.json"):
-        if path.exists():
-            cfg.update({k: v for k, v in json.loads(path.read_text(encoding="utf-8")).items()
-                        if not k.startswith("_")})
-            break
+    for name in ("config.json", "models.json"):
+        for path in (Path(repo) / "orchestra" / name, HERE.parent / name):
+            if path.exists():
+                cfg.update({k: v for k, v in json.loads(path.read_text(encoding="utf-8-sig")).items()
+                            if not k.startswith("_")})
+                break
     return cfg
 
 
