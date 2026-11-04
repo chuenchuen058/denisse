@@ -19,17 +19,17 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from .settings import load
+
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
-BANK = HERE / "bank"
-CATEGORIES = ("code-edit", "debug", "writing", "study", "extract")
-KEEP = 20            # rolling results kept per agent x category
-DOWN_AFTER = 3       # this many failures in a row = "Not working"
-SILENT_HOURS = 24    # no answer for this long = "Not working"
+BANK = HERE / load()["paths"]["bank"]
+# Compatibility for callers displaying categories; execution reads the current data.
+CATEGORIES = tuple(load()["categories"])
 
 
 def scores_path() -> Path:
-    return Path(os.environ.get("ORCHESTRA_EXAMS_SCORES") or REPO / ".review" / "exams" / "scores.json")
+    return Path(os.environ.get("ORCHESTRA_EXAMS_SCORES") or REPO / load()["paths"]["scores"])
 
 
 def now() -> dt.datetime:
@@ -38,7 +38,8 @@ def now() -> dt.datetime:
 
 # ---------------------------------------------------------------- bank
 
-def load_bank(category: str | None = None, bank: Path = BANK) -> list[dict]:
+def load_bank(category: str | None = None, bank: Path | None = None) -> list[dict]:
+    bank = bank if bank is not None else HERE / load()["paths"]["bank"]
     exams = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(bank.glob("*.json"))]
     return [e for e in exams if category in (None, e["category"])]
 
@@ -66,18 +67,18 @@ def run_proc(argv: list[str], *, cwd: Path, timeout: float, stdin: str | None = 
     except subprocess.TimeoutExpired:
         _kill_tree(proc)
         try:
-            proc.communicate(timeout=10)
+            proc.communicate(timeout=load()["limits"]["process_drain_s"])
         except (subprocess.TimeoutExpired, ValueError):
             pass
         return Reply(error=f"timed out after {timeout:g}s")
     if proc.returncode != 0:
-        return Reply(text=out or "", error=f"exit {proc.returncode}: {_one_line(out)[-300:]}")
+        return Reply(text=out or "", error=f"exit {proc.returncode}: {_one_line(out)[-load()["limits"]["result_chars"]:]}")
     return Reply(text=out or "")
 
 
 def _kill_tree(proc: subprocess.Popen) -> None:
     if os.name == "nt":
-        subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True, timeout=60)
+        subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True, timeout=load()["limits"]["kill_tree_s"])
     else:
         import signal
         try:
@@ -127,10 +128,10 @@ def _code_block(text: str) -> str | None:
 def _run_test(exam: dict, cwd: Path) -> tuple[bool, str]:
     cmd = [sys.executable, *exam["grader"]["cmd"]]
     try:
-        r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=60)
+        r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=load()["limits"]["grader_s"])
     except subprocess.TimeoutExpired:
         return False, "test timed out"
-    return r.returncode == 0, _one_line(r.stderr)[-200:]
+    return r.returncode == 0, _one_line(r.stderr)[-load()["limits"]["detail_chars"]:]
 
 
 def grade(exam: dict, text: str, cwd: Path) -> tuple[bool, str]:
@@ -176,7 +177,7 @@ def grade(exam: dict, text: str, cwd: Path) -> tuple[bool, str]:
         got = _json_in(text)
         if got is None:
             return False, "no JSON object"
-        return got == g["answer"], ("exact match" if got == g["answer"] else f"got {json.dumps(got)[:200]}")
+        return got == g["answer"], ("exact match" if got == g["answer"] else f"got {json.dumps(got)[:load()["limits"]["detail_chars"]]}")
     return False, f"unknown grader {kind!r}"
 
 
@@ -184,7 +185,8 @@ def grade(exam: dict, text: str, cwd: Path) -> tuple[bool, str]:
 
 def run_exam(agent, exam: dict, timeout: float | None = None) -> dict:
     """One agent, one exam, in its own temp dir. Never raises: a crash scores a fail."""
-    t = float(timeout or exam.get("timeout_s", 120))
+    limits = load()["limits"]
+    t = float(timeout or exam.get("timeout_s", limits["exam_s"]))
     tmp = Path(tempfile.mkdtemp(prefix=f"exam-{exam['id']}-"))
     start = time.monotonic()
     try:
@@ -194,18 +196,20 @@ def run_exam(agent, exam: dict, timeout: float | None = None) -> dict:
             reply = agent(exam["prompt"], tmp, t)
         except Exception as e:  # a broken agent is a fail with its reason, never a stopped run
             reply = Reply(error=f"{type(e).__name__}: {e}")
-        secs = round(time.monotonic() - start, 1)
+        secs = round(time.monotonic() - start, limits["seconds_digits"])
         if reply.unavailable:
             return {"exam": exam["id"], "skipped": reply.unavailable, "seconds": secs}
         if reply.error and not reply.text:
-            return {"exam": exam["id"], "ok": False, "seconds": secs, "error": reply.error[:300], "answered": False}
+            return {"exam": exam["id"], "ok": False, "seconds": secs,
+                    "error": reply.error[:limits["result_chars"]], "answered": False}
         try:
             ok, why = grade(exam, reply.text, tmp)
         except Exception as e:
             ok, why = False, f"grader crashed: {type(e).__name__}: {e}"
-        res = {"exam": exam["id"], "ok": ok, "seconds": secs, "why": why[:300], "answered": True}
+        res = {"exam": exam["id"], "ok": ok, "seconds": secs,
+               "why": why[:limits["result_chars"]], "answered": True}
         if reply.error:
-            res["error"] = reply.error[:300]
+            res["error"] = reply.error[:limits["result_chars"]]
         return res
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -223,7 +227,7 @@ def run(agents: dict, exams: list[dict], *, scores_file: Path | None = None, tim
                 log(f"{name:<22} {exam['id']:<14} SKIPPED  {res['skipped']}")
                 # not a scored fail, but the router must not send it work until it answers again
                 scores.setdefault("skipped", {})[name] = {"at": now().isoformat(timespec="seconds"),
-                                                         "why": res["skipped"][:200]}
+                                                         "why": res["skipped"][:load()["limits"]["detail_chars"]]}
                 save_scores(scores, path)
                 break  # the agent can't take work at all; don't ask it 14 more times
             record(scores, name, exam["category"], res)
@@ -258,7 +262,7 @@ def record(scores: dict, agent: str, category: str, res: dict, when: dt.datetime
     entry = {"at": (when or now()).isoformat(timespec="seconds"), **{k: v for k, v in res.items() if k != "skipped"}}
     rows = scores["agents"].setdefault(agent, {}).setdefault(category, [])
     rows.append(entry)
-    del rows[:-KEEP]
+    del rows[:-load()["scores"]["keep"]]
 
 
 def _all_rows(cats: dict) -> list[dict]:
@@ -266,25 +270,28 @@ def _all_rows(cats: dict) -> list[dict]:
 
 
 def not_working(scores: dict, at: dt.datetime | None = None) -> dict[str, str]:
-    """agent -> why: its last 3 results all failed, or it hasn't answered in 24 h."""
+    """agent -> why, using the configured failure streak and silence window."""
+    data = load()
+    policy, detail_chars = data["scores"], data["limits"]["detail_chars"]
     at = at or now()
     out = {}
     for agent, skip in scores.get("skipped", {}).items():
         rows = _all_rows(scores["agents"].get(agent, {}))
         if not rows or dt.datetime.fromisoformat(skip["at"]) > dt.datetime.fromisoformat(rows[-1]["at"]):
-            out[agent] = f"can't take work ({skip['at'][:16]}): {skip['why']}"[:200]
+            out[agent] = f"can't take work ({skip['at'][:16]}): {skip['why']}"[:detail_chars]
     for agent, cats in scores["agents"].items():
         rows = _all_rows(cats)
         if not rows or agent in out:
             continue
-        last = rows[-DOWN_AFTER:]
-        if len(last) == DOWN_AFTER and not any(r.get("ok") for r in last):
-            out[agent] = f"last {DOWN_AFTER} results failed ({last[-1].get('error') or last[-1].get('why', '')})"[:200]
+        last = rows[-policy["down_after"]:]
+        if len(last) == policy["down_after"] and not any(r.get("ok") for r in last):
+            why = last[-1].get("error") or last[-1].get("why", "")
+            out[agent] = f"last {policy['down_after']} results failed ({why})"[:detail_chars]
             continue
         answered = [r for r in rows if r.get("answered", True)]
         if not answered:
             out[agent] = "has never answered"
-        elif at - dt.datetime.fromisoformat(answered[-1]["at"]) > dt.timedelta(hours=SILENT_HOURS):
+        elif at - dt.datetime.fromisoformat(answered[-1]["at"]) > dt.timedelta(hours=policy["silent_hours"]):
             out[agent] = f"no answer since {answered[-1]['at'][:16]}"
     return out
 
@@ -314,7 +321,8 @@ def best(scores: dict, category: str, among: list[str] | None = None, at: dt.dat
             cands.append({"agent": agent, "category": category, **s})
     if not cands:
         return None
-    others = [c for c in cands if c["agent"] != "claude"]
+    fallback_agents = load()["scores"]["fallback_agents"]
+    others = [c for c in cands if c["agent"] not in fallback_agents]
     pool = others or cands
     pool.sort(key=lambda c: (-c["pass_rate"], c["median_s"], c["agent"]))
     return pool[0]
@@ -326,7 +334,7 @@ def vault_dir() -> Path | None:
     raw = os.environ.get("ORCHESTRA_VAULT_DIR")
     if raw is None:
         try:
-            raw = json.loads((REPO / "orchestra" / "config.json").read_text(encoding="utf-8")).get("vault_dir", "")
+            raw = json.loads((REPO / load()["paths"]["orchestra_config"]).read_text(encoding="utf-8")).get("vault_dir", "")
         except (OSError, ValueError):
             raw = ""
     if not raw:
@@ -337,6 +345,8 @@ def vault_dir() -> Path | None:
 
 def render_note(scores: dict, at: dt.datetime | None = None) -> str:
     at = at or now()
+    policy = load()
+    categories = policy["categories"]
     day = at.date().isoformat()
     down = not_working(scores, at)
     agents = sorted(scores["agents"])
@@ -345,20 +355,20 @@ def render_note(scores: dict, at: dt.datetime | None = None) -> str:
              f"updated: {day}", "type: generated", "tags: [orchestra, agents]", "---", "",
              "# Agent scores", "",
              f"Generated {at.isoformat(timespec='minutes')} by `python -m orchestra.exams`. Don't edit: the next run overwrites it.",
-             f"Each cell: pass rate (passed/taken) and median seconds over the last {KEEP} results.", "",
-             "| Agent | " + " | ".join(CATEGORIES) + " | Last pass |",
-             "|---|" + "---|" * len(CATEGORIES) + "---|"]
+             f"Each cell: pass rate (passed/taken) and median seconds over the last {policy['scores']['keep']} results.", "",
+             "| Agent | " + " | ".join(categories) + " | Last pass |",
+             "|---|" + "---|" * len(categories) + "---|"]
     for a in agents:
         cells = []
-        for c in CATEGORIES:
+        for c in categories:
             s = stats(scores["agents"][a].get(c, []))
             cells.append(f"{s['pass_rate']:.0%} ({s['passed']}/{s['n']}), {s['median_s']:.0f}s" if s["n"] else "-")
         lp = last_pass(scores["agents"][a])
         lines.append(f"| {a} | " + " | ".join(cells) + f" | {lp[:10] if lp else 'never'} |")
     if not agents:
-        lines.append("| (no results yet) |" + " |" * (len(CATEGORIES) + 1))
+        lines.append("| (no results yet) |" + " |" * (len(categories) + 1))
     lines += ["", "## Best per category", ""]
-    for c in CATEGORIES:
+    for c in categories:
         b = best(scores, c, at=at)
         lines.append(f"- {c}: " + (f"**{b['agent']}** ({b['pass_rate']:.0%}, {b['median_s']:.0f}s)" if b else "no measured answer; the fixed rules decide"))
     lines += ["", "## Not working", ""]
@@ -370,7 +380,7 @@ def write_note(scores: dict, vault: Path | None = None, at: dt.datetime | None =
     vault = vault or vault_dir()
     if not vault or not vault.is_dir():
         return None
-    note = vault / "Dev" / "Agent-Scores.md"
+    note = vault / load()["paths"]["note"]
     note.parent.mkdir(parents=True, exist_ok=True)
     note.write_text(render_note(scores, at), encoding="utf-8")
     return note

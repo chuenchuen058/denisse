@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 from . import core
+from .settings import load
 from .lane_for import category_for
 
 
@@ -47,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--include-claude", action="store_true", help="also examine claude (uses Chuen's allowance)")
         p.add_argument("--timeout", type=float, help="per-exam timeout, seconds")
         if name == "run":
-            p.add_argument("--category", choices=core.CATEGORIES)
+            p.add_argument("--category", choices=load()["categories"])
     p = sub.add_parser("best")
     p.add_argument("category", help="exam category, or an agent hub route kind (code_change, summarise, ...)")
     p.add_argument("--among", help="comma-separated agents to choose from")
@@ -74,8 +75,8 @@ def main(argv: list[str] | None = None) -> int:
         exams = core.load_bank(a.category)
         scores = core.run(_agents(a), exams, scores_file=scores_file, timeout=a.timeout)
     else:  # canary
-        exams = [e for e in core.load_bank() if e.get("canary")][:1]
-        scores = core.run(_agents(a), exams, scores_file=scores_file, timeout=a.timeout or 30)
+        exams = [e for e in core.load_bank() if e.get("canary")][:load()["canary"]["count"]]
+        scores = core.run(_agents(a), exams, scores_file=scores_file, timeout=a.timeout or load()["canary"]["timeout_s"])
     _finish(scores, a)
     return 0
 

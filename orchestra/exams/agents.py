@@ -18,10 +18,9 @@ import urllib.request
 from pathlib import Path
 
 from .core import Reply, run_proc
+from .settings import load
 
-OLLAMA = os.environ.get("OLLAMA_HOST_URL", "http://127.0.0.1:11434")
-NOT_SERVED = re.compile(r"IneligibleTier|no longer supported|not (signed|logged) in|please log ?in|unauthori[sz]ed"
-                        r"|usage limit|quota exceeded", re.I)
+OLLAMA = os.environ.get("OLLAMA_HOST_URL", load()["agents"]["ollama_url"])
 
 
 def _lanes() -> dict:
@@ -49,8 +48,8 @@ def _npm_entry(pkg: str, name: str) -> str | None:
 
 def _refused(r: Reply) -> Reply:
     """An agent that says it can't take work at all is skipped, not failed."""
-    m = NOT_SERVED.search(r.text or "") if r.error else None
-    return Reply(unavailable=m.group(0) + ": " + (r.error or "")[:150]) if m else r
+    m = re.search(load()["agents"]["not_served_pattern"], r.text or "", re.I) if r.error else None
+    return Reply(unavailable=m.group(0) + ": " + (r.error or "")[:load()["agents"]["refusal_chars"]]) if m else r
 
 
 def codex(prompt: str, cwd: Path, timeout: float) -> Reply:
@@ -58,7 +57,7 @@ def codex(prompt: str, cwd: Path, timeout: float) -> Reply:
     exe = _exe(argv[0]) if argv else None
     if not exe:
         return Reply(unavailable="codex lane not found")
-    last = cwd / ".codex-last.txt"
+    last = cwd / load()["agents"]["codex_last_file"]
     rest = argv[1:-1] if argv[-1] == "-" else argv[1:]
     argv = [exe, *rest, "-C", str(cwd), "-o", str(last), "-"]  # "-" = prompt on stdin
     r = _refused(run_proc(argv, cwd=cwd, timeout=timeout, stdin=prompt, env=_env()))
@@ -103,12 +102,13 @@ def gemini(prompt: str, cwd: Path, timeout: float) -> Reply:
     node = shutil.which("node")
     if not entry or not node:
         return Reply(unavailable="Gemini CLI not found")
-    argv = [node, entry, "--approval-mode", "auto_edit", "-o", "text", "-p", "Do the task given above."]
+    argv = [node, entry, "--approval-mode", "auto_edit", "-o", "text", "-p", load()["agents"]["gemini_prompt"]]
     return _refused(run_proc(argv, cwd=cwd, timeout=timeout, stdin=prompt, env=_env()))
 
 
-def ollama_models(timeout: float = 3) -> list[str]:
+def ollama_models(timeout: float | None = None) -> list[str]:
     """Installed Ollama models, or [] if Ollama isn't running."""
+    timeout = load()["agents"]["discovery_timeout_s"] if timeout is None else timeout
     try:
         with urllib.request.urlopen(f"{OLLAMA}/api/tags", timeout=timeout) as resp:
             return [m["name"] for m in json.load(resp).get("models", [])]
@@ -118,8 +118,10 @@ def ollama_models(timeout: float = 3) -> list[str]:
 
 def local(model: str):
     def ask(prompt: str, cwd: Path, timeout: float) -> Reply:
-        files = "".join(f"\n\n--- {p.name} ---\n{p.read_text(encoding='utf-8')}" for p in sorted(cwd.glob("*.py")))
-        body = json.dumps({"model": model, "prompt": prompt + (f"\n\nThe files:{files}" if files else ""),
+        policy = load()["agents"]
+        files = "".join(policy["local_file_template"].format(name=p.name, content=p.read_text(encoding="utf-8"))
+                        for p in sorted(cwd.glob(policy["local_file_glob"])))
+        body = json.dumps({"model": model, "prompt": prompt + (policy["local_files_prompt"].format(files=files) if files else ""),
                            "stream": False}).encode()
         req = urllib.request.Request(f"{OLLAMA}/api/generate", data=body, headers={"Content-Type": "application/json"})
         try:

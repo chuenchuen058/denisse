@@ -17,14 +17,9 @@ import re
 from pathlib import Path
 
 from . import core
+from .settings import load
 from .core import BadOutput, Ctx, Skip
 
-MAX_ITEMS = 25          # evidence items per scout call
-MAX_ITEM_CHARS = 300    # each item's text (and quote) is cut to this
-MAX_LOG_BYTES = 64_000  # newest part of runner.log read per scan
-REPORT_CHARS = 6000     # librarian input
-LOG_SIGNAL = re.compile(r"\b(PARKED|FAIL|PARTIAL|PASS-REJECTED|REVIEW-BLOCKED|INTEGRATION-REJECTED|NO_REPORT"
-                        r"|TIMEOUT|Traceback|ERROR|error|broken)\b")
 SECTION = re.compile(r"^(RESULT|GATE|HUMAN|PREMISE|DONE|NOT DONE|ODD|COMMITS):", re.M)
 
 
@@ -38,7 +33,7 @@ def _mtime(p: Path) -> dt.datetime:
 
 def _cut(s: str) -> str:
     s = s.strip()
-    return s[:MAX_ITEM_CHARS]
+    return s[:load()["collection"]["item_chars"]]
 
 
 def report_sections(text: str) -> dict:
@@ -60,6 +55,7 @@ def report_sections(text: str) -> dict:
 def collect(ctx: Ctx, cursor: dict) -> tuple[list[dict], dict]:
     """Evidence since the cursor, bounded. Returns (items, new cursor). Every item's quote is
     an exact substring of its file, so admission can re-check the premise later."""
+    policy = load()["collection"]
     since = dt.datetime.fromisoformat(cursor["since"]) if cursor.get("since") else None
     items: list[dict] = []
     new = {"since": core.now().isoformat()}
@@ -70,15 +66,15 @@ def collect(ctx: Ctx, cursor: dict) -> tuple[list[dict], dict]:
         off = int(cursor.get("log_offset", 0))
         if off > size:  # rotated or truncated
             off = 0
-        start = max(off, size - MAX_LOG_BYTES)
+        start = max(off, size - policy["log_bytes"])
         with log.open("rb") as f:
             f.seek(start)
             chunk = f.read().decode("utf-8", errors="replace")
         if start != off:  # started mid-file: drop the partial first line
             chunk = chunk.split("\n", 1)[1] if "\n" in chunk else ""
         new["log_offset"] = size
-        lines = [l.strip() for l in chunk.splitlines() if LOG_SIGNAL.search(l)]
-        for l in lines[-12:]:
+        lines = [l.strip() for l in chunk.splitlines() if re.search(policy["log_signal_pattern"], l)]
+        for l in lines[-policy["log_lines"]:]:
             items.append({"source": ctx.rel(log), "time": l[:19], "text": _cut(l)})
 
     def fresh(p: Path) -> bool:
@@ -95,12 +91,12 @@ def collect(ctx: Ctx, cursor: dict) -> tuple[list[dict], dict]:
             continue
         secs = report_sections(rep.read_text(encoding="utf-8", errors="replace"))
         n = 0
-        for name in ("NOT DONE", "ODD"):
+        for name in policy["report_sections"]:
             for b in secs.get(name, []):
                 text = b[2:].strip() if b.startswith("- ") else b
-                if not text or text.lower().strip(".") in ("none", "nothing", "-", "n/a"):
+                if not text or text.lower().strip(".") in policy["empty_bullets"]:
                     continue
-                if n < 6:
+                if n < policy["report_items"]:
                     items.append({"source": ctx.rel(rep), "time": _mtime(rep).isoformat(),
                                   "section": name, "text": _cut(text)})
                     n += 1
@@ -116,7 +112,7 @@ def collect(ctx: Ctx, cursor: dict) -> tuple[list[dict], dict]:
         except (OSError, ValueError, AttributeError):
             pass
 
-    items = items[-MAX_ITEMS:]
+    items = items[-policy["max_items"]:]
     for i, it in enumerate(items, 1):
         it["id"] = f"E{i}"
     return items, new
@@ -153,7 +149,7 @@ def scout(ctx: Ctx) -> dict:
     st["scout"] = {**st.get("scout", {}), **cursor}
     ctx.save_state(st)
     ctx.log(f"scout: {len(items)} evidence items -> {len(out['candidates'])} candidates ({ctx.rel(path)})"
-            + ("" if out["candidates"] else f"; nothing because: {out['nothing_because'][:150]}"))
+            + ("" if out["candidates"] else f"; nothing because: {out['nothing_because'][:load()['logging']['reason_chars']]}"))
     out["path"] = str(path)
     return out
 
@@ -162,23 +158,26 @@ def scout(ctx: Ctx) -> dict:
 
 def _test_files(repo: Path) -> list[str]:
     found = []
-    for pat in ("orchestra/**/test_*.py", "orchestra/**/test_*.mjs", "scripts/test_*.py", "eval/test_*.py",
-                "atrium/**/test_*.py", "test_*.py"):
-        found += [p.relative_to(repo).as_posix() for p in repo.glob(pat) if ".venv" not in p.parts]
-    return sorted(set(found))[:80]
+    policy = load()["planner"]
+    for pat in policy["test_globs"]:
+        found += [p.relative_to(repo).as_posix() for p in repo.glob(pat)
+                  if not set(policy["excluded_dirs"]).intersection(p.parts)]
+    return sorted(set(found))[:policy["max_test_files"]]
 
 
 def plan(ctx: Ctx, candidate: dict, *, admit_it: bool = False, lane: str | None = None) -> dict:
     """One candidate -> one packet (validated against planner.schema.json). With admit_it,
     hand it to orchestra/admission.py, which alone writes the queue."""
     from orchestra import admission
+    policy = load()["planner"]
     role = core.load_role("planner")
     gates = admission.load_gates(ctx.repo)
     payload = {
         "problem": candidate["problem"],
         "evidence": [{"source": e["source"], "text": e["text"], **({"section": e["section"]} if e.get("section") else {})}
                      for e in candidate["evidence_items"]],
-        "gates": {gid: {"about": g["about"], "takes": g["arg"] or "no argument"} for gid, g in gates["gates"].items()},
+        "gates": {gid: {"about": g["about"], "takes": g["arg"] or policy["no_argument_text"]}
+                  for gid, g in gates["gates"].items()},
         "areas": {name: {"paths": a["paths"], "gates": a["gates"]} for name, a in gates["areas"].items()},
         "test_files": _test_files(ctx.repo),
     }
@@ -190,7 +189,8 @@ def plan(ctx: Ctx, candidate: dict, *, admit_it: bool = False, lane: str | None 
     result = admission.admit(packet, ctx.repo, lane=lane) if admit_it else None
     d = ctx.home / "plans"
     d.mkdir(parents=True, exist_ok=True)
-    path = d / f"{_stamp()}-{re.sub(r'[^a-z0-9]+', '-', ans['title'].lower())[:40].strip('-')}.json"
+    slug = re.sub(r"[^a-z0-9]+", "-", ans["title"].lower())[:policy["slug_chars"]].strip("-")
+    path = d / f"{_stamp()}-{slug}.json"
     path.write_text(json.dumps({"packet": packet, "admission": result}, indent=2, ensure_ascii=False), encoding="utf-8")
     ctx.log(f"planner: {ans['title']!r} -> " + (f"{result['kind']}: {result['reason']}" if result
                                                  else f"packet only ({ctx.rel(path)})"))
@@ -205,19 +205,20 @@ def latest_candidates(ctx: Ctx) -> Path | None:
 # ---------------------------------------------------------------- librarian
 
 def librarian(ctx: Ctx, report: Path) -> dict:
-    """≤3 FOR MEMORY lines with provenance, saved as data. Never touches the vault."""
+    """Schema-bounded FOR MEMORY lines with provenance, saved as data; never to the vault."""
+    policy = load()["librarian"]
     role = core.load_role("librarian")
     text = report.read_text(encoding="utf-8", errors="replace")
     rel = ctx.rel(report)
     result = (re.match(r"\s*RESULT:\s*(\w+)", text) or [None, "?"])[1]
-    ans = core.ask(ctx, role, {"report_path": rel, "report": text[:REPORT_CHARS]})
+    ans = core.ask(ctx, role, {"report_path": rel, "report": text[:policy["report_chars"]]})
     lines = []
-    for l in ans["lines"][:3]:
+    for l in ans["lines"][:role.schema["properties"]["lines"]["maxItems"]]:
         body = " ".join(l["text"].split()).rstrip(".")
-        if re.search(r"[\w.+-]+@[\w-]+\.\w+|(?i:password|api[_ ]?key|secret|token)\s*[:=]", body):
+        if re.search(policy["private_pattern"], body):
             continue  # never pass on anything that looks like a credential or address
-        lines.append({"text": f"FOR MEMORY: {body}. (source: {rel}, {l['section']}, RESULT {result}; "
-                              f"local-team librarian v{role.version})",
+        lines.append({"text": policy["line_template"].format(
+                          body=body, report=rel, section=l["section"], result=result, version=role.version),
                       "section": l["section"], "provenance": rel})
     slug = report.name[:-len(".report.md")] if report.name.endswith(".report.md") else report.stem
     d = ctx.home / "memory"
@@ -237,11 +238,19 @@ def new_reports(ctx: Ctx) -> list[Path]:
 def mark_librarian_done(ctx: Ctx, report: Path) -> None:
     st = ctx.state()
     lib = st.setdefault("librarian", {})
-    lib["done"] = (lib.get("done", []) + [ctx.rel(report)])[-500:]
+    lib["done"] = (lib.get("done", []) + [ctx.rel(report)])[-load()["librarian"]["history_count"]:]
     ctx.save_state(st)
 
 
 # ---------------------------------------------------------------- producer
+
+def ranked_candidates(candidates: list[dict]) -> list[dict]:
+    """Use the same configured priorities in production and the baseline."""
+    policy = load()["planner"]
+    order = {worth: i for i, worth in enumerate(policy["worth_order"])}
+    return sorted((c for c in candidates if c["worth"] not in policy["ignored_worth"]),
+                  key=lambda c: order[c["worth"]])
+
 
 def produce(ctx: Ctx, lane: str | None = None) -> dict:
     """One bounded pass: librarian on a few new reports, then (if the queue is short) one
@@ -263,8 +272,7 @@ def produce(ctx: Ctx, lane: str | None = None) -> dict:
         return summary
     found = scout(ctx)
     summary["candidates"] = len(found["candidates"])
-    order = {"high": 0, "medium": 1, "low": 2}
-    picks = sorted((c for c in found["candidates"] if c["worth"] != "low"), key=lambda c: order[c["worth"]])
+    picks = ranked_candidates(found["candidates"])
     for c in picks[: ctx.cfg["producer_plans_per_run"]]:
         try:
             res = plan(ctx, c, admit_it=True, lane=lane)
@@ -272,6 +280,6 @@ def produce(ctx: Ctx, lane: str | None = None) -> dict:
             ctx.log(f"planner: bad answer for {c['id']}: {e}")
             continue
         summary["admission"].append(res["admission"])
-        if res["admission"]["kind"] in ("queue-full", "rate"):
+        if res["admission"]["kind"] in load()["planner"]["stop_admissions"]:
             break
     return summary
