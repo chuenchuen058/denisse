@@ -83,14 +83,20 @@
   },
 
   "interaction": {
-    "_doc": "Dragging the orb and how long each little reaction lasts.",
+    "_doc": "Dragging the orb, how long each little reaction lasts and which mood it shows (a mood names an animation.speed / animation.motion entry): pressing, releasing and hovering the orb, pressing a dock button, the speech bubble, and any react() call that names no mood.",
     "drag_threshold_px": 4,
     "drag_min_interval_s": 0.016,
     "react_press_s": 1.0,
     "react_release_s": 1.2,
     "react_hover_s": 0.8,
     "react_default_s": 2.0,
-    "react_dock_s": 1.0
+    "react_dock_s": 1.0,
+    "press_mood": "happy",
+    "release_mood": "happy",
+    "hover_mood": "happy",
+    "dock_mood": "happy",
+    "say_mood": "listening",
+    "default_mood": "happy"
   },
 
   "bubble": {
@@ -109,8 +115,31 @@
   },
 
   "dock": {
-    "_doc": "Hover dock under the orb. buttons run left to right; action is which of tray's callbacks it calls (chat, voice, reminders), icon which glyph it draws (chat, mic, bell). The button whose action is voice lights up while wake-word listening is on.",
+    "_doc": "Hover dock under the orb. buttons run left to right; action is which of tray's callbacks it calls (chat, voice, reminders), icon which of glyphs.shapes it draws. The button whose action is voice lights up while wake-word listening is on.",
     "title": "Denisse controls",
+    "glyphs": {
+      "_doc": "The dock's outline icons, drawn on a canvas x canvas square and scaled to layout.icon_size. Each shape is a list of strokes, all stroke px wide: rounded_rectangle (xy = x0, y0, x1, y1; radius), arc (xy = the bounding box; start and end in degrees, clockwise from 3 o'clock) or line (xy = x0, y0, x1, y1, ... joined smoothly). Add a shape here and a button can use it by name.",
+      "canvas": 96,
+      "stroke": 6,
+      "shapes": {
+        "chat": [
+          {"op": "rounded_rectangle", "xy": [17, 19, 79, 66], "radius": 12},
+          {"op": "line", "xy": [29, 66, 25, 79, 44, 66]}
+        ],
+        "mic": [
+          {"op": "rounded_rectangle", "xy": [36, 13, 60, 57], "radius": 12},
+          {"op": "arc", "xy": [24, 29, 72, 71], "start": 0, "end": 180},
+          {"op": "line", "xy": [48, 71, 48, 83]},
+          {"op": "line", "xy": [35, 83, 61, 83]}
+        ],
+        "bell": [
+          {"op": "arc", "xy": [24, 17, 72, 65], "start": 180, "end": 360},
+          {"op": "line", "xy": [24, 41, 24, 60, 16, 70, 80, 70, 72, 60, 72, 41]},
+          {"op": "arc", "xy": [39, 69, 57, 85], "start": 0, "end": 180},
+          {"op": "line", "xy": [48, 11, 48, 17]}
+        ]
+      }
+    },
     "buttons": [
       {"action": "chat", "label": "Chat", "icon": "chat"},
       {"action": "voice", "label": "Voice", "icon": "mic"},
