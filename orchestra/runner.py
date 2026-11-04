@@ -1156,6 +1156,10 @@ def run_reviewer(task: Task, wt: Path, branch: str, report: Path, why: str) -> d
     if verdict is None and detect_auth("claude", log_path):
         return {"verdict": "unavailable", "reasons": auth_hit(detect_auth("claude", log_path)),
                 "seconds": seconds, "cost_usd": cost}
+    if verdict is None and detect_limit("claude", log_path):
+        # 4 Nov 00:30: the reviewer hit the 5-hour limit and a good PASS was parked as "blocked"
+        return {"verdict": "unavailable", "reasons": detect_limit("claude", log_path)[:300],
+                "seconds": seconds, "cost_usd": cost}
     if verdict is None:
         return {"verdict": "block", "reasons": "reviewer gave no VERDICT line: " + reasons[-300:],
                 "seconds": seconds, "cost_usd": cost}
