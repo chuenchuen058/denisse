@@ -1,0 +1,803 @@
+{
+  "_about": "The shipped defaults for brain.json (AGENTS.md Rule 0): what brain.py says, matches and limits, outside the system prompt and tool descriptions. brain.json is the live copy; keep the two equal (scripts/test_brain_config.py checks). A missing or bad value falls back to this file with one warning (json_config.py). Every value under a key named pattern / patterns, or ending in _pattern / _patterns, is a Python regex; a list of patterns is joined with | in order. Patterns are case-insensitive, except the *word_pattern values (run on lower-cased text), the path patterns, news.strip_prefix_pattern and honesty.negated_before_pattern, which match as written. Text values are Python format strings whose {fields} are fixed by the default. Keys starting with _ are notes.",
+  "limits": {
+    "_about": "num_ctx and max_tool_rounds keep their env overrides (DENISSE_NUM_CTX, DENISSE_MAX_TOOL_ROUNDS). num_ctx was raised 4096 -> 8192 on 2026-09-05 after measuring; the 8 GB GPU has ~2 GB headroom, so don't raise it without re-running eval/run_eval.py. max_tool_rounds bounds one turn's tool loop; on the last round tools are withheld so the model has to answer in words. shown_request_chars: how much of his request a 'You asked: ...' reply quotes. result_preview_chars: how much of each tool result an honesty nudge or a done-summary quotes. rejected_reply_chars: how much of a rejected answer the retry note repeats. notes_quote_chars: the notes quoted when a retry still says it found nothing. vault_excerpt_chars: the excerpt shown when a reply denies vault access over a real result.",
+    "num_ctx": 8192,
+    "max_tool_rounds": 6,
+    "shown_request_chars": 80,
+    "ellipsis": "...",
+    "result_preview_chars": 120,
+    "rejected_reply_chars": 200,
+    "notes_quote_chars": 400,
+    "vault_excerpt_chars": 900
+  },
+  "chat": {
+    "_about": "Options on every ollama.chat call. temperature 0.2: Ollama's default (~0.8) answered the same question with a correct summary one run and a non-sequitur the next; 4/4 clean at 0.2 with no loss of personality on chat. keep_alive -1 keeps the model loaded (a cold reload is ~4-6 s).",
+    "temperature": 0.2,
+    "keep_alive": -1
+  },
+  "style_examples": {
+    "_about": "Made-up exchanges in her voice, placed between the system prompt and the real conversation (2026-10-22: she talked in report-voice, and the model copies the conversation it is shown). Tool results use the real formats so the examples look like her own turns. No prompt here may match an eval case, or the suite measures recall of the example. Switched by style_examples in memory/brain_rules.json or DENISSE_STYLE_EXAMPLES.",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Here are a few made-up example exchanges showing how you sound. They never happened -- never mention them. The real conversation follows."
+      },
+      {
+        "role": "user",
+        "content": "yo"
+      },
+      {
+        "role": "assistant",
+        "content": "Hey Chuen. What's up?"
+      },
+      {
+        "role": "user",
+        "content": "what's 12 times 4?"
+      },
+      {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "function": {
+              "name": "calculate",
+              "arguments": {
+                "expression": "12*4"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "12*4 = 48"
+      },
+      {
+        "role": "assistant",
+        "content": "48."
+      },
+      {
+        "role": "user",
+        "content": "remind me to email Ben friday at 5"
+      },
+      {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "function": {
+              "name": "add_task",
+              "arguments": {
+                "text": "email Ben",
+                "due": "friday 5pm"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "Added: email Ben (Fri 17:00)"
+      },
+      {
+        "role": "assistant",
+        "content": "Got it -- I'll remind you to email Ben on Friday at 5."
+      },
+      {
+        "role": "user",
+        "content": "cats or dogs?"
+      },
+      {
+        "role": "assistant",
+        "content": "Dogs, probably. Cats do have the better attitude though. You?"
+      },
+      {
+        "role": "user",
+        "content": "cheers"
+      },
+      {
+        "role": "assistant",
+        "content": "Anytime."
+      }
+    ]
+  },
+  "json_leak": {
+    "_about": "A reply that is really a JSON status object (2026-09-23: '{\"status\": \"success\", ...}' to a tick-off). fields: the first of these holding text is said instead; else the last tool result; else fallback.",
+    "fields": [
+      "message",
+      "output",
+      "result",
+      "response",
+      "text",
+      "content"
+    ],
+    "fallback": "Done."
+  },
+  "reply_nets": {
+    "_about": "Nets under the model's reply. tool_narration: a reply made ENTIRELY of commentary on her own tool use ('No tool call needed for that.'); one retry with plain_reply_nudge. tool_talk: narration wrapped round a real answer ('I called the get_weather tool...'); any tool name containing _ counts too. tool_lead_in: lead-ins cut from the front of such a sentence; if fewer than min_words_kept survive the cut, the original stands. didnt_catch: 'I didn't catch that' to a message of at least clear_message_min_words words (word_pattern) gets one retry without the history. role_prefix: the chat template's role marker emitted as text ('assistant\\n\\nNo worries.'), lowercase as observed.",
+    "tool_narration_pattern": "^\\s*(?:no|none|there(?:'s| is) no|i don'?t need)\\b[^.!?\\n]*\\b(?:tools?|functions?|json)(?:\\s+(?:calls?|responses?))?\\b[^.!?\\n]*[.!]?\\s*$",
+    "plain_reply_nudge": "Your last draft talked about tools instead of answering. Reply to his last message the way a person would, in a few words, and don't mention tools or functions.",
+    "tool_talk_patterns": [
+      "i (?:called|used|ran|invoked)",
+      "called the",
+      "tool calls?",
+      "function calls?",
+      "the tool",
+      "the function",
+      "according to the (?:tool|function)"
+    ],
+    "tool_lead_in_pattern": "^(?:according to the (?:tool|function)[^,]*,\\s*|i (?:called|used|ran|checked) [^,]*?(?:tool|function)[^,]*,\\s*(?:and\\s+)?(?:it|that)\\s+(?:said|says|shows?|showed|returned|reports?|reported)\\s+(?:that\\s+)?)",
+    "min_words_kept": 4,
+    "didnt_catch_patterns": [
+      "didn'?t\\s+(?:quite\\s+)?catch",
+      "\\brephrase\\b",
+      "say\\s+that\\s+again",
+      "ask\\s+that\\s+again",
+      "^\\s*what\\s+do\\s+you\\s+mean\\??\\s*$"
+    ],
+    "clear_message_min_words": 3,
+    "word_pattern": "[A-Za-z][A-Za-z']*",
+    "role_prefix_pattern": "^\\s*assistant\\b[:\\s]+"
+  },
+  "weather": {
+    "_about": "follow_up_place_pattern: 'and in Penang?' after a weather question -- group 1 is the place, fetched by the code (live the model answered from memory 3/3). A place that is one of not_a_place or has a time word (tool_policy.json cue time_words) is not a place. data_patterns: weather DATA words that mean the reply invented a forecast when get_weather never ran; line_patterns: the sentences then dropped; not_checked: said when nothing is left.",
+    "follow_up_place_pattern": "^\\s*(?:and|what\\s+about|how\\s+about)\\s+(?:in\\s+|for\\s+|at\\s+)?([A-Za-z][A-Za-z .'-]{1,40}?)\\s*[?.!]*\\s*$",
+    "not_a_place": [
+      "you",
+      "me",
+      "it",
+      "that",
+      "this",
+      "them",
+      "there",
+      "here",
+      "him",
+      "her",
+      "us"
+    ],
+    "data_patterns": [
+      "humidity",
+      "forecast",
+      "chance\\s+of\\s+rain",
+      "\\bhigh\\s+of\\b",
+      "\\blow\\s+of\\b",
+      "conditions\\s*:",
+      "temperature\\s*:",
+      "wind\\s+speed",
+      "uv\\s+index"
+    ],
+    "line_patterns": [
+      "humidity",
+      "forecast",
+      "chance\\s+of\\s+rain",
+      "\\bhigh\\s+of\\b",
+      "\\blow\\s+of\\b",
+      "conditions\\s*:",
+      "temperature",
+      "wind",
+      "cloudy",
+      "overcast",
+      "sunny",
+      "showers?",
+      "drizzle",
+      "°",
+      "\\bdegrees?\\b"
+    ],
+    "not_checked": "I haven't checked the weather -- ask me and I'll look it up."
+  },
+  "paths": {
+    "_about": "His standing asks of 2026-10-31: no file paths read out. windows_path_pattern (case-sensitive; named group 'name' is the file or folder name) finds the paths in a reply; each becomes its name, then ask is appended once, and the full paths are kept for a yes_pattern answer (max_shown of them). wants_path_patterns: he asked for the path, so it is kept. search_miss_pattern -> search_miss_replacement shortens find_files' 'No files matching ... found in <folders>' line. any_path_pattern: any Windows path in text, for the file-reply checks.",
+    "windows_path_pattern": "(?:[A-Za-z]:|\\\\\\\\)(?:[\\\\/][^\\\\/\\r\\n]+)*[\\\\/](?P<name>[^\\\\/\\r\\n]*?\\.[A-Za-z0-9]{2,5}(?=$|[\\s,;:)\\]'\\\"!?]|\\.(?:\\s|$))|[^\\\\/\\s,;:)\\]'\\\"]+)",
+    "ask": "Want the full path?",
+    "wants_path_patterns": [
+      "\\b(?:what'?s|whats|what\\s+is|give|show|send|tell|copy)\\b[^.?!]{0,25}\\b(?:path|location)s?\\b",
+      "\\bfull\\s+paths?\\b",
+      "\\b(?:which|what)\\s+folder\\b"
+    ],
+    "yes_pattern": "^\\s*(?:yes|yeah|yep|yup|sure|ok(?:ay)?|please|go\\s+on|show\\s+(?:me|it|them)|(?:what'?s|give\\s+me|send\\s+me|show\\s+me)\\s+(?:the\\s+)?(?:full\\s+)?paths?)(?:[\\s,]+(?:please|thanks?|show\\s+me|the\\s+path))*[.!\\s]*$",
+    "max_shown": 5,
+    "search_miss_pattern": "(No files matching '[^']*' found) in [^.\\n]*\\.(?: That only covers the folders searched\\.)?",
+    "search_miss_replacement": "\\1 in the folders I search.",
+    "any_path_pattern": "(?:[A-Za-z]:[\\\\/]|\\\\\\\\)[^\\r\\n]+"
+  },
+  "second_person": {
+    "_about": "Notes say '<name> is a collaborator'; she reads that out to him, so his name becomes 'you' (the name is settings.user_name()'s first word). verbs: the verb after his name and its second-person form. possessive_not_before: \"<name>'s\" stays when one of these follows (\"Chuen's is\" is not possessive). verb_cues: words after the name that mark it as the subject. address_lead_ins: 'Hey Chuen' and 'Thanks, Chuen' are talking to him already and stay. possessive_replacement: what \"<name>'s\" becomes. pronouns: swapped in a sentence that changed; subject_pronoun likewise, with verbs. capitalise: these words are capitalised at the start of a sentence.",
+    "verbs": {
+      "is": "are",
+      "has": "have",
+      "was": "were",
+      "does": "do"
+    },
+    "possessive_not_before": [
+      "is",
+      "has",
+      "was"
+    ],
+    "verb_cues": [
+      "\\w+ed",
+      "can",
+      "could",
+      "will",
+      "would",
+      "should",
+      "did",
+      "had",
+      "also",
+      "said",
+      "told",
+      "wants?",
+      "needs?",
+      "asked",
+      "chose",
+      "wrote",
+      "made",
+      "built",
+      "got",
+      "went",
+      "saw",
+      "kept",
+      "left"
+    ],
+    "address_lead_ins": [
+      "Hey",
+      "hey",
+      "Hi",
+      "hi"
+    ],
+    "possessive_replacement": "your",
+    "pronouns": {
+      "his": "your",
+      "himself": "yourself"
+    },
+    "subject_pronoun": "he",
+    "subject_replacement": "you",
+    "capitalise": [
+      "you",
+      "your"
+    ]
+  },
+  "notes": {
+    "_about": "header_pattern (multiline): vault_search's dated-context header, said as header_replacement. asks_due_pattern: he asked about a deadline, so a due year in the notes is kept (specify_year). found: said over a reply that denies vault access when the notes were read. say: a retry that still says it found nothing is replaced by the notes themselves.",
+    "header_pattern": "^From your notes \\([^)]*\\):",
+    "header_replacement": "From your notes:",
+    "asks_due_pattern": "\\bdue\\b|\\bdeadline\\b",
+    "specify_year": " Your notes specify {year}.",
+    "found": "I can search your vault. Here's what I found:\n\n",
+    "say": "Here's what your notes say: "
+  },
+  "dates": {
+    "_about": "A deadline he never said: 'remind me to submit the team sign up' became 'on the 6th of October at 2 PM' (2026-10-31). due_words (whole numbers always count) are the words that pin a date; every one in the model's due has to be in his message, after due_aliases, except always_allowed.",
+    "due_words": [
+      "today",
+      "tonight",
+      "tomorrow",
+      "tmrw",
+      "tmr",
+      "tmw",
+      "yesterday",
+      "weekend",
+      "week",
+      "month",
+      "year",
+      "noon",
+      "midnight",
+      "morning",
+      "afternoon",
+      "evening",
+      "night",
+      "mon",
+      "tue",
+      "wed",
+      "thu",
+      "fri",
+      "sat",
+      "sun",
+      "jan",
+      "feb",
+      "mar",
+      "apr",
+      "may",
+      "jun",
+      "jul",
+      "aug",
+      "sep",
+      "oct",
+      "nov",
+      "dec"
+    ],
+    "due_aliases": [
+      {
+        "said": "tmrw",
+        "means": "tomorrow"
+      },
+      {
+        "said": "tmr",
+        "means": "tomorrow"
+      },
+      {
+        "said": "tmw",
+        "means": "tomorrow"
+      },
+      {
+        "said": "tonight",
+        "means": "today"
+      }
+    ],
+    "always_allowed": [
+      "today"
+    ]
+  },
+  "tasks": {
+    "_about": "deadline_only_pattern: 'before 2nd of november' said right after she added a task sets that task's deadline, if the task is under move_window_minutes old and her last reply named its first move_match_chars characters. moved: the reply. The task tools' results are said in her words (added_*, completed, removed; the store's date, never the model's). content_word_pattern / content_stop_words / min_shared_words: a reply after list_tasks must use the list's words or the list is said instead.",
+    "deadline_only_pattern": "^\\s*(?:it'?s\\s+|its\\s+|make\\s+it\\s+|actually\\s+|no,?\\s+)?(?:by|before|due|on|for|until|till|at)\\s+[\\w\\s.:'-]{2,40}?\\s*[.!?]?\\s*$",
+    "move_window_minutes": 15,
+    "move_match_chars": 30,
+    "moved": "Moved: {task}.",
+    "added_due": "Got it -- I added \"{text}\", due {due}.",
+    "added_trouble": "Got it -- I added \"{text}\", but {trouble}.",
+    "added_no_deadline": "Got it -- I added \"{text}\", no deadline.",
+    "completed": "Ticked off \"{text}\". {tail}",
+    "last_one": "That was the last one.",
+    "still_open": "{left} still open.",
+    "removed": "Removed \"{text}\" from your list.",
+    "content_word_pattern": "[a-z]{4,}",
+    "content_stop_words": [
+      "overdue",
+      "today",
+      "tomorrow",
+      "monday",
+      "tuesday",
+      "wednesday",
+      "thursday",
+      "friday",
+      "saturday",
+      "sunday",
+      "task",
+      "tasks"
+    ],
+    "min_shared_words": 2
+  },
+  "news": {
+    "_about": "A news reply with no news in it ('I've got the latest news for you.') while get_news returned headlines: the net reads max_headlines of them out. head_pattern: the result's lead-in before the list. strip_prefix_pattern: cut from a headline. A reply counts as relaying the news when it shares min_shared_words words (word_pattern) with the headlines.",
+    "head_pattern": "^[^:]*headlines[^:]*:\\s*",
+    "strip_prefix_pattern": "^Analysis:\\s*",
+    "word_pattern": "[a-z]{5,}",
+    "min_shared_words": 2,
+    "max_headlines": 3,
+    "one": "Top story on CNA: {head}.",
+    "many": "Top stories on CNA: {heads}. And {last}."
+  },
+  "honesty": {
+    "_about": "A reply that says something was DONE (learning.json claims_done) with no tool this turn confirming it. Nudges go back round the loop once, this call only: no_tool_claim when nothing ran, wrong_tool_claim ({ran}) when what ran can't do that, unconfirmed_claim ({results}) otherwise. Still unsupported: failed_reply over nothing but errors, else unconfirmed_reply. claim_needs: a done-claim matching pattern also needs one of its tools to have run. set_for: 'Timer set for 5 minutes' counts as a done-claim. delete_claim_pattern: files said to be gone, done-word or not, unless negated_before_pattern ends the negation_window_chars before it; delete_tools are the only tools that remove anything. state_tools: their result is the one true account; a reply contradicting it is replaced by the result up to result_cut_markers.",
+    "no_tool_claim_nudge": "You just said it was done, but you didn't call any tool this turn, so nothing actually happened. If one of your tools does what he asked, call it now. If none does, tell him plainly that you can't do that yet -- don't say it's done.",
+    "unconfirmed_claim_nudge": "You just said it worked, but no tool this turn confirmed that anything happened -- they returned: {results}. Don't say it worked. Either call the tool that actually does what he asked, or tell him plainly what happened.",
+    "wrong_tool_claim_nudge": "You just said it was done, but the only tools that ran this turn were {ran}, and none of them does that. Call the tool that actually does what he asked now, or tell him plainly it isn't done.",
+    "unconfirmed_reply": "I haven't confirmed that action, so I can't say it's done.",
+    "failed_reply": "I couldn't complete that action.",
+    "claim_needs": [
+      {
+        "pattern": "\\btimers?\\b",
+        "tools": [
+          "set_timer",
+          "cancel_timer",
+          "start_study_session",
+          "pause_study_session",
+          "resume_study_session",
+          "stop_study_session"
+        ]
+      },
+      {
+        "pattern": "\\btasks?\\b|\\bto-?do\\b|\\breminders?\\b",
+        "tools": [
+          "add_task",
+          "complete_task",
+          "remove_task",
+          "set_timer"
+        ]
+      },
+      {
+        "pattern": "\\b(?:playing|played|paused|resumed|skipped)\\b",
+        "tools": [
+          "play_song",
+          "pause_music",
+          "resume_music",
+          "skip_song",
+          "previous_song",
+          "pause_study_session",
+          "resume_study_session"
+        ]
+      },
+      {
+        "pattern": "\\b(?:opened|pulled up)\\b|\\bis (?:now )?open\\b",
+        "tools": [
+          "open_application"
+        ]
+      },
+      {
+        "pattern": "\\b(?:study|pomodoro|session)\\b",
+        "tools": [
+          "start_study_session",
+          "pause_study_session",
+          "resume_study_session",
+          "stop_study_session"
+        ]
+      }
+    ],
+    "set_for_pattern": "\\b(?:set|started|running)\\s+for\\b",
+    "delete_claim_pattern": "\\b(?:i'?ve\\s+|i\\s+have\\s+|i\\s+)?(?:deleted|erased|trashed|got\\s+rid\\s+of|cleared\\s+out|removed)\\b(?![^.!?\\n]{0,40}\\btask)",
+    "negated_before_pattern": "\\b(?:not|n't|never|no|nothing|haven'?t|hasn'?t)\\b\\W*(?:\\w+\\W+)?$",
+    "negation_window_chars": 20,
+    "delete_tools": [
+      "clean_temp_files",
+      "remove_task"
+    ],
+    "state_tools": [
+      "start_study_session",
+      "pause_study_session",
+      "resume_study_session",
+      "stop_study_session",
+      "reply_preference"
+    ],
+    "result_cut_markers": [
+      " Tell him",
+      " Start one"
+    ]
+  },
+  "evidence": {
+    "_about": "A tool result that is no evidence the thing was done: empty or one of empty_results, a learning.json tool failure, one of no_evidence_prefixes, or no_evidence_pattern. found_nothing_patterns: a lookup's own words for finding nothing (matched at the start). recovery_sources: where else a lookup that found nothing is checked, read-only, one step. lookup_filler: words dropped from his request when working out what he was looking for (word_pattern finds the words). says_nothing_patterns: a retry still saying it found nothing when the notes were seeded.",
+    "empty_results": [
+      "(no output)"
+    ],
+    "no_evidence_prefixes": [
+      "User declined",
+      "Refused",
+      "No timer started",
+      "No tool needed",
+      "Not needed",
+      "Nothing to save",
+      "No saved preference"
+    ],
+    "no_evidence_pattern": "\\bnothing (?:was|happened)\\b",
+    "found_nothing_patterns": [
+      "i don'?t have anything remembered",
+      "nothing in your notes mentions",
+      "nothing to search for",
+      "i can'?t reach the vault",
+      "vault lookups are disabled"
+    ],
+    "recovery_sources": [
+      {
+        "tool": "recall",
+        "then": [
+          "search_vault"
+        ]
+      },
+      {
+        "tool": "list_known_facts",
+        "then": [
+          "search_vault"
+        ]
+      },
+      {
+        "tool": "search_vault",
+        "then": [
+          "recall"
+        ]
+      }
+    ],
+    "lookup_filler": [
+      "about",
+      "anything",
+      "anywhere",
+      "check",
+      "everything",
+      "find",
+      "got",
+      "have",
+      "info",
+      "information",
+      "know",
+      "look",
+      "note",
+      "notes",
+      "remembered",
+      "save",
+      "saved",
+      "somewhere",
+      "stuff",
+      "tell",
+      "thing",
+      "things"
+    ],
+    "word_pattern": "[a-z][a-z']+",
+    "says_nothing_patterns": [
+      "\\b(?:don'?t|do not|didn'?t|can'?t|couldn'?t) (?:have|find|see)\\b",
+      "\\bnothing (?:saved|about|on)\\b",
+      "\\bno (?:notes|information)\\b"
+    ]
+  },
+  "lookup": {
+    "_about": "Nothing found anywhere: where she looked, per tool, then one question (blocked, with {where} and {terms}). where: per tool, nothing ({terms}) or, when unreachable_pattern matches the result, unreachable. nowhere: when no tool ran. fallback_terms: the subject when his words gave none.",
+    "where": [
+      {
+        "tool": "search_vault",
+        "unreachable_pattern": "can'?t reach|disabled",
+        "unreachable": "I couldn't reach your notes",
+        "nothing": "no note mentions {terms}"
+      },
+      {
+        "tool": "recall",
+        "unreachable_pattern": "",
+        "unreachable": "",
+        "nothing": "nothing is saved under {terms}"
+      },
+      {
+        "tool": "list_known_facts",
+        "unreachable_pattern": "",
+        "unreachable": "",
+        "nothing": "none of your saved facts covers it"
+      }
+    ],
+    "nowhere": "I had nowhere else to look",
+    "fallback_terms": "that",
+    "blocked": "I checked again: {where}. I haven't found it, and I won't guess. What did you file it under -- a note title or a word in it?"
+  },
+  "clock": {
+    "_about": "The current date or time said with no clock run ('It's currently December 2023.' -- her training cutoff as today). A bare number only counts with a clock shape; a day or month only when says_now or says_today precedes it. The sentence is replaced by real_time.",
+    "shape_pattern": "(?:\\d{1,2}:\\d{2}|\\d{1,2}\\s*[ap]\\.?m\\b)",
+    "calendar_pattern": "(?:(?:mon|tues|wednes|thurs|fri|satur|sun)day|january|february|march|april|june|july|august|september|october|november|december)",
+    "says_it_is_pattern": "it'?s|it\\s+is",
+    "says_now_pattern": "currently|now|right\\s+now",
+    "says_today_pattern": "today\\s+is|the\\s+(?:current\\s+)?(?:time|date)\\s+is",
+    "real_time": "It's {weekday} {day} {month}, {hour}:{minute} {ampm}."
+  },
+  "cues": {
+    "_about": "Requests the code answers before the model, because the eval showed the model wrong 3 runs out of 3 (2026-10-29), each matched against his whole message. news_off: switch the daily briefing off (not a news request). self_model: what she runs on is a fact (model_config). briefing / plan_study: planner.py's jobs. watchlist_*: invest.py, no model. study_brief: one module's brief from his notes (study_brief.py); the *_with_module patterns need a module name (module_names, mirroring study_brief.json's aliases) later in the sentence. follow_on: 'go on, do that one' -- the job is the turn before's (carry_*). plan_yes: accepting a planner offer (planner_offer_marker in her last reply). ack: a bare acknowledgement, skipped when looking for the request a complaint is about. delegate / keep_local: writing, research and solutions go to Claude (delegate.py) unless the request is local and checkable. done_word: a complaint about 'Done'. style_note_excludes: a reply preference (tool_policy.json cue reply_preference) that is really a reminder. vault_queries: his internships and projects live in the vault; a request matching every pattern in all_of_patterns searches for query. vault_overview_query: what search_vault is asked for when he wants the overview (instincts.wants_vault_overview). verify_claim_pattern: a yes/no about her last action ('did you open it?'), answered from the evidence; promise_pattern: her reply promised it ('Opening it now'), so nothing recorded means it didn't happen.",
+    "news_off_pattern": "\\b(?:stop|quit|no\\s+more|don'?t|do\\s+not|never|turn\\s+off|switch\\s+off|disable|cancel|unsubscribe)\\b[^.?!]{0,40}?\\b(?:news|headlines?|briefings?|cna)\\b",
+    "self_model_patterns": [
+      "\\bhow\\s+many\\s+parameters?\\b",
+      "\\bwhat(?:'?s|\\s+is|\\s+are)?\\s+your\\s+parameters?\\b",
+      "\\b(?:what|which)\\s+(?:model|llm|language\\s+model)\\s+(?:are\\s+you|do\\s+you\\s+(?:run|use)|are\\s+you\\s+running)\\b",
+      "\\bhow\\s+big\\s+(?:are\\s+you|is\\s+your\\s+model)\\b"
+    ],
+    "briefing_patterns": [
+      "\\b(?:briefing|brief\\s+me|check-?in)\\b",
+      "\\bwhat'?s\\s+(?:up|on)\\s+(?:for\\s+)?today\\b",
+      "\\bwhat\\s+do\\s+i\\s+have\\s+(?:on\\s+)?today\\b"
+    ],
+    "plan_study_patterns": [
+      "\\b(?:plan|schedule|organi[sz]e|timetable)\\b[^.?!]{0,40}?\\b(?:stud(?:y|ies|ying)|revision|revis(?:e|ing)|modules?|coursework|assignments?|semester|term|deadlines?)\\b",
+      "\\b(?:study|revision)\\s+(?:plan|schedule|timetable)\\b"
+    ],
+    "watchlist_brief_pattern": "^\\s*(?:(?:give|run|show)\\s+(?:me\\s+)?(?:my\\s+|the\\s+)?|brief\\s+me\\s+on\\s+my\\s+)(?:watchlist|market)(?:\\s+brief(?:ing)?)?\\s*[.!?]*\\s*$|^\\s*(?:my\\s+)?(?:watchlist|market)\\s+brief(?:ing)?\\s*[.!?]*\\s*$",
+    "watchlist_show_pattern": "^\\s*(?:what'?s\\s+on\\s+|list\\s+|show\\s+)?my\\s+watchlist\\s*[.!?]*\\s*$",
+    "study_brief_patterns": [
+      "\\b(?:study|revision|coursework)\\s+brief\\b"
+    ],
+    "study_brief_with_module_patterns": [
+      "\\b(?:prep|prepare|get\\s+me\\s+ready)\\s+(?:me\\s+)?(?:for|on)\\b",
+      "\\bhelp\\s+me\\s+(?:study|revise|prepare)\\b",
+      "\\brevise\\s+for\\b",
+      "\\bbrief\\s+(?:me\\s+)?(?:for|on)\\b"
+    ],
+    "module_names": [
+      "signals?",
+      "electromag\\w*",
+      "em",
+      "cm",
+      "cab",
+      "s&s",
+      "methods",
+      "biomath\\w*",
+      "5ccyb\\d{3}"
+    ],
+    "follow_on_pattern": "^\\s*(?:(?:alright|ok(?:ay)?|yes|yeah|sure|so|then|well)[,\\s]+)*(?:tell\\s+me|go\\s+on|go\\s+ahead|do\\s+it|do\\s+that|show\\s+me|give\\s+it\\s+to\\s+me|(?:i\\s+want\\s+you\\s+to\\s+|can\\s+you\\s+|could\\s+you\\s+|just\\s+)?(?:do|plan|make)\\s+(?:it|that|one)(?:\\s+for\\s+me)?)(?:[,\\s]+(?:please|then|now|already))*[.!?\\s]*$",
+    "carry_briefing": "give me the briefing",
+    "carry_study_plan": "plan my study modules",
+    "plan_yes_pattern": "^\\s*(?:yes|yeah|yep|yup|sure|ok(?:ay)?|please|go\\s+ahead|do\\s+it|add\\s+(?:them|it|those|all(?:\\s+of\\s+them)?)|please\\s+do)(?:[\\s,]+(?:please|do\\s+it|add\\s+them|thanks?|go\\s+ahead))*[.!\\s]*$",
+    "planner_offer_marker": "to your tasks?",
+    "ack_pattern": "^\\s*(?:ok(?:ay)?|k|thanks?|thank\\s+you|cool|nice|good|great|perfect|alright|sure|yes|yeah|yep|no|nope|that'?s\\s+(?:good|great|fine|nice|it)|(?:ok(?:ay)?\\s+)?(?:that'?s?\\s+)?(?:good|great|fine))[.!\\s]*$",
+    "delegate_patterns": [
+      "\\bcover\\s+letter\\b",
+      "\\blinked?\\s*in\\s+post\\b",
+      "\\bpersonal\\s+statement\\b",
+      "\\b(?:change|edit|improve|update|tailor|tweak|review|rewrite|polish|fix)\\b[^.?!]{0,40}\\b(?:cv|resume|r[eé]sum[eé])\\b",
+      "\\b(?:cv|resume)\\b[^.?!]{0,30}\\b(?:change|edit|improve|tailor|tweak|review|rewrite|feedback)\\b",
+      "\\bwhat\\s+should\\s+i\\s+(?:add|change|put)\\b",
+      "\\bsearch\\s+(?:\\w+\\s+){0,2}(?:up|online)\\b",
+      "\\bsearch\\s+the\\s+web\\b",
+      "\\blook\\s+(?:\\w+\\s+){0,2}up\\b",
+      "\\bresearch\\b",
+      "\\bfind\\s+(?:me\\s+)?(?:\\d+\\s+|some\\s+|more\\s+)?(?:internships?|jobs?|roles?|companies|places)\\b",
+      "\\binternships?\\b[^.?!]{0,40}\\b(?:apply|due|deadline|open)\\b",
+      "\\bplaces\\s+(?:each\\s+)?to\\s+apply\\b",
+      "\\bpitch\\b",
+      "\\bprep(?:are)?\\s+me\\b",
+      "\\b(?:solve|prove)\\b",
+      "\\bworked\\s+solutions?\\b",
+      "\\bsolutions?\\s+(?:to|for)\\b",
+      "\\bhow\\s+(?:do|should|would)\\s+i\\s+(?:do|approach|answer|tackle)\\b",
+      "\\bhow\\s+to\\s+(?:do|approach|answer|tackle)\\b",
+      "\\b(?:ask|use|get)\\s+(?:claude|codex)\\b",
+      "\\bhand\\s+(?:it|this|that)\\s+(?:to|over)\\b",
+      "\\b(?:draft|write)\\s+(?:me\\s+)?(?:a|an|the)\\s+(?:email|message|post|letter|reply|essay|summary|report)\\b"
+    ],
+    "keep_local_patterns": [
+      "\\bremind\\b",
+      "\\breminder\\b",
+      "\\btask\\b",
+      "\\bto-?do\\b",
+      "\\btimer\\b",
+      "\\b(?:find|open|pull\\s+up|bring\\s+up|show\\s+me|where(?:'s|\\s+is))\\s+(?:me\\s+)?(?:my|the)\\b"
+    ],
+    "done_word_pattern": "\\bdone\\b",
+    "style_note_excludes_pattern": "\\bremind\\b",
+    "vault_queries": [
+      {
+        "all_of_patterns": [
+          "\\binternships?\\b|\\btracker\\b"
+        ],
+        "query": "internships"
+      },
+      {
+        "all_of_patterns": [
+          "\\bprojects?\\b",
+          "\\b(?:my|i'?m|i\\s+am|im|doing|working)\\b"
+        ],
+        "query": "current projects"
+      },
+      {
+        "all_of_patterns": [
+          "\\bworking\\s+on\\b",
+          "\\b(?:am\\s+i|i'?m|i\\s+am|im|me|my)\\b"
+        ],
+        "query": "current projects"
+      }
+    ],
+    "vault_overview_query": "current projects",
+    "verify_claim_pattern": "^\\s*(?:did|have|had) you (?:actually |really |even )?(?:open|do|add|set|start|stop|send|save|delete|remove|cancel|finish|run|play|pause|email|write|create|make|turn|close)\\b",
+    "promise_pattern": "\\b(?:\\w+ing (?:it|that|them|this|one|the \\w+) now|on it|will do|right away|one sec(?:ond)?|just a (?:sec|moment|minute))\\b"
+  },
+  "quick_replies": {
+    "_about": "Greetings and acknowledgements have one right kind of answer and the model kept finding wrong ones ('hey' -> 'No response needed.'), so they are answered before the model. {name} is settings.user_name()'s first word. day_part_pattern: a greeting that names the time of day gets greeting_by_time with the first day_parts entry whose until_hour is after now. An 'ok' or 'thanks' right after a question of hers is an answer and goes to the model. never_mind_pattern -> never_mind: 'nvm' drops the thing, mid-question or not (the clock was called first 8/8 otherwise).",
+    "greeting_pattern": "^\\s*(?:hey|hi|hello|hiya|yo|morning|evening|good\\s+(?:morning|afternoon|evening))(?:\\s+(?:denisse|there|chuen))?[.!\\s]*$",
+    "thanks_pattern": "^\\s*(?:thanks?|thank\\s+you|thx|ty|cheers)(?:\\s+(?:denisse|a\\s+lot|so\\s+much))?[.!\\s]*$",
+    "ack_pattern": "^\\s*(?:ok(?:ay)?|alright|cool|nice|great|perfect|good|sounds\\s+good|(?:ok(?:ay)?\\s+)?that'?s?\\s+(?:good|great|fine|nice|perfect))[.!\\s]*$",
+    "never_mind_pattern": "^\\s*(?:nvm|never\\s?mind|forget\\s+(?:it|that)|leave\\s+it|drop\\s+it|doesn'?t\\s+matter|scratch\\s+that)(?:[,.!\\s]+(?:then|thanks?|denisse))*[.!\\s]*$",
+    "never_mind": "No worries.",
+    "day_part_pattern": "good\\s+(?:morning|afternoon|evening)|^\\s*(?:morning|evening)",
+    "day_parts": [
+      {
+        "until_hour": 12,
+        "name": "Morning"
+      },
+      {
+        "until_hour": 18,
+        "name": "Afternoon"
+      },
+      {
+        "until_hour": 24,
+        "name": "Evening"
+      }
+    ],
+    "greeting_by_time": "{part}, {name}.",
+    "greeting": "Hey {name}.",
+    "thanks": "Any time.",
+    "ack": "Good."
+  },
+  "file_query": {
+    "_about": "What to search for when she answered a file request without searching: only from 'my <thing>' or 'called/named <thing>' (named_patterns, first match wins, group 1 is the thing), never from a whole sentence. A message with a path (path_pattern) is left alone. stop_words are dropped and at most max_words kept (word_pattern finds them).",
+    "path_pattern": "[a-z]:\\\\",
+    "named_patterns": [
+      "\\b(?:called|named)\\s+[\\\"']?([^\\\"'?!]+)",
+      "\\bmy\\s+([^?!]+)"
+    ],
+    "word_pattern": "[a-z0-9][a-z0-9._-]*",
+    "stop_words": [
+      "a",
+      "again",
+      "an",
+      "bring",
+      "called",
+      "check",
+      "copy",
+      "doc",
+      "document",
+      "documents",
+      "file",
+      "files",
+      "find",
+      "for",
+      "get",
+      "here",
+      "it",
+      "its",
+      "last",
+      "latest",
+      "literally",
+      "me",
+      "most",
+      "my",
+      "named",
+      "newest",
+      "now",
+      "of",
+      "open",
+      "please",
+      "pull",
+      "recent",
+      "show",
+      "that",
+      "the",
+      "then",
+      "there",
+      "this",
+      "to",
+      "up"
+    ],
+    "max_words": 4
+  },
+  "skills": {
+    "_about": "list_skills ran and the reply was 'I've got a few skills that might come in handy' (3/3): the list is said instead unless the reply names one. A name's words of at least min_word_chars letters count, except generic_words ('take' from take_notes matched 'I can take care of it'). heading and line are the restored reply; strip_prefix_pattern is cut from each description.",
+    "generic_words": [
+      "daily",
+      "elementary",
+      "files",
+      "help",
+      "quick",
+      "take"
+    ],
+    "min_word_chars": 4,
+    "strip_prefix_pattern": "^how to\\s+",
+    "heading": "Here's what I can help with:",
+    "line": "- {name}: {desc}"
+  },
+  "vault_denial_patterns": [
+    "\\b(?:don'?t|do not|can'?t|cannot|no longer)\\s+(?:have\\s+)?access\\b.{0,60}\\bvault\\b",
+    "\\bvault\\b.{0,100}\\b(?:inaccessible|disabled|not accessible)\\b",
+    "\\bit(?:'s| has| is)\\s+(?:been\\s+)?disabled\\b"
+  ],
+  "file_absence_patterns": [
+    "\\b(?:couldn'?t|could not|can'?t|cannot)\\s+find\\b",
+    "\\b(?:doesn'?t|does not|does not appear to)\\s+exist\\b"
+  ],
+  "text": {
+    "_about": "Her fixed replies. news_off: after switching the briefing off. identity_sized / identity_plain: what she runs on ({family} {n} from the model tag, or {model}). noted / noted_unsaved: a reply preference taken. you_asked: prefix on every complaint repair ({shown} is his request, clipped). already_done ({what}): the complained-about action already happened. same_answer ({retry}): the retry repeated the rejected answer. feedback_commands: typed commands and their replies. done_complaint: a complaint about 'Done'. gave_up: the tool loop ran out. matching_files + matching_files_shown: appended when a search found files the reply didn't name. no_verified_results / only_searched_folders / lookup_incomplete: file replies corrected against what find_files actually returned. paths_shown: how the full paths are listed. corrected ({retry}): the complaint repair changed the answer, so the first one was wrong. verified_done / verified_failed ({what}) / verified_nothing: 'did you open it?' answered from the last attempt's evidence.",
+    "news_off": "Okay, no more daily news -- I've switched the briefing off. Ask me whenever you do want the headlines.",
+    "identity_sized": "I'm {family} {n}B -- about {n} billion parameters, running locally on your laptop through Ollama.",
+    "identity_plain": "I'm {model}, running locally on your laptop through Ollama.",
+    "noted": "Alright, noted.",
+    "noted_unsaved": "Alright, noted -- though I couldn't save it, so remind me if I slip.",
+    "you_asked": "You asked: \"{shown}\". ",
+    "already_done": "That part is already done ({what}), and I haven't done it again. What did you want instead?",
+    "same_answer": "I got the same answer again, so I haven't fixed it: {retry} Tell me what you meant and I'll do that instead.",
+    "corrected": "My mistake -- {retry}",
+    "verified_done": "Yes -- {what}",
+    "verified_failed": "No -- it didn't work: {what}",
+    "verified_nothing": "No -- I said I would, but I didn't actually do it; nothing ran for that. Want me to do it now?",
+    "feedback_commands": [
+      {
+        "command": "/good",
+        "reply": "Thanks — that tells me the last answer was helpful."
+      },
+      {
+        "command": "/bad",
+        "reply": "Got it — the last answer was wrong. Tell me what should happen instead."
+      }
+    ],
+    "done_complaint": "I shouldn't have said 'Done' without verifying it. The last action is unverified.",
+    "gave_up": "I got stuck working that one out -- could you rephrase it?",
+    "matching_files": "\n\nMatching files:\n",
+    "matching_files_shown": 3,
+    "no_verified_results": "I don't have verified file-search results for that request yet.",
+    "only_searched_folders": " That only covers the folders searched.",
+    "lookup_incomplete": "I couldn't complete the file lookup, so I can't tell whether it's there.",
+    "paths_shown": "\n"
+  },
+  "nudges": {
+    "_about": "System notes added to one model call only, never to the stored history. rejected_answer ({wrong}): a read found something and he said the answer was wrong. clarified_answer ({spoken}, {evidence}): answer from the one item he picked.",
+    "rejected_answer": "He said your answer \"{wrong}\" was not what he asked. Use the results above. If more than one thing in them could be what he means, ask which one in one short question. Don't repeat that answer.",
+    "clarified_answer": "He means {spoken}. From his notes: {evidence}\nAnswer his question from this alone, in one or two sentences. Don't add anything it doesn't say."
+  }
+}

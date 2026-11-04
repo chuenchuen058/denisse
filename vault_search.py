@@ -162,10 +162,24 @@ def search_vault(query: str = "") -> str:
     if not rules.vault_search or os.environ.get(CONFIG["disable_env"], "").lower() in CONFIG["disable_values"]:
         return _msg("disabled")
     if is_overview_query(query):
-        return _current_overview(rules)
+        overview = _current_overview(rules)
+        if overview.startswith(_msg("overview_header")):
+            return overview
+        # No state note to quote (a vault without one, 2026-11-04: "what am
+        # I working on" got a dead end, and the model answered from its own
+        # folder name). His project notes are still there: search them.
+        notes = _keyword_search(_words(CONFIG["overview_fallback_query"]), rules)
+        if notes.startswith(_msg("hits_header")):
+            return overview + "\n\n" + notes
+        return overview
     words = _words(query)
     if not words:
         return _msg("nothing_to_search")
+    return _keyword_search(words, rules)
+
+
+def _keyword_search(words: list, rules) -> str:
+    """The notes that mention `words`, best first, quoted."""
     if not os.path.isdir(VAULT):
         return _msg("no_vault", vault=VAULT)
     weights = CONFIG["scoring"]

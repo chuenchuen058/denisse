@@ -37,6 +37,8 @@
   ],
   "state_note": "Dev/Memory/STATE.md",
   "state_read_chars": 100000,
+  "_overview_fallback": "When the state note can't be read or has nothing recent, the overview falls back to a keyword search for this, so 'what am I working on' still reaches his project notes.",
+  "overview_fallback_query": "projects",
   "overview_skip_starts": ["```", "|---"],
 
   "scoring": {
