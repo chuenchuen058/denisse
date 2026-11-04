@@ -124,6 +124,21 @@ class Loader(_Theme):
         self.use(edit, expect_warning=True)
         self.assertEqual(ui_theme.get("dock")["voice_on_tip"], DEFAULTS["dock"]["voice_on_tip"])
 
+    def test_bad_glyph_stroke_falls_back(self):
+        for bad in ({"op": "spiral", "xy": [0, 0, 9, 9]},
+                    {"op": "arc", "xy": [0, 0, 9, 9]},
+                    {"op": "line", "xy": [1, 2, 3]},
+                    {"op": "rounded_rectangle", "xy": [0, 0, 9, "9"], "radius": 2}):
+            with self.subTest(bad=bad):
+                self.use(lambda d: d["dock"]["glyphs"]["shapes"]["chat"].append(bad), expect_warning=True)
+                self.assertEqual(ui_theme.get("dock")["glyphs"]["shapes"], DEFAULTS["dock"]["glyphs"]["shapes"])
+
+    def test_button_icon_must_name_a_glyph(self):
+        def edit(d):
+            d["dock"]["buttons"][0]["icon"] = "star"
+        self.use(edit, expect_warning=True)
+        self.assertEqual(ui_theme.get("dock")["buttons"], DEFAULTS["dock"]["buttons"])
+
 
 class FloatingOrbData(_Theme):
     def test_ring_colour_comes_from_the_palette(self):
@@ -164,6 +179,26 @@ class FloatingOrbData(_Theme):
         self.assertEqual(o._pet_state(100.0), "idle")
         self.use(lambda d: d["animation"].__setitem__("sleepy_after_s", 60))
         self.assertEqual(o._pet_state(100.0), "sleepy")
+
+    def test_reaction_moods_come_from_the_data(self):
+        class E:
+            x_root = y_root = 0
+        self.use()
+        o = _orb()
+        o.win = type("W", (), {"winfo_x": lambda s: 0, "winfo_y": lambda s: 0})()
+        o._on_press(E())
+        self.assertEqual(o._reaction, "happy")
+        o.react()
+        self.assertEqual(o._reaction, DEFAULTS["interaction"]["default_mood"])
+
+        def edit(d):
+            d["interaction"]["press_mood"] = "listening"
+            d["interaction"]["default_mood"] = "curious"
+        self.use(edit)
+        o._on_press(E())
+        self.assertEqual(o._reaction, "listening")
+        o.react()
+        self.assertEqual(o._reaction, "curious")
 
     def test_flatten_matte_defaults_to_theme_accent(self):
         from PIL import Image
@@ -207,6 +242,25 @@ class OrbControlsData(_Theme):
         r, g, b, a = after.getpixel((100, 40))
         self.assertGreater(r, 200)
         self.assertLess(g, 40)
+
+    def test_icon_shapes_and_stroke_come_from_the_data(self):
+        self.use()
+        chat = orb_controls._icon("chat", 48, "#ffffff").tobytes()
+        default_dock = orb_controls._dock_frame(1.0).tobytes()
+        thin = lambda d: d["dock"]["glyphs"].__setitem__("stroke", 2)
+        self.use(thin)
+        self.assertNotEqual(orb_controls._icon("chat", 48, "#ffffff").tobytes(), chat)
+
+        def edit(d):  # a new icon, defined only in the data, on a button
+            d["dock"]["glyphs"]["shapes"]["cross"] = [
+                {"op": "line", "xy": [10, 10, 86, 86]}, {"op": "line", "xy": [10, 86, 86, 10]}]
+            d["dock"]["buttons"][0]["icon"] = "cross"
+        self.use(edit)
+        cross = orb_controls._icon("cross", 48, "#ffffff")
+        self.assertGreater(cross.getpixel((24, 24))[3], 200)  # centre of the X
+        self.assertEqual(cross.getpixel((24, 2))[3], 0)
+        self.assertEqual(ui_theme.get("dock")["buttons"][0]["icon"], "cross")
+        self.assertNotEqual(orb_controls._dock_frame(1.0).tobytes(), default_dock)
 
 
 if __name__ == "__main__":

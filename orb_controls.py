@@ -1,7 +1,7 @@
 """Hover-revealed Chat / Voice / Reminders icons beneath Denisse's orb.
 
-Colours, sizes, timings, the buttons and their labels are in ui_theme.json
-under "dock" (Rule 0), validated by ui_theme.py. A button is identified by
+Colours, sizes, timings, the buttons, their labels and the icon shapes are
+in ui_theme.json under "dock" (Rule 0), validated by ui_theme.py. A button is identified by
 its action (chat, voice, reminders -- which of tray's callbacks it calls);
 its label and icon are data.
 """
@@ -14,36 +14,26 @@ from PIL import Image, ImageDraw, ImageTk
 import ui_theme
 from reminder_card import _work_area
 
-# Glyphs are drawn on a GLYPH x GLYPH canvas and scaled to the theme's
-# dock.layout.icon_size: the shapes are the icons themselves, not theme.
-GLYPH = 96
-_STROKE = 6
-
-
 def _dock() -> dict:
     return ui_theme.get("dock")
 
 
 def _icon(icon, size, color):
-    """Small antialiased outline icons, independent of installed symbol fonts.
-    `icon` is a ui_theme.DOCK_ICONS name."""
-    image = Image.new("RGBA", (GLYPH, GLYPH))
+    """Small antialiased outline icons, independent of installed symbol fonts:
+    the strokes of dock.glyphs.shapes[icon], drawn on the glyph canvas and
+    scaled down to `size`."""
+    glyphs = _dock()["glyphs"]
+    n, w = glyphs["canvas"], glyphs["stroke"]
+    image = Image.new("RGBA", (n, n))
     d = ImageDraw.Draw(image)
-    w = _STROKE
-    if icon == "chat":
-        d.rounded_rectangle((17, 19, 79, 66), radius=12, outline=color, width=w)
-        d.line((29, 66, 25, 79, 44, 66), fill=color, width=w, joint="curve")
-    elif icon == "mic":
-        d.rounded_rectangle((36, 13, 60, 57), radius=12, outline=color, width=w)
-        d.arc((24, 29, 72, 71), 0, 180, fill=color, width=w)
-        d.line((48, 71, 48, 83), fill=color, width=w)
-        d.line((35, 83, 61, 83), fill=color, width=w)
-    else:  # bell
-        d.arc((24, 17, 72, 65), 180, 360, fill=color, width=w)
-        d.line((24, 41, 24, 60, 16, 70, 80, 70, 72, 60, 72, 41),
-               fill=color, width=w, joint="curve")
-        d.arc((39, 69, 57, 85), 0, 180, fill=color, width=w)
-        d.line((48, 11, 48, 17), fill=color, width=w)
+    for stroke in glyphs["shapes"][icon]:
+        op, xy = stroke["op"], tuple(stroke["xy"])
+        if op == "rounded_rectangle":
+            d.rounded_rectangle(xy, radius=stroke["radius"], outline=color, width=w)
+        elif op == "arc":
+            d.arc(xy, stroke["start"], stroke["end"], fill=color, width=w)
+        else:  # line
+            d.line(xy, fill=color, width=w, joint="curve")
     return image.resize((size, size), Image.Resampling.LANCZOS)
 
 
@@ -191,7 +181,8 @@ class OrbControls:
         self._draw()
 
     def _invoke(self, action):
-        self.orb.react("happy", ui_theme.get("interaction")["react_dock_s"])
+        act = ui_theme.get("interaction")
+        self.orb.react(act["dock_mood"], act["react_dock_s"])
         self.actions[action]()
         self.tip.withdraw()
         self._draw()

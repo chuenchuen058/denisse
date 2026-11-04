@@ -378,7 +378,8 @@ class FloatingOrb:
 
     def _on_press(self, event):
         self._held = True
-        self.react("happy", _th()["interaction"]["react_press_s"])
+        act = _th()["interaction"]
+        self.react(act["press_mood"], act["react_press_s"])
         self._dragging = False
         self._drag_start = (event.x_root, event.y_root)
         self._win_start = (self.win.winfo_x(), self.win.winfo_y())
@@ -406,7 +407,8 @@ class FloatingOrb:
 
     def _on_release(self, event):
         self._held = False
-        self.react("happy", _th()["interaction"]["react_release_s"])
+        act = _th()["interaction"]
+        self.react(act["release_mood"], act["react_release_s"])
         if self._dragging:
             self._save_position()
         else:
@@ -417,13 +419,18 @@ class FloatingOrb:
     def _hover(self, hovered):
         self._hovered = hovered
         if hovered:
-            self.react("happy", _th()["interaction"]["react_hover_s"])
+            act = _th()["interaction"]
+            self.react(act["hover_mood"], act["react_hover_s"])
 
-    def react(self, reaction="happy", seconds=None):
+    def react(self, reaction=None, seconds=None):
         """Brief UI reaction; call on the Tk thread, never from a worker.
-        seconds defaults to the theme's interaction.react_default_s."""
+        reaction and seconds default to the theme's interaction.default_mood
+        and interaction.react_default_s."""
+        act = _th()["interaction"]
+        if reaction is None:
+            reaction = act["default_mood"]
         if seconds is None:
-            seconds = _th()["interaction"]["react_default_s"]
+            seconds = act["react_default_s"]
         self._last_interaction = time.monotonic()
         self._reaction = reaction
         self._reaction_until = self._last_interaction + seconds
@@ -490,7 +497,7 @@ class FloatingOrb:
         bub = _th()["bubble"]
         if duration_ms is None:
             duration_ms = bub["duration_ms"]
-        self.react("listening", duration_ms / 1000)
+        self.react(_th()["interaction"]["say_mood"], duration_ms / 1000)
         try:
             if self._bubble_hide_job is not None:
                 self.root.after_cancel(self._bubble_hide_job)
