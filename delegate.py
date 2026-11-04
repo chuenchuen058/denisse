@@ -18,57 +18,55 @@ finished deliverable comes back as text and this module writes the file.
 
 Runs in a background thread: these jobs take a minute or two, and the
 tray must not freeze. on_done(message) is called when one finishes.
+
+Engines, their arguments, tool lists, prompt wording and every sentence
+said about a hand-off live in delegate.json beside this file (Rule 0).
 """
 import datetime as dt
+import json
 import os
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 
 import settings
 
+with open(os.path.splitext(os.path.abspath(__file__))[0] + ".json", encoding="utf-8-sig") as _config_file:
+    CONFIG = json.load(_config_file)
+
 HOME = settings.home()
 VAULT = settings.vault()
-DRAFTS = os.path.join(VAULT, "Denisse", "Drafts")
+DRAFTS = os.path.join(VAULT, *CONFIG["drafts_folder"].split("/"))
 # What a delegated Claude may read: config.json's fixed list, in its order --
 # never discovered, since every folder added widens what it can see.
 READ_DIRS = [settings.expand(d) for d in settings.get("read_dirs", ["{vault}"])]
 LEARNING_NOTE = settings.get("learning_note")
-TIMEOUT_S = 600
+TIMEOUT_S = CONFIG["timeout_s"]
 
-ALLOWED = "Read,Glob,Grep,WebSearch,WebFetch"
-DISALLOWED = "Edit,Write,MultiEdit,NotebookEdit,Bash,PowerShell"
+ALLOWED = CONFIG["allowed_tools"]
+DISALLOWED = CONFIG["disallowed_tools"]
 
 DRY_RUN = False   # the eval sets this: decide to hand off, never actually spend
 on_done = None    # tray sets this to show the result when a job finishes
 
-SYSTEM = (
-    f"You are doing a job for {settings.user_name()}"
-    + (f", {settings.get('user_about')}" if settings.get("user_about") else "")
-    + ", on behalf of Denisse, his local "
-    "assistant. Do the job fully and well, as the finished deliverable -- he "
-    "wants the task done, not a description of how he could do it. You can "
-    "read his files and search the web; you cannot edit files, so return the "
-    "deliverable as your answer, in Markdown. Never invent facts about him: "
-    "use only what is in his files or what he said. Don't ask him questions "
-    "back. If something you need is missing, make the most sensible "
-    "assumption and say so in one line at the end, under 'Assumptions'."
-)
+SYSTEM = CONFIG["system"].format(
+    user_name=settings.user_name(),
+    about=(CONFIG["system_about"].format(user_about=settings.get("user_about"))
+           if settings.get("user_about") else ""))
+
+
+def _label(engine) -> str:
+    return (CONFIG["engines"].get(engine) or {}).get("label", engine)
 
 
 def _prompt(task: str, context: list) -> str:
-    where = "\n".join(f"- {d}" for d in READ_DIRS if os.path.isdir(d))
-    convo = "\n".join(f"{m['role']}: {m['content'][:400]}" for m in context[-6:]) or "(none)"
-    return (f"He asked Denisse: \"{task}\"\n\n"
-            f"Recent conversation, for context:\n{convo}\n\n"
-            f"His files are in:\n{where}\n"
-            f"(His Obsidian vault holds his notes, module pages, coursework, "
-            f"internship research and CV-related notes.)\n\n"
-            f"Before anything external-facing (CV, cover letter, application, email), "
-            f"read Atlas/Verified-Claims.md in the vault and state only claims marked "
-            f"verified: true."
-            + (f" For anything meant to teach him, follow {LEARNING_NOTE}." if LEARNING_NOTE else "")
+    where = "\n".join(CONFIG["read_dir_line"].format(dir=d) for d in READ_DIRS if os.path.isdir(d))
+    convo = "\n".join(CONFIG["context_line"].format(role=m["role"], content=m["content"][:CONFIG["context_chars"]])
+                      for m in context[-CONFIG["context_turns"]:]) or CONFIG["context_none"]
+    return (CONFIG["prompt"].format(task=task, convo=convo, where=where)
+            + (CONFIG["prompt_learning"].format(note=LEARNING_NOTE) if LEARNING_NOTE else "")
             + _shared_context())
 
 
@@ -79,56 +77,39 @@ def _shared_context() -> str:
     the 8B model measured 0/4 clean replies (AGENTS.md)."""
     try:
         from atrium import context
-        return "\n\n" + context.show("claude")
+        return CONFIG["shared_context_separator"] + context.show(CONFIG["shared_context_agent"])
     except Exception:
         return ""
 
 
 def _command(engine: str, prompt: str, outfile: str = "") -> tuple:
-    """(argv, stdin_bytes) for one engine, or (None, None) if not installed."""
-    if engine == "claude":
-        exe = shutil.which("claude")
-        if not exe:
-            return None, None
-        cmd = [exe, "-p", prompt, "--output-format", "text",
-               "--append-system-prompt", SYSTEM,
-               "--allowedTools", ALLOWED, "--disallowedTools", DISALLOWED]
+    """(argv, stdin_bytes) for one engine, or (None, None) if it isn't
+    configured or installed."""
+    spec = CONFIG["engines"].get(engine)
+    if not spec:
+        return None, None
+    exe = shutil.which(spec["exe"])
+    if not exe:
+        return None, None
+    values = {"{prompt}": prompt, "{system}": SYSTEM, "{allowed}": ALLOWED,
+              "{disallowed}": DISALLOWED, "{home}": HOME, "{outfile}": outfile}
+    cmd = [exe] + [values.get(a, a) for a in spec["args"]]
+    if spec.get("add_dir_flag"):
         for d in READ_DIRS:
             if os.path.isdir(d):
-                cmd += ["--add-dir", d]
-        return cmd, None
-    if engine == "codex":
-        exe = shutil.which("codex")
-        if not exe:
-            return None, None
-        # Through stdin, never argv. Codex on Windows is a .cmd wrapper, and
-        # a multi-line argument through a .cmd is cut at the first line
-        # break: on 2026-10-29 Codex received only the instructions, replied
-        # "no specific job or deliverable", and that was saved as the draft.
-        # -o writes just its final message, without the progress log.
-        cmd = [exe, "exec", "--sandbox", "read-only", "--skip-git-repo-check",
-               "-C", HOME, "-o", outfile, "-"]
-        return cmd, (SYSTEM + "\n\n" + prompt).encode("utf-8")
-    return None, None
-
-
-# A reply that isn't the deliverable. Saving one as "Done" would be exactly
-# the satisfy-not-do reply he asked her to stop -- it happened once, on the
-# day this file was written.
-_NON_ANSWER = re.compile(
-    r"no\s+(?:specific\s+)?(?:job|task|deliverable|instructions?)\b"
-    r"|(?:didn'?t|did\s+not|haven'?t|has\s+not)\s+(?:provide|give|include|specif)"
-    r"|(?:please|could\s+you|can\s+you)\s+(?:provide|share|specify|clarify|tell\s+me\s+(?:what|which))"
-    r"|what\s+would\s+you\s+like\s+me\s+to|task\s+description\s+was\s+omitted",
-    re.IGNORECASE)
+                cmd += [spec["add_dir_flag"], d]
+    if spec.get("stdin"):
+        return cmd, (SYSTEM + CONFIG["stdin_separator"] + prompt).encode("utf-8")
+    return cmd, None
 
 
 def _is_non_answer(text: str) -> bool:
-    head = (text or "")[:400]
-    return len((text or "").strip()) < 40 or bool(_NON_ANSWER.search(head))
+    head = (text or "")[:CONFIG["non_answer_head_chars"]]
+    return (len((text or "").strip()) < CONFIG["non_answer_min_chars"]
+            or bool(re.search(CONFIG["non_answer_pattern"], head)))
 
 
-LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "memory", "delegate.log")
+LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), *CONFIG["log_file"].split("/"))
 
 
 def _log(line: str) -> None:
@@ -139,27 +120,22 @@ def _log(line: str) -> None:
         pass
 
 
-# brain.py calls load_dotenv(), so by the time a job runs, Denisse's .env
-# is in os.environ -- including ANTHROPIC_API_KEY. A child `claude` that
-# inherits it bills that key instead of using his normal Claude login, and
-# on 2026-10-29 every in-Denisse hand-off to Claude failed that way and fell
-# back to Codex. Run with the environment he'd have typing `claude` himself.
-_STRIP_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")
-
-
 def _child_env() -> dict:
-    env = {k: v for k, v in os.environ.items() if k not in _STRIP_ENV}
-    env["PYTHONIOENCODING"] = "utf-8"
+    """The environment he'd have typing the command himself: brain.py's
+    load_dotenv() puts Denisse's .env into os.environ, and keys listed in
+    strip_env must not reach the child."""
+    strip = set(CONFIG["strip_env"])
+    env = {k: v for k, v in os.environ.items() if k not in strip}
+    env.update(CONFIG["child_env"])
     return env
 
 
 def _brief(err: str) -> str:
     """The one line of an error worth showing him, not a stack of noise."""
-    lines = [l.strip() for l in (err or "").splitlines() if re.search(r"[A-Za-z]{3}", l)]
-    key = [l for l in lines if re.search(r"error|disabled|denied|limit|auth|invalid|expired|"
-                                         r"credit|quota|not\s+logged", l, re.IGNORECASE)]
-    line = (key or lines or ["no output"])[-1]
-    return line[:140]
+    lines = [l.strip() for l in (err or "").splitlines() if re.search(CONFIG["error_line_pattern"], l)]
+    key = [l for l in lines if re.search(CONFIG["error_key_pattern"], l)]
+    line = (key or lines or [CONFIG["no_output"]])[-1]
+    return line[:CONFIG["error_chars"]]
 
 
 def _decode(raw: bytes | None) -> str:
@@ -170,18 +146,21 @@ def _decode(raw: bytes | None) -> str:
     try:
         return raw.decode("utf-8")
     except UnicodeDecodeError:
-        return raw.decode("cp1252", errors="replace")
+        return raw.decode(CONFIG["fallback_codepage"], errors="replace")
 
 
-def run(task: str, context: list | None = None, engines=("claude", "codex")) -> tuple:
+def run(task: str, context: list | None = None, engines=None) -> tuple:
     """Do the job synchronously. Returns (ok, text, engine, failures):
     `failures` lists every engine that was tried and didn't deliver, and
     why -- a fallback is reported to him, never hidden."""
+    engines = list(CONFIG["engines"]) if engines is None else engines
+    fail, log = CONFIG["failures"], CONFIG["log"]
+    short = task[:CONFIG["log_task_chars"]]
     prompt = _prompt(task, context or [])
     failures = []
     for engine in engines:
-        import tempfile
-        outfile = os.path.join(tempfile.gettempdir(), f"denisse-{engine}-{os.getpid()}.md")
+        outfile = os.path.join(tempfile.gettempdir(),
+                               CONFIG["outfile"].format(engine=engine, pid=os.getpid()))
         cmd, stdin_bytes = _command(engine, prompt, outfile)
         if not cmd:
             continue
@@ -194,33 +173,33 @@ def run(task: str, context: list | None = None, engines=("claude", "codex")) -> 
                                env=_child_env(),
                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except subprocess.TimeoutExpired:
-            failures.append(f"{engine} took longer than {TIMEOUT_S // 60} minutes")
-            _log(f"{engine} TIMEOUT task={task[:80]!r}")
+            failures.append(fail["timeout"].format(engine=engine, minutes=TIMEOUT_S // 60))
+            _log(log["timeout"].format(engine=engine, task=short))
             continue
         except OSError as e:
-            failures.append(f"{engine} couldn't start ({e})")
-            _log(f"{engine} OSERROR {e} task={task[:80]!r}")
+            failures.append(fail["oserror"].format(engine=engine, error=e))
+            _log(log["oserror"].format(engine=engine, error=e, task=short))
             continue
         out = _decode(p.stdout).strip()
-        if engine == "codex" and os.path.exists(outfile):
+        if CONFIG["engines"][engine].get("reads_outfile") and os.path.exists(outfile):
             out = _decode(open(outfile, "rb").read()).strip()
         err = _decode(p.stderr).strip()
         if p.returncode == 0 and out and not _is_non_answer(out):
-            _log(f"{engine} OK chars={len(out)} task={task[:80]!r}")
+            _log(log["ok"].format(engine=engine, chars=len(out), task=short))
             return True, out, engine, failures
-        why = ("came back without doing the job" if p.returncode == 0 and out
+        why = (fail["non_answer"] if p.returncode == 0 and out
                else _brief(err or out))
-        failures.append(f"{engine}: {why}")
-        _log(f"{engine} FAIL rc={p.returncode} why={why!r} task={task[:80]!r}")
+        failures.append(fail["fail"].format(engine=engine, why=why))
+        _log(log["fail"].format(engine=engine, rc=p.returncode, why=why, task=short))
     if not failures:
-        failures.append("neither Claude Code nor Codex is installed")
-    return False, "; ".join(failures), None, failures
+        failures.append(fail["none_installed"])
+    return False, fail["separator"].join(failures), None, failures
 
 
 def _slug(text: str) -> str:
     words = re.findall(r"[a-z0-9]+", text.lower())
-    stop = {"could", "you", "please", "me", "my", "for", "the", "a", "an", "can", "i", "to"}
-    return " ".join([w for w in words if w not in stop][:7]) or "draft"
+    stop = set(CONFIG["slug_stop_words"])
+    return " ".join([w for w in words if w not in stop][:CONFIG["slug_words"]]) or CONFIG["slug_fallback"]
 
 
 def save(task: str, text: str, engine: str, now: dt.datetime | None = None) -> str:
@@ -228,17 +207,13 @@ def save(task: str, text: str, engine: str, now: dt.datetime | None = None) -> s
     (frontmatter: name, description, tags, updated). Returns the path."""
     now = now or dt.datetime.now()
     os.makedirs(DRAFTS, exist_ok=True)
-    slug = _slug(task)
-    name = f"{now:%Y-%m-%d %H%M} {slug}"
+    name = CONFIG["draft_name"].format(now=now, slug=_slug(task))
     path = os.path.join(DRAFTS, f"{name}.md")
-    who = "Claude" if engine == "claude" else "Codex"
     desc = task.replace('"', "'").strip()
-    body = (f"---\nname: {re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')}\n"
-            f"description: \"Draft by {who} via Denisse: {desc[:150]}\"\n"
-            f"tags: [denisse, draft]\nupdated: {now:%Y-%m-%d}\n---\n\n"
-            f"> [!note] Asked: {desc}\n> Done by {who} on {now:%d %b %Y %H:%M}, "
-            f"read-only access to his files and the web. Check it before you send it.\n\n"
-            f"{text.strip()}\n")
+    body = CONFIG["draft_body"].format(
+        name=re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-"),
+        who=_label(engine), short=desc[:CONFIG["draft_description_chars"]], desc=desc,
+        now=now, text=text.strip())
     with open(path, "w", encoding="utf-8") as f:
         f.write(body)
     return path
@@ -253,38 +228,40 @@ def _remember(task: str, ok: bool, engine, path, text: str) -> None:
         return
     try:
         from atrium import handoff
-        who = {"claude": "Claude", "codex": "Codex"}.get(engine, engine)
+        n = CONFIG["handoff_task_chars"]
         if ok:
-            line = f"handed off \"{task[:120]}\" -> {who}, draft saved: Denisse/Drafts/{os.path.basename(path)}"
+            line = CONFIG["handoff_ok"].format(task=task[:n], who=_label(engine),
+                                               drafts=CONFIG["drafts_folder"],
+                                               file=os.path.basename(path))
         else:
-            line = f"hand-off FAILED \"{task[:120]}\": {text[:200]}"
-        handoff.remember("denisse", [line])
+            line = CONFIG["handoff_fail"].format(task=task[:n], text=text[:CONFIG["handoff_text_chars"]])
+        handoff.remember(CONFIG["handoff_agent"], [line])
     except Exception:
         pass
 
 
 def start(task: str, context: list | None = None) -> str:
     """Hand the job off in the background. Returns what Denisse says now."""
-    if not (shutil.which("claude") or shutil.which("codex")):
-        return ("That's a job for Claude or Codex, and neither is installed on "
-                "this laptop, so I can't hand it off.")
+    say = CONFIG["say"]
+    drafts = CONFIG["drafts_folder"]
+    if not any(shutil.which(spec["exe"]) for spec in CONFIG["engines"].values()):
+        return say["not_installed"]
     if DRY_RUN:
-        return ("Handing that to Claude -- it can read your files and search the "
-                "web. I'll tell you when it's done and save it in Denisse/Drafts.")
+        return say["dry_run"].format(drafts=drafts)
 
     def work():
         ok, text, engine, failures = run(task, context)
         path = None
         if ok:
             path = save(task, text, engine)
-            who = "Claude" if engine == "claude" else "Codex"
-            msg = (f"Done -- {who} finished \"{task[:60]}\". It's in your vault: "
-                   f"Denisse/Drafts/{os.path.basename(path)}")
+            msg = say["done"].format(who=_label(engine), task=task[:say["done_task_chars"]],
+                                     drafts=drafts, file=os.path.basename(path))
             if failures:
-                msg += f" (Claude didn't manage it -- {failures[0][:120]} -- so Codex did.)"
+                msg += say["fallback"].format(failed=_label(next(iter(CONFIG["engines"]))),
+                                              why=failures[0][:say["fallback_chars"]],
+                                              who=_label(engine))
         else:
-            msg = (f"I couldn't get that done: {text[:300]}. Nothing was saved. "
-                   "Ask me again in a bit, or ask Claude directly.")
+            msg = say["failed"].format(text=text[:say["failed_chars"]])
         _remember(task, ok, engine, path if ok else None, text)
         if on_done:
             try:
@@ -293,6 +270,4 @@ def start(task: str, context: list | None = None) -> str:
                 pass
 
     threading.Thread(target=work, daemon=True).start()
-    return ("Handing that to Claude -- it can read your files and search the web. "
-            "Usually a minute or two; I'll tell you when it's done, and it'll be "
-            "saved in your vault under Denisse/Drafts.")
+    return say["started"].format(drafts=drafts)

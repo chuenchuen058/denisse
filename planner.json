@@ -1,0 +1,69 @@
+{
+  "_note": "Data for planner.py (AGENTS.md Rule 0): where coursework notes live, how their deadlines are read, the plan's step offsets, and every sentence the briefing and plan say.",
+  "pending_file": "memory/pending_plan.json",
+  "_pending_minutes": "a 'yes' an hour later is not about this plan",
+  "pending_minutes": 30,
+
+  "_coursework": "The vault path (split on '/') globbed for coursework notes, the exact file name that counts, and the folder name that means 'look one level up for the module'.",
+  "coursework_glob": "Atlas/Academic/SEM * Modules/**/Coursework*.md",
+  "coursework_file": "coursework.md",
+  "coursework_folder": "coursework",
+  "date_formats": ["%d %b %Y", "%d %B %Y"],
+  "patterns": {
+    "due": "(?i)\\bdue\\s+(?:\\*\\*)?(?:(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\\s+)?(\\d{1,2}\\s+[A-Za-z]{3,9}\\s+20\\d\\d)",
+    "code": "\\b(\\d[A-Z]{4}\\d{3})\\b",
+    "weight": "\\b(\\d{1,3})%",
+    "description": "(?m)^description:\\s*\"?(.+?)\"?\\s*$",
+    "module_noise": "\\(.*?\\)"
+  },
+  "brief_unread_marker": "brief not yet read",
+  "weight_format": "{weight}%",
+
+  "when": {
+    "today": "today",
+    "tomorrow": "tomorrow",
+    "past": "{days} days ago",
+    "future": "in {days} days"
+  },
+  "short_task_chars": 70,
+  "short_task_strip": " ,;:-(",
+  "ellipsis": "...",
+  "join": {"limit": 4, "separator": "; ", "more": "; and {more} more"},
+
+  "briefing": {
+    "horizon_days": 45,
+    "soon_hours": 48,
+    "clock": "It's {now:%A %d %B}, {now:%H:%M}.",
+    "overdue": "Overdue: {items}.",
+    "soon": "Due in the next two days: {items}.",
+    "coursework_item": "{module} {due:%a %d %b} ({when})",
+    "coursework": "Coursework due: {items}.",
+    "unread": "Brief not read yet for {items}.",
+    "nothing": "Nothing overdue, and no coursework due in the next {horizon_days} days."
+  },
+
+  "study_plan": {
+    "horizon_days": 120,
+    "_offsets": "Days counted from today or back from the deadline.",
+    "read_brief_after_days": 2,
+    "read_brief_before_due_days": 1,
+    "draft_min_days_left": 9,
+    "draft_before_due_days": 7,
+    "submit_before_due_days": 1,
+    "step_due_time": "18:00",
+    "read_brief": "Read the {module} coursework brief",
+    "draft": "Full draft of the {module} coursework",
+    "submit": "Finish and submit the {module} coursework",
+    "head": "{module} -- due {due:%a %d %b}",
+    "head_weight": ", {weight}",
+    "line": "  - {when:%a %d %b}: {text}",
+    "step_due": "{when:%d %b %Y} {time}",
+    "none": "I couldn't find any dated coursework in your module notes for the next few months, so there's nothing to plan from yet.",
+    "header": "Here's a plan from the coursework deadlines in your module notes:\n\n",
+    "footer": "\n\nThis covers coursework only -- I don't have your lecture timetable or exam dates."
+  },
+
+  "offer": "Want me to add {n} of these to your tasks?",
+  "accepted": "Added {n} tasks:\n",
+  "accepted_line": "- {task}"
+}

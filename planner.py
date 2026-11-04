@@ -26,22 +26,25 @@ import re
 import tasks
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PENDING_FILE = os.path.join(BASE_DIR, "memory", "pending_plan.json")
-PENDING_MINUTES = 30  # a "yes" an hour later is not about this plan
+
+# Every path, pattern, offset and sentence lives in the JSON beside this
+# file (Rule 0). Read at call time, so editing CONFIG changes behaviour.
+with open(os.path.splitext(os.path.abspath(__file__))[0] + ".json", encoding="utf-8-sig") as _config_file:
+    CONFIG = json.load(_config_file)
+
+PENDING_FILE = os.path.join(BASE_DIR, *CONFIG["pending_file"].split("/"))
 
 from settings import vault as _vault
 
 VAULT = _vault()
 
-_DUE = re.compile(
-    r"\bdue\s+(?:\*\*)?(?:(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\s+)?"
-    r"(\d{1,2}\s+[A-Za-z]{3,9}\s+20\d\d)", re.IGNORECASE)
-_CODE = re.compile(r"\b(\d[A-Z]{4}\d{3})\b")
-_WEIGHT = re.compile(r"\b(\d{1,3})%")
+
+def _pattern(name: str):
+    return re.compile(CONFIG["patterns"][name])
 
 
 def _parse_date(s: str):
-    for fmt in ("%d %b %Y", "%d %B %Y"):
+    for fmt in CONFIG["date_formats"]:
         try:
             return dt.datetime.strptime(s.strip(), fmt).date()
         except ValueError:
@@ -51,10 +54,10 @@ def _parse_date(s: str):
 
 def _module_name(path: str) -> str:
     folder = os.path.basename(os.path.dirname(path))
-    if folder.lower() == "coursework":
+    if folder.lower() == CONFIG["coursework_folder"]:
         folder = os.path.basename(os.path.dirname(os.path.dirname(path)))
-    name = _CODE.sub("", folder)
-    name = re.sub(r"\(.*?\)", "", name)
+    name = _pattern("code").sub("", folder)
+    name = _pattern("module_noise").sub("", name)
     return " ".join(name.split()) or folder
 
 
@@ -65,102 +68,111 @@ def coursework_deadlines(vault: str = VAULT) -> list:
     (that is where he keeps "due 24 Nov 2026"), then the body. Worked
     solutions and other files that merely mention the coursework are skipped.
     """
+    due_re, code_re, weight_re = _pattern("due"), _pattern("code"), _pattern("weight")
     found = {}
-    for path in glob.glob(os.path.join(vault, "Atlas", "Academic", "SEM * Modules", "**", "Coursework*.md"),
-                          recursive=True):
-        if os.path.basename(path).lower() != "coursework.md":
+    for path in glob.glob(os.path.join(vault, *CONFIG["coursework_glob"].split("/")), recursive=True):
+        if os.path.basename(path).lower() != CONFIG["coursework_file"]:
             continue
         try:
             text = open(path, encoding="utf-8-sig", errors="replace").read()
         except OSError:
             continue
         desc = ""
-        m = re.search(r"(?m)^description:\s*\"?(.+?)\"?\s*$", text)
+        m = _pattern("description").search(text)
         if m:
             desc = m.group(1)
-        hit = _DUE.search(desc) or _DUE.search(text)
+        hit = due_re.search(desc) or due_re.search(text)
         due = _parse_date(hit.group(1)) if hit else None
         if not due:
             continue
-        code_m = _CODE.search(desc) or _CODE.search(path)
+        code_m = code_re.search(desc) or code_re.search(path)
         code = code_m.group(1) if code_m else ""
-        weight = _WEIGHT.search(desc)
+        weight = weight_re.search(desc)
         module = _module_name(path)
         found[(module, due)] = {
             "module": module,
             "code": code,
             "due": due,
-            "weight": f"{weight.group(1)}%" if weight else "",
-            "brief_unread": "brief not yet read" in desc.lower(),
+            "weight": CONFIG["weight_format"].format(weight=weight.group(1)) if weight else "",
+            "brief_unread": CONFIG["brief_unread_marker"] in desc.lower(),
             "path": path,
         }
     return sorted(found.values(), key=lambda d: d["due"])
 
 
 def _when(d: dt.date, today: dt.date) -> str:
+    words = CONFIG["when"]
     days = (d - today).days
     if days == 0:
-        return "today"
+        return words["today"]
     if days == 1:
-        return "tomorrow"
+        return words["tomorrow"]
     if days < 0:
-        return f"{-days} days ago"
-    return f"in {days} days"
+        return words["past"].format(days=-days)
+    return words["future"].format(days=days)
 
 
-def _short(t: dict, n: int = 70) -> str:
+def _short(t: dict, n: int | None = None) -> str:
     """tasks.describe with the task text cut at a word -- his msoc tasks run
     to 150 characters, which is a paragraph when read aloud."""
+    n = CONFIG["short_task_chars"] if n is None else n
     text = t["text"]
     if len(text) > n:
-        text = text[:n].rsplit(" ", 1)[0].rstrip(" ,;:-(") + "..."
+        text = text[:n].rsplit(" ", 1)[0].rstrip(CONFIG["short_task_strip"]) + CONFIG["ellipsis"]
     return tasks.describe({**t, "text": text})
 
 
-def _join(items: list, limit: int = 4) -> str:
+def _join(items: list, limit: int | None = None) -> str:
+    cfg = CONFIG["join"]
+    limit = cfg["limit"] if limit is None else limit
     shown = items[:limit]
     more = len(items) - len(shown)
-    return "; ".join(shown) + (f"; and {more} more" if more > 0 else "")
+    return cfg["separator"].join(shown) + (cfg["more"].format(more=more) if more > 0 else "")
 
 
-def briefing(now: dt.datetime | None = None, horizon_days: int = 45) -> str:
-    """Today, from real data only: what's overdue, what's due in the next
-    two days, and the coursework coming up. Spoken-friendly sentences --
-    this is often read aloud. No news (he switched it off) and no weather
-    unless a weather tool actually ran, which it doesn't here."""
+def briefing(now: dt.datetime | None = None, horizon_days: int | None = None) -> str:
+    """Today, from real data only: what's overdue, what's due soon, and the
+    coursework coming up. Spoken-friendly sentences -- this is often read
+    aloud. No news (he switched it off) and no weather unless a weather
+    tool actually ran, which it doesn't here."""
+    cfg = CONFIG["briefing"]
+    horizon_days = cfg["horizon_days"] if horizon_days is None else horizon_days
     now = now or dt.datetime.now()
     today = now.date()
-    parts = [f"It's {now:%A %d %B}, {now:%H:%M}."]
+    parts = [cfg["clock"].format(now=now)]
 
-    overdue, soon = tasks.due_within(48)
+    overdue, soon = tasks.due_within(cfg["soon_hours"])
     if overdue:
-        parts.append(f"Overdue: {_join([_short(t) for t in overdue])}.")
+        parts.append(cfg["overdue"].format(items=_join([_short(t) for t in overdue])))
     if soon:
-        parts.append(f"Due in the next two days: {_join([_short(t) for t in soon])}.")
+        parts.append(cfg["soon"].format(items=_join([_short(t) for t in soon])))
 
     upcoming = [d for d in coursework_deadlines()
                 if 0 <= (d["due"] - today).days <= horizon_days]
     if upcoming:
-        bits = [f"{d['module']} {d['due']:%a %d %b} ({_when(d['due'], today)})"
+        bits = [cfg["coursework_item"].format(module=d["module"], due=d["due"],
+                                              when=_when(d["due"], today))
                 for d in upcoming]
-        parts.append(f"Coursework due: {_join(bits)}.")
+        parts.append(cfg["coursework"].format(items=_join(bits)))
         unread = [d["module"] for d in upcoming if d["brief_unread"]]
         if unread:
-            parts.append(f"Brief not read yet for {_join(unread)}.")
+            parts.append(cfg["unread"].format(items=_join(unread)))
 
     if not (overdue or soon or upcoming):
-        parts.append(f"Nothing overdue, and no coursework due in the next "
-                     f"{horizon_days} days.")
+        parts.append(cfg["nothing"].format(horizon_days=horizon_days))
     return " ".join(parts)
 
 
-def study_plan(now: dt.datetime | None = None, horizon_days: int = 120) -> tuple:
+def study_plan(now: dt.datetime | None = None, horizon_days: int | None = None) -> tuple:
     """A dated plan for each upcoming coursework, and the steps as tasks.
 
-    Three steps per piece of coursework, counted back from the deadline:
-    read the brief (only if his note says it's unread), have a full draft
-    a week out, finish and submit the day before. Steps already on his task
-    list are left out. Returns (text, steps)."""
+    Up to three steps per piece of coursework, counted back from the
+    deadline (offsets in planner.json): read the brief (only if his note
+    says it's unread), a full draft, then finish and submit. Steps already
+    on his task list are left out. Returns (text, steps)."""
+    cfg = CONFIG["study_plan"]
+    horizon_days = cfg["horizon_days"] if horizon_days is None else horizon_days
+    day = dt.timedelta(days=1)
     now = now or dt.datetime.now()
     today = now.date()
     existing = {t["text"].lower() for t in tasks.list_tasks()}
@@ -172,31 +184,27 @@ def study_plan(now: dt.datetime | None = None, horizon_days: int = 120) -> tuple
         mod, due = d["module"], d["due"]
         plan = []
         if d["brief_unread"]:
-            plan.append((min(today + dt.timedelta(days=2), due - dt.timedelta(days=1)),
-                         f"Read the {mod} coursework brief"))
-        if days > 9:
-            plan.append((due - dt.timedelta(days=7), f"Full draft of the {mod} coursework"))
-        plan.append((max(today, due - dt.timedelta(days=1)),
-                     f"Finish and submit the {mod} coursework"))
-        head = f"{mod} -- due {due:%a %d %b}" + (f", {d['weight']}" if d["weight"] else "")
+            plan.append((min(today + day * cfg["read_brief_after_days"],
+                             due - day * cfg["read_brief_before_due_days"]),
+                         cfg["read_brief"].format(module=mod)))
+        if days > cfg["draft_min_days_left"]:
+            plan.append((due - day * cfg["draft_before_due_days"], cfg["draft"].format(module=mod)))
+        plan.append((max(today, due - day * cfg["submit_before_due_days"]),
+                     cfg["submit"].format(module=mod)))
+        head = cfg["head"].format(module=mod, due=due) + (
+            cfg["head_weight"].format(weight=d["weight"]) if d["weight"] else "")
         lines.append(head)
         for when, text in plan:
-            lines.append(f"  - {when:%a %d %b}: {text[0].lower() + text[1:]}")
+            lines.append(cfg["line"].format(when=when, text=text[0].lower() + text[1:]))
             if text.lower() not in existing:
-                steps.append({"text": text, "due": f"{when:%d %b %Y} 18:00"})
+                steps.append({"text": text,
+                              "due": cfg["step_due"].format(when=when, time=cfg["step_due_time"])})
     if not lines:
-        return ("I couldn't find any dated coursework in your module notes for "
-                "the next few months, so there's nothing to plan from yet."), []
-    text = ("Here's a plan from the coursework deadlines in your module notes:\n\n"
-            + "\n".join(lines)
-            + "\n\nThis covers coursework only -- I don't have your lecture "
-              "timetable or exam dates.")
-    return text, steps
+        return cfg["none"], []
+    return cfg["header"] + "\n".join(lines) + cfg["footer"], steps
 
 
 # -- offering the plan, and acting on "yes" ---------------------------------
-
-OFFER = "Want me to add {n} of these to your tasks?"
 
 
 def offer(steps: list, now: dt.datetime | None = None) -> str:
@@ -208,7 +216,7 @@ def offer(steps: list, now: dt.datetime | None = None) -> str:
     os.makedirs(os.path.dirname(PENDING_FILE), exist_ok=True)
     with open(PENDING_FILE, "w", encoding="utf-8") as f:
         json.dump({"created": now.isoformat(timespec="seconds"), "steps": steps}, f, indent=2)
-    return OFFER.format(n=len(steps))
+    return CONFIG["offer"].format(n=len(steps))
 
 
 def pending(now: dt.datetime | None = None) -> list:
@@ -219,7 +227,7 @@ def pending(now: dt.datetime | None = None) -> list:
         made = dt.datetime.fromisoformat(data["created"])
     except (OSError, ValueError, KeyError):
         return []
-    if now - made > dt.timedelta(minutes=PENDING_MINUTES):
+    if now - made > dt.timedelta(minutes=CONFIG["pending_minutes"]):
         return []
     return data.get("steps") or []
 
@@ -239,5 +247,5 @@ def accept(now: dt.datetime | None = None) -> str:
         return ""
     added = [tasks.add_task(s["text"], due=s["due"]) for s in steps]
     clear_pending()
-    return (f"Added {len(added)} tasks:\n"
-            + "\n".join(f"- {tasks.describe(t)}" for t in added))
+    return (CONFIG["accepted"].format(n=len(added))
+            + "\n".join(CONFIG["accepted_line"].format(task=tasks.describe(t)) for t in added))

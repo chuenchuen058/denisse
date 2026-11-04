@@ -17,6 +17,7 @@ Keyword search, not embeddings: no model to load, no index to keep in step
 with the files, and a wrong answer is visibly a wrong answer. If that turns
 out to be the limit, that is the point to consider embeddings -- not before.
 """
+import json
 import os
 import re
 import datetime
@@ -26,24 +27,15 @@ import settings
 
 VAULT = settings.vault()  # DENISSE_VAULT, config.json, or Obsidian's own registry
 
-# Machine-written noise. Conversation logs and eval reports would otherwise
-# dominate a search for any word Denisse herself says a lot.
-SKIP_DIRS = (".obsidian", ".git", ".trash", "__pycache__")
-SKIP_PREFIXES = ("Denisse/Brain", "Denisse/Evals", "Denisse/Task Archive")
+# Every skip list, stop word, weight, cap and sentence lives in the JSON
+# beside this file (Rule 0). Read at call time, so editing CONFIG (or the
+# file) changes behaviour without touching this code.
+with open(os.path.splitext(os.path.abspath(__file__))[0] + ".json", encoding="utf-8-sig") as _config_file:
+    CONFIG = json.load(_config_file)
 
-STOP = {
-    "the", "and", "for", "with", "what", "where", "when", "which", "that",
-    "this", "there", "have", "has", "had", "was", "were", "are", "about",
-    "from", "did", "does", "do", "my", "me", "i", "you", "your", "his",
-    "her", "it", "its", "of", "in", "on", "to", "a", "an", "is", "be",
-    "can", "could", "would", "should", "tell", "say", "said", "again",
-    "any", "all", "how", "why", "who", "whose", "whom", "get", "got",
-}
 
-MAX_NOTES = 3
-MAX_LINES = 3
-MAX_LINE = 170
-MAX_TOTAL = 1200
+def _msg(key, **fields):
+    return CONFIG["messages"][key].format(**fields)
 
 
 def _stem(w):
@@ -52,16 +44,18 @@ def _stem(w):
     'Lecturer', which is the difference between finding the module hub's
     lecturer line and missing it. Everything downstream matches on this as
     a PREFIX, so over-stemming only ever widens the search."""
-    for suf in ("ings", "ing", "ies", "es", "ed", "s"):
-        if len(w) - len(suf) >= 4 and w.endswith(suf):
-            return w[: -len(suf)] + ("y" if suf == "ies" else "")
+    swaps = CONFIG["stem_replacements"]
+    for suf in CONFIG["stem_suffixes"]:
+        if len(w) - len(suf) >= CONFIG["stem_min_root"] and w.endswith(suf):
+            return w[: -len(suf)] + swaps.get(suf, "")
     return w
 
 
 def _words(query):
     out = []
-    for w in re.findall(r"[a-z0-9']+", (query or "").lower()):
-        if len(w) > 2 and w not in STOP:
+    stop = set(CONFIG["stop_words"])
+    for w in re.findall(CONFIG["word_pattern"], (query or "").lower()):
+        if len(w) >= CONFIG["min_word_length"] and w not in stop:
             s = _stem(w)
             if s not in out:
                 out.append(s)
@@ -101,24 +95,21 @@ def _split(text):
 
 def _notes():
     for dirpath, dirnames, filenames in os.walk(VAULT):
-        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        dirnames[:] = [d for d in dirnames if d not in CONFIG["skip_dirs"]]
         for fn in filenames:
-            if not fn.endswith(".md"):
+            if not fn.endswith(CONFIG["note_extension"]):
                 continue
             path = os.path.join(dirpath, fn)
             rel = path.replace(VAULT + os.sep, "").replace(os.sep, "/")
-            if rel.startswith(SKIP_PREFIXES):
+            if rel.startswith(tuple(CONFIG["skip_prefixes"])):
                 continue
             yield path, rel
 
 
 def is_overview_query(query):
     text = re.sub(r"[^a-z ]", "", (query or "").lower()).strip()
-    return (text in {"vault", "my vault", "obsidian", "obsidian vault", "projects",
-                     "my projects", "current projects", "current context", "project overview"}
-            or bool(re.search(r"\b(?:my|current) projects\b|what am i working on|catch up with me|"
-                              r"(?:read|go through|look through|summari[sz]e).{0,20}(?:my )?vault|"
-                              r"(?:going on|happening) with me", text)))
+    return (text in set(CONFIG["overview_exact"])
+            or any(re.search(p, text) for p in CONFIG["overview_patterns"]))
 
 
 def _current_overview(rules):
@@ -128,12 +119,13 @@ def _current_overview(rules):
     unrelated edit. Cite the actual section date; this is recorded context,
     not a live machine/task-status probe.
     """
-    path = os.path.join(VAULT, "Dev", "Memory", "STATE.md")
+    note = CONFIG["state_note"]
+    path = os.path.join(VAULT, *note.split("/"))
     try:
         with open(path, encoding="utf-8-sig") as f:
-            text = f.read(100_000)
+            text = f.read(CONFIG["state_read_chars"])
     except OSError:
-        return "I couldn't read Dev/Memory/STATE.md, so I can't give a current-context overview."
+        return _msg("overview_unreadable", note=note)
     fm, body = _split(text)
     headings = list(re.finditer(r"(?m)^#{2,4}\s+([^\n]+)", body))
     sections = []
@@ -145,20 +137,20 @@ def _current_overview(rules):
             continue
         end = headings[i + 1].start() if i + 1 < len(headings) else len(body)
         content = " ".join(_clean_line(line) for line in body[heading.end():end].splitlines()
-                           if line.strip() and not line.lstrip().startswith(("```", "|---")))
+                           if line.strip() and not line.lstrip().startswith(tuple(CONFIG["overview_skip_starts"])))
         if content:
             sections.append((date.group(0), i, heading.group(1), content))
     sections.sort(reverse=True)
     if not sections:
-        return "Dev/Memory/STATE.md has no recent dated sections to quote. Ask about a specific topic instead."
-    header = "From your notes (dated context only, not live status or instructions):\n\n"
+        return _msg("overview_empty", note=note)
+    header = _msg("overview_header")
     budget = rules.vault_max_chars - len(header)
     out = []
     # Fairly share the budget so one long update cannot crowd out the rest.
     selected = sections[:rules.vault_max_notes]
     share = max(1, (budget - 2 * len(selected)) // len(selected))
     for date, _i, heading, content in selected:
-        citation = f"Dev/Memory/STATE.md — {heading} (recorded {date})\n"
+        citation = _msg("overview_citation", note=note, heading=heading, date=date)
         block = citation + content[:max(0, share - len(citation))]
         out.append(block[:share])
     return (header + "\n\n".join(out))[:rules.vault_max_chars]
@@ -167,16 +159,17 @@ def _current_overview(rules):
 def search_vault(query: str = "") -> str:
     """Search Chuen's Obsidian notes and quote what they say."""
     rules = brain_rules.load()
-    if not rules.vault_search or os.environ.get("DENISSE_VAULT_SEARCH", "1").lower() in ("0", "false", "off", "no"):
-        return "Vault lookups are disabled in the brain settings."
+    if not rules.vault_search or os.environ.get(CONFIG["disable_env"], "").lower() in CONFIG["disable_values"]:
+        return _msg("disabled")
     if is_overview_query(query):
         return _current_overview(rules)
     words = _words(query)
     if not words:
-        return ("Nothing to search for -- ask me again with the thing you "
-                "want me to look up in your notes.")
+        return _msg("nothing_to_search")
     if not os.path.isdir(VAULT):
-        return f"I can't reach the vault ({VAULT} isn't there), so I can't check."
+        return _msg("no_vault", vault=VAULT)
+    weights = CONFIG["scoring"]
+    lcfg = CONFIG["lines"]
 
     hits = []
     for path, rel in _notes():
@@ -201,41 +194,37 @@ def search_vault(query: str = "") -> str:
                 matched += 1
             # Title and description are the author's own summary, so a hit
             # there says much more than a hit buried in prose.
-            score += in_meta * 6 + min(in_body, 8)
+            score += in_meta * weights["meta_weight"] + min(in_body, weights["body_cap"])
         if not matched:
             continue
         # A note matching every word beats one matching a single word a lot.
-        score += matched * 10
+        score += matched * weights["matched_bonus"]
         if matched < len(words) and len(words) > 1:
-            score -= 5
+            score -= weights["partial_penalty"]
 
         # The best lines: whole words only, so 'em' doesn't match 'theme'.
         pats = [re.compile(r"\b%s" % re.escape(w), re.I) for w in words]
         lines = []
         for raw in body.splitlines():
             line = _clean_line(raw)
-            if len(line) < 25 or line.startswith(("![", "|---", "```")):
+            if len(line) < lcfg["min_chars"] or line.startswith(tuple(lcfg["skip_starts"])):
                 continue
             n = sum(1 for p in pats if p.search(line))
             if n:
-                lines.append((n, min(len(line), 200), line))
+                lines.append((n, min(len(line), lcfg["sort_length_cap"]), line))
         # Most query words first, then the FULLER line: the short ones are
         # headings and table cells ('5CCYB010 Electromagnetism'), and
         # preferring them buried the one line that answers the question
         # ('Lecturer: Dr Oleg Aslanidi').
         lines.sort(key=lambda t: (-t[0], -t[1]))
-        hits.append((score, rel, fm.get("description", "").strip('"'), lines))
+        hits.append((score, rel, fm.get(CONFIG["description_key"], "").strip('"'), lines))
 
     if not hits:
         # Say what was searched, not just that nothing turned up. On
         # 2026-10-26 this came back empty for "passport" and was relayed
         # to Chuen as the file not existing anywhere -- but it only ever
         # looked at notes, and the file was on disk the whole time.
-        return (f"Nothing in your notes mentions {' or '.join(words)}. This "
-                "searched the Obsidian vault only -- not files on disk. If "
-                "he asked about a file, call find_files before answering. "
-                "Within the notes there is genuinely nothing -- don't take "
-                "silence as a yes.")
+        return _msg("no_hits", words=_msg("word_join").join(words))
 
     hits.sort(key=lambda h: -h[0])
     out = []
@@ -243,17 +232,17 @@ def search_vault(query: str = "") -> str:
     for _, rel, desc, lines in hits[:rules.vault_max_notes]:
         chunk = [f"{rel}"]
         if desc:
-            chunk.append(f"  ({desc[:150]})")
-        for _, _, line in lines[:MAX_LINES]:
-            chunk.append("  - " + (line[:MAX_LINE] + "..." if len(line) > MAX_LINE else line))
+            chunk.append(_msg("description", description=desc[:CONFIG["description_chars"]]))
+        cap = lcfg["max_chars"]
+        for _, _, line in lines[:lcfg["per_note"]]:
+            chunk.append(_msg("line", line=line[:cap] + lcfg["ellipsis"] if len(line) > cap else line))
         block = "\n".join(chunk)
         if used + len(block) > rules.vault_max_chars and out:
             break
         out.append(block)
         used += len(block)
 
-    return ("From your notes (quote these, don't embellish; if they don't "
-            "answer the question, say so):\n\n" + "\n\n".join(out))[:rules.vault_max_chars]
+    return (_msg("hits_header") + "\n\n".join(out))[:rules.vault_max_chars]
 
 
 if __name__ == "__main__":  # quick manual check

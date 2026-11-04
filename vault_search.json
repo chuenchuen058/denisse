@@ -1,0 +1,75 @@
+{
+  "_note": "Data for vault_search.py (AGENTS.md Rule 0): what is skipped, how notes are scored and quoted, and every sentence the tool returns. Note and result caps come from brain_rules (vault_max_notes, vault_max_chars).",
+  "disable_env": "DENISSE_VAULT_SEARCH",
+  "disable_values": ["0", "false", "off", "no"],
+
+  "_skip": "Machine-written noise. Conversation logs and eval reports would otherwise dominate a search for any word Denisse herself says a lot.",
+  "skip_dirs": [".obsidian", ".git", ".trash", "__pycache__"],
+  "skip_prefixes": ["Denisse/Brain", "Denisse/Evals", "Denisse/Task Archive"],
+  "note_extension": ".md",
+
+  "word_pattern": "[a-z0-9']+",
+  "min_word_length": 3,
+  "stop_words": [
+    "the", "and", "for", "with", "what", "where", "when", "which", "that",
+    "this", "there", "have", "has", "had", "was", "were", "are", "about",
+    "from", "did", "does", "do", "my", "me", "i", "you", "your", "his",
+    "her", "it", "its", "of", "in", "on", "to", "a", "an", "is", "be",
+    "can", "could", "would", "should", "tell", "say", "said", "again",
+    "any", "all", "how", "why", "who", "whose", "whom", "get", "got"
+  ],
+  "_stem": "Suffixes tried in order; a stem keeps at least stem_min_root letters. stem_replacements gives what replaces a suffix (default: nothing).",
+  "stem_suffixes": ["ings", "ing", "ies", "es", "ed", "s"],
+  "stem_min_root": 4,
+  "stem_replacements": {"ies": "y"},
+
+  "_overview": "Queries answered from the dated sections of the state note instead of a keyword search. Matched against the query lower-cased with everything but letters and spaces removed.",
+  "overview_exact": [
+    "vault", "my vault", "obsidian", "obsidian vault", "projects",
+    "my projects", "current projects", "current context", "project overview"
+  ],
+  "overview_patterns": [
+    "\\b(?:my|current) projects\\b",
+    "what am i working on",
+    "catch up with me",
+    "(?:read|go through|look through|summari[sz]e).{0,20}(?:my )?vault",
+    "(?:going on|happening) with me"
+  ],
+  "state_note": "Dev/Memory/STATE.md",
+  "state_read_chars": 100000,
+  "overview_skip_starts": ["```", "|---"],
+
+  "scoring": {
+    "_why": "Title and description are the author's own summary, so a hit there says much more than a hit buried in prose. A note matching every word beats one matching a single word a lot.",
+    "meta_weight": 6,
+    "body_cap": 8,
+    "matched_bonus": 10,
+    "partial_penalty": 5
+  },
+  "description_key": "description",
+  "description_chars": 150,
+
+  "lines": {
+    "min_chars": 25,
+    "skip_starts": ["![", "|---", "```"],
+    "sort_length_cap": 200,
+    "per_note": 3,
+    "max_chars": 170,
+    "ellipsis": "..."
+  },
+
+  "messages": {
+    "disabled": "Vault lookups are disabled in the brain settings.",
+    "nothing_to_search": "Nothing to search for -- ask me again with the thing you want me to look up in your notes.",
+    "no_vault": "I can't reach the vault ({vault} isn't there), so I can't check.",
+    "word_join": " or ",
+    "no_hits": "Nothing in your notes mentions {words}. This searched the Obsidian vault only -- not files on disk. If he asked about a file, call find_files before answering. Within the notes there is genuinely nothing -- don't take silence as a yes.",
+    "hits_header": "From your notes (quote these, don't embellish; if they don't answer the question, say so):\n\n",
+    "description": "  ({description})",
+    "line": "  - {line}",
+    "overview_unreadable": "I couldn't read {note}, so I can't give a current-context overview.",
+    "overview_empty": "{note} has no recent dated sections to quote. Ask about a specific topic instead.",
+    "overview_header": "From your notes (dated context only, not live status or instructions):\n\n",
+    "overview_citation": "{note} — {heading} (recorded {date})\n"
+  }
+}
