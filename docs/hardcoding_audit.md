@@ -6,9 +6,9 @@ Candidates are intentionally conservative: regexes include parsers, text compari
 Static coverage is not proof of exhaustiveness: comments/docstrings, non-Python files, excluded fixtures/private state/dependencies, dynamically constructed/imported values and interprocedural user-text flow are not analysed. Local aliases and comprehension/loop iterables are followed conservatively without execution-order analysis; results can include unrelated possible bindings.
 Values are complete decoded literal representations; f-string fragments and concatenated pieces are reported at their AST source location. Multiple kinds at one location are intentional. No value truncation is applied. Numeric strings used as defaults are included. Booleans and None are excluded.
 
-Scanned **139** Python files; **8117** candidates; **0** scan errors.
+Scanned **140** Python files; **8025** candidates; **0** scan errors.
 
-Source and policy SHA-256: `d8cb37acb3bfb3e5e2f1bb0ca3b7c459168a3d37f59ec8a248f10d4112cbf96c`.
+Source and policy SHA-256: `dd69bce7e8a8e8dc278706492053d86b26f846dd57b7d0867528fa3f0c8d9b7d`.
 
 ## Coverage and regeneration
 
@@ -62,14 +62,14 @@ Traversal policy (from the JSON configuration):
 
 | Kind | Count | Suggested home |
 | --- | ---: | --- |
-| regex candidate | 553 | data file |
-| text match / keyword candidate | 3689 | data file |
-| absolute path | 81 | runtime lookup |
-| user / vault name | 148 | runtime lookup |
-| model name | 233 | config.json |
-| URL | 13 | config.json |
-| time / duration / threshold / limit | 715 | config.json |
-| numeric literal (review) | 2685 | config.json |
+| regex candidate | 558 | data file |
+| text match / keyword candidate | 3680 | data file |
+| absolute path | 73 | runtime lookup |
+| user / vault name | 133 | runtime lookup |
+| model name | 216 | config.json |
+| URL | 12 | config.json |
+| time / duration / threshold / limit | 700 | config.json |
+| numeric literal (review) | 2653 | config.json |
 
 ## Files in review order
 
@@ -137,8 +137,8 @@ Traversal policy (from the JSON configuration):
 | <code>model_config.py</code> | 2: User-facing tools, voice, UI and runtime services | 0 |
 | <code>orchestra/runner.py</code> | 3: Background automation and operator tooling | 418 |
 | <code>orchestra/soak/harness.py</code> | 3: Background automation and operator tooling | 225 |
-| <code>atrium/snapshot.py</code> | 3: Background automation and operator tooling | 195 |
 | <code>scripts/eval_local_voice.py</code> | 3: Background automation and operator tooling | 167 |
+| <code>atrium/snapshot.py</code> | 3: Background automation and operator tooling | 150 |
 | <code>orchestra/admission.py</code> | 3: Background automation and operator tooling | 141 |
 | <code>demo/report.py</code> | 3: Background automation and operator tooling | 120 |
 | <code>scripts/vault_theme.py</code> | 3: Background automation and operator tooling | 115 |
@@ -166,14 +166,13 @@ Traversal policy (from the JSON configuration):
 | <code>scripts/next_lecture.py</code> | 3: Background automation and operator tooling | 51 |
 | <code>orchestra/local_team/core.py</code> | 3: Background automation and operator tooling | 50 |
 | <code>orchestra/status.py</code> | 3: Background automation and operator tooling | 42 |
-| <code>atrium/capture.py</code> | 3: Background automation and operator tooling | 41 |
 | <code>orchestra/exams/daily.py</code> | 3: Background automation and operator tooling | 41 |
 | <code>orchestra/exams/agents.py</code> | 3: Background automation and operator tooling | 40 |
 | <code>orchestra/watch.py</code> | 3: Background automation and operator tooling | 36 |
 | <code>scripts/make_orb_svg.py</code> | 3: Background automation and operator tooling | 35 |
 | <code>scripts/nightly_chat_import.py</code> | 3: Background automation and operator tooling | 33 |
-| <code>atrium/context.py</code> | 3: Background automation and operator tooling | 32 |
 | <code>orchestra/requeue.py</code> | 3: Background automation and operator tooling | 31 |
+| <code>atrium/capture.py</code> | 3: Background automation and operator tooling | 28 |
 | <code>scripts/checks_sandbox/sitecustomize.py</code> | 3: Background automation and operator tooling | 28 |
 | <code>scripts/propose_cases.py</code> | 3: Background automation and operator tooling | 28 |
 | <code>orchestra/hooks/guard.py</code> | 3: Background automation and operator tooling | 27 |
@@ -185,7 +184,6 @@ Traversal policy (from the JSON configuration):
 | <code>scripts/normalize_vault.py</code> | 3: Background automation and operator tooling | 22 |
 | <code>scripts/qualify_attachments.py</code> | 3: Background automation and operator tooling | 21 |
 | <code>scripts/vault_git.py</code> | 3: Background automation and operator tooling | 21 |
-| <code>atrium/install_capture.py</code> | 3: Background automation and operator tooling | 20 |
 | <code>eval/run_pass_k.py</code> | 3: Background automation and operator tooling | 20 |
 | <code>orchestra/exams/__main__.py</code> | 3: Background automation and operator tooling | 18 |
 | <code>orchestra/local_team/__main__.py</code> | 3: Background automation and operator tooling | 18 |
@@ -194,21 +192,24 @@ Traversal policy (from the JSON configuration):
 | <code>orchestra/local_team/lease.py</code> | 3: Background automation and operator tooling | 16 |
 | <code>scripts/vault_link_audit.py</code> | 3: Background automation and operator tooling | 16 |
 | <code>scripts/fix_vault_links.py</code> | 3: Background automation and operator tooling | 15 |
+| <code>atrium/context.py</code> | 3: Background automation and operator tooling | 13 |
 | <code>scripts/standing.py</code> | 3: Background automation and operator tooling | 13 |
-| <code>atrium/__main__.py</code> | 3: Background automation and operator tooling | 10 |
+| <code>atrium/install_capture.py</code> | 3: Background automation and operator tooling | 12 |
 | <code>demo/suite_rounds.py</code> | 3: Background automation and operator tooling | 10 |
 | <code>learner/__main__.py</code> | 3: Background automation and operator tooling | 10 |
 | <code>orchestra/power.py</code> | 3: Background automation and operator tooling | 9 |
-| <code>atrium/credits.py</code> | 3: Background automation and operator tooling | 8 |
+| <code>atrium/__main__.py</code> | 3: Background automation and operator tooling | 8 |
 | <code>scripts/download_vosk_model.py</code> | 3: Background automation and operator tooling | 8 |
 | <code>scripts/brain_settings.py</code> | 3: Background automation and operator tooling | 7 |
 | <code>orchestra/exams/lane_for.py</code> | 3: Background automation and operator tooling | 6 |
 | <code>scripts/ask.py</code> | 3: Background automation and operator tooling | 6 |
+| <code>atrium/credits.py</code> | 3: Background automation and operator tooling | 5 |
 | <code>demo/voice_stages.py</code> | 3: Background automation and operator tooling | 5 |
-| <code>atrium/handoff.py</code> | 3: Background automation and operator tooling | 3 |
 | <code>orchestra/soak/__main__.py</code> | 3: Background automation and operator tooling | 3 |
+| <code>atrium/handoff.py</code> | 3: Background automation and operator tooling | 1 |
 | <code>atrium/hook.py</code> | 3: Background automation and operator tooling | 1 |
 | <code>atrium/__init__.py</code> | 3: Background automation and operator tooling | 0 |
+| <code>atrium/conf.py</code> | 3: Background automation and operator tooling | 0 |
 | <code>eval/__init__.py</code> | 3: Background automation and operator tooling | 0 |
 | <code>learner/__init__.py</code> | 3: Background automation and operator tooling | 0 |
 | <code>orchestra/exams/__init__.py</code> | 3: Background automation and operator tooling | 0 |
@@ -5438,208 +5439,6 @@ Priority 3: Background automation and operator tooling.
 | 628 | numeric literal (review) | <code>1</code> | config.json |
 | 633 | text match / keyword candidate | <code>&#x27;__main__&#x27;</code> | data file |
 
-## atrium/snapshot.py
-
-Priority 3: Background automation and operator tooling.
-
-| Line | Kind | Value | Suggested home |
-| ---: | --- | --- | --- |
-| 29 | numeric literal (review) | <code>0</code> | config.json |
-| 32 | model name | <code>&#x27;chat&#x27;</code> | config.json |
-| 32 | model name | <code>&#x27;, Whisper &#x27;</code> | config.json |
-| 32 | model name | <code>&#x27;whisper&#x27;</code> | config.json |
-| 46 | numeric literal (review) | <code>2</code> | config.json |
-| 47 | regex candidate | <code>&#x27;^(Queue&#124;Kind&#124;Lane&#124;Priority):\\s*(\\S+)&#x27;</code> | data file |
-| 49 | text match / keyword candidate | <code>&#x27;queue&#x27;</code> | data file |
-| 49 | text match / keyword candidate | <code>&#x27;auto&#x27;</code> | data file |
-| 50 | numeric literal (review) | <code>90</code> | config.json |
-| 51 | model name | <code>&#x27;claude&#x27;</code> | config.json |
-| 51 | numeric literal (review) | <code>0</code> | config.json |
-| 57 | text match / keyword candidate | <code>&#x27;.report.md&#x27;</code> | data file |
-| 59 | time / duration / threshold / limit | <code>-7</code> | config.json |
-| 62 | text match / keyword candidate | <code>&#x27;.report.md&#x27;</code> | data file |
-| 71 | absolute path | <code>&#x27;/Query&#x27;</code> | runtime lookup |
-| 71 | absolute path | <code>&#x27;/TN&#x27;</code> | runtime lookup |
-| 71 | user / vault name | <code>&#x27;Denisse Orchestra&#x27;</code> | runtime lookup |
-| 71 | absolute path | <code>&#x27;/FO&#x27;</code> | runtime lookup |
-| 71 | absolute path | <code>&#x27;/NH&#x27;</code> | runtime lookup |
-| 72 | time / duration / threshold / limit | <code>10</code> | config.json |
-| 73 | numeric literal (review) | <code>0</code> | config.json |
-| 77 | absolute path | <code>&#x27;/FI&#x27;</code> | runtime lookup |
-| 77 | absolute path | <code>&#x27;/NH&#x27;</code> | runtime lookup |
-| 78 | time / duration / threshold / limit | <code>10</code> | config.json |
-| 79 | text match / keyword candidate | <code>&#x27;pythonw.exe&#x27;</code> | data file |
-| 83 | model name | <code>&#x27;Claude&#x27;</code> | config.json |
-| 90 | user / vault name | <code>&#x27;Denisse&#x27;</code> | runtime lookup |
-| 90 | model name | <code>&#x27;, Kokoro)&#x27;</code> | config.json |
-| 104 | user / vault name | <code>&#x27;Waiting on Chuen&#x27;</code> | runtime lookup |
-| 105 | regex candidate | <code>&#x27;^\\s*[-*]\\s*&#x27;</code> | data file |
-| 106 | text match / keyword candidate | <code>&#x27;TODO&#x27;</code> | data file |
-| 107 | numeric literal (review) | <code>160</code> | config.json |
-| 109 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
-| 109 | text match / keyword candidate | <code>&#x27;draft&#x27;</code> | data file |
-| 111 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
-| 111 | text match / keyword candidate | <code>&#x27;parked&#x27;</code> | data file |
-| 113 | numeric literal (review) | <code>1</code> | config.json |
-| 113 | numeric literal (review) | <code>-1</code> | config.json |
-| 113 | numeric literal (review) | <code>0</code> | config.json |
-| 114 | numeric literal (review) | <code>120</code> | config.json |
-| 116 | numeric literal (review) | <code>1</code> | config.json |
-| 124 | regex candidate | <code>&#x27;^\\s*-\\s*(\\d{1,2}:\\d{2})\\s*\\[([^\\]]+)\\]\\s*(.*)$&#x27;</code> | data file |
-| 126 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 126 | numeric literal (review) | <code>2</code> | config.json |
-| 126 | numeric literal (review) | <code>3</code> | config.json |
-| 126 | numeric literal (review) | <code>220</code> | config.json |
-| 128 | numeric literal (review) | <code>1</code> | config.json |
-| 138 | text match / keyword candidate | <code>&#x27;area&#x27;</code> | data file |
-| 138 | text match / keyword candidate | <code>&#x27;beliefs&#x27;</code> | data file |
-| 138 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
-| 138 | text match / keyword candidate | <code>&#x27;current&#x27;</code> | data file |
-| 139 | text match / keyword candidate | <code>&#x27;questions&#x27;</code> | data file |
-| 139 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
-| 139 | text match / keyword candidate | <code>&#x27;open&#x27;</code> | data file |
-| 140 | text match / keyword candidate | <code>&#x27;area&#x27;</code> | data file |
-| 141 | numeric literal (review) | <code>4</code> | config.json |
-| 151 | time / duration / threshold / limit | <code>0</code> | config.json |
-| 155 | text match / keyword candidate | <code>&#x27;Z&#x27;</code> | data file |
-| 155 | time / duration / threshold / limit | <code>&#x27;+00:00&#x27;</code> | config.json |
-| 160 | time / duration / threshold / limit | <code>0</code> | config.json |
-| 160 | time / duration / threshold / limit | <code>2</code> | config.json |
-| 161 | time / duration / threshold / limit | <code>0</code> | config.json |
-| 161 | time / duration / threshold / limit | <code>60</code> | config.json |
-| 162 | time / duration / threshold / limit | <code>0</code> | config.json |
-| 162 | time / duration / threshold / limit | <code>60</code> | config.json |
-| 181 | model name | <code>&#x27;claude&#x27;</code> | config.json |
-| 181 | numeric literal (review) | <code>1</code> | config.json |
-| 181 | numeric literal (review) | <code>1</code> | config.json |
-| 185 | text match / keyword candidate | <code>&#x27;Z&#x27;</code> | data file |
-| 185 | time / duration / threshold / limit | <code>&#x27;+00:00&#x27;</code> | config.json |
-| 205 | numeric literal (review) | <code>1</code> | config.json |
-| 205 | numeric literal (review) | <code>1</code> | config.json |
-| 206 | numeric literal (review) | <code>2</code> | config.json |
-| 206 | numeric literal (review) | <code>2</code> | config.json |
-| 206 | numeric literal (review) | <code>2</code> | config.json |
-| 206 | numeric literal (review) | <code>1</code> | config.json |
-| 208 | time / duration / threshold / limit | <code>60</code> | config.json |
-| 210 | time / duration / threshold / limit | <code>0</code> | config.json |
-| 214 | numeric literal (review) | <code>2</code> | config.json |
-| 216 | numeric literal (review) | <code>90</code> | config.json |
-| 217 | numeric literal (review) | <code>11</code> | config.json |
-| 217 | numeric literal (review) | <code>16</code> | config.json |
-| 220 | text match / keyword candidate | <code>&#x27;lane&#x27;</code> | data file |
-| 220 | text match / keyword candidate | <code>&#x27;slot&#x27;</code> | data file |
-| 222 | numeric literal (review) | <code>1</code> | config.json |
-| 222 | numeric literal (review) | <code>1</code> | config.json |
-| 225 | time / duration / threshold / limit | <code>0</code> | config.json |
-| 226 | text match / keyword candidate | <code>&#x27;task&#x27;</code> | data file |
-| 230 | regex candidate | <code>&#x27;(usage limit&#124;rate limit&#124;try again at ([0-9: ]+[AP]M)&#124;IneligibleTierError&#124;quota)&#x27;</code> | data file |
-| 234 | regex candidate | <code>&#x27;\\$([0-9.]+)&#x27;</code> | data file |
-| 235 | numeric literal (review) | <code>1</code> | config.json |
-| 235 | numeric literal (review) | <code>0.0</code> | config.json |
-| 247 | numeric literal (review) | <code>1</code> | config.json |
-| 247 | numeric literal (review) | <code>0</code> | config.json |
-| 248 | numeric literal (review) | <code>0</code> | config.json |
-| 248 | numeric literal (review) | <code>0</code> | config.json |
-| 251 | numeric literal (review) | <code>0</code> | config.json |
-| 252 | numeric literal (review) | <code>1</code> | config.json |
-| 252 | numeric literal (review) | <code>1</code> | config.json |
-| 253 | time / duration / threshold / limit | <code>3</code> | config.json |
-| 267 | numeric literal (review) | <code>0</code> | config.json |
-| 267 | numeric literal (review) | <code>0</code> | config.json |
-| 267 | time / duration / threshold / limit | <code>0.0</code> | config.json |
-| 267 | numeric literal (review) | <code>0.0</code> | config.json |
-| 268 | numeric literal (review) | <code>1</code> | config.json |
-| 269 | text match / keyword candidate | <code>&#x27;result&#x27;</code> | data file |
-| 269 | text match / keyword candidate | <code>&#x27;PASS&#x27;</code> | data file |
-| 270 | numeric literal (review) | <code>0</code> | config.json |
-| 270 | numeric literal (review) | <code>60</code> | config.json |
-| 272 | time / duration / threshold / limit | <code>11</code> | config.json |
-| 272 | time / duration / threshold / limit | <code>16</code> | config.json |
-| 275 | numeric literal (review) | <code>-15</code> | config.json |
-| 277 | numeric literal (review) | <code>-4000</code> | config.json |
-| 281 | numeric literal (review) | <code>-1</code> | config.json |
-| 284 | text match / keyword candidate | <code>&#x27;result&#x27;</code> | data file |
-| 284 | text match / keyword candidate | <code>&#x27;NO_REPORT&#x27;</code> | data file |
-| 284 | text match / keyword candidate | <code>&#x27;LIMITED&#x27;</code> | data file |
-| 286 | time / duration / threshold / limit | <code>-800</code> | config.json |
-| 287 | numeric literal (review) | <code>6</code> | config.json |
-| 287 | numeric literal (review) | <code>3600</code> | config.json |
-| 288 | text match / keyword candidate | <code>&#x27;lane&#x27;</code> | data file |
-| 290 | time / duration / threshold / limit | <code>2</code> | config.json |
-| 290 | time / duration / threshold / limit | <code>2</code> | config.json |
-| 290 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 293 | numeric literal (review) | <code>-300</code> | config.json |
-| 294 | regex candidate | <code>&#x27;^(\\S+) LIMITED \\S+ lane=(\\w+) until (\\S+ )?(\\d{1,2}:\\d{2})&#x27;</code> | data file |
-| 295 | numeric literal (review) | <code>1</code> | config.json |
-| 295 | numeric literal (review) | <code>10</code> | config.json |
-| 296 | time / duration / threshold / limit | <code>3</code> | config.json |
-| 298 | time / duration / threshold / limit | <code>4</code> | config.json |
-| 299 | time / duration / threshold / limit | <code>2</code> | config.json |
-| 303 | time / duration / threshold / limit | <code>2</code> | config.json |
-| 303 | time / duration / threshold / limit | <code>4</code> | config.json |
-| 309 | numeric literal (review) | <code>0</code> | config.json |
-| 309 | numeric literal (review) | <code>1</code> | config.json |
-| 312 | URL | <code>&#x27;http://127.0.0.1:11434/api/ps&#x27;</code> | config.json |
-| 312 | time / duration / threshold / limit | <code>2</code> | config.json |
-| 319 | model name | <code>&#x27;claude&#x27;</code> | config.json |
-| 319 | text match / keyword candidate | <code>&#x27;claude&#x27;</code> | data file |
-| 319 | model name | <code>&#x27;Claude&#x27;</code> | config.json |
-| 320 | text match / keyword candidate | <code>&#x27;codex&#x27;</code> | data file |
-| 320 | text match / keyword candidate | <code>&#x27;gemini&#x27;</code> | data file |
-| 321 | text match / keyword candidate | <code>&#x27;copilot&#x27;</code> | data file |
-| 321 | text match / keyword candidate | <code>&#x27;local&#x27;</code> | data file |
-| 322 | numeric literal (review) | <code>0</code> | config.json |
-| 322 | numeric literal (review) | <code>0</code> | config.json |
-| 322 | time / duration / threshold / limit | <code>0.0</code> | config.json |
-| 322 | numeric literal (review) | <code>0.0</code> | config.json |
-| 323 | numeric literal (review) | <code>0</code> | config.json |
-| 323 | model name | <code>&#x27;claude&#x27;</code> | config.json |
-| 323 | text match / keyword candidate | <code>&#x27;claude&#x27;</code> | data file |
-| 323 | text match / keyword candidate | <code>&#x27;codex&#x27;</code> | data file |
-| 323 | text match / keyword candidate | <code>&#x27;gemini&#x27;</code> | data file |
-| 323 | numeric literal (review) | <code>0</code> | config.json |
-| 324 | text match / keyword candidate | <code>&#x27;local&#x27;</code> | data file |
-| 326 | text match / keyword candidate | <code>&#x27;gemini&#x27;</code> | data file |
-| 335 | numeric literal (review) | <code>0</code> | config.json |
-| 337 | time / duration / threshold / limit | <code>2</code> | config.json |
-| 339 | text match / keyword candidate | <code>&#x27;limited&#x27;</code> | data file |
-| 339 | text match / keyword candidate | <code>&#x27;blocked&#x27;</code> | data file |
-| 339 | text match / keyword candidate | <code>&#x27;Ollama not&#x27;</code> | data file |
-| 348 | time / duration / threshold / limit | <code>2</code> | config.json |
-| 352 | numeric literal (review) | <code>10</code> | config.json |
-| 352 | text match / keyword candidate | <code>&#x27;result&#x27;</code> | data file |
-| 352 | text match / keyword candidate | <code>&#x27;NO_REPORT&#x27;</code> | data file |
-| 363 | regex candidate | <code>&#x27;^DONE:\\s*\\n((?:\\s*-.*\\n?)+)&#x27;</code> | data file |
-| 365 | regex candidate | <code>&#x27;^\\s*-\\s*&#x27;</code> | data file |
-| 365 | numeric literal (review) | <code>1</code> | config.json |
-| 365 | numeric literal (review) | <code>0</code> | config.json |
-| 365 | numeric literal (review) | <code>220</code> | config.json |
-| 369 | numeric literal (review) | <code>2</code> | config.json |
-| 372 | text match / keyword candidate | <code>&#x27;result&#x27;</code> | data file |
-| 372 | text match / keyword candidate | <code>&#x27;PASS&#x27;</code> | data file |
-| 373 | numeric literal (review) | <code>5</code> | config.json |
-| 373 | numeric literal (review) | <code>16</code> | config.json |
-| 373 | text match / keyword candidate | <code>&#x27;T&#x27;</code> | data file |
-| 374 | numeric literal (review) | <code>90</code> | config.json |
-| 375 | time / duration / threshold / limit | <code>0</code> | config.json |
-| 375 | time / duration / threshold / limit | <code>60</code> | config.json |
-| 375 | text match / keyword candidate | <code>&#x27;pushed&#x27;</code> | data file |
-| 378 | numeric literal (review) | <code>40</code> | config.json |
-| 384 | time / duration / threshold / limit | <code>6</code> | config.json |
-| 384 | time / duration / threshold / limit | <code>-1</code> | config.json |
-| 384 | time / duration / threshold / limit | <code>-1</code> | config.json |
-| 385 | numeric literal (review) | <code>0.0</code> | config.json |
-| 385 | model name | <code>&#x27;claude&#x27;</code> | config.json |
-| 385 | text match / keyword candidate | <code>&#x27;claude&#x27;</code> | data file |
-| 385 | text match / keyword candidate | <code>&#x27;codex&#x27;</code> | data file |
-| 388 | text match / keyword candidate | <code>&#x27;end&#x27;</code> | data file |
-| 388 | numeric literal (review) | <code>10</code> | config.json |
-| 388 | text match / keyword candidate | <code>&#x27;lane&#x27;</code> | data file |
-| 390 | numeric literal (review) | <code>0</code> | config.json |
-| 390 | numeric literal (review) | <code>60</code> | config.json |
-| 391 | model name | <code>&#x27;claude&#x27;</code> | config.json |
-| 403 | numeric literal (review) | <code>1</code> | config.json |
-
 ## scripts/eval_local_voice.py
 
 Priority 3: Background automation and operator tooling.
@@ -5813,6 +5612,163 @@ Priority 3: Background automation and operator tooling.
 | 355 | numeric literal (review) | <code>2</code> | config.json |
 | 359 | text match / keyword candidate | <code>&#x27;__main__&#x27;</code> | data file |
 | 366 | numeric literal (review) | <code>2</code> | config.json |
+
+## atrium/snapshot.py
+
+Priority 3: Background automation and operator tooling.
+
+| Line | Kind | Value | Suggested home |
+| ---: | --- | --- | --- |
+| 34 | numeric literal (review) | <code>2</code> | config.json |
+| 43 | numeric literal (review) | <code>0</code> | config.json |
+| 46 | model name | <code>&#x27;chat&#x27;</code> | config.json |
+| 46 | model name | <code>&#x27;whisper&#x27;</code> | config.json |
+| 63 | regex candidate | <code>&#x27;^(Queue&#124;Kind&#124;Lane&#124;Priority):\\s*(\\S+)&#x27;</code> | data file |
+| 65 | text match / keyword candidate | <code>&#x27;queue&#x27;</code> | data file |
+| 65 | text match / keyword candidate | <code>&#x27;auto&#x27;</code> | data file |
+| 67 | numeric literal (review) | <code>0</code> | config.json |
+| 73 | text match / keyword candidate | <code>&#x27;.report.md&#x27;</code> | data file |
+| 78 | text match / keyword candidate | <code>&#x27;.report.md&#x27;</code> | data file |
+| 88 | text match / keyword candidate | <code>&#x27;image&#x27;</code> | data file |
+| 88 | numeric literal (review) | <code>0</code> | config.json |
+| 99 | text match / keyword candidate | <code>&#x27;agents&#x27;</code> | data file |
+| 103 | text match / keyword candidate | <code>&#x27;{models}&#x27;</code> | data file |
+| 103 | text match / keyword candidate | <code>&#x27;role&#x27;</code> | data file |
+| 109 | text match / keyword candidate | <code>&#x27;waiting&#x27;</code> | data file |
+| 110 | text match / keyword candidate | <code>&#x27;skip&#x27;</code> | data file |
+| 113 | regex candidate | <code>&#x27;^\\s*[-*]\\s*&#x27;</code> | data file |
+| 117 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
+| 117 | text match / keyword candidate | <code>&#x27;draft&#x27;</code> | data file |
+| 119 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
+| 119 | text match / keyword candidate | <code>&#x27;parked&#x27;</code> | data file |
+| 121 | numeric literal (review) | <code>1</code> | config.json |
+| 121 | numeric literal (review) | <code>-1</code> | config.json |
+| 121 | numeric literal (review) | <code>0</code> | config.json |
+| 126 | numeric literal (review) | <code>1</code> | config.json |
+| 138 | regex candidate | <code>&#x27;^\\s*-\\s*(\\d{1,2}:\\d{2})\\s*\\[([^\\]]+)\\]\\s*(.*)$&#x27;</code> | data file |
+| 140 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 140 | numeric literal (review) | <code>2</code> | config.json |
+| 140 | numeric literal (review) | <code>3</code> | config.json |
+| 142 | numeric literal (review) | <code>1</code> | config.json |
+| 152 | text match / keyword candidate | <code>&#x27;area&#x27;</code> | data file |
+| 152 | text match / keyword candidate | <code>&#x27;beliefs&#x27;</code> | data file |
+| 152 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
+| 152 | text match / keyword candidate | <code>&#x27;current&#x27;</code> | data file |
+| 153 | text match / keyword candidate | <code>&#x27;questions&#x27;</code> | data file |
+| 153 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
+| 153 | text match / keyword candidate | <code>&#x27;open&#x27;</code> | data file |
+| 154 | text match / keyword candidate | <code>&#x27;area&#x27;</code> | data file |
+| 165 | time / duration / threshold / limit | <code>0</code> | config.json |
+| 169 | text match / keyword candidate | <code>&#x27;Z&#x27;</code> | data file |
+| 169 | time / duration / threshold / limit | <code>&#x27;+00:00&#x27;</code> | config.json |
+| 174 | time / duration / threshold / limit | <code>0</code> | config.json |
+| 174 | time / duration / threshold / limit | <code>2</code> | config.json |
+| 175 | time / duration / threshold / limit | <code>0</code> | config.json |
+| 175 | time / duration / threshold / limit | <code>60</code> | config.json |
+| 176 | time / duration / threshold / limit | <code>0</code> | config.json |
+| 176 | time / duration / threshold / limit | <code>60</code> | config.json |
+| 199 | text match / keyword candidate | <code>&#x27;Z&#x27;</code> | data file |
+| 199 | time / duration / threshold / limit | <code>&#x27;+00:00&#x27;</code> | config.json |
+| 220 | numeric literal (review) | <code>1</code> | config.json |
+| 220 | numeric literal (review) | <code>1</code> | config.json |
+| 221 | numeric literal (review) | <code>2</code> | config.json |
+| 221 | numeric literal (review) | <code>2</code> | config.json |
+| 221 | numeric literal (review) | <code>2</code> | config.json |
+| 221 | numeric literal (review) | <code>1</code> | config.json |
+| 223 | time / duration / threshold / limit | <code>60</code> | config.json |
+| 225 | time / duration / threshold / limit | <code>0</code> | config.json |
+| 231 | numeric literal (review) | <code>11</code> | config.json |
+| 231 | numeric literal (review) | <code>16</code> | config.json |
+| 234 | text match / keyword candidate | <code>&#x27;lane&#x27;</code> | data file |
+| 234 | text match / keyword candidate | <code>&#x27;slot&#x27;</code> | data file |
+| 236 | numeric literal (review) | <code>1</code> | config.json |
+| 236 | numeric literal (review) | <code>1</code> | config.json |
+| 239 | time / duration / threshold / limit | <code>0</code> | config.json |
+| 240 | text match / keyword candidate | <code>&#x27;task&#x27;</code> | data file |
+| 245 | regex candidate | <code>&#x27;\\$([0-9.]+)&#x27;</code> | data file |
+| 246 | numeric literal (review) | <code>1</code> | config.json |
+| 246 | numeric literal (review) | <code>0.0</code> | config.json |
+| 258 | numeric literal (review) | <code>1</code> | config.json |
+| 258 | numeric literal (review) | <code>0</code> | config.json |
+| 259 | numeric literal (review) | <code>0</code> | config.json |
+| 259 | numeric literal (review) | <code>0</code> | config.json |
+| 262 | numeric literal (review) | <code>0</code> | config.json |
+| 263 | numeric literal (review) | <code>1</code> | config.json |
+| 263 | numeric literal (review) | <code>1</code> | config.json |
+| 264 | time / duration / threshold / limit | <code>3</code> | config.json |
+| 271 | text match / keyword candidate | <code>&#x27;usage_status&#x27;</code> | data file |
+| 272 | regex candidate | <code>&#x27;limit_pattern&#x27;</code> | data file |
+| 281 | numeric literal (review) | <code>0</code> | config.json |
+| 281 | numeric literal (review) | <code>0</code> | config.json |
+| 281 | time / duration / threshold / limit | <code>0.0</code> | config.json |
+| 281 | numeric literal (review) | <code>0.0</code> | config.json |
+| 282 | numeric literal (review) | <code>1</code> | config.json |
+| 283 | text match / keyword candidate | <code>&#x27;result&#x27;</code> | data file |
+| 283 | text match / keyword candidate | <code>&#x27;PASS&#x27;</code> | data file |
+| 284 | numeric literal (review) | <code>0</code> | config.json |
+| 284 | numeric literal (review) | <code>60</code> | config.json |
+| 286 | time / duration / threshold / limit | <code>11</code> | config.json |
+| 286 | time / duration / threshold / limit | <code>16</code> | config.json |
+| 295 | numeric literal (review) | <code>-1</code> | config.json |
+| 298 | text match / keyword candidate | <code>&#x27;result&#x27;</code> | data file |
+| 298 | text match / keyword candidate | <code>&#x27;limit_results&#x27;</code> | data file |
+| 301 | numeric literal (review) | <code>3600</code> | config.json |
+| 302 | text match / keyword candidate | <code>&#x27;lane&#x27;</code> | data file |
+| 304 | time / duration / threshold / limit | <code>2</code> | config.json |
+| 304 | time / duration / threshold / limit | <code>2</code> | config.json |
+| 304 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 309 | regex candidate | <code>&#x27;^(\\S+) LIMITED \\S+ lane=(\\w+) until (\\S+ )?(\\d{1,2}:\\d{2})&#x27;</code> | data file |
+| 310 | numeric literal (review) | <code>1</code> | config.json |
+| 310 | numeric literal (review) | <code>10</code> | config.json |
+| 311 | time / duration / threshold / limit | <code>3</code> | config.json |
+| 313 | time / duration / threshold / limit | <code>4</code> | config.json |
+| 314 | time / duration / threshold / limit | <code>2</code> | config.json |
+| 318 | time / duration / threshold / limit | <code>2</code> | config.json |
+| 318 | time / duration / threshold / limit | <code>4</code> | config.json |
+| 324 | numeric literal (review) | <code>0</code> | config.json |
+| 324 | numeric literal (review) | <code>1</code> | config.json |
+| 334 | text match / keyword candidate | <code>&#x27;bad_status_prefixes&#x27;</code> | data file |
+| 336 | text match / keyword candidate | <code>&#x27;usage&#x27;</code> | data file |
+| 337 | text match / keyword candidate | <code>&#x27;lane&#x27;</code> | data file |
+| 338 | numeric literal (review) | <code>0</code> | config.json |
+| 338 | numeric literal (review) | <code>0</code> | config.json |
+| 338 | time / duration / threshold / limit | <code>0.0</code> | config.json |
+| 338 | numeric literal (review) | <code>0.0</code> | config.json |
+| 339 | numeric literal (review) | <code>0</code> | config.json |
+| 339 | numeric literal (review) | <code>0</code> | config.json |
+| 340 | text match / keyword candidate | <code>&#x27;source&#x27;</code> | data file |
+| 340 | text match / keyword candidate | <code>&#x27;ollama&#x27;</code> | data file |
+| 350 | model name | <code>&#x27;label&#x27;</code> | config.json |
+| 351 | numeric literal (review) | <code>0</code> | config.json |
+| 353 | time / duration / threshold / limit | <code>2</code> | config.json |
+| 365 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 366 | text match / keyword candidate | <code>&#x27;skip_results&#x27;</code> | data file |
+| 370 | numeric literal (review) | <code>10</code> | config.json |
+| 370 | text match / keyword candidate | <code>&#x27;result&#x27;</code> | data file |
+| 381 | regex candidate | <code>&#x27;^DONE:\\s*\\n((?:\\s*-.*\\n?)+)&#x27;</code> | data file |
+| 383 | regex candidate | <code>&#x27;^\\s*-\\s*&#x27;</code> | data file |
+| 383 | numeric literal (review) | <code>1</code> | config.json |
+| 383 | numeric literal (review) | <code>0</code> | config.json |
+| 389 | text match / keyword candidate | <code>&#x27;result&#x27;</code> | data file |
+| 389 | text match / keyword candidate | <code>&#x27;PASS&#x27;</code> | data file |
+| 390 | numeric literal (review) | <code>5</code> | config.json |
+| 390 | numeric literal (review) | <code>16</code> | config.json |
+| 390 | text match / keyword candidate | <code>&#x27;T&#x27;</code> | data file |
+| 392 | time / duration / threshold / limit | <code>0</code> | config.json |
+| 392 | time / duration / threshold / limit | <code>60</code> | config.json |
+| 392 | text match / keyword candidate | <code>&#x27;pushed&#x27;</code> | data file |
+| 401 | text match / keyword candidate | <code>&#x27;activity_lanes&#x27;</code> | data file |
+| 403 | text match / keyword candidate | <code>&#x27;activity_days&#x27;</code> | data file |
+| 403 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 403 | time / duration / threshold / limit | <code>-1</code> | config.json |
+| 403 | time / duration / threshold / limit | <code>-1</code> | config.json |
+| 404 | numeric literal (review) | <code>0.0</code> | config.json |
+| 407 | text match / keyword candidate | <code>&#x27;end&#x27;</code> | data file |
+| 407 | numeric literal (review) | <code>10</code> | config.json |
+| 407 | text match / keyword candidate | <code>&#x27;lane&#x27;</code> | data file |
+| 409 | numeric literal (review) | <code>0</code> | config.json |
+| 409 | numeric literal (review) | <code>60</code> | config.json |
+| 422 | numeric literal (review) | <code>1</code> | config.json |
 
 ## orchestra/admission.py
 
@@ -8153,54 +8109,6 @@ Priority 3: Background automation and operator tooling.
 | 208 | numeric literal (review) | <code>0</code> | config.json |
 | 211 | text match / keyword candidate | <code>&#x27;__main__&#x27;</code> | data file |
 
-## atrium/capture.py
-
-Priority 3: Background automation and operator tooling.
-
-| Line | Kind | Value | Suggested home |
-| ---: | --- | --- | --- |
-| 27 | time / duration / threshold / limit | <code>40000</code> | config.json |
-| 28 | time / duration / threshold / limit | <code>4</code> | config.json |
-| 31 | time / duration / threshold / limit | <code>40</code> | config.json |
-| 38 | text match / keyword candidate | <code>&#x27;type&#x27;</code> | data file |
-| 38 | text match / keyword candidate | <code>&#x27;text&#x27;</code> | data file |
-| 50 | text match / keyword candidate | <code>&#x27;role&#x27;</code> | data file |
-| 50 | text match / keyword candidate | <code>&#x27;type&#x27;</code> | data file |
-| 51 | text match / keyword candidate | <code>&#x27;content&#x27;</code> | data file |
-| 52 | text match / keyword candidate | <code>&#x27;user&#x27;</code> | data file |
-| 54 | text match / keyword candidate | <code>&#x27;tool_result&#x27;</code> | data file |
-| 54 | numeric literal (review) | <code>40</code> | config.json |
-| 56 | text match / keyword candidate | <code>&#x27;assistant&#x27;</code> | data file |
-| 61 | text match / keyword candidate | <code>&#x27;type&#x27;</code> | data file |
-| 61 | text match / keyword candidate | <code>&#x27;tool_use&#x27;</code> | data file |
-| 61 | text match / keyword candidate | <code>&#x27;name&#x27;</code> | data file |
-| 61 | text match / keyword candidate | <code>&#x27;Write&#x27;</code> | data file |
-| 61 | text match / keyword candidate | <code>&#x27;Edit&#x27;</code> | data file |
-| 61 | text match / keyword candidate | <code>&#x27;MultiEdit&#x27;</code> | data file |
-| 62 | text match / keyword candidate | <code>&#x27;file_path&#x27;</code> | data file |
-| 69 | regex candidate | <code>&#x27;\\s+&#x27;</code> | data file |
-| 70 | numeric literal (review) | <code>1</code> | config.json |
-| 74 | time / duration / threshold / limit | <code>10</code> | config.json |
-| 75 | numeric literal (review) | <code>8</code> | config.json |
-| 76 | model name | <code>&#x27;description: Claude Code session in &#x27;</code> | config.json |
-| 81 | numeric literal (review) | <code>300</code> | config.json |
-| 83 | numeric literal (review) | <code>400</code> | config.json |
-| 83 | numeric literal (review) | <code>-8</code> | config.json |
-| 85 | numeric literal (review) | <code>-30</code> | config.json |
-| 103 | text match / keyword candidate | <code>&#x27;hook_event_name&#x27;</code> | data file |
-| 103 | text match / keyword candidate | <code>&#x27;Stop&#x27;</code> | data file |
-| 106 | numeric literal (review) | <code>0</code> | config.json |
-| 108 | text match / keyword candidate | <code>&#x27;Stop&#x27;</code> | data file |
-| 116 | numeric literal (review) | <code>10</code> | config.json |
-| 116 | regex candidate | <code>&#x27;[^A-Za-z0-9 _-]&#x27;</code> | data file |
-| 116 | numeric literal (review) | <code>8</code> | config.json |
-| 118 | numeric literal (review) | <code>-1</code> | config.json |
-| 118 | numeric literal (review) | <code>120</code> | config.json |
-| 119 | model name | <code>&#x27;claude&#x27;</code> | config.json |
-| 119 | numeric literal (review) | <code>8</code> | config.json |
-| 123 | numeric literal (review) | <code>1</code> | config.json |
-| 137 | numeric literal (review) | <code>0</code> | config.json |
-
 ## orchestra/exams/daily.py
 
 Priority 3: Background automation and operator tooling.
@@ -8421,45 +8329,6 @@ Priority 3: Background automation and operator tooling.
 | 188 | numeric literal (review) | <code>7</code> | config.json |
 | 190 | numeric literal (review) | <code>1</code> | config.json |
 
-## atrium/context.py
-
-Priority 3: Background automation and operator tooling.
-
-| Line | Kind | Value | Suggested home |
-| ---: | --- | --- | --- |
-| 24 | user / vault name | <code>&quot;OneDrive - King&#x27;s College London&quot;</code> | runtime lookup |
-| 24 | user / vault name | <code>&#x27;Denisse&#x27;</code> | runtime lookup |
-| 25 | model name | <code>&#x27;claude&#x27;</code> | config.json |
-| 25 | user / vault name | <code>&#x27;denisse&#x27;</code> | runtime lookup |
-| 26 | model name | <code>&#x27;claude&#x27;</code> | config.json |
-| 26 | time / duration / threshold / limit | <code>6000</code> | config.json |
-| 26 | time / duration / threshold / limit | <code>4000</code> | config.json |
-| 26 | time / duration / threshold / limit | <code>8000</code> | config.json |
-| 26 | time / duration / threshold / limit | <code>2500</code> | config.json |
-| 26 | user / vault name | <code>&#x27;denisse&#x27;</code> | runtime lookup |
-| 26 | time / duration / threshold / limit | <code>2500</code> | config.json |
-| 37 | regex candidate | <code>&#x27;\\A---\\n.*?\\n---\\n&#x27;</code> | data file |
-| 41 | regex candidate | <code>&#x27;^##+ &#x27;</code> | data file |
-| 41 | regex candidate | <code>&#x27;\\s*\\n(.*?)(?=^## &#124;\\Z)&#x27;</code> | data file |
-| 42 | numeric literal (review) | <code>1</code> | config.json |
-| 47 | regex candidate | <code>&#x27;^\\&#124;\\s*-&#x27;</code> | data file |
-| 54 | user / vault name | <code>&#x27;Before planning anything about Chuen&#x27;</code> | runtime lookup |
-| 57 | text match / keyword candidate | <code>&#x27;- unknown&#x27;</code> | data file |
-| 67 | user / vault name | <code>&quot;Standing asks (Chuen&#x27;s rules)&quot;</code> | runtime lookup |
-| 68 | user / vault name | <code>&#x27;Before planning anything about Chuen&#x27;</code> | runtime lookup |
-| 70 | user / vault name | <code>&#x27;Waiting on Chuen&#x27;</code> | runtime lookup |
-| 70 | user / vault name | <code>&#x27;Waiting on Chuen&#x27;</code> | runtime lookup |
-| 71 | regex candidate | <code>&#x27;\\A## STATE NOW\\s*\\n&#x27;</code> | data file |
-| 72 | numeric literal (review) | <code>12</code> | config.json |
-| 73 | numeric literal (review) | <code>15</code> | config.json |
-| 77 | model name | <code>&#x27;claude&#x27;</code> | config.json |
-| 78 | time / duration / threshold / limit | <code>4000</code> | config.json |
-| 79 | user / vault name | <code>&quot; (from Chuen&#x27;s vault, &quot;</code> | runtime lookup |
-| 87 | numeric literal (review) | <code>40</code> | config.json |
-| 88 | numeric literal (review) | <code>200</code> | config.json |
-| 91 | numeric literal (review) | <code>1</code> | config.json |
-| 91 | numeric literal (review) | <code>0</code> | config.json |
-
 ## orchestra/requeue.py
 
 Priority 3: Background automation and operator tooling.
@@ -8497,6 +8366,41 @@ Priority 3: Background automation and operator tooling.
 | 227 | numeric literal (review) | <code>1</code> | config.json |
 | 228 | numeric literal (review) | <code>0</code> | config.json |
 | 231 | text match / keyword candidate | <code>&#x27;__main__&#x27;</code> | data file |
+
+## atrium/capture.py
+
+Priority 3: Background automation and operator tooling.
+
+| Line | Kind | Value | Suggested home |
+| ---: | --- | --- | --- |
+| 42 | text match / keyword candidate | <code>&#x27;type&#x27;</code> | data file |
+| 42 | text match / keyword candidate | <code>&#x27;text&#x27;</code> | data file |
+| 48 | text match / keyword candidate | <code>&#x27;capture&#x27;</code> | data file |
+| 48 | text match / keyword candidate | <code>&#x27;edit_tools&#x27;</code> | data file |
+| 56 | text match / keyword candidate | <code>&#x27;role&#x27;</code> | data file |
+| 56 | text match / keyword candidate | <code>&#x27;type&#x27;</code> | data file |
+| 57 | text match / keyword candidate | <code>&#x27;content&#x27;</code> | data file |
+| 58 | text match / keyword candidate | <code>&#x27;user&#x27;</code> | data file |
+| 60 | text match / keyword candidate | <code>&#x27;tool_result&#x27;</code> | data file |
+| 60 | numeric literal (review) | <code>40</code> | config.json |
+| 62 | text match / keyword candidate | <code>&#x27;assistant&#x27;</code> | data file |
+| 67 | text match / keyword candidate | <code>&#x27;type&#x27;</code> | data file |
+| 67 | text match / keyword candidate | <code>&#x27;tool_use&#x27;</code> | data file |
+| 67 | text match / keyword candidate | <code>&#x27;name&#x27;</code> | data file |
+| 68 | text match / keyword candidate | <code>&#x27;file_path&#x27;</code> | data file |
+| 75 | regex candidate | <code>&#x27;\\s+&#x27;</code> | data file |
+| 76 | numeric literal (review) | <code>1</code> | config.json |
+| 81 | time / duration / threshold / limit | <code>10</code> | config.json |
+| 102 | text match / keyword candidate | <code>&#x27;capture&#x27;</code> | data file |
+| 109 | text match / keyword candidate | <code>&#x27;hook_event_name&#x27;</code> | data file |
+| 109 | text match / keyword candidate | <code>&#x27;default_event&#x27;</code> | data file |
+| 112 | numeric literal (review) | <code>0</code> | config.json |
+| 114 | text match / keyword candidate | <code>&#x27;threshold_event&#x27;</code> | data file |
+| 124 | time / duration / threshold / limit | <code>10</code> | config.json |
+| 124 | regex candidate | <code>&#x27;[^A-Za-z0-9 _-]&#x27;</code> | data file |
+| 126 | numeric literal (review) | <code>-1</code> | config.json |
+| 132 | numeric literal (review) | <code>1</code> | config.json |
+| 146 | numeric literal (review) | <code>0</code> | config.json |
 
 ## scripts/checks_sandbox/sitecustomize.py
 
@@ -8846,33 +8750,6 @@ Priority 3: Background automation and operator tooling.
 | 62 | text match / keyword candidate | <code>&#x27;HEAD&#x27;</code> | data file |
 | 64 | text match / keyword candidate | <code>&#x27;name&#x27;</code> | data file |
 
-## atrium/install_capture.py
-
-Priority 3: Background automation and operator tooling.
-
-| Line | Kind | Value | Suggested home |
-| ---: | --- | --- | --- |
-| 6 | numeric literal (review) | <code>0</code> | config.json |
-| 6 | numeric literal (review) | <code>1</code> | config.json |
-| 8 | model name | <code>&#x27;.claude&#x27;</code> | config.json |
-| 8 | text match / keyword candidate | <code>&#x27;.claude&#x27;</code> | data file |
-| 8 | text match / keyword candidate | <code>&#x27;settings.json&#x27;</code> | data file |
-| 9 | text match / keyword candidate | <code>&#x27;utf-8&#x27;</code> | data file |
-| 15 | absolute path | <code>&#x27;/.venv/Scripts/python.exe&quot; &quot;&#x27;</code> | runtime lookup |
-| 15 | absolute path | <code>&#x27;/atrium/hook.py&quot;&#x27;</code> | runtime lookup |
-| 17 | text match / keyword candidate | <code>&#x27;Stop&#x27;</code> | data file |
-| 17 | text match / keyword candidate | <code>&#x27;PreCompact&#x27;</code> | data file |
-| 17 | text match / keyword candidate | <code>&#x27;SessionEnd&#x27;</code> | data file |
-| 19 | text match / keyword candidate | <code>&#x27;atrium capture&#x27;</code> | data file |
-| 19 | text match / keyword candidate | <code>&#x27;command&#x27;</code> | data file |
-| 20 | text match / keyword candidate | <code>&#x27;atrium/hook.py&#x27;</code> | data file |
-| 20 | text match / keyword candidate | <code>&#x27;command&#x27;</code> | data file |
-| 21 | text match / keyword candidate | <code>&#x27;Stop&#x27;</code> | data file |
-| 21 | time / duration / threshold / limit | <code>20</code> | config.json |
-| 22 | text match / keyword candidate | <code>&#x27;.tmp&#x27;</code> | data file |
-| 24 | numeric literal (review) | <code>2</code> | config.json |
-| 26 | text match / keyword candidate | <code>&#x27;hooks&#x27;</code> | data file |
-
 ## eval/run_pass_k.py
 
 Priority 3: Background automation and operator tooling.
@@ -9067,6 +8944,26 @@ Priority 3: Background automation and operator tooling.
 | 58 | numeric literal (review) | <code>0</code> | config.json |
 | 61 | text match / keyword candidate | <code>&#x27;__main__&#x27;</code> | data file |
 
+## atrium/context.py
+
+Priority 3: Background automation and operator tooling.
+
+| Line | Kind | Value | Suggested home |
+| ---: | --- | --- | --- |
+| 32 | numeric literal (review) | <code>0</code> | config.json |
+| 54 | regex candidate | <code>&#x27;\\A---\\n.*?\\n---\\n&#x27;</code> | data file |
+| 58 | regex candidate | <code>&#x27;^##+ &#x27;</code> | data file |
+| 58 | regex candidate | <code>&#x27;\\s*\\n(.*?)(?=^## &#124;\\Z)&#x27;</code> | data file |
+| 59 | numeric literal (review) | <code>1</code> | config.json |
+| 64 | regex candidate | <code>&#x27;^\\&#124;\\s*-&#x27;</code> | data file |
+| 84 | regex candidate | <code>&#x27;context&#x27;</code> | data file |
+| 87 | regex candidate | <code>&#x27;parts&#x27;</code> | data file |
+| 94 | regex candidate | <code>&#x27;\\A## &#x27;</code> | data file |
+| 94 | regex candidate | <code>&#x27;strip_heading&#x27;</code> | data file |
+| 94 | regex candidate | <code>&#x27;\\s*\\n&#x27;</code> | data file |
+| 118 | numeric literal (review) | <code>1</code> | config.json |
+| 118 | numeric literal (review) | <code>0</code> | config.json |
+
 ## scripts/standing.py
 
 Priority 3: Background automation and operator tooling.
@@ -9087,22 +8984,24 @@ Priority 3: Background automation and operator tooling.
 | 44 | numeric literal (review) | <code>1</code> | config.json |
 | 47 | text match / keyword candidate | <code>&#x27;__main__&#x27;</code> | data file |
 
-## atrium/__main__.py
+## atrium/install_capture.py
 
 Priority 3: Background automation and operator tooling.
 
 | Line | Kind | Value | Suggested home |
 | ---: | --- | --- | --- |
-| 18 | model name | <code>&#x27;claude&#x27;</code> | config.json |
-| 19 | numeric literal (review) | <code>7</code> | config.json |
-| 23 | text match / keyword candidate | <code>&#x27;context&#x27;</code> | data file |
-| 26 | numeric literal (review) | <code>0</code> | config.json |
-| 27 | text match / keyword candidate | <code>&#x27;capture&#x27;</code> | data file |
-| 30 | text match / keyword candidate | <code>&#x27;snapshot&#x27;</code> | data file |
-| 33 | numeric literal (review) | <code>0</code> | config.json |
-| 38 | numeric literal (review) | <code>1</code> | config.json |
-| 38 | numeric literal (review) | <code>0</code> | config.json |
-| 41 | text match / keyword candidate | <code>&#x27;__main__&#x27;</code> | data file |
+| 7 | numeric literal (review) | <code>0</code> | config.json |
+| 7 | numeric literal (review) | <code>1</code> | config.json |
+| 10 | text match / keyword candidate | <code>&#x27;hook&#x27;</code> | data file |
+| 11 | text match / keyword candidate | <code>&#x27;settings_file&#x27;</code> | data file |
+| 12 | text match / keyword candidate | <code>&#x27;utf-8&#x27;</code> | data file |
+| 22 | text match / keyword candidate | <code>&#x27;legacy_marker&#x27;</code> | data file |
+| 22 | text match / keyword candidate | <code>&#x27;command&#x27;</code> | data file |
+| 23 | text match / keyword candidate | <code>&#x27;marker&#x27;</code> | data file |
+| 23 | text match / keyword candidate | <code>&#x27;command&#x27;</code> | data file |
+| 25 | text match / keyword candidate | <code>&#x27;.tmp&#x27;</code> | data file |
+| 27 | numeric literal (review) | <code>2</code> | config.json |
+| 29 | text match / keyword candidate | <code>&#x27;hooks&#x27;</code> | data file |
 
 ## demo/suite_rounds.py
 
@@ -9154,20 +9053,20 @@ Priority 3: Background automation and operator tooling.
 | 51 | text match / keyword candidate | <code>&#x27;nt&#x27;</code> | data file |
 | 72 | numeric literal (review) | <code>30</code> | config.json |
 
-## atrium/credits.py
+## atrium/__main__.py
 
 Priority 3: Background automation and operator tooling.
 
 | Line | Kind | Value | Suggested home |
 | ---: | --- | --- | --- |
-| 17 | model name | <code>&#x27;\\[(Chuen&#124;Claude&#124;Codex&#124;Gemini&#124;Copilot&#124;Denisse&#124;measured&#124;claude&#124;codex&#124;gemini&#124;copilot&#124;denisse&#124;Claude proposed, Chuen approved)[^\\]]*\\]&#x27;</code> | config.json |
-| 17 | regex candidate | <code>&#x27;\\[(Chuen&#124;Claude&#124;Codex&#124;Gemini&#124;Copilot&#124;Denisse&#124;measured&#124;claude&#124;codex&#124;gemini&#124;copilot&#124;denisse&#124;Claude proposed, Chuen approved)[^\\]]*\\]&#x27;</code> | data file |
-| 17 | user / vault name | <code>&#x27;\\[(Chuen&#124;Claude&#124;Codex&#124;Gemini&#124;Copilot&#124;Denisse&#124;measured&#124;claude&#124;codex&#124;gemini&#124;copilot&#124;denisse&#124;Claude proposed, Chuen approved)[^\\]]*\\]&#x27;</code> | runtime lookup |
-| 19 | regex candidate | <code>&#x27;^\\s*[-*]\\s+(\\d{4}-\\d{2}-\\d{2}&#124;\\d{1,2}:\\d{2})\\b&#x27;</code> | data file |
-| 23 | time / duration / threshold / limit | <code>7</code> | config.json |
-| 25 | numeric literal (review) | <code>86400</code> | config.json |
-| 32 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 34 | numeric literal (review) | <code>120</code> | config.json |
+| 24 | text match / keyword candidate | <code>&#x27;context&#x27;</code> | data file |
+| 27 | numeric literal (review) | <code>0</code> | config.json |
+| 28 | text match / keyword candidate | <code>&#x27;capture&#x27;</code> | data file |
+| 31 | text match / keyword candidate | <code>&#x27;snapshot&#x27;</code> | data file |
+| 34 | numeric literal (review) | <code>0</code> | config.json |
+| 39 | numeric literal (review) | <code>1</code> | config.json |
+| 39 | numeric literal (review) | <code>0</code> | config.json |
+| 42 | text match / keyword candidate | <code>&#x27;__main__&#x27;</code> | data file |
 
 ## scripts/download_vosk_model.py
 
@@ -9224,6 +9123,18 @@ Priority 3: Background automation and operator tooling.
 | 83 | numeric literal (review) | <code>0</code> | config.json |
 | 86 | text match / keyword candidate | <code>&#x27;__main__&#x27;</code> | data file |
 
+## atrium/credits.py
+
+Priority 3: Background automation and operator tooling.
+
+| Line | Kind | Value | Suggested home |
+| ---: | --- | --- | --- |
+| 18 | regex candidate | <code>&#x27;^\\s*[-*]\\s+(\\d{4}-\\d{2}-\\d{2}&#124;\\d{1,2}:\\d{2})\\b&#x27;</code> | data file |
+| 22 | regex candidate | <code>&#x27;\\[(&#x27;</code> | data file |
+| 22 | regex candidate | <code>&#x27;)[^\\]]*\\]&#x27;</code> | data file |
+| 30 | numeric literal (review) | <code>86400</code> | config.json |
+| 37 | time / duration / threshold / limit | <code>1</code> | config.json |
+
 ## demo/voice_stages.py
 
 Priority 3: Background automation and operator tooling.
@@ -9236,16 +9147,6 @@ Priority 3: Background automation and operator tooling.
 | 42 | numeric literal (review) | <code>0</code> | config.json |
 | 45 | text match / keyword candidate | <code>&#x27;__main__&#x27;</code> | data file |
 
-## atrium/handoff.py
-
-Priority 3: Background automation and operator tooling.
-
-| Line | Kind | Value | Suggested home |
-| ---: | --- | --- | --- |
-| 18 | regex candidate | <code>&#x27;\\s+&#x27;</code> | data file |
-| 18 | numeric literal (review) | <code>400</code> | config.json |
-| 28 | user / vault name | <code>&#x27;\n\nOne line per decision, correction, hand-off or thing waiting on Chuen, tagged with who wrote it.\n\n## Log\n&#x27;</code> | runtime lookup |
-
 ## orchestra/soak/__main__.py
 
 Priority 3: Background automation and operator tooling.
@@ -9256,6 +9157,14 @@ Priority 3: Background automation and operator tooling.
 | 8 | text match / keyword candidate | <code>&#x27;__main__&#x27;</code> | data file |
 | 9 | numeric literal (review) | <code>1</code> | config.json |
 
+## atrium/handoff.py
+
+Priority 3: Background automation and operator tooling.
+
+| Line | Kind | Value | Suggested home |
+| ---: | --- | --- | --- |
+| 21 | regex candidate | <code>&#x27;\\s+&#x27;</code> | data file |
+
 ## atrium/hook.py
 
 Priority 3: Background automation and operator tooling.
@@ -9265,6 +9174,14 @@ Priority 3: Background automation and operator tooling.
 | 7 | numeric literal (review) | <code>0</code> | config.json |
 
 ## atrium/__init__.py
+
+Priority 3: Background automation and operator tooling.
+
+| Line | Kind | Value | Suggested home |
+| ---: | --- | --- | --- |
+| - | No candidates | - | - |
+
+## atrium/conf.py
 
 Priority 3: Background automation and operator tooling.
 

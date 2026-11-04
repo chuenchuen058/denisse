@@ -1,22 +1,23 @@
 """python -m atrium <command>
 
-  context [--lane claude|codex|gemini|copilot|denisse]   print the shared context pack
-  credits [--days 7]     list decision lines in the vault that don't say who decided (exit 1 if any)
+  context [--lane LANE]  print the shared context pack (lanes and default: atrium/config.json)
+  credits [--days N]     list decision lines in the vault that don't say who decided (exit 1 if any)
   snapshot [--out DIR]   write the Atrium Hub page's tables (default .review/hub)
   capture                Claude Code hook (stdin): save the session into the vault
 """
 import argparse
 import sys
 
-from . import context, credits, snapshot
+from . import conf, context, credits, snapshot
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="python -m atrium", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    c = sub.add_parser("context"); c.add_argument("--lane", default="claude", choices=context.LANES)
-    k = sub.add_parser("credits"); k.add_argument("--days", type=int, default=7)
+    c = sub.add_parser("context")
+    c.add_argument("--lane", default=conf.section("context")["default_lane"], choices=context.LANES)
+    k = sub.add_parser("credits"); k.add_argument("--days", type=int, default=conf.section("credits")["default_days"])
     sn = sub.add_parser("snapshot"); sn.add_argument("--out", default=None)
     sub.add_parser("capture")
     a = ap.parse_args(argv)
@@ -34,7 +35,7 @@ def main(argv=None) -> int:
     bad = credits.check(a.days)
     for f, n, line in bad:
         print(f"{f}:{n}: {line}")
-    print(f"{len(bad)} decision line(s) without a credit")
+    print(conf.section("credits")["summary"].format(n=len(bad)))
     return 1 if bad else 0
 
 
