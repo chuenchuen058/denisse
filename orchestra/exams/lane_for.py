@@ -14,48 +14,32 @@ import re
 from pathlib import Path
 
 from . import core
+from .settings import load
 
-DEFAULT_LANE = "claude"
+DEFAULT_LANE = load()["routing"]["default_lane"]
 
 
 def orchestra_lanes(config: Path | None = None) -> tuple[str, ...]:
     """The lanes the runner knows: the keys of config.json "lane_argv" (claude, codex, gemini,
     copilot, ...). A lane with no passing scores is never picked, so a new lane (copilot, 3 Nov
     2026) only gets tasks that name it (Lane: copilot) until the daily exams have scored it."""
-    path = config or core.REPO / "orchestra" / "config.json"
+    path = config or core.REPO / load()["paths"]["orchestra_config"]
     try:
         argv = json.loads(path.read_text(encoding="utf-8")).get("lane_argv") or {}
     except (OSError, ValueError, AttributeError):
         argv = {}
-    return tuple(argv) if isinstance(argv, dict) and argv else (DEFAULT_LANE,)
-
-# agent hub route kinds (server.mjs ROUTES) -> exam category. Kinds with no fitting exam
-# (github, shell_help) are left out: those keep the hub's fixed rules.
-KIND_TO_CATEGORY = {
-    "code_change": "code-edit", "quick_code": "code-edit", "fix": "code-edit", "code": "code-edit",
-    "debug": "debug", "code_review": "debug",
-    "summarise": "writing", "research": "writing", "long_read": "writing", "write": "writing",
-    "study": "study", "maths": "study", "math": "study",
-    "extract": "extract",
-}
-
-GUESS = [
-    (r"\b(fix|implement|refactor|add (a )?test|rename|edit|code)\b", "code-edit"),
-    (r"\b(bug|error|traceback|crash|failing|debug)\b", "debug"),
-    (r"\b(fourier|signal|maths?|equation|exam|lecture|revision|study)\b", "study"),
-    (r"\b(extract|parse|pull .* into|json|csv)\b", "extract"),
-    (r"\b(write|rewrite|summari[sz]e|draft|email|essay|notes?)\b", "writing"),
-]
+    return tuple(argv) if isinstance(argv, dict) and argv else (load()["routing"]["default_lane"],)
 
 
 def category_for(kind: str | None, title: str = "") -> str | None:
+    policy = load()
     if kind:
         k = kind.strip().lower()
-        if k in core.CATEGORIES:
+        if k in policy["categories"]:
             return k
-        return KIND_TO_CATEGORY.get(k.replace("-", "_"))
+        return policy["routing"]["kind_to_category"].get(k.replace("-", "_"))
     t = title.lower()
-    for pat, cat in GUESS:
+    for pat, cat in policy["routing"]["title_routes"]:
         if re.search(pat, t):
             return cat
     return None
@@ -63,11 +47,12 @@ def category_for(kind: str | None, title: str = "") -> str | None:
 
 def lane_for(kind: str | None, title: str = "", scores_file: Path | None = None,
              lanes: tuple[str, ...] | None = None) -> str:
+    default_lane = load()["routing"]["default_lane"]
     cat = category_for(kind, title)
     if not cat:
-        return DEFAULT_LANE
+        return default_lane
     scores = core.load_scores(scores_file)
     if not scores["agents"]:
-        return DEFAULT_LANE
+        return default_lane
     b = core.best(scores, cat, among=list(lanes or orchestra_lanes()))
-    return b["agent"] if b else DEFAULT_LANE
+    return b["agent"] if b else default_lane

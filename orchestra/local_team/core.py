@@ -17,21 +17,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .lease import GpuLease
+from .settings import load
 
 HERE = Path(__file__).resolve().parent
 ROLES = HERE / "roles"
 DEFAULT_REPO = HERE.parent.parent
 
 # Model choices are in orchestra/models.json, not here (AGENTS.md Rule 0).
-DEFAULTS = {
-    "local_team_timeout_s": 240,
-    "local_team_num_ctx": 8192,
-    "local_team_gpu_busy_pct": 60,
-    "gpu_lease_ttl_s": 900,
-    "producer_target_ready": 6,
-    "producer_plans_per_run": 2,
-    "producer_librarian_per_run": 2,
-}
+DEFAULTS = load()["defaults"]
 
 
 class Skip(Exception):
@@ -49,7 +42,7 @@ def now() -> dt.datetime:
 def load_config(repo: Path) -> dict:
     """DEFAULTS, then config.json, then models.json: each read from `repo`'s orchestra/ if
     present, else this checkout's. models.json wins for the keys it holds."""
-    cfg = dict(DEFAULTS)
+    cfg = load()["defaults"]
     for name in ("config.json", "models.json"):
         for path in (Path(repo) / "orchestra" / name, HERE.parent / name):
             if path.exists():
@@ -68,7 +61,7 @@ class Ctx:
     def __post_init__(self):
         self.repo = Path(self.repo).resolve()
         self.cfg = {**load_config(self.repo), **self.cfg}
-        self.ollama = (self.ollama or os.environ.get("OLLAMA_HOST_URL") or "http://127.0.0.1:11434").rstrip("/")
+        self.ollama = (self.ollama or os.environ.get("OLLAMA_HOST_URL") or load()["ollama"]["url"]).rstrip("/")
 
     @property
     def review(self) -> Path:
@@ -124,7 +117,7 @@ def load_role(name: str) -> Role:
             k, v = line.split(":", 1)
             meta[k.strip()] = v.strip()
     schema = json.loads((ROLES / f"{name}.schema.json").read_text(encoding="utf-8"))
-    return Role(name, meta.get("version", "0"), meta, m.group(2).strip(), schema)
+    return Role(name, meta.get("version", "0"), meta, load()["role_prompts"][name], schema)
 
 
 # ---------------------------------------------------------------- schema
@@ -168,12 +161,13 @@ def validate(value, schema: dict, where: str = "$") -> list[str]:
 
 # ---------------------------------------------------------------- Ollama
 
-def _get(ctx: Ctx, path: str, timeout: float = 3) -> dict:
+def _get(ctx: Ctx, path: str, timeout: float | None = None) -> dict:
+    timeout = load()["ollama"]["probe_timeout_s"] if timeout is None else timeout
     with urllib.request.urlopen(ctx.ollama + path, timeout=timeout) as r:
         return json.loads(r.read().decode("utf-8"))
 
 
-_last_call_end = -1e9  # time.monotonic() when this process's last model call ended
+_last_call_end = float("-inf")  # time.monotonic() when this process's last model call ended
 
 
 def gpu_utilisation() -> int | None:
@@ -183,7 +177,7 @@ def gpu_utilisation() -> int | None:
         return None
     try:
         out = subprocess.run([exe, "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"],
-                             capture_output=True, text=True, timeout=10,
+                             capture_output=True, text=True, timeout=load()["gpu"]["probe_timeout_s"],
                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
         return max(int(x) for x in out.split() if x.strip().isdigit())
     except (OSError, ValueError, subprocess.SubprocessError):
@@ -211,10 +205,10 @@ def ready(ctx: Ctx) -> str:
         raise Skip(f"another model is loaded ({', '.join(others)}); loading {model} would evict it")
     busy = gpu_utilisation()
     limit = ctx.cfg["local_team_gpu_busy_pct"]
-    if busy is not None and busy >= limit and time.monotonic() - _last_call_end < 15:
+    if busy is not None and busy >= limit and time.monotonic() - _last_call_end < load()["gpu"]["settle_window_s"]:
         # Our own call just finished and nvidia-smi still shows it (found 2 Nov 2026: 97% right
         # after the librarian's call). Let it settle once before deciding someone else is busy.
-        time.sleep(2)
+        time.sleep(load()["gpu"]["settle_delay_s"])
         busy = gpu_utilisation()
     if busy is not None and busy >= limit:
         raise Skip(f"GPU {busy}% busy (limit {ctx.cfg['local_team_gpu_busy_pct']}%): Denisse or another job is using it")
@@ -232,7 +226,7 @@ def ask(ctx: Ctx, role: Role, payload: dict) -> dict:
     try:
         body = {"model": model, "stream": False, "format": role.schema,
                 # Same num_ctx as Denisse, so the loaded model is reused rather than reloaded.
-                "options": {"temperature": 0, "num_ctx": ctx.cfg["local_team_num_ctx"]},
+                "options": {"temperature": load()["ollama"]["temperature"], "num_ctx": ctx.cfg["local_team_num_ctx"]},
                 "messages": [{"role": "system", "content": role.prompt},
                              {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]}
         req = urllib.request.Request(ctx.ollama + "/api/chat", data=json.dumps(body).encode("utf-8"),
@@ -250,8 +244,8 @@ def ask(ctx: Ctx, role: Role, payload: dict) -> dict:
     try:
         out = json.loads(content)
     except ValueError:
-        raise BadOutput(f"{role.name}: answer is not JSON: {content[:200]!r}")
+        raise BadOutput(f"{role.name}: answer is not JSON: {content[:load()["errors"]["preview_chars"]]!r}")
     errs = validate(out, role.schema)
     if errs:
-        raise BadOutput(f"{role.name}: " + "; ".join(errs[:5]))
+        raise BadOutput(f"{role.name}: " + "; ".join(errs[:load()["errors"]["schema_count"]]))
     return out

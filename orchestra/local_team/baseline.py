@@ -41,13 +41,13 @@ import time
 from pathlib import Path
 
 from . import core, roles
+from .settings import load
 from .core import BadOutput, Ctx, Skip
 from .lease import GpuLease
 
 HERE = Path(__file__).resolve().parent
 FIXTURES = HERE / "fixtures"
 SRC_REPO = HERE.parent.parent
-TOP_AREAS = ("orchestra", "atrium", "eval", "scripts")
 
 
 # ---------------------------------------------------------------- fixtures and repos
@@ -65,8 +65,8 @@ def tracked_files(src: Path) -> list[str]:
     out = subprocess.run(["git", "ls-files", "-z"], cwd=src, capture_output=True, check=True).stdout
     # Never the tray's memory or models folders: the fixture repo doesn't need them, and
     # scripts/run_checks.py's sandbox (rightly) refuses any touch of memory/.
-    return [p for p in out.decode("utf-8").split("\0")
-            if p and not p.startswith(("orchestra/local_team/fixtures/", ".review/", "memory/", "models/"))]
+    excluded = tuple(load()["baseline"]["exclude_prefixes"])
+    return [p for p in out.decode("utf-8").split("\0") if p and not p.startswith(excluded)]
 
 
 def build_repo(fixture: dict, dest: Path, src: Path = SRC_REPO, files: list[str] | None = None) -> Path:
@@ -83,7 +83,8 @@ def build_repo(fixture: dict, dest: Path, src: Path = SRC_REPO, files: list[str]
     cfg_path = dest / "orchestra" / "config.json"
     cfg = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
     cfg["vault_dir"] = str(dest / "no-vault")       # nothing in the fixture repo is the vault
-    cfg["producer_dedupe_days"] = 3650              # fixtures are dated 2 Nov 2026; keep them in reach
+    # Keep the dated fixtures in reach of duplicate detection.
+    cfg["producer_dedupe_days"] = load()["baseline"]["dedupe_days"]
     cfg["auto_admit_areas"] = []                    # never auto
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
     cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
@@ -116,7 +117,8 @@ class Recorder:
         return data.get("pid") == os.getpid() and str(data.get("holder", "")).startswith("orchestra.local_team")
 
     def _sample(self, stop: threading.Event, seen: list):
-        while not stop.wait(0.2):
+        interval = load()["baseline"]["sample_s"]
+        while not stop.wait(interval):
             seen.append(self._ours())
 
     @staticmethod
@@ -154,13 +156,13 @@ class Recorder:
             rec.update(ok=False, skip=str(e))
             raise
         except BadOutput as e:
-            rec.update(ok=False, bad=str(e)[:200])
+            rec.update(ok=False, bad=str(e)[:load()["baseline"]["detail_chars"]])
             raise
         finally:
             core.urllib.request.urlopen = real_urlopen
             stop.set()
             t.join()
-            rec["seconds"] = round(time.monotonic() - start, 2)
+            rec["seconds"] = round(time.monotonic() - start, load()["baseline"]["call_seconds_digits"])
             rec["lease_samples"] = len(seen)
             rec["lease_held"] = self.contiguous(seen)
             rec["lease_at_inference"] = all(at_http) if at_http else None
@@ -181,9 +183,10 @@ class Recorder:
             core.ask = prev
 
 
-def wait_ready(ctx: Ctx, max_wait_s: float, poll_s: float = 30, log=print) -> None:
+def wait_ready(ctx: Ctx, max_wait_s: float, poll_s: float | None = None, log=print) -> None:
     """Block until core.ready() passes (Ollama up, model there, GPU not busy, no other model
     loaded) and the lease is free, or raise Skip after max_wait_s."""
+    poll_s = load()["baseline"]["poll_s"] if poll_s is None else poll_s
     end = time.monotonic() + max_wait_s
     lease = GpuLease.for_repo(ctx.repo, "baseline-check", ctx.cfg["gpu_lease_ttl_s"])
     while True:
@@ -212,19 +215,19 @@ def packet_area(packet: dict) -> str | None:
     return areas.pop() if len(areas) == 1 else None
 
 
-def run_fixture(fixture: dict, repo: Path, ollama: str = "", plans: int = 2) -> dict:
+def run_fixture(fixture: dict, repo: Path, ollama: str = "", plans: int | None = None) -> dict:
     ctx = Ctx(repo, ollama=ollama)
+    plans = load()["baseline"]["plans"] if plans is None else plans
     found = roles.scout(ctx)
-    order = {"high": 0, "medium": 1, "low": 2}
-    picks = sorted((c for c in found["candidates"] if c["worth"] != "low"), key=lambda c: order[c["worth"]])
+    picks = roles.ranked_candidates(found["candidates"])
     out = {"fixture": fixture["name"], "evidence_items": len(found["evidence"]),
            "candidates": [{k: c[k] for k in ("problem", "evidence", "area_hint", "worth")} for c in found["candidates"]],
            "nothing_because": found.get("nothing_because", ""), "plans": []}
     for c in picks[:plans]:
         try:
-            res = roles.plan(ctx, c, admit_it=True, lane="claude")
+            res = roles.plan(ctx, c, admit_it=True, lane=load()["baseline"]["lane"])
         except BadOutput as e:
-            out["plans"].append({"problem": c["problem"], "bad_output": str(e)[:300]})
+            out["plans"].append({"problem": c["problem"], "bad_output": str(e)[:load()["baseline"]["error_chars"]]})
             continue
         p, a = res["packet"], res["admission"]
         out["plans"].append({"problem": c["problem"], "title": p["title"], "scope_paths": p["scope_paths"],
@@ -245,7 +248,7 @@ def probe_lease(fixture: dict, repo: Path, ollama: str = "") -> dict:
     except Skip as e:
         # Any skip before the HTTP call is fine (ready() may also see the GPU busy first);
         # "Ollama call failed" would mean it called the model anyway.
-        return {"ran": True, "respected": "Ollama call failed" not in str(e), "why": str(e)[:200]}
+        return {"ran": True, "respected": "Ollama call failed" not in str(e), "why": str(e)[:load()["baseline"]["detail_chars"]]}
     finally:
         lease.release()
 
@@ -260,7 +263,7 @@ def _on_target(cand: dict, plan: dict | None, exp: dict) -> bool:
     if plan and plan.get("area") == want:
         return True
     if want == "app":
-        return hint not in TOP_AREAS
+        return hint not in load()["baseline"]["top_areas"]
     return hint == want
 
 
@@ -304,9 +307,10 @@ def score(runs: list[dict], fixtures: list[dict]) -> dict:
             gate_expected += {"id": p["gate"].get("id"), "arg": str(p["gate"].get("arg", "")).replace("\\", "/")} in e["gates"]
     calls = [c for r in runs for c in r.get("calls", [])]
     lat = {}
+    digits = load()["baseline"]["seconds_digits"]
     for role in sorted({c["role"] for c in calls}):
         s = [c["seconds"] for c in calls if c["role"] == role]
-        lat[role] = {"n": len(s), "median_s": round(statistics.median(s), 1), "max_s": round(max(s), 1)}
+        lat[role] = {"n": len(s), "median_s": round(statistics.median(s), digits), "max_s": round(max(s), digits)}
     sampled = [c for c in calls if c["lease_held"] is not None]
 
     def pct(a, b):
@@ -332,8 +336,12 @@ def score(runs: list[dict], fixtures: list[dict]) -> dict:
 
 # ---------------------------------------------------------------- main
 
-def run(rounds: int = 3, only: list[str] | None = None, plans: int = 2, ollama: str = "",
-        wait_gpu_s: float = 1800, out_dir: Path | None = None, log=print) -> dict:
+def run(rounds: int | None = None, only: list[str] | None = None, plans: int | None = None, ollama: str = "",
+        wait_gpu_s: float | None = None, out_dir: Path | None = None, log=print) -> dict:
+    policy = load()["baseline"]
+    rounds = policy["rounds"] if rounds is None else rounds
+    plans = policy["plans"] if plans is None else plans
+    wait_gpu_s = policy["wait_gpu_s"] if wait_gpu_s is None else wait_gpu_s
     fixtures = load_fixtures(only=only)
     files = tracked_files(SRC_REPO)
     tmp = Path(tempfile.mkdtemp(prefix="lt-baseline-"))
@@ -359,12 +367,13 @@ def run(rounds: int = 3, only: list[str] | None = None, plans: int = 2, ollama: 
                         except Skip as e:
                             log(f"  r{rnd} {fx['name']}: skipped mid-run ({e}); retrying")
                             del rec.calls[before:]
-                            skips.append({"round": rnd, "fixture": fx["name"], "why": str(e)[:160]})
-                            time.sleep(20)
+                            skips.append({"round": rnd, "fixture": fx["name"], "why": str(e)[:policy["skip_chars"]]})
+                            time.sleep(policy["retry_delay_s"])
                             continue
                         except BadOutput as e:  # the scout's answer didn't fit its schema
-                            r = {"fixture": fx["name"], "candidates": [], "plans": [], "scout_bad_output": str(e)[:300]}
-                        r.update(round=rnd, seconds=round(time.monotonic() - t0, 1), calls=rec.calls[before:])
+                            r = {"fixture": fx["name"], "candidates": [], "plans": [],
+                                 "scout_bad_output": str(e)[:policy["error_chars"]]}
+                        r.update(round=rnd, seconds=round(time.monotonic() - t0, policy["seconds_digits"]), calls=rec.calls[before:])
                         runs.append(r)
                         kinds = [p.get("admission", {}).get("kind", "bad-output") for p in r["plans"]]
                         log(f"r{rnd} {fx['name']}: {len(r['candidates'])} candidate(s), plans -> {kinds or '-'} "
@@ -390,10 +399,10 @@ def run(rounds: int = 3, only: list[str] | None = None, plans: int = 2, ollama: 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m orchestra.local_team.baseline")
-    ap.add_argument("--rounds", type=int, default=3)
+    ap.add_argument("--rounds", type=int, default=load()["baseline"]["rounds"])
     ap.add_argument("--only", nargs="*", help="fixture names (default: all)")
-    ap.add_argument("--plans", type=int, default=2, help="candidates planned per fixture (produce uses 2)")
-    ap.add_argument("--wait-gpu", type=float, default=1800, help="seconds to wait for a busy GPU before giving up")
+    ap.add_argument("--plans", type=int, default=load()["baseline"]["plans"], help="candidates planned per fixture")
+    ap.add_argument("--wait-gpu", type=float, default=load()["baseline"]["wait_gpu_s"], help="seconds to wait for a busy GPU before giving up")
     ap.add_argument("--out", default=str(SRC_REPO / ".review" / "local_team" / "baseline"))
     a = ap.parse_args(argv)
     try:

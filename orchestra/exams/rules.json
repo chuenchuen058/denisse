@@ -1,0 +1,104 @@
+{
+  "categories": [
+    "code-edit",
+    "debug",
+    "writing",
+    "study",
+    "extract"
+  ],
+  "scores": {
+    "keep": 20,
+    "down_after": 3,
+    "silent_hours": 24,
+    "fallback_agents": [
+      "claude"
+    ]
+  },
+  "limits": {
+    "process_drain_s": 10,
+    "kill_tree_s": 60,
+    "grader_s": 60,
+    "exam_s": 120,
+    "result_chars": 300,
+    "detail_chars": 200,
+    "seconds_digits": 1
+  },
+  "paths": {
+    "bank": "bank",
+    "scores": ".review/exams/scores.json",
+    "orchestra_config": "orchestra/config.json",
+    "note": "Dev/Agent-Scores.md"
+  },
+  "routing": {
+    "default_lane": "claude",
+    "kind_to_category": {
+      "code_change": "code-edit",
+      "quick_code": "code-edit",
+      "fix": "code-edit",
+      "code": "code-edit",
+      "debug": "debug",
+      "code_review": "debug",
+      "summarise": "writing",
+      "research": "writing",
+      "long_read": "writing",
+      "write": "writing",
+      "study": "study",
+      "maths": "study",
+      "math": "study",
+      "extract": "extract"
+    },
+    "title_routes": [
+      [
+        "\\b(fix|implement|refactor|add (a )?test|rename|edit|code)\\b",
+        "code-edit"
+      ],
+      [
+        "\\b(bug|error|traceback|crash|failing|debug)\\b",
+        "debug"
+      ],
+      [
+        "\\b(fourier|signal|maths?|equation|exam|lecture|revision|study)\\b",
+        "study"
+      ],
+      [
+        "\\b(extract|parse|pull .* into|json|csv)\\b",
+        "extract"
+      ],
+      [
+        "\\b(write|rewrite|summari[sz]e|draft|email|essay|notes?)\\b",
+        "writing"
+      ]
+    ]
+  },
+  "daily": {
+    "at": "07:10",
+    "agents": [
+      "codex",
+      "copilot",
+      "local"
+    ],
+    "opt_in_agents": [
+      "claude"
+    ],
+    "cap_s": 900,
+    "lock_grace_s": 600,
+    "minimum_wait_s": 1.0,
+    "summary_chars": 60,
+    "error_chars": 120
+  },
+  "canary": {
+    "count": 1,
+    "timeout_s": 30
+  },
+  "agents": {
+    "ollama_url": "http://127.0.0.1:11434",
+    "discovery_timeout_s": 3,
+    "not_served_pattern": "IneligibleTier|no longer supported|not (signed|logged) in|please log ?in|unauthori[sz]ed|usage limit|quota exceeded",
+    "refusal_chars": 150,
+    "gemini_prompt": "Do the task given above.",
+    "local_files_prompt": "\n\nThe files:{files}",
+    "local_file_template": "\n\n--- {name} ---\n{content}",
+    "local_file_glob": "*.py",
+    "codex_last_file": ".codex-last.txt"
+  }
+}
