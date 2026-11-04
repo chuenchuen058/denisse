@@ -261,6 +261,19 @@ class TestRouter(Base):
         self.assertEqual(lane_for.lane_for("writing", scores_file=self.scores_file), "claude")
         self.assertEqual(lane_for.lane_for(None, "Something vague", scores_file=self.scores_file), "claude")
 
+    def test_lane_for_copilot_only_once_it_has_scores(self):
+        self.assertIn("copilot", lane_for.orchestra_lanes(), "the router knows every lane in config.json")
+        s = scores_with(codex={"code-edit": [row(True, 30)] * 3})
+        core.save_scores(s, self.scores_file)
+        self.assertEqual(lane_for.lane_for("code-edit", scores_file=self.scores_file), "codex",
+                         "no copilot scores yet: never routed to copilot")
+        s = scores_with(codex={"code-edit": [row(True, 30), row(False, 30)]},
+                        copilot={"code-edit": [row(True, 10)] * 3})
+        core.save_scores(s, self.scores_file)
+        self.assertEqual(lane_for.lane_for("code-edit", scores_file=self.scores_file), "copilot")
+        self.assertEqual(lane_for.lane_for("code-edit", scores_file=self.scores_file, lanes=("claude", "codex")),
+                         "codex", "a lane the runner doesn't have is never picked")
+
 
 class TestNoteAndCanary(Base):
     def test_note_in_temp_vault(self):

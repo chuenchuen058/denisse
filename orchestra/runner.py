@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import glob
 import hashlib
 import json
 import os
@@ -206,10 +207,13 @@ C = load_config()
 # Lanes: argv lists from config.json "lane_argv"; the prompt goes in on stdin. Override or add
 # lanes in .review/lanes.json. The allow list is broad on purpose; the real limits are in
 # hooks/guard.py, which the runner passes with --settings (Thomas: a prefix allow list mostly
-# buys refusals). Two placeholders are resolved at run time:
+# buys refusals). Three placeholders are resolved at run time:
 #   {npm:<package>:<bin>}  a global npm CLI's JS entry (run with node); the lane is left out
 #                          when the package isn't installed.
 #   {npm-shim:<name>}      the full path of npm's <name>.cmd shim if found, else <name>.
+#   {prompt-file}          (anywhere inside an argument) the path of <worktree>/.review/prompt.md,
+#                          which then holds the prompt, for a CLI that takes its prompt as an
+#                          argument: a long prompt must never go on a cmd.exe command line.
 # claude: stream-json, so the lane log fills as the session works and orchestra/watch.py can
 # show it live (Chuen, 2 Nov); the last line is still the result JSON lane_result reads.
 # codex: Codex 0.162 dropped --full-auto. MCP servers off: with approval "never" Chuen's Desktop
@@ -220,29 +224,53 @@ C = load_config()
 # (orchestra/hooks/pre-push), which refuses any push while ORCHESTRA_WORKTREE is set or from a
 # checkout under the worktrees folder.
 # gemini: auto_edit = may edit files, may not run shell commands. The runner runs the gate itself.
+# copilot: `-p` wants the prompt as an argument, so -p only points at {prompt-file}.
+# --allow-all-tools (required for -p) without --allow-all-paths: file access stays inside the
+# working directory (the worktree; --add-dir is never given) plus the temp dir. No
+# --allow-all-urls. Built-in GitHub MCP servers off, git push / gh denied, no ask_user: it can't
+# post as Chuen and can't stall on a question. Copilot reports no cost (unpriced_lanes).
+PROMPT_FILE_PLACEHOLDER = "{prompt-file}"
+
+
+def npm_dirs(patterns: list | None = None) -> list[Path]:
+    """The global npm folders to look in, in order: config.json "npm_dirs", each with %VAR%/~
+    expanded and globs (e.g. Claude_*) matched. An entry whose %VAR% is unset is skipped.
+    One resolver for the lanes, orchestra/exams and the agent hub (which reads the same key).
+    The scheduled task's PATH has no %APPDATA%\\npm, and npm installs made from inside the
+    Claude desktop app land in its packaged (virtualised) AppData, which only the app sees;
+    outside it the real files are under %LOCALAPPDATA%\\Packages\\Claude_*\\LocalCache\\Roaming
+    (found 2 Nov 2026; on 3 Nov the daily exams logged "Copilot CLI not found" for this)."""
+    out = []
+    for pat in (C["npm_dirs"] if patterns is None else patterns):
+        s = os.path.expanduser(os.path.expandvars(str(pat)))
+        if "%" in s or "$" in s:  # a variable that isn't set: don't search a literal "%APPDATA%"
+            continue
+        hits = sorted(Path(p) for p in glob.glob(s)) if glob.has_magic(s) else [Path(s)]
+        out += [p for p in hits if p.is_dir() and p not in out]
+    return out
+
+
 def npm_bin(pkg: str, name: str) -> str | None:
     """A global npm CLI's JS entry, run with node so long prompts never go through cmd.exe."""
-    root = Path(os.environ.get("APPDATA", "")) / "npm" / "node_modules" / pkg
-    try:
-        meta = json.loads((root / "package.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    rel = meta["bin"] if isinstance(meta.get("bin"), str) else (meta.get("bin") or {}).get(name)
-    return str(root / rel) if rel else None
+    for d in npm_dirs():
+        root = d / "node_modules" / pkg
+        try:
+            meta = json.loads((root / "package.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        rel = meta["bin"] if isinstance(meta.get("bin"), str) else (meta.get("bin") or {}).get(name)
+        if rel:
+            return str(root / rel)
+    return None
 
 
 def npm_shim(name: str) -> str:
-    """The full path of npm's <name>.cmd, else <name>.
-    The scheduled task's PATH has no %APPDATA%\\npm, so give the lane its full path (2 Nov 2026).
+    """The full path of npm's <name>.cmd (first of npm_dirs() that has it), else <name>.
     The prompt goes in on stdin, so running the .cmd shim is safe for long prompts.
     Always prefer the npm shim: under Task Scheduler `which("codex")` can find a Windows app
-    alias that then fails to run. Try the home folder too in case APPDATA is unset.
-    npm installs made from inside the Claude desktop app land in its packaged (virtualised)
-    AppData, which only the app sees; outside it the real files are under
-    %LOCALAPPDATA%\\Packages\\Claude_*\\LocalCache\\Roaming (found 2 Nov 2026)."""
-    local = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
-    for cmd in (Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming") / "npm" / f"{name}.cmd",
-                *sorted(local.glob(f"Packages/Claude_*/LocalCache/Roaming/npm/{name}.cmd"))):
+    alias that then fails to run."""
+    for d in npm_dirs():
+        cmd = d / f"{name}.cmd"
         if cmd.exists():
             return str(cmd)
     return name
@@ -1381,9 +1409,8 @@ def run_lane(task: Task, wt: Path, report: Path, timeout: int, prov: dict | None
         return f"LANE_MISSING: no lane called {task.lane!r}", 0
     exe = shutil.which(argv[0]) or argv[0]
     if not Path(exe).exists() and not shutil.which(exe):
-        shim = Path(os.environ.get("APPDATA", "")) / "npm" / f"{argv[0]}.cmd"
         return (f"LANE_MISSING: {argv[0]} not on PATH (which={shutil.which(argv[0])!r}, "
-                f"{shim} exists={shim.exists()}, file={__file__})"), 0
+                f"npm dirs searched={[str(d) for d in npm_dirs()]}, file={__file__})"), 0
     local = wt / ".review"
     local.mkdir(exist_ok=True)
     shutil.copyfile(task.path, local / "task.md")
@@ -1412,6 +1439,10 @@ def run_lane(task: Task, wt: Path, report: Path, timeout: int, prov: dict | None
     env.update(ORCHESTRA_TASK=str(local / "task.md"), ORCHESTRA_REPORT=str(local_report),
                ORCHESTRA_WORKTREE=str(wt), ORCHESTRA_MAIN=str(REPO))
     prompt = build_prompt(".review/task.md", ".review/report.md")
+    if any(PROMPT_FILE_PLACEHOLDER in str(a) for a in argv):
+        prompt_file = local / "prompt.md"
+        prompt_file.write_text(prompt, encoding="utf-8")
+        argv = [str(a).replace(PROMPT_FILE_PLACEHOLDER, str(prompt_file)) for a in argv]
     p = run_provenance(wt, prompt)
     if prov is not None:
         prov.update(p)
@@ -1582,7 +1613,8 @@ def charge(state: dict, task: Task, seconds: int, cost: float | None, lane: str 
         u["cost_usd"] += cost
         u["known_cost_s"] += seconds
         return f"${cost:.2f}"
-    if (lane or task.lane) != "codex" and seconds:  # codex reports no cost; it runs on its own plan
+    # Unpriced lanes (codex, gemini, copilot) report no cost and run on their own plans: no estimate.
+    if (lane or task.lane) not in C["unpriced_lanes"] and seconds:
         rate = (u["cost_usd"] / (u["known_cost_s"] / 60)) if u["known_cost_s"] >= 60 else C["unknown_cost_per_min_usd"]
         est = rate * seconds / 60
         u["cost_usd"] += est
