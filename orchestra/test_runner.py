@@ -445,6 +445,143 @@ class RunnerTest(unittest.TestCase):
         until = dt.datetime.fromisoformat(self.state()["lanes"]["codex"]["limited_until"])
         self.assertAlmostEqual((until - before).total_seconds(), 3600, delta=120)
 
+    # --- copilot lane (GitHub Copilot CLI; fake executable, no model calls)
+
+    COPILOT_FAKE = textwrap.dedent("""
+        import json, os, pathlib, sys
+        args = sys.argv[1:]
+        sys.stdin.read()
+        prompt_arg = args[args.index("-p") + 1]
+        path = prompt_arg.split("file ", 1)[1].split(" ", 1)[0].rstrip(".")
+        prompt = pathlib.Path(path).read_text(encoding="utf-8")
+        pathlib.Path(os.environ["FAKE_COPILOT_SEEN"]).write_text(json.dumps(
+            {"args": args, "prompt_path": path, "prompt": prompt,
+             "worktree": os.environ.get("ORCHESTRA_WORKTREE"), "cwd": os.getcwd()}), encoding="utf-8")
+        if os.environ.get("FAKE_LIMIT"):
+            print(os.environ["FAKE_LIMIT"])
+            sys.exit(1)
+        pathlib.Path(os.environ["ORCHESTRA_REPORT"]).write_text(
+            "RESULT: PASS\\nGATE: fake -> ok\\nHUMAN: none\\nPREMISE: right\\n")
+        print("Total usage est: 1 Premium request")
+    """)
+
+    def copilot_lane(self):
+        """lanes.json's copilot = the shipped config argv with the CLI swapped for the fake."""
+        fake = self.tmp / "fake_copilot.py"
+        fake.write_text(self.COPILOT_FAKE, encoding="utf-8")
+        argv = [sys.executable, str(fake), *self.R.C["lane_argv"]["copilot"][1:]]
+        (self.R.REVIEW / "lanes.json").write_text(json.dumps({"fake": [sys.executable, "-c", FAKE], "copilot": argv}))
+        seen = self.tmp / "seen.json"
+        os.environ["FAKE_COPILOT_SEEN"] = str(seen)
+        self.addCleanup(os.environ.pop, "FAKE_COPILOT_SEEN", None)
+        return seen
+
+    def test_copilot_argv_shape_and_shim_from_claude_app_appdata(self):
+        roaming, local = self.tmp / "roaming", self.tmp / "local"
+        roaming.mkdir()
+        npm = local / "Packages" / "Claude_abc123" / "LocalCache" / "Roaming" / "npm"
+        npm.mkdir(parents=True)
+        (npm / "copilot.cmd").write_text("@echo off\n")
+        for k, v in (("APPDATA", roaming), ("LOCALAPPDATA", local)):
+            old = os.environ.get(k)
+            os.environ[k] = str(v)
+            self.addCleanup(lambda k=k, old=old: os.environ.__setitem__(k, old) if old is not None else os.environ.pop(k, None))
+        argv = self.R.lanes()["copilot"]
+        self.assertEqual(Path(argv[0]), npm / "copilot.cmd", "the Claude-app npm shim is found off PATH")
+        self.assertIn("--allow-all-tools", argv)
+        for banned in ("--allow-all-urls", "--allow-all-paths", "--allow-all", "--yolo", "--add-dir"):
+            self.assertNotIn(banned, argv)
+        p = argv[argv.index("-p") + 1]
+        self.assertIn(self.R.PROMPT_FILE_PLACEHOLDER, p)
+        self.assertLess(len(p), 300, "only a pointer to the prompt file goes on the command line")
+        self.assertIn("copilot", self.R.C["unpriced_lanes"])
+        self.assertEqual(self.R.C["lane_slots"].get("copilot"), 1)
+        self.assertEqual(self.R.C["lane_fallback"].get("copilot"), "claude")
+        # the exams and the hub share this resolver: same folder, same CLI
+        sys.path.insert(0, str(HERE.parent))
+        from orchestra.exams import agents
+        (npm / "node_modules" / "@github" / "copilot").mkdir(parents=True)
+        (npm / "node_modules" / "@github" / "copilot" / "package.json").write_text(
+            json.dumps({"bin": {"copilot": "npm-loader.js"}}))
+        self.assertEqual(Path(agents._npm_entry("@github/copilot", "copilot")),
+                         npm / "node_modules" / "@github" / "copilot" / "npm-loader.js")
+
+    def test_npm_dirs_skip_unset_variables(self):
+        d = self.tmp / "npmdir"
+        d.mkdir()
+        os.environ.pop("ORCHESTRA_TEST_UNSET_VAR", None)
+        self.assertEqual(self.R.npm_dirs(["%ORCHESTRA_TEST_UNSET_VAR%/npm", str(d)]), [d])
+        self.assertEqual(self.R.npm_dirs([str(self.tmp / "np*dir")]), [d])
+
+    def test_copilot_prompt_goes_in_a_file_and_runs_in_the_worktree(self):
+        seen = self.copilot_lane()
+        self.add("cp", lane="copilot")
+        self.assertEqual(self.R.tick(), "PASS")
+        got = json.loads(seen.read_text(encoding="utf-8"))
+        self.assertEqual(got["prompt"], self.R.build_prompt(".review/task.md", ".review/report.md"))
+        wt = Path(got["worktree"])
+        self.assertEqual(Path(got["prompt_path"]), wt / ".review" / "prompt.md")
+        self.assertEqual(Path(got["cwd"]).resolve(), wt.resolve())
+        self.assertFalse(any(self.R.PROMPT_FILE_PLACEHOLDER in a for a in got["args"]))
+        self.assertLess(max(len(a) for a in got["args"]), 400, "no long prompt on the command line")
+        h = self.state()["tasks"]["cp"]["history"][-1]
+        self.assertEqual(h["lane"], "copilot")
+        u = self.R.today_usage(self.R.load_state())
+        self.assertEqual((u["cost_usd"], u["estimated_runs"]), (0, 0), "copilot is unpriced: no estimate")
+
+    def test_copilot_limit_messages(self):
+        log = self.tmp / "c.lane.log"
+        hits = ["Error: You've reached your monthly limit of premium requests. Try again at 9:00 AM.",
+                "You have exhausted your premium requests quota for this month.",
+                "error: out of AI credits for this billing period",
+                "Request failed: 429 Too Many Requests"]
+        misses = ["Total usage est: 1 Premium request", "Session limits: 0.5/1 AI credits used.",
+                  "all fine, no report though"]
+        for text in hits + misses:
+            log.write_text(text + "\n", encoding="utf-8")
+            self.assertEqual(bool(self.R.detect_limit("copilot", log)), text in hits, text)
+
+    def test_copilot_limit_waits_and_falls_back_to_claude(self):
+        seen = self.copilot_lane()
+        os.environ["ORCHESTRA_LANE_FALLBACK"] = json.dumps({})
+        self.R = importlib.reload(self.R)
+        self.add("cl", lane="copilot")
+        os.environ["FAKE_LIMIT"] = "Error: You've reached your monthly limit of premium requests."
+        self.assertEqual(self.R.tick(), "LIMITED")
+        self.assertTrue(seen.exists())
+        st = self.state()
+        self.assertEqual(st["tasks"]["cl"]["attempts"], 0, "a limit is not an attempt")
+        self.assertIn("copilot", st["lanes"])
+        self.assertTrue((self.R.QUEUE / "cl.md").exists())
+        # with the shipped fallback (copilot -> claude) the waiting task moves to claude
+        os.environ.pop("ORCHESTRA_LANE_FALLBACK")
+        os.environ.pop("FAKE_LIMIT")
+        self.R = importlib.reload(self.R)
+        self.lanes_with("copilot", "claude")
+        self.add("cf", lane="copilot", extra=" cf")
+        self.assertEqual(self.R.fallback_lane(next(t for t in self.R.load_queue() if t.slug == "cf"),
+                                              self.R.load_state()), "claude")
+        os.environ["FAKE_COMMIT"] = "1"
+        os.environ["FAKE_HOOKLOG"] = "1"
+        res = self.R.tick()
+        self.assertEqual(res, "PASS")
+        done = {s: v["history"][-1] for s, v in self.state()["tasks"].items() if v.get("history")}
+        self.assertTrue(any(h.get("fallback_from") == "copilot" and h["lane"] == "claude" for h in done.values()))
+
+    def test_unpriced_lanes_are_never_estimated_or_capped(self):
+        st = self.R.load_state()
+        self.R.today_usage(st)["cost_usd"] = 99.0  # well over the $5 cap
+        for lane in ("copilot", "gemini", "codex"):
+            self.add(f"u{lane}", lane=lane, extra=f" {lane}")
+            t = next(t for t in self.R.load_queue() if t.slug == f"u{lane}")
+            self.assertEqual(self.R.charge(st, t, 600, None), "unknown", lane)
+            self.R.save_state(st)
+            self.assertNotIn("spend cap", self.why(f"u{lane}") or "", lane)
+        self.assertEqual(self.R.today_usage(st)["cost_usd"], 99.0)
+        self.add("upriced", extra=" priced")
+        t = next(t for t in self.R.load_queue() if t.slug == "upriced")
+        self.assertIn("estimated", self.R.charge(st, t, 600, None))
+
     # --- expired sign-in (3 Nov 2026: Claude's OAuth expired at 18:06; 9 tasks parked as NO_REPORT)
 
     AUTH_TEXT = "Failed to authenticate: OAuth session expired and could not be refreshed"

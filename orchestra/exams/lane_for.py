@@ -9,13 +9,25 @@ No scores, or no working agent among the lanes: the old default, "claude".
 """
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
 from . import core
 
 DEFAULT_LANE = "claude"
-LANES = ("claude", "codex", "gemini")  # the Orchestra lanes runner.py knows
+
+
+def orchestra_lanes(config: Path | None = None) -> tuple[str, ...]:
+    """The lanes the runner knows: the keys of config.json "lane_argv" (claude, codex, gemini,
+    copilot, ...). A lane with no passing scores is never picked, so a new lane (copilot, 3 Nov
+    2026) only gets tasks that name it (Lane: copilot) until the daily exams have scored it."""
+    path = config or core.REPO / "orchestra" / "config.json"
+    try:
+        argv = json.loads(path.read_text(encoding="utf-8")).get("lane_argv") or {}
+    except (OSError, ValueError, AttributeError):
+        argv = {}
+    return tuple(argv) if isinstance(argv, dict) and argv else (DEFAULT_LANE,)
 
 # agent hub route kinds (server.mjs ROUTES) -> exam category. Kinds with no fitting exam
 # (github, shell_help) are left out: those keep the hub's fixed rules.
@@ -49,12 +61,13 @@ def category_for(kind: str | None, title: str = "") -> str | None:
     return None
 
 
-def lane_for(kind: str | None, title: str = "", scores_file: Path | None = None) -> str:
+def lane_for(kind: str | None, title: str = "", scores_file: Path | None = None,
+             lanes: tuple[str, ...] | None = None) -> str:
     cat = category_for(kind, title)
     if not cat:
         return DEFAULT_LANE
     scores = core.load_scores(scores_file)
     if not scores["agents"]:
         return DEFAULT_LANE
-    b = core.best(scores, cat, among=list(LANES))
+    b = core.best(scores, cat, among=list(lanes or orchestra_lanes()))
     return b["agent"] if b else DEFAULT_LANE

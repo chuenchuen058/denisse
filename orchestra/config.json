@@ -28,10 +28,10 @@
   "parallel_lanes": true,
   "_parallel_lanes": "One task per lane at the same time (claude + codex + gemini), each with its own lock; state saves merge and merges/pushes take turns. Task Scheduler must allow parallel instances. false = one task at a time.",
 
-  "lane_slots": {"claude": 1, "codex": 1},
+  "lane_slots": {"claude": 1, "codex": 1, "copilot": 1},
   "_lane_slots": "How many tasks of one lane may run at once, normally. A campaign (.review/campaign.json, see orchestra/campaign.py) may raise it until its stop_at; the Max-plan sprint (Claude 3 until Wed 4 Nov 18:00 London) lives there, not here.",
 
-  "lane_fallback": {"codex": "claude"},
+  "lane_fallback": {"codex": "claude", "copilot": "claude"},
   "_lane_fallback": "While a lane is limited (usage limit seen in its log, see limit_patterns below), its tasks run on this lane instead, unless the task header says Lane-Fixed: yes. The fallback lane's slots still apply. {} turns it off.",
 
   "lane_argv": {
@@ -45,10 +45,17 @@
               "-c", "mcp_servers.obsidian.enabled=false",
               "-s", "danger-full-access", "-"],
     "gemini": ["node", "{npm:@google/gemini-cli:gemini}", "--approval-mode", "auto_edit", "-o", "text",
-               "-p", "Do the task given above."]
+               "-p", "Do the task given above."],
+    "copilot": ["{npm-shim:copilot}", "-p",
+                "Your full instructions are in the file {prompt-file}. Read that file first and follow it exactly.",
+                "--allow-all-tools", "--no-ask-user", "--no-color", "--no-auto-update", "--disable-builtin-mcps",
+                "--deny-tool", "shell(git push)", "--deny-tool", "shell(gh)"]
   },
   "_lane_argv": "Each lane's command; the prompt goes in on stdin. {npm-shim:<name>} = full path of npm's <name>.cmd if found (the scheduled task's PATH has no %APPDATA%\\npm), else <name>. {npm:<package>:<bin>} = that global npm CLI's JS entry, run with node; the lane is left out if it isn't installed. .review/lanes.json still overrides or adds lanes. Why each flag: comment above lane_argv in runner.py (claude stream-json for the live watch; codex full access and MCP off, Chuen 2 Nov 2026; gemini auto_edit = edits, no shell).",
   "unpriced_lanes": ["codex", "gemini", "copilot"],
+  "npm_dirs": ["%APPDATA%/npm", "~/AppData/Roaming/npm", "%LOCALAPPDATA%/Packages/Claude_*/LocalCache/Roaming/npm"],
+  "_npm_dirs": "Where global npm CLIs (codex, copilot, gemini) are looked for, in order, by the lanes ({npm-shim:..}, {npm:..}), orchestra/exams and the agent hub: one list for all three. %VAR% and ~ are expanded, * globs; an entry whose variable is unset is skipped. The scheduled task's PATH has no %APPDATA%\\npm, and npm installs made from the Claude desktop app live in its packaged AppData (3 Nov 2026: the daily exams logged copilot skipped: Copilot CLI not found).",
+  "_copilot_lane": "copilot: -p only points at {prompt-file} (<worktree>/.review/prompt.md, the full prompt), so no long prompt reaches cmd.exe. --allow-all-tools without --allow-all-paths keeps file access to the worktree (plus temp); no --allow-all-urls; built-in GitHub MCP off and git push / gh denied so it cannot post as Chuen; the pre-push hook refuses pushes anyway (ORCHESTRA_WORKTREE is set).",
   "_unpriced_lanes": "Lanes that report no cost, so the daily spend cap never blocks them.",
 
   "limit_patterns": {
@@ -57,7 +64,14 @@
     "claude": ["usage limit reached", "you've hit your (usage )?limit", "\\b\\d+-hour limit reached",
                "weekly limit reached", "rate limit (reached|exceeded)", "rate_limit_error"],
     "gemini": ["IneligibleTierError", "quota exceeded", "exceeded your current quota",
-               "RESOURCE_EXHAUSTED", "rate limit (reached|exceeded)"]
+               "RESOURCE_EXHAUSTED", "rate limit (reached|exceeded)"],
+    "copilot": ["premium requests?\\b.{0,60}\\b(limit|quota|exhausted|run out|used up)",
+                "(limit|quota|allowance)\\b.{0,40}\\bpremium requests?",
+                "(out of|exhausted|no remaining|used (all|up)( of)?)( your)? (premium requests|ai credits)",
+                "ai credits?\\b.{0,40}\\b(exhausted|limit (reached|exceeded)|run out|used up)",
+                "monthly (limit|quota|allowance) (reached|exceeded|hit)",
+                "you've (hit|reached|exceeded) your .{0,40}(limit|quota)",
+                "rate limit(ed)? (reached|exceeded)", "429 too many requests"]
   },
   "limit_tail_lines": 40,
   "limit_default_min": 60,

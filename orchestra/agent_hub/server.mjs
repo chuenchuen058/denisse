@@ -32,7 +32,7 @@ import { createInterface } from "node:readline";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes } from "node:crypto";
 
-const NPM = join(process.env.APPDATA || join(homedir(), ".npm-global"), "npm", "node_modules");
+const CONFIG = join(dirname(fileURLToPath(import.meta.url)), "..", "config.json");
 const VAULT = process.env.AGENT_HUB_VAULT || join(homedir(), "OneDrive - King's College London", "Denisse");
 const DEFAULT_CWD = existsSync(join(homedir(), "GitHub")) ? join(homedir(), "GitHub") : homedir();
 const TIMEOUT_MS = Number(process.env.AGENT_HUB_TIMEOUT_MS || 20 * 60 * 1000);
@@ -40,14 +40,44 @@ const FAKE = process.env.AGENT_HUB_FAKE === "1";
 
 // ------------------------------------------------------------------ helpers
 
-function binOf(pkg, name) {
+export function npmDirs(patterns) {
+  // The same list the Orchestra runner searches (config.json "npm_dirs", runner.npm_dirs):
+  // %VAR% and ~ expanded, * matched within one path segment, an entry with an unset variable
+  // skipped. npm installs made from the Claude desktop app live in its packaged AppData, which
+  // the APPDATA npm folder alone never finds (3 Nov 2026).
+  if (!patterns) {
+    try { patterns = JSON.parse(readFileSync(CONFIG, "utf8")).npm_dirs; } catch {}
+    if (!Array.isArray(patterns)) patterns = [];
+  }
+  const out = [];
+  for (const pat of patterns) {
+    let unset = false;
+    let s = String(pat).replace(/%([^%]+)%/g, (_, v) => process.env[v] ?? (unset = true, ""));
+    if (unset) continue;
+    if (s === "~" || s.startsWith("~/") || s.startsWith("~\\")) s = join(homedir(), s.slice(1));
+    const parts = s.split(/[\\/]+/);
+    let paths = [parts[0] === "" ? "/" : parts[0] + (parts[0].endsWith(":") ? "\\" : "")];
+    for (const part of parts.slice(1)) {
+      if (!part) continue;
+      if (!part.includes("*")) { paths = paths.map((p) => join(p, part)); continue; }
+      const re = new RegExp("^" + part.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$", "i");
+      paths = paths.flatMap((p) => { try { return readdirSync(p).filter((n) => re.test(n)).sort().map((n) => join(p, n)); } catch { return []; } });
+    }
+    for (const p of paths) { try { if (lstatSync(p).isDirectory() && !out.includes(p)) out.push(p); } catch {} }
+  }
+  return out;
+}
+
+export function binOf(pkg, name, dirs = npmDirs()) {
   // Run the CLI's own JS entry with node, so long multi-line prompts never pass through cmd.exe.
-  try {
-    const dir = join(NPM, ...pkg.split("/"));
-    const meta = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
-    const rel = typeof meta.bin === "string" ? meta.bin : meta.bin?.[name];
-    if (rel) return join(dir, rel);
-  } catch {}
+  for (const npm of dirs) {
+    try {
+      const dir = join(npm, "node_modules", ...pkg.split("/"));
+      const meta = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+      const rel = typeof meta.bin === "string" ? meta.bin : meta.bin?.[name];
+      if (rel) return join(dir, rel);
+    } catch {}
+  }
   return null;
 }
 
