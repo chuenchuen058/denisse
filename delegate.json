@@ -1,0 +1,103 @@
+{
+  "_note": "Data for delegate.py (AGENTS.md Rule 0): which engines a job goes to and how each is called, what they may do, the prompt wording, how a non-answer and an error are recognised, the draft note's shape, and every sentence Denisse says about a hand-off. Which folders a delegated agent may read stays in config.json's settings.read_dirs.",
+  "drafts_folder": "Denisse/Drafts",
+  "log_file": "memory/delegate.log",
+  "timeout_s": 600,
+
+  "_engines": "Tried in this order. args: '{name}' as a whole argument is replaced by that value (prompt, system, allowed, disallowed, home, outfile); anything else is passed as written. add_dir_flag is repeated before each existing read folder. stdin: the system text and prompt go on stdin instead of argv. reads_outfile: the answer is read from {outfile}, not stdout.",
+  "engines": {
+    "claude": {
+      "label": "Claude",
+      "exe": "claude",
+      "args": ["-p", "{prompt}", "--output-format", "text",
+               "--append-system-prompt", "{system}",
+               "--allowedTools", "{allowed}", "--disallowedTools", "{disallowed}"],
+      "add_dir_flag": "--add-dir",
+      "stdin": false,
+      "reads_outfile": false
+    },
+    "codex": {
+      "label": "Codex",
+      "exe": "codex",
+      "_why_stdin": "Codex on Windows is a .cmd wrapper, and a multi-line argument through a .cmd is cut at the first line break (2026-10-29). -o writes just its final message, without the progress log.",
+      "args": ["exec", "--sandbox", "read-only", "--skip-git-repo-check",
+               "-C", "{home}", "-o", "{outfile}", "-"],
+      "add_dir_flag": "",
+      "stdin": true,
+      "reads_outfile": true
+    }
+  },
+  "allowed_tools": "Read,Glob,Grep,WebSearch,WebFetch",
+  "disallowed_tools": "Edit,Write,MultiEdit,NotebookEdit,Bash,PowerShell",
+  "outfile": "denisse-{engine}-{pid}.md",
+  "stdin_separator": "\n\n",
+
+  "system": "You are doing a job for {user_name}{about}, on behalf of Denisse, his local assistant. Do the job fully and well, as the finished deliverable -- he wants the task done, not a description of how he could do it. You can read his files and search the web; you cannot edit files, so return the deliverable as your answer, in Markdown. Never invent facts about him: use only what is in his files or what he said. Don't ask him questions back. If something you need is missing, make the most sensible assumption and say so in one line at the end, under 'Assumptions'.",
+  "system_about": ", {user_about}",
+
+  "context_turns": 6,
+  "context_chars": 400,
+  "context_line": "{role}: {content}",
+  "context_none": "(none)",
+  "read_dir_line": "- {dir}",
+  "prompt": "He asked Denisse: \"{task}\"\n\nRecent conversation, for context:\n{convo}\n\nHis files are in:\n{where}\n(His Obsidian vault holds his notes, module pages, coursework, internship research and CV-related notes.)\n\nBefore anything external-facing (CV, cover letter, application, email), read Atlas/Verified-Claims.md in the vault and state only claims marked verified: true.",
+  "prompt_learning": " For anything meant to teach him, follow {note}.",
+  "shared_context_agent": "claude",
+  "shared_context_separator": "\n\n",
+
+  "_non_answer": "A reply that isn't the deliverable. Saving one as 'Done' would be exactly the satisfy-not-do reply he asked her to stop.",
+  "non_answer_pattern": "(?i)no\\s+(?:specific\\s+)?(?:job|task|deliverable|instructions?)\\b|(?:didn'?t|did\\s+not|haven'?t|has\\s+not)\\s+(?:provide|give|include|specif)|(?:please|could\\s+you|can\\s+you)\\s+(?:provide|share|specify|clarify|tell\\s+me\\s+(?:what|which))|what\\s+would\\s+you\\s+like\\s+me\\s+to|task\\s+description\\s+was\\s+omitted",
+  "non_answer_head_chars": 400,
+  "non_answer_min_chars": 40,
+
+  "_strip_env": "A child claude that inherits Denisse's .env API key bills that key instead of his normal login (2026-10-29).",
+  "strip_env": ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"],
+  "child_env": {"PYTHONIOENCODING": "utf-8"},
+  "fallback_codepage": "cp1252",
+
+  "error_line_pattern": "[A-Za-z]{3}",
+  "error_key_pattern": "(?i)error|disabled|denied|limit|auth|invalid|expired|credit|quota|not\\s+logged",
+  "error_chars": 140,
+  "no_output": "no output",
+
+  "log_task_chars": 80,
+  "log": {
+    "timeout": "{engine} TIMEOUT task={task!r}",
+    "oserror": "{engine} OSERROR {error} task={task!r}",
+    "ok": "{engine} OK chars={chars} task={task!r}",
+    "fail": "{engine} FAIL rc={rc} why={why!r} task={task!r}"
+  },
+  "failures": {
+    "timeout": "{engine} took longer than {minutes} minutes",
+    "oserror": "{engine} couldn't start ({error})",
+    "non_answer": "came back without doing the job",
+    "fail": "{engine}: {why}",
+    "none_installed": "neither Claude Code nor Codex is installed",
+    "separator": "; "
+  },
+
+  "slug_stop_words": ["could", "you", "please", "me", "my", "for", "the", "a", "an", "can", "i", "to"],
+  "slug_words": 7,
+  "slug_fallback": "draft",
+  "draft_name": "{now:%Y-%m-%d %H%M} {slug}",
+  "draft_description_chars": 150,
+  "draft_body": "---\nname: {name}\ndescription: \"Draft by {who} via Denisse: {short}\"\ntags: [denisse, draft]\nupdated: {now:%Y-%m-%d}\n---\n\n> [!note] Asked: {desc}\n> Done by {who} on {now:%d %b %Y %H:%M}, read-only access to his files and the web. Check it before you send it.\n\n{text}\n",
+
+  "handoff_agent": "denisse",
+  "handoff_task_chars": 120,
+  "handoff_text_chars": 200,
+  "handoff_ok": "handed off \"{task}\" -> {who}, draft saved: {drafts}/{file}",
+  "handoff_fail": "hand-off FAILED \"{task}\": {text}",
+
+  "say": {
+    "not_installed": "That's a job for Claude or Codex, and neither is installed on this laptop, so I can't hand it off.",
+    "dry_run": "Handing that to Claude -- it can read your files and search the web. I'll tell you when it's done and save it in {drafts}.",
+    "started": "Handing that to Claude -- it can read your files and search the web. Usually a minute or two; I'll tell you when it's done, and it'll be saved in your vault under {drafts}.",
+    "done_task_chars": 60,
+    "done": "Done -- {who} finished \"{task}\". It's in your vault: {drafts}/{file}",
+    "fallback_chars": 120,
+    "fallback": " ({failed} didn't manage it -- {why} -- so {who} did.)",
+    "failed_chars": 300,
+    "failed": "I couldn't get that done: {text}. Nothing was saved. Ask me again in a bit, or ask Claude directly."
+  }
+}
