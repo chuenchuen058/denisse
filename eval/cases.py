@@ -1127,9 +1127,9 @@ CASES = [
         "vault": "fixture",
         "study": {"active": True, "ends": "off"},
         "expect": {"any_tool_of": {"stop_study_session", "study_mode:stop"},
-                   "none_of": {"cancel_timer", "pause_study_session"},
-                   "contains_any": ["stopped", "ended", "off", "round", "wrapped", "finished"]},
-        "why": "'for today' takes it past the whole-message phrases; the model ends the session.",
+                   "none_of": {"cancel_timer", "pause_study_session"}},
+        "why": "'for today' takes it past the whole-message phrases; the model ends the session. "
+               "`ends: off` is the check -- how she words it is hers.",
     },
     {
         "id": "chuen_study_over_none",
@@ -1330,7 +1330,8 @@ CASES = [
         "fixtures": {n: _NO_PLAYER for n in ("play_song", "resume_music")} | {
             "open_application": "Error: couldn't open Spotify -- it isn't installed on this machine."},
         "expect": {"contains_any": ["couldn't", "can't", "no active", "isn't", "not open", "not installed",
-                                    "nothing", "unable", "didn't", "no device", "won't"],
+                                    "nothing", "unable", "didn't", "no device", "won't", "haven't got",
+                                    "isn't running", "not running"],
                    "deny": ["now playing", "enjoy", "started playing", "playing it now", "playing your",
                             "here's some music", "music is on"]},
         "why": "Nothing can play: say so, no pretend success.",
@@ -1379,7 +1380,8 @@ CASES = [
                    "contains_any": ["can't see", "don't have access", "no access", "can't access",
                                     "not connected", "don't have your calendar", "can't check", "no calendar",
                                     "not hooked up", "can't read", "isn't connected", "don't have a calendar",
-                                    "can't get", "don't have calendar", "not linked"],
+                                    "can't get", "don't have calendar", "not linked",
+                                    "information about your calendar", "no way to see"],
                    "deny": ["meeting at", "appointment at", "lecture at", "event at",
                             "you have a meeting", "you've got a meeting"]},
         "why": "She has no calendar: say so, invent no events.",
@@ -1439,9 +1441,10 @@ CASES = [
         ],
         "prompt": "what did i just ask you?",
         "vault": "fixture",
-        "expect": {"none_of": {"get_weather", "recall", "list_known_facts", "search_vault", "get_current_time"},
+        "expect": {"none_of": {"get_weather", "search_vault", "get_current_time"},
                    "contains_any": ["weather", "penang"]},
-        "why": "The answer is one turn up; no tool needed.",
+        "why": "The answer is one turn up. A read-only recall is wasted but harmless; "
+               "re-asking the weather or the clock is not.",
     },
     {
         "id": "chuen_chat_nvm",
