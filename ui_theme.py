@@ -12,7 +12,9 @@ Loaded once per process (reload() re-reads, for tests). Every value in
 ui_theme.json is checked against its shipped default -- same type, numbers
 positive where the default is, colours as #rrggbb, templates using only the
 {fields} the default uses -- plus a few cross-checks (motion kinds, dock
-actions and icons, alpha <= 255). A missing or bad value logs one clear line
+actions and icons, alpha <= 255). dock.glyphs.shapes is the one open-ended
+part -- any icon name, each a list of strokes -- so it is checked by its
+own rules (_check_shapes) rather than against the default's keys. A missing or bad value logs one clear line
 and the default is used instead: a typo in the theme must never stop the orb.
 
 DENISSE_UI_THEME points at another theme file (tests, A/Bs).
@@ -35,7 +37,10 @@ log = logging.getLogger("denisse.ui_theme")
 # What the code can draw / do -- names the data picks from, not values.
 MOTION_KINDS = ("shake", "bounce", "orbit", "lift", "bob", "still")
 DOCK_ACTIONS = ("chat", "voice", "reminders")
-DOCK_ICONS = ("chat", "mic", "bell")
+# Stroke kinds a dock glyph can use, and the xy length each takes (line: any
+# even length of 4 or more). The icons themselves are dock.glyphs.shapes.
+GLYPH_OPS = {"rounded_rectangle": ("radius",), "arc": ("start", "end"), "line": ()}
+_FREEFORM = {"ui_theme.dock.glyphs.shapes"}
 ALPHA_MAX = 255
 
 _lock = threading.Lock()
@@ -65,6 +70,8 @@ def _bad(where, why, default):
 
 def _check(where, value, default):
     """value if it fits the shape of default, else default (logged)."""
+    if where in _FREEFORM:
+        return value  # checked by _extra_checks
     if isinstance(default, dict):
         if not isinstance(value, dict):
             return _bad(where, "should be an object", default)
@@ -126,6 +133,33 @@ def _check(where, value, default):
     return value
 
 
+def _number(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _shape_problem(shapes):
+    """Why dock.glyphs.shapes is unusable, or None when every shape draws."""
+    if not isinstance(shapes, dict) or not shapes:
+        return "should be an object of icon name -> list of strokes"
+    for name, strokes in shapes.items():
+        if not isinstance(strokes, list) or not strokes:
+            return f"{name} should be a non-empty list of strokes"
+        for i, s in enumerate(strokes):
+            if not isinstance(s, dict) or s.get("op") not in GLYPH_OPS:
+                return f"{name}[{i}].op should be one of {list(GLYPH_OPS)}"
+            xy = s.get("xy")
+            if not isinstance(xy, list) or not all(_number(v) for v in xy):
+                return f"{name}[{i}].xy should be a list of numbers"
+            if (len(xy) != 4) if s["op"] != "line" else (len(xy) < 4 or len(xy) % 2):
+                return f"{name}[{i}].xy has the wrong number of values for {s['op']}"
+            if s["op"] == "rounded_rectangle" and (xy[2] < xy[0] or xy[3] < xy[1]):
+                return f"{name}[{i}].xy should run x0, y0 to x1, y1 with x1 >= x0, y1 >= y0"
+            for key in GLYPH_OPS[s["op"]]:
+                if not _number(s.get(key)) or (key == "radius" and s[key] < 0):
+                    return f"{name}[{i}].{key} should be a{' non-negative' if key == 'radius' else ''} number"
+    return None
+
+
 def _fix(data, defaults, dotted, why):
     """Replace data[dotted] with its default, logged."""
     *head, last = dotted.split(".")
@@ -155,12 +189,16 @@ def _extra_checks(data, defaults):
     for mood, m in anim["motion"].items():
         if m["kind"] not in MOTION_KINDS:
             _fix(data, defaults, f"animation.motion.{mood}", f"kind should be one of {list(MOTION_KINDS)}")
+    problem = _shape_problem(dock["glyphs"]["shapes"])
+    if problem:
+        _fix(data, defaults, "dock.glyphs.shapes", problem)
+    icons = dock["glyphs"]["shapes"]
     actions = [b["action"] for b in dock["buttons"]]
     if (len(set(actions)) != len(actions)
             or any(a not in DOCK_ACTIONS for a in actions)
-            or any(b["icon"] not in DOCK_ICONS for b in dock["buttons"])):
+            or any(b["icon"] not in icons for b in dock["buttons"])):
         _fix(data, defaults, "dock.buttons",
-             f"should use each action of {list(DOCK_ACTIONS)} at most once and icons from {list(DOCK_ICONS)}")
+             f"should use each action of {list(DOCK_ACTIONS)} at most once and icons from {sorted(icons)}")
     if 2 * dock["layout"]["button_top"] >= dock["layout"]["height"]:
         _fix(data, defaults, "dock.layout.button_top", "should be under half of dock.layout.height")
     return data
