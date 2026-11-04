@@ -11,8 +11,10 @@ whisper when faster-whisper is installed; any Whisper failure falls back to
 Vosk in voice_mode.listen()).
 
 Model: config.json's models.whisper (DENISSE_WHISPER_MODEL overrides it;
-downloaded once to the Hugging Face cache). Runs on the GPU (float16) when
-CUDA libraries load, otherwise on the CPU (int8). The GPU is shared with the
+downloaded once to the Hugging Face cache). Device, compute types, chunk size,
+language, beam size and VAD are voice.json's "stt_whisper" section (AGENTS.md
+Rule 0). By default it runs on the GPU (float16) when CUDA libraries load,
+otherwise on the CPU (int8). The GPU is shared with the
 Ollama chat model (~5.6 GB of 8 GB), and small.en in float16 needs about 1 GB.
 Everything stays on this machine.
 """
@@ -29,12 +31,18 @@ import numpy as np
 
 import model_config
 import stt_vosk  # reuse its mic-picking and downmix/resample (see its 48 kHz note)
+import voice_config
 import voice_pipeline
 
+_CFG = voice_config.section("stt_whisper")
 SAMPLE_RATE = stt_vosk.SAMPLE_RATE  # 16 kHz, what Whisper expects
 MODEL_NAME = model_config.model("whisper")
-DEVICE = os.environ.get("DENISSE_WHISPER_DEVICE", "auto")  # auto | cuda | cpu
-CHUNK_FRAMES = 1024
+DEVICE = os.environ.get("DENISSE_WHISPER_DEVICE") or _CFG["device"]  # auto | cuda | cpu
+CHUNK_FRAMES = _CFG["chunk_frames"]
+LEAD_IN_CHUNKS = _CFG["lead_in_chunks"]
+LANGUAGE = _CFG["language"]
+BEAM_SIZE = _CFG["beam_size"]
+VAD_FILTER = _CFG["vad_filter"]
 # Endpointing lives in voice_pipeline.Endpointer: DENISSE_END_SILENCE_S is
 # how much quiet after speech ends the clip (docs/voice_latency.md has the
 # measurements behind its default).
@@ -67,12 +75,13 @@ def _load(device: str):
     from faster_whisper import WhisperModel
     if device == "cuda":
         _add_cuda_dll_dirs()
-        m = WhisperModel(MODEL_NAME, device="cuda", compute_type="float16")
+        m = WhisperModel(MODEL_NAME, device="cuda", compute_type=_CFG["gpu_compute_type"])
         # CUDA libraries load lazily: a missing cuBLAS/cuDNN only shows up on
         # first use, so run a tiny clip now rather than mid-sentence later.
-        list(m.transcribe(np.zeros(SAMPLE_RATE // 2, dtype=np.float32))[0])
+        probe = max(1, int(SAMPLE_RATE * _CFG["cuda_probe_s"]))
+        list(m.transcribe(np.zeros(probe, dtype=np.float32))[0])
         return m
-    return WhisperModel(MODEL_NAME, device="cpu", compute_type="int8")
+    return WhisperModel(MODEL_NAME, device="cpu", compute_type=_CFG["cpu_compute_type"])
 
 
 def get_model():
@@ -110,16 +119,20 @@ def preload() -> None:
         pass
 
 
-def transcribe_array(audio: np.ndarray) -> str:
-    """audio: float32 mono at 16 kHz in [-1, 1]."""
-    segments, _info = get_model().transcribe(audio, language="en", beam_size=5, vad_filter=True)
+def _transcribe(source) -> str:
+    segments, _info = get_model().transcribe(source, language=LANGUAGE, beam_size=BEAM_SIZE,
+                                             vad_filter=VAD_FILTER)
     return " ".join(s.text.strip() for s in segments).strip()
+
+
+def transcribe_array(audio: np.ndarray) -> str:
+    """audio: float32 mono at SAMPLE_RATE (16 kHz) in [-1, 1]."""
+    return _transcribe(audio)
 
 
 def transcribe_file(path: str) -> str:
     """Any audio file faster-whisper can decode (wav, mp3...)."""
-    segments, _info = get_model().transcribe(path, language="en", beam_size=5, vad_filter=True)
-    return " ".join(s.text.strip() for s in segments).strip()
+    return _transcribe(path)
 
 
 def _record(timeout: float, phrase_time_limit: float, on_ready, trace=None) -> bytes:
@@ -153,7 +166,7 @@ def _record(timeout: float, phrase_time_limit: float, on_ready, trace=None) -> b
                 if verdict == "timeout":
                     return b""
                 if ep.started_at is None:
-                    frames = (frames + [mono])[-4:]  # keep ~0.25 s of lead-in
+                    frames = (frames + [mono])[-LEAD_IN_CHUNKS:]  # ~0.25 s of lead-in by default
                     continue
                 frames.append(mono)
                 if verdict in ("end", "limit"):
@@ -170,11 +183,13 @@ def _record(timeout: float, phrase_time_limit: float, on_ready, trace=None) -> b
         pa.terminate()
 
 
-def transcribe_once(timeout: float = 8.0, phrase_time_limit: float = 15.0, on_ready=None,
+def transcribe_once(timeout: float = None, phrase_time_limit: float = None, on_ready=None,
                     trace=None) -> str:
     """Blocking push-to-talk: waits up to `timeout` s for speech, records until
     END_SILENCE_S of quiet (or `phrase_time_limit`), returns the transcript or ''.
-    Loads the model BEFORE opening the mic, so on_ready() means really listening."""
+    Loads the model BEFORE opening the mic, so on_ready() means really listening.
+    Unset timeouts are voice.json's voice_mode.listen_timeout_s / phrase_time_limit_s."""
+    timeout, phrase_time_limit = stt_vosk._listen_limits(timeout, phrase_time_limit)
     get_model()
     pcm = _record(timeout, phrase_time_limit, on_ready, trace)
     if not pcm:

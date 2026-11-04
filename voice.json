@@ -111,5 +111,52 @@
     "listen_timeout_s": 8.0,
     "phrase_time_limit_s": 15.0,
     "exit_phrases": ["exit", "quit"]
+  },
+
+  "stt_vosk": {
+    "_why_model": "Folder of the Vosk model, relative to the repo (or absolute). DENISSE_VOSK_MODEL_PATH still wins; DENISSE_WAKE_MODEL_PATH pins hands-free listening to a different one. A bigger model (vosk-model-en-us-0.22) is the fix for words it keeps getting wrong, not more code.",
+    "model_dir": "models/vosk-model-en-us-0.22-lgraph",
+    "sample_rate": 16000,
+    "_why_chunk": "2000 frames at 16 kHz = 0.125 s per read: short enough that partials feel live, long enough not to underrun on a background thread.",
+    "chunk_frames": 2000,
+    "_why_alternatives": "A mangled 'Denisse' is likelier in a secondary guess than in the top one.",
+    "max_alternatives": 5,
+    "_why_gate": "Chunks under floor x noise_gate_multiplier become silence before Vosk sees them (it hallucinates 'the' from room noise). 5x, not 2.5x: transient spikes in a quiet room; speech measured 700-1900+ RMS against a floor of ~30-150. DENISSE_VOSK_NOISE_GATE_MULTIPLIER still wins. The floor is the noise_floor_percentile of the last noise_floor_window_s of chunk levels, never below noise_gate_min_floor, recomputed once noise_floor_min_chunks are in.",
+    "noise_gate_multiplier": 5.0,
+    "noise_gate_min_floor": 30,
+    "noise_floor_window_s": 12.0,
+    "noise_floor_min_chunks": 8,
+    "noise_floor_percentile": 0.2,
+    "_why_grammar": "The only phrases the dedicated name spotter may choose between (plus Vosk's own '[unk]', added in code). Her name isn't a dictionary word, so the open recognizer sometimes never gets close ('the nice').",
+    "wake_grammar": ["denisse", "denise", "hey denisse", "hey denise", "hi denisse", "hi denise"],
+    "decode_poll_s": 0.5,
+    "stop_join_s": 2.0
+  },
+
+  "stt_whisper": {
+    "_why_device": "auto = GPU (float16) when the CUDA libraries load, else CPU (int8); DENISSE_WHISPER_DEVICE still wins. The model name itself is config.json's models.whisper. cuda_probe_s of silence is transcribed at load, because a missing cuBLAS/cuDNN only shows up on first use.",
+    "device": "auto",
+    "gpu_compute_type": "float16",
+    "cpu_compute_type": "int8",
+    "cuda_probe_s": 0.5,
+    "chunk_frames": 1024,
+    "_why_lead_in": "Chunks kept from before speech starts (4 x 1024 frames at 16 kHz is about 0.25 s), so the first syllable isn't clipped.",
+    "lead_in_chunks": 4,
+    "language": "en",
+    "beam_size": 5,
+    "vad_filter": true
+  },
+
+  "tts_kokoro": {
+    "_why": "Local neural voice. model_dir is relative to the repo (or absolute); DENISSE_KOKORO_DIR, DENISSE_KOKORO_VOICE, DENISSE_KOKORO_SPEED and DENISSE_KOKORO_DEVICE still win. voice is any voice in the voices file. warm_up_text is spoken into a throwaway file so the first real reply doesn't pay the GPU warm-up. unavailable_note is printed (with {error}) when synthesis fails and the caller falls back.",
+    "model_dir": "models/kokoro",
+    "model_file": "kokoro-v1.0.onnx",
+    "voices_file": "voices-v1.0.bin",
+    "voice": "af_heart",
+    "speed": 1.0,
+    "lang": "en-us",
+    "device": "auto",
+    "warm_up_text": "Ready.",
+    "unavailable_note": "(Kokoro voice unavailable: {error})"
   }
 }
