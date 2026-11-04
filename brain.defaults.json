@@ -646,15 +646,26 @@
           "\\b(?:my|i'?m|i\\s+am|im|doing|working)\\b"
         ],
         "query": "current projects"
+      },
+      {
+        "all_of_patterns": [
+          "\\bworking\\s+on\\b",
+          "\\b(?:am\\s+i|i'?m|i\\s+am|im|me|my)\\b"
+        ],
+        "query": "current projects"
       }
     ],
-    "vault_overview_query": "current projects"
+    "vault_overview_query": "current projects",
+    "verify_claim_pattern": "^\\s*(?:did|have|had) you (?:actually |really |even )?(?:open|do|add|set|start|stop|send|save|delete|remove|cancel|finish|run|play|pause|email|write|create|make|turn|close)\\b",
+    "promise_pattern": "\\b(?:\\w+ing (?:it|that|them|this|one|the \\w+) now|on it|will do|right away|one sec(?:ond)?|just a (?:sec|moment|minute))\\b"
   },
   "quick_replies": {
     "_about": "Greetings and acknowledgements have one right kind of answer and the model kept finding wrong ones ('hey' -> 'No response needed.'), so they are answered before the model. {name} is settings.user_name()'s first word. day_part_pattern: a greeting that names the time of day gets greeting_by_time with the first day_parts entry whose until_hour is after now. An 'ok' or 'thanks' right after a question of hers is an answer and goes to the model.",
     "greeting_pattern": "^\\s*(?:hey|hi|hello|hiya|yo|morning|evening|good\\s+(?:morning|afternoon|evening))(?:\\s+(?:denisse|there|chuen))?[.!\\s]*$",
     "thanks_pattern": "^\\s*(?:thanks?|thank\\s+you|thx|ty|cheers)(?:\\s+(?:denisse|a\\s+lot|so\\s+much))?[.!\\s]*$",
     "ack_pattern": "^\\s*(?:ok(?:ay)?|alright|cool|nice|great|perfect|good|sounds\\s+good|(?:ok(?:ay)?\\s+)?that'?s?\\s+(?:good|great|fine|nice|perfect))[.!\\s]*$",
+    "never_mind_pattern": "^\\s*(?:nvm|never\\s?mind|forget\\s+(?:it|that)|leave\\s+it|drop\\s+it|doesn'?t\\s+matter|scratch\\s+that)(?:[,.!\\s]+(?:then|thanks?|denisse))*[.!\\s]*$",
+    "never_mind": "No worries.",
     "day_part_pattern": "good\\s+(?:morning|afternoon|evening)|^\\s*(?:morning|evening)",
     "day_parts": [
       {
@@ -761,6 +772,10 @@
     "you_asked": "You asked: \"{shown}\". ",
     "already_done": "That part is already done ({what}), and I haven't done it again. What did you want instead?",
     "same_answer": "I got the same answer again, so I haven't fixed it: {retry} Tell me what you meant and I'll do that instead.",
+    "corrected": "My mistake -- {retry}",
+    "verified_done": "Yes -- {what}",
+    "verified_failed": "No -- it didn't work: {what}",
+    "verified_nothing": "No -- I said I would, but I didn't actually do it; nothing ran for that. Want me to do it now?",
     "feedback_commands": [
       {
         "command": "/good",

@@ -158,6 +158,12 @@ def is_multistep(text: str) -> bool:
     text = (text or "").strip()
     if not text or len(text) > _R["max_request_chars"] or "\n" in text:
         return False
+    import tool_policy
+    if tool_policy.cue("reply_preference").match(text):
+        # "stop reading out file paths, just ask me if i want them" splits
+        # into two verb phrases, but it is one instruction about how she
+        # replies (brain._style_note takes it), never a plan of actions.
+        return False
     if len(action_parts(text)) < 2:
         return False
     import tool_router

@@ -784,6 +784,25 @@ def reply_preference(action: str = "add", text: str = "") -> str:
     return reply_preferences.tool(action, text)
 
 
+def check_calendar(day: str = "") -> str:
+    """What is on his calendar -- which, today, is nothing she can see.
+
+    No calendar is connected (config.json settings.calendar is unset; the
+    task list is deliberately not a calendar, see tasks.py). The honest
+    result is that, said plainly: on 2026-11-04 "what's on my calendar
+    tomorrow?" got "I don't have anything scheduled for tomorrow" -- an
+    empty calendar asserted with no calendar to read. A tool result is the
+    one thing the model treats as ground truth, so the fact lives here.
+    When a calendar is wired up, this is where it answers from."""
+    import settings
+    if not settings.get("calendar"):
+        return ("No calendar is connected to Denisse, so nothing about his calendar can be seen "
+                "or checked -- not for " + (day or "any day") + ", not at all. Tell him plainly "
+                "you can't see his calendar; don't say it's empty or free. His reminders "
+                "(list_tasks) are the nearest thing you can read.")
+    return "Error: a calendar is configured but no calendar reader is installed. Tell him this failed."
+
+
 TOOL_FUNCTIONS = {
     "run_shell_command": run_shell_command,
     "open_application": open_application,
@@ -832,4 +851,5 @@ TOOL_FUNCTIONS = {
     "resume_study_session": resume_study_session,
     "stop_study_session": stop_study_session,
     "reply_preference": reply_preference,
+    "check_calendar": check_calendar,
 }

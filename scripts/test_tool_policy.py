@@ -255,5 +255,152 @@ class ExecuteAgainstThePolicy(unittest.TestCase):
         status.assert_called()
 
 
+class ChuenQuestions(unittest.TestCase):
+    """The 2026-11-04 failures from his 29 test questions, each replayed
+    with a scripted model: the fix is policy data, a tool's words or a net
+    under the reply -- never a regex on what he typed."""
+
+    def test_reminder_with_no_subject_is_refused_before_it_runs(self):
+        # "remind me thursday" -> add_task('Thursday', 'thursday') -> "I added Thursday" 6/6.
+        write = Mock(return_value="Added: Thursday -- due Thursday 5 Nov, 23:59.")
+        out, seen = run_turn("remind me thursday",
+                             [call("add_task", {"text": "Thursday", "due": "thursday"}),
+                              reply("What's the reminder for -- and this Thursday or next?")],
+                             {"add_task": write})
+        write.assert_not_called()
+        self.assertTrue(any(s.startswith("Refused: 'Thursday' is only a time") for s in seen), seen)
+        self.assertIn("?", out)
+
+    def test_ambiguous_due_surfaces_time_parse_question(self):
+        import datetime as dt
+        import time_parse
+        with time_parse.fixed_clock(dt.datetime(2026, 11, 5, 8, 40)):  # a Thursday morning
+            refusal = tool_policy.refuse("add_task", {"text": "dentist", "due": "thursday"})
+            self.assertIsNotNone(refusal)
+            self.assertIn("today", refusal)
+            self.assertIn("next Thursday", refusal)
+            self.assertIsNone(tool_policy.refuse("add_task", {"text": "dentist", "due": "friday"}))
+            self.assertIsNone(tool_policy.refuse("add_task", {"text": "robotics meeting", "due": "at 5"}))
+
+    def test_her_own_settings_file_is_refused_by_name_anywhere(self):
+        # "edit your own settings file" -> write_file to an invented path outside her folder, 6/6.
+        for path in (r"C:\Users\Xichu\settings.json", r"C:\Users\Xichu\Desktop\denisse_settings.txt",
+                     r"C:\Users\Xichu\Documents\config.json"):
+            self.assertIn("your own files", tool_policy.refuse("write_file", {"path": path, "content": "x"}) or "", path)
+        self.assertIsNone(tool_policy.refuse("write_file", {"path": r"C:\Users\Xichu\Documents\notes.txt", "content": "x"}))
+
+    def test_nothing_running_is_said_not_a_goodbye(self):
+        # "session over" with no session -> stop ran, did nothing -> "See you next time, Chuen." 6/6.
+        out, _ = run_turn("session over", [call("stop_study_session"), reply("See you next time, Chuen.")],
+                          {"stop_study_session": lambda: "No study session was running, so nothing was stopped."})
+        self.assertEqual(out, "No study session was running, so nothing was stopped.")
+        out, _ = run_turn("session over", [call("stop_study_session"), reply("Nothing was running, so there's nothing to stop.")],
+                          {"stop_study_session": lambda: "No study session was running, so nothing was stopped."})
+        self.assertEqual(out, "Nothing was running, so there's nothing to stop.")
+
+    def test_a_corrected_answer_owns_the_mistake(self):
+        # "omg youre so dumb" after "15% of 240 is 24" -> "36." with no acknowledgement, 6/6.
+        out, _ = run_turn("omg youre so dumb",
+                          [call("calculate", {"expression": "240*0.15"}), reply("36.")],
+                          {"calculate": lambda expression: f"{expression} = 36"},
+                          before=[user("what's 15% of 240"), {"role": "assistant", "content": "15% of 240 is 24."}])
+        self.assertEqual(out, 'You asked: "what\'s 15% of 240". My mistake -- 36.')
+
+    def test_a_file_lookup_is_not_a_study_brief(self):
+        # "where's my EM coursework brief?" went into the study-brief job on the word "brief", 6/6.
+        found = ("Found 1 file:\nC:\\Users\\Xichu\\OneDrive\\Documents\\KCL\\Electromagnetism"
+                 "\\5CCYB010 Coursework brief.pdf")
+        out, _ = run_turn("where's my EM coursework brief?",
+                          [call("find_files", {"query": "em coursework brief"}),
+                           reply("Found it: 5CCYB010 Coursework brief.pdf, in your KCL Electromagnetism folder.")],
+                          {"find_files": lambda query, location="": found})
+        self.assertNotIn("couldn't finish", out)
+        self.assertIn("Coursework brief", out)
+        self.assertIn(brain._PATH_ASK, out)
+        self.assertTrue(brain._STUDY_BRIEF.search("prep me for electromagnetism"))
+
+    def test_calendar_with_nothing_connected_is_said_so(self):
+        # "what's on my calendar tomorrow?" -> "I don't have anything scheduled for tomorrow" (no calendar exists).
+        out, seen = run_turn("what's on my calendar tomorrow?",
+                             [call("check_calendar", {"day": "tomorrow"}), reply("You've got nothing on tomorrow.")],
+                             {"check_calendar": brain.tools.check_calendar})
+        self.assertTrue(any(s.startswith("No calendar is connected") for s in seen), seen)
+        self.assertEqual(out, tool_policy.tool("check_calendar")["fallback_reply"])
+        out, _ = run_turn("what's on my calendar tomorrow?",
+                          [call("check_calendar", {"day": "tomorrow"}), reply("I can't see your calendar -- nothing's connected.")],
+                          {"check_calendar": brain.tools.check_calendar})
+        self.assertEqual(out, "I can't see your calendar -- nothing's connected.")
+
+    def test_project_question_uses_the_known_vault_query(self):
+        # "what am I working on right now?" -> search_vault('working on right now') -> her own folder name, 4/6.
+        search = Mock(return_value="From your notes (quote these, don't embellish; if they don't answer the "
+                                   "question, say so):\n\nAtlas/Projects/Projects.md\n  - Kestrel line-follower")
+        out, _ = run_turn("what am I working on right now?",
+                          [call("search_vault", {"query": "working on right now"}), reply("The Kestrel line-follower.")],
+                          {"search_vault": search})
+        search.assert_called_once_with(query="current projects")
+        self.assertIn("Kestrel", out)
+
+    def test_follow_ups_reach_the_study_and_task_tools(self):
+        def offered(msgs):
+            return {d["function"]["name"] for d in tool_router.select(brain.TOOL_DEFINITIONS, msgs)}
+        paused = [user("pause the study timer"), {"role": "assistant", "content": "Paused -- 18 minutes left."}]
+        self.assertIn("resume_study_session", offered(paused + [user("ok carry on")]))
+        reminded = [user("remind me robotics meeting at 5"), {"role": "assistant", "content": "Okay."}]
+        self.assertIn("remove_task", offered(reminded + [user("cancel the robotics one")]))
+        self.assertIn("check_calendar", offered([user("what's on my calendar tomorrow?")]))
+
+    def test_did_you_open_it_is_answered_from_the_evidence(self):
+        # "did you open it?" after "Opening it now." with nothing run -> read_file and
+        # "the file isn't there" (2026-11-04). The evidence answers, not the model.
+        before = [user("open my signals syllabus"), {"role": "assistant", "content": "Opening it now."}]
+        with patch.object(brain, "_corrected_attempt", return_value=[]):
+            out, _ = run_turn("did you open it?", [reply("It looks like the file isn't there.")], before=before)
+        self.assertEqual(out, brain.CONFIG["text"]["verified_nothing"])
+        failed = [{"name": "open_application", "arguments": {"app_name": "x.pdf"},
+                   "result": "Error: couldn't open the file -- access is denied. Tell him this failed."}]
+        with patch.object(brain, "_corrected_attempt", return_value=failed):
+            out, _ = run_turn("did you open it?", [reply("Yes, it's open.")], before=before)
+        self.assertTrue(out.startswith("No -- it didn't work: Error: couldn't open the file"), out)
+        opened = [{"name": "open_application", "arguments": {"app_name": "x.pdf"}, "result": "Opened x.pdf."}]
+        with patch.object(brain, "_corrected_attempt", return_value=opened):
+            out, _ = run_turn("did you open it?", [reply("No idea.")], before=before)
+        self.assertEqual(out, "Yes -- Opened x.pdf.")
+        # No promise and nothing recorded: the model answers.
+        with patch.object(brain, "_corrected_attempt", return_value=[]):
+            out, _ = run_turn("did you open it?", [reply("I haven't opened anything yet.")],
+                              before=[user("open my signals syllabus"), {"role": "assistant", "content": "Alright, noted."}])
+        self.assertEqual(out, "I haven't opened anything yet.")
+
+    def test_never_mind_is_answered_without_the_clock(self):
+        clock = Mock(return_value="It's 5:43 PM.")
+        out, _ = run_turn("nvm", [call("get_current_time"), reply("No worries.")], {"get_current_time": clock},
+                          before=[user("find my japan flight pdf and remind me to check in"),
+                                  {"role": "assistant", "content": "Sure -- which day do you want the check-in reminder for?"}])
+        clock.assert_not_called()
+        self.assertEqual(out, brain.CONFIG["quick_replies"]["never_mind"])
+
+    def test_a_task_reply_that_drops_the_time_gets_the_stores_words(self):
+        # live 2026-11-04: "I've added the robotics meeting to your reminders." -- no 5pm.
+        out, _ = run_turn("remind me robotics meeting at 5",
+                          [call("add_task", {"text": "robotics meeting", "due": "at 5"}),
+                           reply("I've added the robotics meeting to your reminders.")],
+                          {"add_task": lambda text, due="": "Added: robotics meeting -- due Thursday 5 Nov, 17:00."})
+        self.assertIn("17:00", out)
+
+    def test_a_document_name_is_not_an_app_to_open(self):
+        # "open my signals and systems syllabus" -> open_application('Signals and Systems syllabus') -> "It's open now."
+        refusal = tool_policy.refuse("open_application", {"app_name": "Signals and Systems syllabus"},
+                                     verified_path=lambda p: False)
+        self.assertIn("find_files", refusal or "")
+        self.assertIsNone(tool_policy.refuse("open_application", {"app_name": "Spotify"}, verified_path=lambda p: False))
+
+    def test_keep_your_answers_short_is_a_preference(self):
+        with patch.object(reply_preferences, "FILE", os.path.join(tempfile.mkdtemp(), "p.json")):
+            out, _ = run_turn("keep your answers short", [])
+            self.assertEqual(out, "Alright, noted.")
+            self.assertIn("keep your answers short", reply_preferences.prompt_block().lower())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

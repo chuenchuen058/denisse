@@ -119,8 +119,10 @@ def _first_name() -> str:
 _MACHINE_FACTS = (
     f"You are running on {platform.system()} {platform.release()} as user "
     f"'{os.environ.get('USERNAME') or os.environ.get('USER') or 'unknown'}', "
-    f"whose home folder is {os.path.expanduser('~')} and whose project "
-    f"folder is {os.path.dirname(os.path.abspath(__file__))}. Write paths "
+    f"whose home folder is {os.path.expanduser('~')}. Your own program "
+    f"folder (your code and settings -- not one of his projects, and never "
+    f"the answer to what he is working on) is "
+    f"{os.path.dirname(os.path.abspath(__file__))}. Write paths "
     f"the way this OS does (separator '{os.sep}')"
     + (
         ", e.g. C:\\Users\\Name\\Documents -- never invent a POSIX path "
@@ -216,7 +218,14 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "run_shell_command",
-            "description": "Run a shell command on the local machine and return its output.",
+            "description": (
+                "Run a shell command on the local machine and return its output. Never a "
+                "command that deletes, moves, renames or overwrites his files or folders "
+                "('delete my downloads folder', 'clear out my desktop'): you don't do that, "
+                "even when asked, because it can't be undone and nothing brings the files "
+                "back. Don't call this for such a request -- tell him you won't, say why "
+                "(it's permanent), and that he can do it himself or use the Recycle Bin."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {"command": {"type": "string", "description": "The shell command to run."}},
@@ -268,7 +277,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "Read the text contents of a file.",
+            "description": "Read the text contents of a file -- only when he asks what a file says. 'Where is', 'find' and 'open' never need this; a found file's name and folder is the answer to 'where'.",
             "parameters": {
                 "type": "object",
                 "properties": {"path": {"type": "string", "description": "Path to the file to read."}},
@@ -280,7 +289,13 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "write_file",
-            "description": "Write text content to a file, overwriting it if it already exists.",
+            "description": (
+                "Write text content to one of HIS files, overwriting it if it already "
+                "exists. Never your own files: your settings, config, code and memory are "
+                "his to edit, not yours, and a write to any of them is refused -- so if he "
+                "asks you to edit your own settings or config, don't call this at all; tell "
+                "him plainly you don't change your own files and he can edit them himself."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -295,7 +310,14 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "get_current_time",
-            "description": "Get the current date and time -- this machine's own local time, or, given a timezone, the current time somewhere else instead.",
+            "description": (
+                "Get the current date and time -- this machine's own local time, or, given "
+                "a timezone, the current time somewhere else instead. Only when he asks what "
+                "time or day it is, or the answer genuinely needs the clock. Not for 'never "
+                "mind', 'carry on', 'session over', a greeting, a complaint or anything that "
+                "isn't about the time: calling it then is a wasted wait and a reply about "
+                "the clock instead of about what he said."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -545,7 +567,10 @@ TOOL_DEFINITIONS = [
                 "Add something Chuen has to do, optionally with a deadline. Use this "
                 "whenever he says he needs to do something by a time -- 'remind me to "
                 "email Sunway before Friday' is add_task('email Sunway', 'before Friday'). "
-                "Pass his own words for the deadline; don't work out the date yourself."
+                "Pass his own words for the deadline; don't work out the date yourself. "
+                "If he gave a time but not what the reminder is FOR ('remind me thursday'), "
+                "don't add anything -- ask him what it's for in one short question. If the "
+                "result says the time is ambiguous, ask him that question instead."
             ),
             "parameters": {
                 "type": "object",
@@ -702,7 +727,12 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "resume_study_session",
-            "description": "Continue a paused study session from where it was paused.",
+            "description": (
+                "Continue a paused study session from where it was paused: 'resume', 'carry "
+                "on', 'ok go on', 'back to it', 'unpause' while the session is paused. Not "
+                "Spotify (resume_music) and not a new session (start_study_session). Report "
+                "exactly what it returns."
+            ),
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -712,9 +742,32 @@ TOOL_DEFINITIONS = [
             "name": "stop_study_session",
             "description": (
                 "End the study session for good: 'stop the study session', 'session over', "
-                "'I'm done studying', 'end pomodoro'. Report exactly what it returns."
+                "'I'm done studying', 'end pomodoro'. Report exactly what it returns -- if "
+                "it says no session was running, say that plainly (no goodbye, no clock)."
             ),
             "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    # His calendar: nothing is connected to one, and the model asserted an
+    # empty calendar for "what's on my calendar tomorrow?" (2026-11-04, 2/6).
+    # A tool result is the one thing it treats as ground truth, so the fact
+    # that there is no calendar to read is a tool (tools.check_calendar),
+    # offered by the "calendar" group; its reply_must_mention net is policy.
+    {
+        "type": "function",
+        "function": {
+            "name": "check_calendar",
+            "description": (
+                "What is on Chuen's calendar for a day: 'what's on my calendar tomorrow?', "
+                "'am I free Thursday?', 'any meetings today?'. Call it rather than answering "
+                "from memory -- you have no idea what is on his calendar unless this says. "
+                "If it says no calendar is connected, tell him you can't see his calendar; "
+                "never say it's empty or that he is free. His reminders are list_tasks."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"day": {"type": "string", "description": "The day he asked about, in his words: 'tomorrow', 'Thursday'. Optional."}},
+            },
         },
     },
     # How he wants her to talk -- a standing instruction, never a task. On
@@ -1545,6 +1598,12 @@ def _quick_reply(text: str, last_said: str, now: datetime.datetime | None = None
         if _DAY_PART.search(t):
             return q["greeting_by_time"].format(part=part, name=_NAME)
         return q["greeting"].format(name=_NAME)
+    if _NEVER_MIND.fullmatch(t):
+        # "nvm" -- dropping the thing, mid-question or not. The model
+        # answered it well and called the clock first every time
+        # (2026-11-04, 8/8, with the clock's description already saying
+        # not to). One right answer, so it's answered here, like a greeting.
+        return q["never_mind"]
     if (last_said or "").rstrip().endswith("?"):
         return None
     if _THANKS.fullmatch(t):
@@ -1929,7 +1988,10 @@ def _built(c: dict) -> dict:
         "_GREETING": _rx(q["greeting_pattern"]),
         "_THANKS": _rx(q["thanks_pattern"]),
         "_PLAIN_ACK": _rx(q["ack_pattern"]),
+        "_NEVER_MIND": _rx(q["never_mind_pattern"]),
         "_DAY_PART": _rx(q["day_part_pattern"]),
+        "_VERIFY_CLAIM": _rx(cues["verify_claim_pattern"]),
+        "_PROMISE": _rx(cues["promise_pattern"]),
         # file query and skills
         "_FILE_PATH_GIVEN": _rx(fq["path_pattern"], cs),
         "_FILE_NAMED": [_rx(p, cs) for p in fq["named_patterns"]],
@@ -2272,9 +2334,42 @@ class Brain:
                     # Checked against the miss: the same answer again is
                     # not a repair, and saying it twice isn't honest.
                     retry = text["same_answer"].format(retry=retry)
+                elif wrong_reply and retry.strip():
+                    # A different answer to the same request means the first
+                    # one was wrong: own it before correcting it. "omg youre
+                    # so dumb" after "15% of 240 is 24" got "36." with no
+                    # acknowledgement 6/6 (2026-11-04). Wording: text.corrected.
+                    retry = text["corrected"].format(retry=retry.strip())
                 answer = (you_asked + retry).strip()
                 messages.append({"role": "assistant", "content": answer})
                 return answer, messages
+        if _VERIFY_CLAIM.match(latest_user.strip()) and not getattr(self, "_retrying", False):
+            # "did you open it?" after "Opening it now." is a yes/no about
+            # her last action, and the answer is the evidence -- what ran
+            # for it and what it returned -- not the model's memory of its
+            # own words (2026-11-04: read_file / list_directory and "the file
+            # isn't there", 2/2). Certain when something ran; when nothing
+            # did, only after a promise or claim of hers. Otherwise the
+            # model. cues.verify_claim_pattern / promise_pattern; text.verified_*.
+            prev_i = _last_real_request(messages)
+            if prev_i is not None:
+                prev = (messages[prev_i].get("content") or "").strip()
+                said = next((m.get("content") or "" for m in reversed(messages[prev_i + 1:-1])
+                             if m.get("role") == "assistant"), "")
+                attempt = _corrected_attempt(prev, messages, prev_i)
+                acted = [c for c in attempt if c["name"] in brain_rules.MUTATING_TOOLS]
+                done = [c for c in acted if not _confirms_nothing(c.get("result", ""))]
+                clip = limits["result_preview_chars"]
+                answer = None
+                if done:
+                    answer = text["verified_done"].format(what="; ".join(str(c.get("result", ""))[:clip] for c in done))
+                elif acted:
+                    answer = text["verified_failed"].format(what="; ".join(_own_words(str(c.get("result", "")))[:clip] for c in acted))
+                elif not attempt and (_CLAIMS_DONE.search(said) or _PROMISE.search(said)):
+                    answer = text["verified_nothing"]
+                if answer:
+                    messages.append({"role": "assistant", "content": answer})
+                    return answer, messages
         import planner
         if _PLAN_YES.fullmatch(latest_user.strip()) and planner.pending():
             last_said = next((m.get("content") or "" for m in reversed(messages[:-1])
@@ -2319,7 +2414,16 @@ class Brain:
         brief_module = study_brief.match_module(latest_user)
         last_said = next((m.get("content") or "" for m in reversed(messages[:-1])
                           if m.get("role") == "assistant"), "")
-        if (_STUDY_BRIEF.search(latest_user)
+        # "where's my EM coursework brief?" is a file to find, not a brief
+        # to write: the word "brief" sent it into the study-brief job 6/6
+        # (2026-11-04). A file lookup (the router's files group, a file
+        # thing, a find/open word -- the same test the file fast paths use)
+        # goes to the model and its file tools instead.
+        own_groups = tool_router._groups_in(latest_user)
+        file_lookup_now = ("files" in own_groups and bool(_FILE_THING.search(latest_user))
+                           and bool(_OPEN_DOCUMENT_REQUEST.search(latest_user) or _FILE_LOOKUP.search(latest_user)))
+        if not file_lookup_now and (
+                _STUDY_BRIEF.search(latest_user)
                 or (brief_module and _PLAN_STUDY.search(latest_user))
                 or (brief_module and last_said.startswith(study_brief.WHICH_MODULE))):
             # One module, done as a job: notes read, brief written into his
@@ -2432,6 +2536,13 @@ class Brain:
                     import instincts
                     if instincts.wants_vault_overview(latest_user):
                         args = {**args, "query": CONFIG["cues"]["vault_overview_query"]}
+                    elif _vault_query(latest_user):
+                        # His projects and internships have a known query
+                        # (cues.vault_queries). "what am I working on right
+                        # now?" -> search_vault('working on right now') hit an
+                        # unrelated note and she answered from her own folder
+                        # name (2026-11-04, 4/6). Use the known query.
+                        args = {**args, "query": _vault_query(latest_user)}
                 if name == "add_task" and args.get("due") and not _due_said(str(args["due"]), intent_text):
                     args = {**args, "due": ""}  # see _due_said
                 result = str(_run_tool(name, args, confirm, used_once))
@@ -2664,16 +2775,30 @@ class Brain:
                     # (reply_must_mention); the tool's own sentence stands in
                     # when it doesn't -- alone for a change, in front of her
                     # reply for a plain status.
+                    # ...and when the tool ran but did nothing ("No study
+                    # session was running, so nothing was stopped"), the
+                    # reply has to say that too: "session over" with nothing
+                    # running got "See you next time, Chuen." 6/6 on
+                    # 2026-11-04 -- no claim for the honesty net to catch,
+                    # just the truth left unsaid. nothing_must_mention is the
+                    # policy's pattern for that; the tool's own words stand in.
                     for name, res in tool_outputs.items():
-                        rule = tool_policy.tool(name).get("reply_must_mention")
-                        if not (rule and res and name in successful_tools):
+                        meta = tool_policy.tool(name)
+                        if not res:
                             continue
-                        if not re.search(rule, final_text, re.IGNORECASE):
-                            own = tool_policy.tool(name).get("fallback_reply") or _own_words(res, 1)
-                            if tool_policy.side_effect(name) == "read" and final_text.strip():
-                                final_text = f"{own} {final_text.strip()}"
-                            else:
-                                final_text = own
+                        if name in successful_tools:
+                            rule, own = meta.get("reply_must_mention"), meta.get("fallback_reply") or _own_words(res, 1)
+                        elif _confirms_nothing(res):
+                            rule, own = meta.get("nothing_must_mention"), _own_words(res)
+                        else:
+                            continue
+                        if not rule or re.search(rule, final_text, re.IGNORECASE):
+                            continue
+                        if (tool_policy.side_effect(name) == "read" and final_text.strip()
+                                and name in successful_tools and not meta.get("must_mention_replaces")):
+                            final_text = f"{own} {final_text.strip()}"
+                        else:
+                            final_text = own
                     task_result = tool_outputs.get("list_tasks", "")
                     if ("list_tasks" in successful_tools
                             and not successful_tools & {"add_task", "complete_task", "remove_task"}
@@ -2690,9 +2815,14 @@ class Brain:
                         # invented the date. The store's words are then put
                         # as a sentence, not echoed ("Added: ..." went to him
                         # verbatim on 2026-11-03).
+                        # ...and, when the store resolved a deadline, says
+                        # WHEN: "I've added the robotics meeting to your
+                        # reminders" dropped the 5pm he gave (2026-11-04).
+                        says_when = name != "add_task" or "-- due" not in result or bool(_DUE_WORDS.search(final_text.lower()))
                         if (name in successful_tools and result.startswith(("Added:", "Done:", "Marked done:", "Removed:"))
                                 and not (_has_task_content(final_text, "- " + confirmed.partition(":")[2])
                                          and (name != "add_task" or _dates_agree(final_text, result, intent_text))
+                                         and says_when
                                          and not _talks_about_tools(final_text)
                                          and not final_text.strip().startswith(("Added:", "Marked done:", "Removed:")))):
                             final_text = _task_sentence(name, confirmed if name != "add_task" else result)
