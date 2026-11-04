@@ -40,22 +40,25 @@ from floating_orb import (
     BREATH_FRAMES, RING_DEG_PER_TICK, TICK_MS, _breath_curve, _flatten,
 )
 import reminders_config as _cfg
+import ui_theme
 
-# Colours, sizes, timings and every word on the card are in reminders.json
-# under "card" (Rule 0), read once at import; the names below are kept so
+# Card values live in reminders.json; shared orb colours and glow alpha
+# come from ui_theme.json (Rule 0), read once at import. Names are kept so
 # study_mode, timer_ui and tray can go on importing them.
 _C = _cfg.get("card")
 _COL, _LAY, _TIM, _TXT, _FONT = _C["colours"], _C["layout"], _C["timing"], _C["text"], _C["fonts"]
+_WEIGHT, _INPUT = _C["font_weights"], _C["interaction"]
+_ORB_GLOW = ui_theme.get("orb.glow")
 
 ORB_RING_DEG_PER_S = RING_DEG_PER_TICK * 1000 / TICK_MS  # 60 deg/s, a turn per 6s
 SWEEP_SPEED = _TIM["sweep_speed"]  # the bubble's arcs at 40% of the orb ring's speed -- "60% slower"
 
-ORB_VIOLET = (124, 58, 237)  # the orb ring's second, shorter arc (floating_orb._make_ring_frame)
+ORB_VIOLET = ui_theme.rgb(ui_theme.colour("ring_violet"))
 
 # Same colorkey trick as floating_orb.py: pixels exactly this color are
 # invisible AND click-through, which is what lets the bubble be a rounded
 # shape with a tail instead of a rectangle.
-TRANSPARENT_KEY = "#010203"
+TRANSPARENT_KEY = ui_theme.colour("transparent_key")
 
 
 def _hex(rgb):
@@ -67,8 +70,8 @@ def _hex(rgb):
 # breathing glow halo in the orb's glow colour, and the orb's two-tone ring
 # (a long lavender arc and a short violet one) sweeping round the edge over
 # a deep-violet base line. Breath and sweep are read from the orb's own
-# frame counters, so the two pulse and turn together. Every colour comes
-# from floating_orb.py so they can't drift apart. A single flat #a855f7
+# frame counters, so the two pulse and turn together. Orb colours share
+# ui_theme.json, directly or via floating_orb.py. A single flat #a855f7
 # outline was tried first and didn't read as the orb's tone -- that colour
 # only ever appears on the orb as a blurred halo, never flat.
 FILL = _COL["fill"]  # black -- but not TRANSPARENT_KEY, or it would vanish
@@ -148,11 +151,11 @@ class _BubbleArt:
     def __init__(self, w, h, side, tail_y, s, g):
         k = SUPERSAMPLE
         r, tl, tb = round(RADIUS * s) * k, round(TAIL_LEN * s) * k, round(TAIL_BASE * s) * k
-        st = max(1.0, STROKE * s) * k
+        st = max(_LAY["stroke_min_px"], STROKE * s) * k
         bw, H = w * k, h * k
         W = bw + tl
         ty = tail_y * k
-        base = bw - 1 - st * 3
+        base = bw - 1 - st * _LAY["tail_overlap_strokes"]
 
         def shape(inset):
             m = Image.new("L", (W, H), 0)
@@ -162,9 +165,9 @@ class _BubbleArt:
                 d.polygon([(base, ty - tb / 2), (base, ty + tb / 2), (W - 1, ty)], fill=255)
             else:  # pulled in so the border keeps its thickness to the point
                 d.polygon([
-                    (base - inset, ty - tb / 2 + inset * 1.3),
-                    (base - inset, ty + tb / 2 - inset * 1.3),
-                    (W - 1 - inset * 2.4, ty),
+                    (base - inset, ty - tb / 2 + inset * _LAY["tail_inset_y"]),
+                    (base - inset, ty + tb / 2 - inset * _LAY["tail_inset_y"]),
+                    (W - 1 - inset * _LAY["tail_inset_tip"], ty),
                 ], fill=255)
             m = m.resize((W // k, h), Image.LANCZOS)
             return ImageOps.mirror(m) if side == "left" else m
@@ -176,7 +179,7 @@ class _BubbleArt:
         inner_full = Image.new("L", self.size, 0)
         inner_full.paste(inner, (g, g))
         self.ring = ImageChops.subtract(self.fill, inner_full)
-        self.glow = self.fill.filter(ImageFilter.GaussianBlur(g * 0.55))
+        self.glow = self.fill.filter(ImageFilter.GaussianBlur(g * _LAY["glow_blur_frac"]))
 
         # Angle of each border pixel around the body's centre, 0-255 for
         # 0-360 degrees, measured the way PIL draws the orb's ring arcs
@@ -204,14 +207,14 @@ class _BubbleArt:
         for v in range(256):
             rel = (v / 255 * 360 - start) % 360
             edge = min(rel, span - rel)
-            lut.append(0 if rel >= span else min(255, round(255 * edge / 6)))
+            lut.append(0 if rel >= span else min(255, round(255 * edge / _LAY["arc_feather_deg"])))
         return lut
 
     def _base(self, breath):
         """Everything but the moving arcs, for one breath level: the halo
         at the orb's own breathing alpha, the black body, the violet line."""
         img = Image.new("RGBA", self.size, (0, 0, 0, 0))
-        strength = (150 + 79.2 * breath) / 255 * 0.8
+        strength = (_ORB_GLOW["alpha_rest"] + _ORB_GLOW["alpha_swing"] * breath) / 255 * _LAY["glow_strength"]
         img.paste((*ORB_GLOW, 255), mask=self.glow.point(lambda v: round(v * strength)))
         img.paste(_rgb(FILL) + (255,), mask=self.fill)
         img.paste((*ORB_DEEP, 255), mask=self.ring)
@@ -227,7 +230,7 @@ class _BubbleArt:
             self._bases[lvl] = self._base(lvl / (BREATH_LEVELS - 1))
         img = self._bases[lvl].copy()
         long_arc = ImageChops.multiply(self.ring, self.ang.point(self._arc_lut(angle, LONG_ARC)))
-        short_arc = ImageChops.multiply(self.ring, self.ang.point(self._arc_lut(angle + 180, SHORT_ARC)))
+        short_arc = ImageChops.multiply(self.ring, self.ang.point(self._arc_lut(angle + _LAY["short_arc_offset_deg"], SHORT_ARC)))
         img.paste((*ORB_LAVENDER, 255), mask=long_arc)
         img.paste((*ORB_VIOLET, 255), mask=short_arc)
         # No part-alpha pixels: Tk would blend them onto the near-black
@@ -404,12 +407,12 @@ class ReminderCard:
     def _px(self, n):
         return round(n * self.s)
 
-    def _f(self, size, weight="normal"):
-        return (self.font, size, weight)
+    def _f(self, size, weight=None):
+        return (self.font, size, _WEIGHT["normal"] if weight is None else weight)
 
-    def _link(self, parent, text, cmd, fg=MUTED, hover=ACCENT, size=None, weight="normal"):
+    def _link(self, parent, text, cmd, fg=MUTED, hover=ACCENT, size=None, weight=None):
         size = _FONT["link"] if size is None else size
-        lbl = tk.Label(parent, text=text, bg=FILL, fg=fg, font=self._f(size, weight), cursor="hand2", bd=0)
+        lbl = tk.Label(parent, text=text, bg=FILL, fg=fg, font=self._f(size, weight), cursor=_INPUT["link_cursor"], bd=0)
         lbl.bind("<Button-1>", lambda e: cmd())
         lbl.bind("<Enter>", lambda e: lbl.config(fg=hover))
         lbl.bind("<Leave>", lambda e: lbl.config(fg=fg))
@@ -418,7 +421,7 @@ class ReminderCard:
     def _entry(self, parent, value):
         e = tk.Entry(
             parent, bg=ENTRY_BG, fg=TEXT, insertbackground=TEXT, relief="flat",
-            font=self._f(_FONT["body"]), highlightthickness=1, highlightbackground=DIVIDER,
+            font=self._f(_FONT["body"]), highlightthickness=_LAY["entry_border_px"], highlightbackground=DIVIDER,
             highlightcolor=ACCENT,
         )
         e.insert(0, value)
@@ -432,7 +435,7 @@ class ReminderCard:
         self.body = tk.Frame(self.canvas, bg=FILL)
         self._img_key = None  # new body -> the canvas needs rebuilding
         if self.typing:
-            self._typing_label = tk.Label(self.body, text=_TXT["typing_dot"], bg=FILL, fg=MUTED, font=self._f(_FONT["typing"], "bold"), anchor="w")
+            self._typing_label = tk.Label(self.body, text=_TXT["typing_dot"], bg=FILL, fg=MUTED, font=self._f(_FONT["typing"], _WEIGHT["emphasis"]), anchor="w")
             self._typing_label.pack(fill="x")
             self._layout(TYPING_W, self._px(TYPING_W - PAD * 2))
             self._tick_dots()
@@ -445,16 +448,16 @@ class ReminderCard:
 
         head = tk.Frame(self.body, bg=FILL)
         head.pack(fill="x")
-        tk.Label(head, text=_cfg.say("card.text.header", greeting=_greeting()), bg=FILL, fg=TEXT, font=self._f(_FONT["title"], "bold")).pack(side="left")
+        tk.Label(head, text=_cfg.say("card.text.header", greeting=_greeting()), bg=FILL, fg=TEXT, font=self._f(_FONT["title"], _WEIGHT["emphasis"])).pack(side="left")
         # Faded word rather than a close cross -- it shouldn't compete with
         # the per-row ✕, which deletes a reminder rather than hiding the card.
-        self._link(head, _TXT["dismiss"], self.close, fg=FAINT, hover=MUTED, size=_FONT["body"]).pack(side="right", pady=(self._px(3), 0))
+        self._link(head, _TXT["dismiss"], self.close, fg=FAINT, hover=MUTED, size=_FONT["body"]).pack(side="right", pady=(self._px(_LAY["dismiss_top_px"]), 0))
         n = len(open_tasks)
         groups = {p: [t for t in open_tasks if _prio(t) == p] for p in PRIORITY_ORDER}
-        tk.Label(self.body, text=_summary(open_tasks), bg=FILL, fg=MUTED, font=self._f(_FONT["body"]), anchor="w", wraplength=inner_w, justify="left").pack(fill="x", pady=(0, self._px(2)))
+        tk.Label(self.body, text=_summary(open_tasks), bg=FILL, fg=MUTED, font=self._f(_FONT["body"]), anchor="w", wraplength=inner_w, justify="left").pack(fill="x", pady=(0, self._px(_LAY["summary_bottom_px"])))
 
         # Rows go in a scrolling viewport; header and Add link stay put.
-        row_w = inner_w - self._px(BAR_W + 4)
+        row_w = inner_w - self._px(BAR_W + _LAY["bar_gap_px"])
         wrap = tk.Frame(self.body, bg=FILL)
         wrap.pack(fill="x")
         lc = tk.Canvas(wrap, bg=FILL, highlightthickness=0, bd=0, width=row_w, yscrollincrement=self._px(_LAY["scroll_step_px"]))
@@ -472,15 +475,15 @@ class ReminderCard:
                 if groups[p]:
                     tk.Label(
                         legend, text=_cfg.fill(_TXT["legend"], label=PRIORITY_LABEL[p]), bg=FILL, fg=PRIORITY_COLOR[p],
-                        font=self._f(_FONT["small"], "bold"),
-                    ).pack(side="left", padx=(0, self._px(12)))
-            legend.pack(fill="x", pady=(0, self._px(4)), before=wrap)
+                        font=self._f(_FONT["small"], _WEIGHT["emphasis"]),
+                    ).pack(side="left", padx=(0, self._px(_LAY["legend_gap_px"])))
+            legend.pack(fill="x", pady=(0, self._px(_LAY["legend_bottom_px"])), before=wrap)
 
         # list_tasks() is already soonest-first (undated last).
         shown = 0
         for t in open_tasks[:MAX_ROWS]:
             if shown:
-                tk.Frame(lf, bg=DIVIDER, height=1).pack(fill="x", pady=self._px(3))
+                tk.Frame(lf, bg=DIVIDER, height=_LAY["divider_height_px"]).pack(fill="x", pady=self._px(_LAY["divider_pad_px"]))
             if self.editing == t["id"]:
                 self._edit_row(t, row_w)
             else:
@@ -490,20 +493,20 @@ class ReminderCard:
         if n > shown:
             tk.Label(self.body, text=_cfg.fill(_TXT["more"], count=n - shown), bg=FILL, fg=MUTED, font=self._f(_FONT["small"])).pack(anchor="w")
 
-        tk.Frame(self.body, bg=DIVIDER, height=1).pack(fill="x", pady=self._px(3))
+        tk.Frame(self.body, bg=DIVIDER, height=_LAY["divider_height_px"]).pack(fill="x", pady=self._px(_LAY["divider_pad_px"]))
         if self.editing == "new":
             self._edit_row(None, inner_w)
         else:
             self._link(self.body, _TXT["add"], self._start_new, fg=ACCENT, hover=TEXT, size=_FONT["body"]).pack(anchor="w")
 
         if self.note:
-            tk.Label(self.body, text=self.note, bg=FILL, fg=WARN, font=self._f(_FONT["small"]), wraplength=inner_w, justify="left").pack(anchor="w", pady=(self._px(4), 0))
+            tk.Label(self.body, text=self.note, bg=FILL, fg=WARN, font=self._f(_FONT["small"]), wraplength=inner_w, justify="left").pack(anchor="w", pady=(self._px(_LAY["note_top_px"]), 0))
 
         # WhatsApp's little time stamp, bottom-right of the bubble.
         tk.Label(self.body, text=datetime.now().strftime(_TXT["stamp_format"]), bg=FILL, fg=FAINT, font=self._f(_FONT["stamp"])).pack(anchor="e")
 
         self._layout(CARD_W, inner_w)
-        self.win.after(30, self._scroll_to_edit)
+        self.win.after(_TIM["scroll_to_edit_ms"], self._scroll_to_edit)
 
     # -- scrolling list --
 
@@ -529,8 +532,9 @@ class ReminderCard:
 
     def _on_wheel(self, e):
         if self._list_full > self._list_view:
-            notches = int(e.delta / 120)
-            step = -2 * notches if notches else (-1 if e.delta > 0 else 1)  # touchpads send small deltas
+            notches = int(e.delta / 120)  # Windows WHEEL_DELTA protocol unit
+            step = (-_INPUT["wheel_units_per_notch"] * notches if notches else
+                    _INPUT["touchpad_units"] * (-1 if e.delta > 0 else 1))
             self._list_canvas.yview_scroll(step, "units")
             self._scroll_frac = self._list_canvas.yview()[0]
             self._draw_bar()
@@ -554,9 +558,9 @@ class ReminderCard:
                 return
             h, w = self._list_view, self._px(BAR_W)
             top, bot = self._list_canvas.yview()
-            bar.create_rectangle(w // 2, 0, w // 2 + 1, h, fill=DIVIDER, outline="")
+            bar.create_rectangle(w // 2, 0, w // 2 + _LAY["bar_track_px"], h, fill=DIVIDER, outline="")
             y0 = round(top * h)
-            bar.create_rectangle(0, y0, w, max(y0 + self._px(16), round(bot * h)), fill=ACCENT, outline="")
+            bar.create_rectangle(0, y0, w, max(y0 + self._px(_LAY["bar_thumb_min_px"]), round(bot * h)), fill=ACCENT, outline="")
         except (tk.TclError, AttributeError):
             pass
 
@@ -567,7 +571,7 @@ class ReminderCard:
             if self._edit_box is None or self._list_full <= self._list_view:
                 return
             y = self._edit_box.winfo_y()
-            self._list_canvas.yview_moveto(max(0, y - self._px(8)) / self._list_full)
+            self._list_canvas.yview_moveto(max(0, y - self._px(_LAY["scroll_edit_pad_px"])) / self._list_full)
             self._scroll_frac = self._list_canvas.yview()[0]
             self._draw_bar()
         except (tk.TclError, AttributeError):
@@ -577,16 +581,16 @@ class ReminderCard:
         row = tk.Frame(self._rows_parent, bg=FILL)
         row.pack(fill="x")
         color = PRIORITY_COLOR[_prio(t)]
-        tk.Frame(row, bg=color, width=self._px(3)).pack(side="left", fill="y", padx=(0, self._px(6)))
+        tk.Frame(row, bg=color, width=self._px(_LAY["priority_stripe_px"])).pack(side="left", fill="y", padx=(0, self._px(_LAY["priority_gap_px"])))
         check = self._link(row, _TXT["tick"], lambda: self._done(t), fg=color, hover=GOOD, size=_FONT["check"])
-        check.pack(side="left", anchor="n", padx=(0, self._px(6)))
+        check.pack(side="left", anchor="n", padx=(0, self._px(_LAY["check_gap_px"])))
         actions = tk.Frame(row, bg=FILL)
         actions.pack(side="right", anchor="n")
-        self._link(actions, _TXT["edit"], lambda: self._start_edit(t), size=_FONT["link"]).pack(side="left", padx=(self._px(4), 0))
-        self._link(actions, _TXT["delete"], lambda: self._delete(t), hover=BAD, size=_FONT["body"]).pack(side="left", padx=(self._px(6), 0))
+        self._link(actions, _TXT["edit"], lambda: self._start_edit(t), size=_FONT["link"]).pack(side="left", padx=(self._px(_LAY["edit_action_gap_px"]), 0))
+        self._link(actions, _TXT["delete"], lambda: self._delete(t), hover=BAD, size=_FONT["body"]).pack(side="left", padx=(self._px(_LAY["delete_action_gap_px"]), 0))
         mid = tk.Frame(row, bg=FILL)
         mid.pack(side="left", fill="x", expand=True)
-        text_w = inner_w - self._px(71)  # check, actions, and the priority stripe
+        text_w = inner_w - self._px(_LAY["row_controls_px"])  # check, actions, and the priority stripe
         tk.Label(mid, text=t["text"], bg=FILL, fg=TEXT, font=self._f(_FONT["body"]), wraplength=text_w, justify="left", anchor="w").pack(fill="x")
         due, color = _due_line(t)
         tk.Label(mid, text=due, bg=FILL, fg=color, font=self._f(_FONT["small"]), anchor="w").pack(fill="x")
@@ -601,11 +605,11 @@ class ReminderCard:
         small = self._f(_FONT["small"])
         tk.Label(box, text=_TXT["field_text"], bg=FILL, fg=MUTED, font=small).pack(anchor="w")
         text_e = self._entry(box, t["text"] if t else "")
-        text_e.pack(fill="x", ipady=self._px(2))
-        tk.Label(box, text=_TXT["field_due"], bg=FILL, fg=MUTED, font=small).pack(anchor="w", pady=(self._px(4), 0))
+        text_e.pack(fill="x", ipady=self._px(_LAY["entry_pad_y_px"]))
+        tk.Label(box, text=_TXT["field_due"], bg=FILL, fg=MUTED, font=small).pack(anchor="w", pady=(self._px(_LAY["field_top_px"]), 0))
         due_e = self._entry(box, _due_prefill(t) if t else "")
-        due_e.pack(fill="x", ipady=self._px(2))
-        tk.Label(box, text=_TXT["field_priority"], bg=FILL, fg=MUTED, font=small).pack(anchor="w", pady=(self._px(4), 0))
+        due_e.pack(fill="x", ipady=self._px(_LAY["entry_pad_y_px"]))
+        tk.Label(box, text=_TXT["field_priority"], bg=FILL, fg=MUTED, font=small).pack(anchor="w", pady=(self._px(_LAY["field_top_px"]), 0))
         chips_row = tk.Frame(box, bg=FILL)
         chips_row.pack(anchor="w")
         chips = {}
@@ -618,20 +622,20 @@ class ReminderCard:
 
         for p in PRIORITY_ORDER:
             lbl = tk.Label(
-                chips_row, text=PRIORITY_LABEL[p], bg=FILL, fg=PRIORITY_COLOR[p], font=self._f(_FONT["small"], "bold"),
-                padx=self._px(7), pady=self._px(1), cursor="hand2",
-                highlightthickness=1, highlightbackground=PRIORITY_COLOR[p],
+                chips_row, text=PRIORITY_LABEL[p], bg=FILL, fg=PRIORITY_COLOR[p], font=self._f(_FONT["small"], _WEIGHT["emphasis"]),
+                padx=self._px(_LAY["chip_pad_x_px"]), pady=self._px(_LAY["chip_pad_y_px"]), cursor=_INPUT["link_cursor"],
+                highlightthickness=_LAY["chip_border_px"], highlightbackground=PRIORITY_COLOR[p],
             )
-            lbl.pack(side="left", padx=(0, self._px(6)))
+            lbl.pack(side="left", padx=(0, self._px(_LAY["chip_gap_px"])))
             lbl.bind("<Button-1>", lambda e, p=p: pick(p))
             chips[p] = lbl
         pick(_prio(t) if t else DEFAULT_PRIORITY)
 
         btns = tk.Frame(box, bg=FILL)
-        btns.pack(anchor="e", pady=(self._px(5), 0))
+        btns.pack(anchor="e", pady=(self._px(_LAY["edit_buttons_top_px"]), 0))
         save = lambda: self._save(t, text_e.get(), due_e.get())
-        self._link(btns, _TXT["cancel"], self._cancel_edit, size=_FONT["body"]).pack(side="left", padx=(0, self._px(10)))
-        self._link(btns, _TXT["save"], save, fg=ACCENT, hover=TEXT, size=_FONT["body"], weight="bold").pack(side="left")
+        self._link(btns, _TXT["cancel"], self._cancel_edit, size=_FONT["body"]).pack(side="left", padx=(0, self._px(_LAY["cancel_gap_px"])))
+        self._link(btns, _TXT["save"], save, fg=ACCENT, hover=TEXT, size=_FONT["body"], weight=_WEIGHT["emphasis"]).pack(side="left")
         for e in (text_e, due_e):
             e.bind("<Return>", lambda ev: (save(), "break")[1])
             e.bind("<Escape>", lambda ev: (self._cancel_edit(), "break")[1])
@@ -643,14 +647,14 @@ class ReminderCard:
                 text_e.icursor("end")
             except tk.TclError:
                 pass  # re-rendered before this fired
-        self.win.after(10, _focus)
+        self.win.after(_TIM["edit_focus_ms"], _focus)
 
     def _tick_dots(self):
         if not self.typing:
             return
         try:
-            self._dots = self._dots % 3 + 1
-            self._typing_label.config(text=" ".join(_TXT["typing_dot"] * self._dots))
+            self._dots = self._dots % _LAY["typing_dot_count"] + 1
+            self._typing_label.config(text=_TXT["typing_dot_join"].join([_TXT["typing_dot"]] * self._dots))
             self.win.after(_TIM["typing_dot_ms"], self._tick_dots)
         except tk.TclError:
             pass
@@ -757,7 +761,7 @@ class ReminderCard:
         def step(i):
             try:
                 t = i / ANIM_STEPS
-                ease = 1 - (1 - t) ** 3
+                ease = 1 - (1 - t) ** _TIM["slide_ease_power"]
                 self.win.geometry(f"{size}+{x + round(d * (1 - ease))}+{y}")
                 self.win.attributes("-alpha", max(0.0, min(1.0, ease)))
                 if i < ANIM_STEPS:
@@ -881,7 +885,8 @@ class ThinkingBubble(ReminderCard):
         self.full_message = text
         text = " ".join((text or "").split())
         if len(text) > self.REPLY_MAX_CHARS:
-            text = text[: self.REPLY_MAX_CHARS - 1].rstrip() + _TXT["ellipsis"]
+            suffix = _TXT["ellipsis"][:self.REPLY_MAX_CHARS]
+            text = text[: self.REPLY_MAX_CHARS - len(suffix)].rstrip() + suffix
         self.message = text
         try:
             self.render()
@@ -914,13 +919,13 @@ class ThinkingBubble(ReminderCard):
         )
         msg.pack(fill="x")
         actions = tk.Frame(self.body, bg=FILL)
-        actions.pack(fill="x", pady=(self._px(10), 0))
+        actions.pack(fill="x", pady=(self._px(_LAY["reply_actions_top_px"]), 0))
         if self.on_reply is not None:
             self._link(actions, _TXT["continue_chat"], self.on_reply,
                        fg=ACCENT, hover=TEXT, size=_FONT["body"]).pack(side="left")
         if self.on_stop is not None:
             self._link(actions, _TXT["stop_voice"], self.on_stop,
-                       size=_FONT["small"]).pack(side="left", padx=(self._px(12), 0))
+                       size=_FONT["small"]).pack(side="left", padx=(self._px(_LAY["reply_stop_gap_px"]), 0))
         self._link(actions, _TXT["dismiss"], self.close, fg=FAINT, hover=MUTED,
                    size=_FONT["small"]).pack(side="right")
         self._layout(self.REPLY_W, inner_w)
