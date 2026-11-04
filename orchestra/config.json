@@ -87,8 +87,7 @@
   "auth_fix_hint": "sign-in expired: open a terminal, run the lane's CLI (e.g. `claude`) and sign in (`/login`)",
   "_auth_patterns": "A run that dies because the lane's CLI isn't signed in (3 Nov 2026, 18:06: Claude's OAuth sign-in expired and 9 tasks were parked as NO_REPORT in an hour) is treated like a usage limit: the attempt isn't counted and the lane waits auth_retry_min before the next try. Patterns are case-insensitive regexes against the tail of the lane log. A reviewer that can't sign in parks the PASS for a --merge-only re-run instead of blocking it.",
 
-  "daily_spend_cap_usd": 150.0,
-  "_daily_spend_cap_usd_chuen": "Raised from 5 to 150 on 4 Nov 2026 19:40 because Chuen asked to run all queued tasks (today's notional spend was already $100). Put it back to 5.0 when that queue is done.",
+  "daily_spend_cap_usd": 5.0,
   "_daily_spend_cap_usd_note": "The normal cap. The sprint's $400 (2 Nov 2026: spare Claude allowance before it resets; claude -p's total_cost_usd is notional on his plan) was a campaign override; the sprint ended Wed 4 Nov 18:00 London, so $5 applies again.",
   "_daily_spend_cap_usd": "Summed from claude -p total_cost_usd. Runs killed before reporting are charged an estimate from minutes x today's cost per minute. Thomas's ledger saw under half of a 20-hour spend.",
   "unknown_cost_per_min_usd": 0.10,
