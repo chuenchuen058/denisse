@@ -45,6 +45,7 @@ import logging
 import math
 import os
 import re
+import string
 import sys
 import tempfile
 import threading
@@ -94,8 +95,18 @@ def _groups(pattern, sym):
         return None, f"is not a valid regex ({type(e).__name__})"
 
 
+DEMO_KEYS = ("search", "symbol", "name", "type", "region", "currency", "timezone")
+DEMO_NUMBERS = ("price", "previous_close", "change_percent")
+
+
 def _check(key, value, default):
     """(value, None) if `value` has the shape of `default`, else (None, why)."""
+    if key == "demo_instruments":
+        ok = isinstance(value, list) and all(
+            isinstance(d, dict) and all(isinstance(d.get(k), str) and d[k].strip() for k in DEMO_KEYS)
+            and all(_is_number(d.get(k)) for k in DEMO_NUMBERS) for d in value)
+        return (value, None) if ok else (None, "must be a list of instruments, each with "
+                                         + ", ".join(DEMO_KEYS + DEMO_NUMBERS))
     if key == "move_sizes":
         ok = (isinstance(value, list) and all(
             isinstance(b, dict) and _is_number(b.get("below")) and b["below"] > 0 and isinstance(b.get("word"), str)
@@ -167,6 +178,46 @@ def _check_patterns(chat):
     chat["patterns"] = pats
 
 
+def _fields(template):
+    """The {field} names a reply template uses, or None if it isn't a valid template."""
+    try:
+        return {f.split(".")[0].split("[")[0] for _, f, _, _ in string.Formatter().parse(template) if f}
+    except ValueError:
+        return None
+
+
+def _check_replies(replies, defaults, where="replies"):
+    """A reply template may drop a field its default has, never add one:
+    the code only passes the default's fields."""
+    for key, default in defaults.items():
+        name = f"{where}.{key}"
+        if isinstance(default, dict):
+            _check_replies(replies[key], default, name)
+            continue
+        got = _fields(replies[key])
+        if got is None or not got <= _fields(default):
+            log.warning("invest config: %s %s; using the default", name,
+                        "is not a valid template" if got is None
+                        else "uses " + ", ".join(sorted(got - _fields(default))) + " which it isn't given")
+            replies[key] = default
+
+
+def _fill(_where, _template, _default, **fields):
+    """`_template` filled in; one that still fails (a bad format spec) falls back to `_default`."""
+    try:
+        return _template.format(**fields)
+    except (KeyError, IndexError, ValueError, TypeError, AttributeError) as e:
+        log.warning("invest config: %s can't be filled in (%s); using the default", _where, type(e).__name__)
+        return _default.format(**fields)
+
+
+def _say(_key, **fields):
+    """The reply invest.json has for `_key` ("section.name" under replies), filled in."""
+    section, item = _key.split(".")
+    return _fill("replies." + _key, CONFIG["replies"][section][item],
+                 DEFAULTS.get("replies", CONFIG["replies"])[section][item], **fields)
+
+
 def load_config(path=None):
     """invest.json (or `path`) checked and merged over DEFAULTS. Never raises."""
     path = path or config_path()
@@ -180,6 +231,7 @@ def load_config(path=None):
         return data
     cfg = _merge(DEFAULTS, data, "")
     _check_patterns(cfg["chat"])
+    _check_replies(cfg["replies"], DEFAULTS["replies"])
     return cfg
 
 
@@ -187,6 +239,7 @@ def configure(path=None):
     """Load invest.json (or `path`) and set the module's values from it.
     Called once at import; tests call it again with another file."""
     global CONFIG, DATA_DIR, FIXTURE_DIR, STALE_DAYS, COOLDOWN_HOURS, LATEST_UTC_OFFSET, PENDING_MINUTES, _CHAT
+    global FIXTURE_LABEL
     CONFIG = load_config(path)
     # Relative to the repo; an absolute path is used as it is.
     DATA_DIR = os.path.join(BASE_DIR, os.path.normpath(CONFIG["paths"]["data_dir"]))
@@ -199,10 +252,12 @@ def configure(path=None):
     sym = CONFIG["chat"]["symbol"]
     _CHAT = [(kind, re.compile(p.replace(SYM_SLOT, sym), re.I)) for kind, p in CONFIG["chat"]["patterns"].items()]
     AlphaVantage.configure(CONFIG["provider"])
+    FIXTURE_LABEL = CONFIG["fixtures"]["label"]
+    fx = CONFIG["fixtures"]
+    FixtureProvider.name = _fill("fixtures.provider_name", fx["provider_name"],
+                                 DEFAULTS.get("fixtures", fx)["provider_name"], label=FIXTURE_LABEL)
+    FixtureProvider.source_url = CONFIG["fixtures"]["source_url"]
     return CONFIG
-
-
-FIXTURE_LABEL = "SYNTHETIC FIXTURE -- not market data"
 
 
 class StoreError(Exception):
@@ -221,7 +276,7 @@ def _load(name, default):
     except FileNotFoundError:
         return default
     except (OSError, ValueError) as e:
-        raise StoreError(f"{name} is unreadable ({type(e).__name__}); I haven't changed it")
+        raise StoreError(_say("store.unreadable", name=name, error=type(e).__name__))
 
 
 def _when(value):
@@ -241,33 +296,33 @@ def _watchlist_shape(data):
     """Why the watchlist can't be used as it is, or None. Valid JSON in the
     wrong shape ({"instruments": null}) used to escape as a TypeError."""
     if not isinstance(data, dict) or not isinstance(data.get("instruments"), list):
-        return "it has no list of instruments"
+        return _say("store.no_instruments")
     for n, i in enumerate(data["instruments"], 1):
         if not isinstance(i, dict):
-            return f"entry {n} isn't an instrument"
+            return _say("store.not_instrument", n=n)
         for k in ("symbol", "currency"):
             if not isinstance(i.get(k), str) or not i[k].strip():
-                return f"entry {n} has no {k}"
+                return _say("store.missing_field", n=n, field=k)
         if not isinstance(i.get("name"), str):  # may be empty: the provider doesn't always give one
-            return f"entry {n} has no name"
+            return _say("store.no_name", n=n)
         if i.get("utc_offset") is not None and not _finite(i["utc_offset"]):
-            return f"{i['symbol']} has an invalid timezone offset"
+            return _say("store.bad_offset", symbol=i["symbol"])
         if not isinstance(i.get("alerts"), list):
-            return f"{i['symbol']} has no list of alerts"
+            return _say("store.no_alert_list", symbol=i["symbol"])
         for a in i["alerts"]:
             if not (isinstance(a, dict) and a.get("direction") in ("above", "below") and _finite(a.get("level"))
                     and a["level"] > 0 and isinstance(a.get("currency"), str)):
-                return f"{i['symbol']} has an invalid alert"
+                return _say("store.bad_alert", symbol=i["symbol"])
     return None
 
 
 def _alert_state_shape(data):
     if not isinstance(data, dict):
-        return "it isn't a record of sent alerts"
+        return _say("store.not_alert_state")
     if not (isinstance(data.get("delivered", []), list) and all(isinstance(d, str) for d in data.get("delivered", []))):
-        return "its list of sent alerts is invalid"
+        return _say("store.bad_delivered")
     if any(k != "delivered" and not (isinstance(v, dict) and _when(v.get("at"))) for k, v in data.items()):
-        return "a sent-alert entry has no valid time"
+        return _say("store.bad_sent_time")
     return None
 
 
@@ -277,7 +332,7 @@ def _pending_shape(data):
     if not (isinstance(data, dict) and isinstance(data.get("question"), str) and _when(data.get("at"))
             and isinstance(data.get("options"), list) and data["options"]
             and all(isinstance(o, str) for o in data["options"])):
-        return "it isn't a valid pending choice"
+        return _say("store.bad_pending")
     return None
 
 
@@ -287,8 +342,7 @@ def _load_checked(name, default, shape):
     data = _load(name, default)
     why = shape(data)
     if why:
-        raise StoreError(f"{name} isn't in the shape I expect ({why}); I haven't changed it -- "
-                         f"fix or move {_path(name)} and I'll start again")
+        raise StoreError(_say("store.bad_shape", name=name, why=why, path=_path(name)))
     return data
 
 
@@ -299,7 +353,7 @@ def _load_watchlist():
 def _save(name, data):
     if name == "watchlist.json" and _watchlist_shape(data):
         # Never write what every later read would refuse.
-        raise StoreError(f"the change would leave watchlist.json invalid ({_watchlist_shape(data)}), so I didn't save it")
+        raise StoreError(_say("store.would_be_invalid", name=name, why=_watchlist_shape(data)))
     os.makedirs(DATA_DIR, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=DATA_DIR)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -328,7 +382,7 @@ def _locked():
             except OSError:
                 time.sleep(CONFIG["store"]["lock_wait_s"])
         else:
-            raise StoreError("the watchlist is busy in another window; try again")
+            raise StoreError(_say("store.busy"))
         try:
             yield
         finally:
@@ -399,8 +453,7 @@ class AlphaVantage:
 
     def _call(self, params):
         if not self.key:
-            raise ProviderError(f"no {self.key_env} configured -- add {self.key_env}=<your key> "
-                                f"to .env ({self.key_help})")
+            raise ProviderError(_say("provider.no_key", key_env=self.key_env, key_help=self.key_help))
         get = self._get
         if get is None:
             import requests
@@ -408,12 +461,13 @@ class AlphaVantage:
         try:
             data = get(self.url, {**params, "apikey": self.key})
         except Exception as e:  # its text can carry the URL, key included
-            raise ProviderError(f"request failed: {type(e).__name__}")
+            raise ProviderError(_say("provider.request_failed", error=type(e).__name__))
         if not isinstance(data, dict):
-            raise ProviderError("unexpected response")
+            raise ProviderError(_say("provider.unexpected"))
         for k in ("Note", "Information", "Error Message"):
             if k in data:  # rate limit or bad symbol: say so, don't parse
-                raise ProviderError(f"{k}: {_clean(data[k]).replace(self.key, '<key>')}")
+                raise ProviderError(_say("provider.provider_said", field=k,
+                                         text=_clean(data[k]).replace(self.key, "<key>")))
         return data
 
     def search(self, keywords):
@@ -427,16 +481,15 @@ class AlphaVantage:
     def quote(self, symbol):
         q = self._call({"function": "GLOBAL_QUOTE", "symbol": symbol}).get("Global Quote") or {}
         if not q or q.get("01. symbol", "").upper() != symbol.upper():
-            raise ProviderError(f"no quote returned for {symbol}")
+            raise ProviderError(_say("provider.no_quote", symbol=symbol))
         return {"price": _num(q.get("05. price")), "previous_close": _num(q.get("08. previous close")),
                 "change_percent": _num(q.get("10. change percent")),
                 "market_date": q.get("07. latest trading day") or None}
 
 
 class FixtureProvider:
-    """Synthetic quotes for tests and demos. Never market data."""
-    name = "fixture provider (" + FIXTURE_LABEL + ")"
-    source_url = "fixture (no URL)"
+    """Synthetic quotes for tests and demos. Never market data.
+    name and source_url come from invest.json "fixtures", set by configure()."""
     freshness = "delayed"
     reuse_hours = 0
 
@@ -445,24 +498,24 @@ class FixtureProvider:
 
     def search(self, keywords):
         if self.fail:
-            raise ProviderError("fixture provider set to fail")
+            raise ProviderError(_say("provider.fixture_fail"))
         key = keywords.upper()
         return list(self.matches.get(key) or self.matches.get(key.split(".")[0], []))
 
     def quote(self, symbol):
         if self.fail or symbol not in self.quotes:
-            raise ProviderError("fixture provider set to fail" if self.fail else f"no quote returned for {symbol}")
+            raise ProviderError(_say("provider.fixture_fail") if self.fail else _say("provider.no_quote", symbol=symbol))
         return dict(self.quotes[symbol])
 
 
 def provider(fixtures=False):
     if fixtures:
         today = dt.date.today().isoformat()
-        return FixtureProvider(
-            quotes={"DEMO.FIX": {"price": 101.5, "previous_close": 100.0, "change_percent": 1.5,
-                                 "market_date": today}},
-            matches={"DEMO": [{"symbol": "DEMO.FIX", "name": "Demo Fixture Co (synthetic)", "type": "Equity",
-                               "region": "Fixture", "currency": "XXX", "timezone": "UTC+00"}]})
+        quotes, matches = {}, {}
+        for d in CONFIG["fixtures"]["demo_instruments"]:
+            quotes[d["symbol"]] = {**{k: d[k] for k in DEMO_NUMBERS}, "market_date": today}
+            matches.setdefault(d["search"].upper(), []).append({k: d[k] for k in DEMO_KEYS if k != "search"})
+        return FixtureProvider(quotes=quotes, matches=matches)
     return AlphaVantage()
 
 
@@ -479,38 +532,46 @@ def list_text():
     try:
         items = watchlist()
     except StoreError as e:
-        return f"I can't read your watchlist, so I haven't listed or changed anything: {e}."
-    return ("\n".join(f"{i['symbol']} ({i['name']}, {i['currency']}) alerts: "
-                      f"{[f'{a['direction']} {a['level']:g}' for a in i['alerts']] or 'none'}"
-                      for i in items) or "Your watchlist is empty.")
+        return _say("watchlist.list_unreadable", error=e)
+    return ("\n".join(_say("watchlist.list_line", symbol=i["symbol"], name=i["name"], currency=i["currency"],
+                           alerts=str([_say("watchlist.list_alert", direction=a["direction"], level=a["level"])
+                                       for a in i["alerts"]] or _say("watchlist.list_no_alerts")))
+                      for i in items) or _say("watchlist.list_empty"))
 
 
-def add(query, prov=None):
-    """Add one instrument. Refuses to choose between several matches."""
+def _option(m):
+    return _say("watchlist.option", symbol=m["symbol"], name=m["name"], region=m["region"], currency=m["currency"])
+
+
+def add(query, prov=None, ask=None):
+    """Add one instrument. Refuses to choose between several matches; given
+    a list as `ask`, it also gets [the ambiguity, without its ending; the
+    symbols offered], so chat can ask which one without matching words."""
     prov = prov or provider()
     query = (query or "").strip()
     if not query:
-        return "Tell me the ticker to watch, with its exchange suffix if it has one (e.g. TSCO.LON)."
+        return _say("watchlist.add_no_query")
     try:
         matches = prov.search(query)
     except ProviderError as e:
-        return f"I couldn't check {query} with the data provider ({e}), so I haven't added it."
+        return _say("watchlist.add_check_failed", query=query, error=e)
     exact = [m for m in matches if (m["symbol"] or "").upper() == query.upper()]
     if len(exact) != 1:
         if not matches:
-            return f"The provider has no instrument matching {query}. Nothing added."
-        options = "; ".join(f"{m['symbol']} ({m['name']}, {m['region']}, {m['currency']})"
-                            for m in matches[:CONFIG["chat"]["options_shown"]])
-        return (f"{query} isn't one exact instrument -- it could be: {options}. "
-                "Add the exact symbol you mean. Nothing added.")
+            return _say("watchlist.add_no_match", query=query)
+        shown = matches[:CONFIG["chat"]["options_shown"]]
+        ambiguous = _say("watchlist.add_ambiguous", query=query, options="; ".join(_option(m) for m in shown))
+        if ask is not None:  # chat: the caller asks which one and holds the choice
+            ask.extend([ambiguous, [(m["symbol"] or "").upper() for m in shown]])
+        return ambiguous + _say("watchlist.add_ambiguous_end")
     m = exact[0]
     if not m.get("currency"):
-        return f"The provider didn't say which currency {m['symbol']} trades in, so I haven't added it."
+        return _say("watchlist.add_no_currency", symbol=m["symbol"])
     try:
         with _locked():
             data = _load_watchlist()
             if any(i["symbol"] == m["symbol"] for i in data["instruments"]):
-                return f"{m['symbol']} is already on your watchlist."
+                return _say("watchlist.add_already", symbol=m["symbol"])
             data["instruments"].append({"symbol": m["symbol"], "name": m["name"], "region": m["region"],
                                         "currency": m["currency"], "utc_offset": _offset_hours(m.get("timezone")),
                                         "provider": prov.name, "added": _now().isoformat(timespec="seconds"),
@@ -518,10 +579,10 @@ def add(query, prov=None):
             _save("watchlist.json", data)
             saved = any(i["symbol"] == m["symbol"] for i in _load_watchlist()["instruments"])
     except StoreError as e:
-        return f"I haven't added {m['symbol']}: {e}."
+        return _say("watchlist.add_failed", symbol=m["symbol"], error=e)
     if not saved:
-        return f"I tried to add {m['symbol']} but it isn't in the saved watchlist."
-    return f"Added {m['symbol']} ({m['name']}, {m['region']}, priced in {m['currency']}) to your watchlist."
+        return _say("watchlist.add_not_saved", symbol=m["symbol"])
+    return _say("watchlist.added", symbol=m["symbol"], name=m["name"], region=m["region"], currency=m["currency"])
 
 
 def remove(symbol):
@@ -530,38 +591,38 @@ def remove(symbol):
             data = _load_watchlist()
             keep = [i for i in data["instruments"] if i["symbol"].upper() != (symbol or "").upper()]
             if len(keep) == len(data["instruments"]):
-                return f"{symbol} isn't on your watchlist."
+                return _say("watchlist.remove_missing", symbol=symbol)
             data["instruments"] = keep
             _save("watchlist.json", data)
     except StoreError as e:
-        return f"I haven't removed {symbol}: {e}."
-    return f"Removed {symbol} from your watchlist."
+        return _say("watchlist.remove_failed", symbol=symbol, error=e)
+    return _say("watchlist.removed", symbol=symbol)
 
 
 def set_alert(symbol, direction, level, currency):
     """Fires when price >= level ("above") or price <= level ("below"),
     in the instrument's own currency -- a mismatch is refused, not converted."""
     if direction not in ("above", "below"):
-        return "An alert is 'above' or 'below' a price."
+        return _say("alerts.bad_direction")
     lvl = _num(level)
     if lvl is None or lvl <= 0:
-        return "The alert needs a positive, finite price, like 300 or 2.5."
+        return _say("alerts.bad_level")
     try:
         with _locked():
             data = _load_watchlist()
             inst = next((i for i in data["instruments"] if i["symbol"].upper() == (symbol or "").upper()), None)
             if inst is None:
-                return f"{symbol} isn't on your watchlist; add it first."
+                return _say("alerts.not_watched", symbol=symbol)
             if (currency or "").upper() != inst["currency"].upper():
-                return (f"{inst['symbol']} is priced in {inst['currency']}, not {currency}. Give the level in "
-                        f"{inst['currency']} ({CONFIG['alerts']['currency_hint']}).")
+                return _say("alerts.wrong_currency", symbol=inst["symbol"], currency=inst["currency"],
+                            given=currency, hint=CONFIG["alerts"]["currency_hint"])
             rule = {"direction": direction, "level": lvl, "currency": inst["currency"]}
             if rule not in inst["alerts"]:
                 inst["alerts"].append(rule)
                 _save("watchlist.json", data)
     except StoreError as e:
-        return f"I haven't set that alert: {e}."
-    return f"Alert set: {inst['symbol']} at or {direction} {lvl:g} {inst['currency']}."
+        return _say("alerts.set_failed", error=e)
+    return _say("alerts.set", symbol=inst["symbol"], direction=direction, level=lvl, currency=inst["currency"])
 
 
 # -- quotes, alerts, brief ---------------------------------------------------
@@ -626,7 +687,7 @@ def _observe(inst, prov, raw, now, retrieved, status):
     problems = []
     if quote["price"] is None:
         quote["status"] = "unavailable"
-        problems.append("no valid price in the response" if raw.get("price") is None else "the price in the response is invalid")
+        problems.append(_say("provider.no_price") if raw.get("price") is None else _say("provider.bad_price"))
     # Exchange-local today, from the timezone the provider gave when it was
     # added. Unknown -> UTC+14 for "can't be in the future", UTC for
     # staleness, so neither check is ever stricter than the truth.
@@ -637,16 +698,16 @@ def _observe(inst, prov, raw, now, retrieved, status):
         market = dt.date.fromisoformat(quote["market_date"])
     except (TypeError, ValueError):
         market = None
-        problems.append("no valid market date in the response")
+        problems.append(_say("provider.no_market_date"))
         quote["status"] = "unavailable"
     if market is not None:
         age = (stale_today - market).days
         if market > local_today:
-            problems.append(f"market date {market} is after the exchange's today ({local_today})")
+            problems.append(_say("provider.future_date", market=market, today=local_today))
             quote["status"] = "unavailable"
         elif age > STALE_DAYS:
             quote["stale"] = True
-            problems.append(f"market date is {age} days old")
+            problems.append(_say("provider.old_date", age=age))
     if problems:
         quote["problem"] = "; ".join(problems)
     if quote["status"] == "unavailable":
@@ -717,27 +778,32 @@ def _already_in_saved_brief(events, out_dir):
         except OSError:
             pass
     for e in events:
-        if any(f"[event {e['id']}]" in t for t in texts):
+        if any(EVENT_MARK.format(e["id"]) in t for t in texts):
             found.append(e)
     return found
 
 
 def _fmt(value, currency):
-    return "unavailable" if value is None else f"{value:,.2f} {currency}"
+    return _say("brief.unavailable") if value is None else _say("brief.money", value=value, currency=currency)
 
 
 def _obs_line(q, name):
-    line = (f"- **{q['symbol']}** ({name}): {_fmt(q.get('price'), q['currency'])}; "
-            f"previous close {_fmt(q.get('previous_close'), q['currency'])}; "
-            f"status **{q['status']}**{' (stale)' if q.get('stale') else ''}; "
-            f"market date {q.get('market_date') or 'unavailable'}; retrieved {q['retrieved']}; "
-            f"source: {q['source']}" + (f" <{q['source_url']}>" if q.get("source_url") else ""))
-    return line + (f"; problem: {q['problem']}" if q.get("problem") else "")
+    return _say("brief.obs_line", symbol=q["symbol"], name=name, price=_fmt(q.get("price"), q["currency"]),
+                previous_close=_fmt(q.get("previous_close"), q["currency"]), status=q["status"],
+                stale=_say("brief.obs_stale") if q.get("stale") else "",
+                market_date=q.get("market_date") or _say("brief.unavailable"), retrieved=q["retrieved"],
+                source=q["source"],
+                source_url=_say("brief.obs_source_url", url=q["source_url"]) if q.get("source_url") else "",
+                problem=_say("brief.obs_problem", problem=q["problem"]) if q.get("problem") else "")
+
+
+EVENT_MARK = "[event {}]"  # how a saved brief carries an alert's id; read back by _already_in_saved_brief
 
 
 def _alert_line(e):
-    return (f"- {e['symbol']} is {_fmt(e['price'], e['currency'])}, at or {e['direction']} "
-            f"your {e['level']:g} {e['currency']} level. [event {e['id']}]")
+    return (_say("brief.alert_line", symbol=e["symbol"], price=_fmt(e["price"], e["currency"]),
+                 direction=e["direction"], level=e["level"], currency=e["currency"])
+            + " " + EVENT_MARK.format(e["id"]))
 
 
 def _move_size(cp):
@@ -764,9 +830,9 @@ def brief(prov=None, now=None, out_dir=None):
     try:
         items = watchlist()
     except StoreError as e:
-        return f"I can't brief your watchlist: {e}."
+        return _say("brief.cant_brief", error=e)
     if not items:
-        return "Your watchlist is empty, so there's nothing to brief. Add an instrument first, e.g. 'python invest.py add TSCO.LON'."
+        return _say("brief.empty")
     obs, notes, events = [], [], []
     try:
         for inst in items:
@@ -776,30 +842,28 @@ def brief(prov=None, now=None, out_dir=None):
             cp = q.get("change_percent")
             if q["status"] in ("live", "delayed") and not q.get("stale") and cp is not None:
                 size = _move_size(cp)
-                notes.append(f"- {inst['symbol']} moved {cp:+.2f}% on its last trading day -- {size} one-day "
-                             "move for a single share. The size alone doesn't say why it moved, and one day "
-                             "says little about the long run.")
+                notes.append(_say("brief.move_note", symbol=inst["symbol"], change=cp, size=size))
             elif q["status"] != "delayed" or q.get("stale"):
-                notes.append(f"- {inst['symbol']}: no fresh data, so nothing to interpret.")
+                notes.append(_say("brief.no_fresh_data", symbol=inst["symbol"]))
     except StoreError as e:
-        return f"I can't brief your watchlist: {e}."
+        return _say("brief.cant_brief", error=e)
     recovered = _already_in_saved_brief(events, out_dir)
     if recovered:
         try:
             _acknowledge(recovered, now)
         except StoreError as e:
-            return f"I can't brief your watchlist: {e}."
+            return _say("brief.cant_brief", error=e)
         events = [e for e in events if e not in recovered]
     last_observations = obs
     fixture = any(FIXTURE_LABEL in o["source"] for o in obs)
-    stamp = now.strftime("%Y-%m-%d %H:%M UTC")
+    stamp = now.strftime(CONFIG["replies"]["brief"]["stamp_format"])
     head = CONFIG["brief"]["headings"]
     text = "\n".join([
-        f"# Watchlist brief -- {stamp}", "",
-        *([f"> **{FIXTURE_LABEL}.** Every number below is made up for testing.", ""] if fixture else []),
+        _say("brief.title", stamp=stamp), "",
+        *([_say("brief.fixture_banner", label=FIXTURE_LABEL), ""] if fixture else []),
         head["observations"], "", *[_obs_line(o, o["name"]) for o in obs], "",
-        head["alerts"], "", *([_alert_line(e) for e in events] or ["- None fired."]), "",
-        head["interpretation"], "", *(notes or ["- Nothing to interpret."]), "",
+        head["alerts"], "", *([_alert_line(e) for e in events] or [_say("brief.no_alerts")]), "",
+        head["interpretation"], "", *(notes or [_say("brief.nothing_to_interpret")]), "",
         head["background"], "", CONFIG["brief"]["background"], "",
     ])
     try:
@@ -812,45 +876,47 @@ def brief(prov=None, now=None, out_dir=None):
         with open(path + ".pending", "x", encoding="utf-8") as f:
             f.write(text)
     except OSError as e:
-        return f"I couldn't save the brief ({type(e).__name__}), so no alert was marked as sent; I'll include it next time."
+        return _say("brief.save_failed", error=type(e).__name__)
     problems = verify(path + ".pending", obs, events)
     if problems:
         os.replace(path + ".pending", path[:-3] + ".failed.md")
-        return (f"The brief at {path[:-3]}.failed.md didn't match what was fetched, so no alert was marked as "
-                "sent. The check found: " + "; ".join(problems) + ".")
+        return _say("brief.verify_failed", path=path[:-3] + ".failed.md", problems="; ".join(problems))
     os.replace(path + ".pending", path)
     try:
         _acknowledge(events, now, path)
     except StoreError as e:  # the saved brief carries the event ids; next run recovers them
-        return f"Watchlist brief saved to {path}, but I couldn't record its alerts as sent: {e}."
-    summary = f" {len(items)} instrument(s), {len(events)} alert(s)."
-    return (_chat_summary(obs, events, fixture) + f"\nFull report saved to {path}." + summary
-            + (" These are synthetic fixtures, not market data." if fixture else ""))
+        return _say("brief.ack_failed", path=path, error=e)
+    return (_chat_summary(obs, events, fixture)
+            + _say("brief.saved", path=path, instruments=len(items), alerts=len(events))
+            + (_say("brief.saved_fixture") if fixture else ""))
 
 
 def _chat_summary(obs, events, fixture, limit=None):
     """The brief in chat, from the same observations the saved report was
     verified against. Bounded, and it never gives a reason for a move."""
     limit = limit or CONFIG["chat"]["summary_limit"]
-    lines = ["Watchlist brief" + (f" ({FIXTURE_LABEL})" if fixture else "") + ":"]
+    lines = [_say("brief.summary_title", fixture=_say("brief.summary_fixture", label=FIXTURE_LABEL) if fixture else "")]
     for o in obs[:limit]:
         if o.get("price") is None:
-            lines.append(f"- {o['symbol']}: no usable price ({_clean(o.get('problem') or o['status'], CONFIG['text_limits']['problem_in_chat'])}).")
+            lines.append(_say("brief.summary_no_price", symbol=o["symbol"], problem=_clean(
+                o.get("problem") or o["status"], CONFIG["text_limits"]["problem_in_chat"])))
             continue
         when = _when(o["retrieved"])
-        when = f"{when.astimezone(dt.timezone.utc):%Y-%m-%d %H:%M} UTC" if when else o["retrieved"]
-        fresh = ("stale, " if o.get("stale") else "") + CONFIG["brief"]["freshness_words"].get(o["status"], o["status"])
-        lines.append(f"- {o['symbol']}: {_fmt(o['price'], o['currency'])}, market date {o['market_date']} "
-                     f"({fresh}; retrieved {when}).")
+        when = (when.astimezone(dt.timezone.utc).strftime(CONFIG["replies"]["brief"]["summary_when_format"])
+                if when else o["retrieved"])
+        fresh = ((_say("brief.summary_stale") if o.get("stale") else "")
+                 + CONFIG["brief"]["freshness_words"].get(o["status"], o["status"]))
+        lines.append(_say("brief.summary_line", symbol=o["symbol"], price=_fmt(o["price"], o["currency"]),
+                          market_date=o["market_date"], fresh=fresh, when=when))
     if len(obs) > limit:
-        lines.append(f"- ...and {len(obs) - limit} more in the full report.")
+        lines.append(_say("brief.summary_more", n=len(obs) - limit))
     if events:
-        lines.append("Alerts: " + "; ".join(f"{e['symbol']} is {_fmt(e['price'], e['currency'])}, at or "
-                                            f"{e['direction']} your {e['level']:g} {e['currency']} level"
-                                            for e in events[:limit])
-                     + (f"; and {len(events) - limit} more" if len(events) > limit else "") + ".")
+        lines.append(_say("brief.summary_alerts", alerts="; ".join(
+            _say("brief.summary_alert", symbol=e["symbol"], price=_fmt(e["price"], e["currency"]),
+                 direction=e["direction"], level=e["level"], currency=e["currency"]) for e in events[:limit]),
+            more=_say("brief.summary_alerts_more", n=len(events) - limit) if len(events) > limit else ""))
     else:
-        lines.append("No alerts fired.")
+        lines.append(_say("brief.summary_no_alerts"))
     return "\n".join(lines)
 
 
@@ -862,14 +928,13 @@ def verify(path, obs, events=()):
         with open(path, encoding="utf-8") as f:
             saved = f.read().splitlines()
     except OSError as e:
-        return [f"the brief couldn't be read back ({type(e).__name__})"]
-    problems = [f"{o['symbol']}: the saved line doesn't match what was fetched"
-                for o in obs if _obs_line(o, o["name"]) not in saved]
-    problems += [f"alert {e['id']} is missing or changed" for e in events if _alert_line(e) not in saved]
+        return [_say("brief.check_unreadable", error=type(e).__name__)]
+    problems = [_say("brief.check_line", symbol=o["symbol"]) for o in obs if _obs_line(o, o["name"]) not in saved]
+    problems += [_say("brief.check_alert", id=e["id"]) for e in events if _alert_line(e) not in saved]
     head = CONFIG["brief"]["headings"]
     heads = [line for line in saved if line in head.values()]
     if heads[:2] != [head["observations"], head["alerts"]] or head["interpretation"] not in heads:
-        problems.append("observations and interpretation are not separated")
+        problems.append(_say("brief.check_sections"))
     return problems
 
 
@@ -880,15 +945,15 @@ def cancel_alert(symbol, direction, level):
             data = _load_watchlist()
             inst = next((i for i in data["instruments"] if i["symbol"].upper() == (symbol or "").upper()), None)
             if inst is None:
-                return f"{symbol} isn't on your watchlist."
+                return _say("alerts.cancel_not_watched", symbol=symbol)
             keep = [a for a in inst["alerts"] if not (a["direction"] == direction and a["level"] == lvl)]
             if len(keep) == len(inst["alerts"]):
-                return f"There's no {direction} {level} alert on {inst['symbol']}."
+                return _say("alerts.cancel_missing", direction=direction, level=level, symbol=inst["symbol"])
             inst["alerts"] = keep
             _save("watchlist.json", data)
     except StoreError as e:
-        return f"I haven't cancelled it: {e}."
-    return f"Cancelled the {inst['symbol']} alert at or {direction} {lvl:g} {inst['currency']}."
+        return _say("alerts.cancel_failed", error=e)
+    return _say("alerts.cancelled", symbol=inst["symbol"], direction=direction, level=lvl, currency=inst["currency"])
 
 
 # -- chat: a few exact commands, no model call -------------------------------
@@ -948,20 +1013,16 @@ def chat(text, prov=None, now=None, last_said=None):
             try:
                 found = prov.search(m.group(1))
             except ProviderError as e:
-                return f"I couldn't search the data provider: {e}."
-            return ("No instrument matches that." if not found else "Matches: " + "; ".join(
-                f"{f['symbol']} ({f['name']}, {f['region']}, {f['currency']})"
-                for f in found[:CONFIG["chat"]["options_shown"]]) + ".")
+                return _say("search.failed", error=e)
+            return (_say("search.none") if not found else _say("search.matches", matches="; ".join(
+                _option(f) for f in found[:CONFIG["chat"]["options_shown"]])))
         if kind == "add":
-            reply = add(m.group(1), prov)
-            if "isn't one exact instrument" in reply:
-                try:
-                    options = [f["symbol"].upper() for f in prov.search(m.group(1))][:CONFIG["chat"]["options_shown"]]
-                except ProviderError:
-                    return reply
-                question = (reply.replace(" Add the exact symbol you mean. Nothing added.", "") + " Which one? Say its "
-                            "symbol or number (" + ", ".join(f"{n} = {o}" for n, o in enumerate(options, 1))
-                            + "). Nothing added yet.")
+            ask = []
+            reply = add(m.group(1), prov, ask)
+            if ask:  # several matches: ask which one rather than guess
+                ambiguous, options = ask
+                question = ambiguous + _say("watchlist.add_ambiguous_ask", numbered=", ".join(
+                    _say("watchlist.numbered_option", n=n, symbol=o) for n, o in enumerate(options, 1)))
                 try:
                     with _locked():  # replaces any earlier question
                         _save("pending.json", {"request": text, "question": question, "options": options,
@@ -975,19 +1036,18 @@ def chat(text, prov=None, now=None, last_said=None):
         if kind == "alert":
             sym, direction, level, cur = m.group(1), m.group(2).lower(), m.group(3).replace(",", ""), m.group(4)
             if not cur:
-                return (f"Which currency is {level} in? Say it with the currency, e.g. 'alert me if {sym} goes "
-                        f"{direction} {level} {CONFIG['alerts']['example_currency']}' -- "
-                        f"{CONFIG['alerts']['currency_warning']}, so I won't guess.")
+                return _say("alerts.which_currency", level=level, symbol=sym, direction=direction,
+                            example=CONFIG["alerts"]["example_currency"], warning=CONFIG["alerts"]["currency_warning"])
             return set_alert(sym, direction, level, cur.upper())
         if kind == "cancel":
             return cancel_alert(m.group(1), m.group(2).lower(), m.group(3).replace(",", ""))
         if kind == "alerts":
             try:
-                rows = [f"{i['symbol']} {a['direction']} {a['level']:g} {a['currency']}"
-                        for i in watchlist() for a in i["alerts"]]
+                rows = [_say("alerts.list_row", symbol=i["symbol"], direction=a["direction"], level=a["level"],
+                             currency=a["currency"]) for i in watchlist() for a in i["alerts"]]
             except StoreError as e:
-                return f"I can't read your alerts: {e}."
-            return "Your alerts: " + "; ".join(rows) + "." if rows else "You have no price alerts."
+                return _say("alerts.list_unreadable", error=e)
+            return _say("alerts.list", alerts="; ".join(rows)) if rows else _say("alerts.list_none")
     return None
 
 
@@ -1011,9 +1071,10 @@ def main(argv):
     if cmd == "search" and len(args) > 1:
         try:
             for m in prov.search(" ".join(args[1:])):
-                print(f"{m['symbol']:12} {m['currency'] or '?':4} {m['region']}: {m['name']}")
+                print(_say("search.cli_row", symbol=m["symbol"], region=m["region"], name=m["name"],
+                           currency=m["currency"] or _say("search.cli_unknown_currency")))
         except ProviderError as e:
-            print(f"Provider unavailable: {e}")
+            print(_say("search.cli_failed", error=e))
     elif cmd == "add" and len(args) > 1:
         print(add(args[1], prov))
     elif cmd == "remove" and len(args) > 1:

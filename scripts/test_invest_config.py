@@ -117,6 +117,42 @@ out_dir = tempfile.mkdtemp(prefix="denisse-invest-config-briefs-")
 said = invest.brief(fix, NOW, out_dir)
 check("new headings: the brief is written and verifies against them", "Full report saved" in said, said)
 
+# -- wording (invest.json "replies" and "fixtures") ------------------------
+use({"replies": {"watchlist": {"added": "Watching {symbol} now.", "list_empty": "Nothing watched."}}})
+check("a reply's wording comes from invest.json", invest.list_text() == "Nothing watched.", invest.list_text())
+reply = invest.add("ACME.LON", P)
+check("...with its fields filled in", reply == "Watching ACME.LON now.", reply)
+check("...and an unchanged reply keeps its default", invest.add("ACME.LON", P) == "ACME.LON is already on your watchlist.")
+
+AMBIG = invest.FixtureProvider(matches={"ACME": [dict(M, symbol="ACME.LON", name="Acme plc"),
+                                                 dict(M, symbol="ACME.US", name="Acme Inc", currency="USD")]})
+use({"replies": {"watchlist": {"add_ambiguous": "{query}: several.", "add_ambiguous_ask": " Pick ({numbered})."}}})
+q = invest.chat("add ACME to my watchlist", AMBIG, NOW)
+check("an ambiguous add is asked about whatever its wording (no phrase match on the reply)",
+      q == "ACME: several. Pick (1 = ACME.LON, 2 = ACME.US).", q)
+r = invest.chat("2", AMBIG, NOW, last_said=q)
+check("...and the answer to that question is taken", (r or "").startswith("Added ACME.US"), r)
+
+use({"replies": {"brief": {"move_note": "- {symbol}: {change:+.1f}% ({size})", "title": "# Brief {stamp}",
+                           "stamp_format": "%d/%m/%Y"}}})
+invest.add("ACME.LON", P)
+out_dir = tempfile.mkdtemp(prefix="denisse-invest-config-briefs-")
+said = invest.brief(fix, NOW, out_dir)
+saved = [n for n in os.listdir(out_dir) if n.endswith(".md") and not n.endswith(".failed.md")]
+text = open(os.path.join(out_dir, saved[0]), encoding="utf-8").read() if saved else ""
+check("brief wording and its date format come from invest.json",
+      "# Brief 30/10/2026" in text and "- ACME.LON: +0.3% (a small)" in text, said)
+
+use({"fixtures": {"label": "MADE-UP DATA", "demo_instruments": [
+    {"search": "TOY", "symbol": "TOY.FIX", "name": "Toy Co", "type": "Equity", "region": "Nowhere",
+     "currency": "XXX", "timezone": "UTC+00", "price": 5, "previous_close": 4, "change_percent": 25}]}})
+demo = invest.provider(fixtures=True)
+check("the --fixtures demo instruments come from invest.json",
+      demo.search("TOY")[0]["symbol"] == "TOY.FIX" and demo.quote("TOY.FIX")["price"] == 5
+      and not demo.search("DEMO"), str(demo.matches))
+check("...and so does the fixture label", invest.FIXTURE_LABEL == "MADE-UP DATA"
+      and "MADE-UP DATA" in invest.FixtureProvider.name, invest.FixtureProvider.name)
+
 # -- bad values: a warning and the default, never a crash -------------------
 cfg = use({"quotes": {"stale_days": "four"}, "alerts": {"cooldown_hours": -1}, "store": {"lock_attempts": 2.5}})
 check("bad numbers fall back to their defaults",
@@ -136,6 +172,19 @@ check("...and the default command still works",
 use({"brief": {"move_sizes": [{"below": 3, "word": "x"}, {"below": 1, "word": "y"}]}, "nonsense": 1})
 check("unordered move sizes fall back; an unknown section is ignored",
       invest._move_size(2.0) == "a noticeable" and len(cap.lines) == 2, "; ".join(cap.lines))
+
+use({"replies": {"watchlist": {"added": "Added {symbol} for {who}.", "removed": "Removed {symbol:zz}."}},
+     "fixtures": {"demo_instruments": [{"symbol": "NOPRICE"}]}})
+check("a reply using a field it isn't given falls back, with a warning",
+      invest.CONFIG["replies"]["watchlist"]["added"] == invest.DEFAULTS["replies"]["watchlist"]["added"]
+      and any("replies.watchlist.added" in line and "who" in line for line in cap.lines), "; ".join(cap.lines))
+check("an incomplete demo instrument falls back to the default demo",
+      invest.CONFIG["fixtures"]["demo_instruments"] == invest.DEFAULTS["fixtures"]["demo_instruments"])
+invest.add("ACME.LON", P)
+reply = invest.remove("ACME.LON")
+check("a bad format spec is caught when used: the default wording, not a crash",
+      reply == "Removed ACME.LON from your watchlist."
+      and any("replies.watchlist.removed" in line for line in cap.lines), reply)
 
 use(raw="{ not json")
 check("an unreadable invest.json: every default, one warning",
