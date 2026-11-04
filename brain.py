@@ -119,9 +119,12 @@ def _first_name() -> str:
 _MACHINE_FACTS = (
     f"You are running on {platform.system()} {platform.release()} as user "
     f"'{os.environ.get('USERNAME') or os.environ.get('USER') or 'unknown'}', "
-    f"whose home folder is {os.path.expanduser('~')}. Your own program "
-    f"folder (your code and settings -- not one of his projects, and never "
-    f"the answer to what he is working on) is "
+    # "whose project folder is <denisse-wt\...>" read as HIS project: "what
+    # am I working on?" was answered with the worktree's name (2026-11-04).
+    # Reworded, not expanded: a longer sentence here (two tried) sent the
+    # garbled-input case to get_news 4/6 -- the prompt-budget lesson again.
+    f"whose home folder is {os.path.expanduser('~')} and whose copy of "
+    f"this program (Denisse's own folder, not his project) is "
     f"{os.path.dirname(os.path.abspath(__file__))}. Write paths "
     f"the way this OS does (separator '{os.sep}')"
     + (
@@ -310,14 +313,11 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "get_current_time",
-            "description": (
-                "Get the current date and time -- this machine's own local time, or, given "
-                "a timezone, the current time somewhere else instead. Only when he asks what "
-                "time or day it is, or the answer genuinely needs the clock. Not for 'never "
-                "mind', 'carry on', 'session over', a greeting, a complaint or anything that "
-                "isn't about the time: calling it then is a wasted wait and a reply about "
-                "the clock instead of about what he said."
-            ),
+            # One sentence added, not a paragraph: this is in CORE, so every
+            # turn pays for it. A longer version listing the non-time turns
+            # ("never mind", "carry on", a greeting...) cost the garbled case
+            # 2/6 against 6/6 (A/B, 2026-11-04).
+            "description": "Get the current date and time -- this machine's own local time, or, given a timezone, the current time somewhere else instead. Only for a question about the time or date, never for a message that isn't.",
             "parameters": {
                 "type": "object",
                 "properties": {
