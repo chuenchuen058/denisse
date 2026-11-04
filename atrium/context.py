@@ -2,14 +2,11 @@
 
 Codex, Gemini and Copilot can't be trusted to go and read the vault, so the
 agent hub hands them this pack at the top of every task instead. It holds the
-live, shared state, trimmed to a budget so it never swamps the task:
-
-  1. Standing asks (Chuen's rules)        Atlas/Standing-Asks.md
-  2. Before planning anything about him   Atlas/Concepts/Learning/Learner-Model.md
-  3. Active right now / Waiting on Chuen  hot.md
-  4. STATE NOW (what's running)           STATE NOW.md
-  5. Settled (latest lines)               Atlas/Settled.md
-  6. Today's handoff (latest lines)       Calendar/Handoff-<today>.md
+live, shared state, trimmed to a per-lane budget so it never swamps the task.
+Which notes, sections and line counts go in, in what order, and every budget
+live in atrium/config.json ("context"); with the shipped data the pack is:
+standing asks, the learner model's known areas, hot.md's active and waiting
+lists, STATE NOW, the latest settled lines and today's handoff.
 
 Missing notes are skipped. Read-only.
 """
@@ -18,12 +15,32 @@ from __future__ import annotations
 import datetime as dt
 import os
 import re
+import sys
 from pathlib import Path
 
-VAULT = Path(os.environ.get("DENISSE_VAULT",
-                            Path.home() / "OneDrive - King's College London" / "Denisse"))
-LANES = ("claude", "codex", "gemini", "copilot", "denisse")
-BUDGET = {"claude": 6000, "codex": 4000, "gemini": 8000, "copilot": 2500, "denisse": 2500}
+from . import conf
+
+REPO = Path(__file__).resolve().parent.parent
+
+
+def _vault() -> Path:
+    """DENISSE_VAULT, else settings.vault() (config.json / Obsidian's own registry),
+    else the fallback in atrium/config.json under the home folder."""
+    if os.environ.get("DENISSE_VAULT"):
+        return Path(os.environ["DENISSE_VAULT"])
+    if str(REPO) not in sys.path:
+        sys.path.insert(0, str(REPO))
+    try:
+        import settings
+        return Path(settings.vault())
+    except Exception:
+        return Path.home() / conf.section("vault")["fallback"]
+
+
+VAULT = _vault()
+_C = conf.section("context")
+LANES = tuple(_C["lanes"])
+BUDGET = dict(_C["budget"])
 
 
 def _read(rel: str) -> str:
@@ -48,13 +65,11 @@ def _bullets(text: str, last: int | None = None) -> str:
     return "\n".join(lines[-last:] if last else lines)
 
 
-def parts() -> list[tuple[str, str]]:
-    hot = _read("hot.md")
-    today = dt.date.today().isoformat()
-    learner = _section(_read("Atlas/Concepts/Learning/Learner-Model.md"), "Before planning anything about Chuen")
+def _known_only(text: str, unknown: str) -> str:
+    """Drop the areas (### headings) whose every line is still unknown."""
     kept, pending = [], None
-    for l in learner.splitlines():  # keep only areas with something known
-        if not l.strip() or "- unknown" in l:
+    for l in text.splitlines():
+        if not l.strip() or unknown in l:
             continue
         if l.startswith("#"):
             pending = l
@@ -62,33 +77,45 @@ def parts() -> list[tuple[str, str]]:
         if pending:
             kept.append(pending); pending = None
         kept.append(l)
-    learner = "\n".join(kept)
-    return [
-        ("Standing asks (Chuen's rules)", _bullets(_body(_read("Atlas/Standing-Asks.md")))),
-        ("Before planning anything about Chuen", learner),
-        ("Active right now", _bullets(_section(hot, "Active right now"))),
-        ("Waiting on Chuen", _bullets(_section(hot, "Waiting on Chuen"))),
-        ("STATE NOW", re.sub(r"\A## STATE NOW\s*\n", "", _body(_read("STATE NOW.md")))),
-        ("Settled (latest)", _bullets(_body(_read("Atlas/Settled.md")), last=12)),
-        (f"Today's handoff ({today})", _bullets(_read(f"Calendar/Handoff-{today}.md"), last=15)),
-    ]
+    return "\n".join(kept)
 
 
-def show(lane: str = "claude") -> str:
-    budget = BUDGET.get(lane, 4000)
-    out = [f"# Shared context for {lane} (from Chuen's vault, {dt.datetime.now():%Y-%m-%d %H:%M})",
-           "Read-only. Facts here outrank your assumptions; anything missing is unknown."]
+def parts() -> list[tuple[str, str]]:
+    c = conf.section("context")
+    today = dt.date.today().isoformat()
+    out = []
+    for p in c["parts"]:
+        text = _read(p["note"].format(today=today))
+        if p.get("body"):
+            text = _body(text)
+        if p.get("section"):
+            text = _section(text, p["section"])
+        if p.get("strip_heading"):
+            text = re.sub(rf"\A## {re.escape(p['strip_heading'])}\s*\n", "", text)
+        if p.get("known_only"):
+            text = _known_only(text, c["unknown_marker"])
+        if p.get("bullets"):
+            text = _bullets(text, last=p.get("last"))
+        out.append((p["title"].format(today=today), text))
+    return out
+
+
+def show(lane: str | None = None) -> str:
+    c = conf.section("context")
+    lane = lane or c["default_lane"]
+    budget = BUDGET.get(lane, c["default_budget"])
+    out = [c["header"].format(lane=lane, now=dt.datetime.now().strftime(c["header_time"])), c["preamble"]]
     used = sum(len(x) for x in out)
     for title, text in parts():
         if not text.strip():
             continue
         block = f"\n## {title}\n{text.strip()}"
         if used + len(block) > budget:
-            room = budget - used - 40
-            if room < 200:
-                out.append(f"\n## {title}\n(cut for length; see the vault)")
+            room = budget - used - c["cut_margin"]
+            if room < c["cut_min_room"]:
+                out.append(f"\n## {title}\n{c['cut_whole']}")
                 continue
-            block = block[:room].rsplit("\n", 1)[0] + "\n(... cut for length)"
+            block = block[:room].rsplit("\n", 1)[0] + "\n" + c["cut_tail"]
         out.append(block)
         used += len(block)
     return "\n".join(out) + "\n"

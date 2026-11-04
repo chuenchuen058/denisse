@@ -1,33 +1,33 @@
 """Append tagged lines to today's handoff note, the shared log every agent and
-the nightly review read: <vault>/Calendar/Handoff-YYYY-MM-DD.md.
-Same format as the agent hub's remember(): "- HH:MM [agent] text".
+the nightly review read (path, line shape and new-note text: atrium/config.json
+"handoff"; shipped: <vault>/Calendar/Handoff-YYYY-MM-DD.md, "- HH:MM [agent] text",
+the same format as the agent hub's remember()).
 Append-only; never edits other notes; silently does nothing without a vault."""
 from __future__ import annotations
 
 import datetime as dt
 import re
 
+from . import conf
 from .context import VAULT
 
 
 def path(date: str | None = None):
-    return VAULT / "Calendar" / f"Handoff-{date or dt.date.today().isoformat()}.md"
+    return VAULT / conf.section("handoff")["note"].format(date=date or dt.date.today().isoformat())
 
 
 def remember(agent: str, lines: list[str]) -> bool:
-    lines = [re.sub(r"\s+", " ", l).strip()[:400] for l in lines if l and l.strip()]
+    c = conf.section("handoff")
+    lines = [re.sub(r"\s+", " ", l).strip()[:c["line_chars"]] for l in lines if l and l.strip()]
     if not lines or not VAULT.is_dir():
         return False
     now = dt.datetime.now()
-    p = path(now.date().isoformat())
+    d = now.date().isoformat()
+    p = path(d)
     p.parent.mkdir(parents=True, exist_ok=True)
     if not p.exists():
-        d = now.date().isoformat()
-        p.write_text(f"---\nname: Handoff-{d}\ndescription: What every agent did on {d}, one line each, tagged with who.\n"
-                     f"updated: {d}\ntype: dated\nstatus: active\ntags: [handoff]\nprotection: append\n---\n\n"
-                     f"# Handoff {d}\n\nOne line per decision, correction, hand-off or thing waiting on Chuen, "
-                     f"tagged with who wrote it.\n\n## Log\n", encoding="utf-8")
+        p.write_text(c["new_note"].format(date=d), encoding="utf-8")
     with p.open("a", encoding="utf-8") as f:
         for l in lines:
-            f.write(f"- {now:%H:%M} [{agent}] {l}\n")
+            f.write(c["line"].format(time=now.strftime(c["time_format"]), agent=agent, text=l) + "\n")
     return True
