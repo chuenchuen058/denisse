@@ -6,9 +6,9 @@ Candidates are intentionally conservative: regexes include parsers, text compari
 Static coverage is not proof of exhaustiveness: comments/docstrings, non-Python files, excluded fixtures/private state/dependencies, dynamically constructed/imported values and interprocedural user-text flow are not analysed. Local aliases and comprehension/loop iterables are followed conservatively without execution-order analysis; results can include unrelated possible bindings.
 Values are complete decoded literal representations; f-string fragments and concatenated pieces are reported at their AST source location. Multiple kinds at one location are intentional. No value truncation is applied. Numeric strings used as defaults are included. Booleans and None are excluded.
 
-Scanned **140** Python files; **8025** candidates; **0** scan errors.
+Scanned **140** Python files; **7973** candidates; **0** scan errors.
 
-Source and policy SHA-256: `dd69bce7e8a8e8dc278706492053d86b26f846dd57b7d0867528fa3f0c8d9b7d`.
+Source and policy SHA-256: `1c06e71393bff102098bc7629f7d787847963abbd27228af52de51e98f489e94`.
 
 ## Coverage and regeneration
 
@@ -68,8 +68,8 @@ Traversal policy (from the JSON configuration):
 | user / vault name | 133 | runtime lookup |
 | model name | 216 | config.json |
 | URL | 12 | config.json |
-| time / duration / threshold / limit | 700 | config.json |
-| numeric literal (review) | 2653 | config.json |
+| time / duration / threshold / limit | 694 | config.json |
+| numeric literal (review) | 2607 | config.json |
 
 ## Files in review order
 
@@ -85,8 +85,8 @@ Traversal policy (from the JSON configuration):
 | <code>tool_router.py</code> | 1: Conversation, intent routing and visible study behaviour | 24 |
 | <code>planner.py</code> | 1: Conversation, intent routing and visible study behaviour | 22 |
 | <code>speech_control.py</code> | 1: Conversation, intent routing and visible study behaviour | 19 |
-| <code>reminder_card.py</code> | 2: User-facing tools, voice, UI and runtime services | 226 |
 | <code>invest.py</code> | 2: User-facing tools, voice, UI and runtime services | 215 |
+| <code>reminder_card.py</code> | 2: User-facing tools, voice, UI and runtime services | 174 |
 | <code>time_parse.py</code> | 2: User-facing tools, voice, UI and runtime services | 173 |
 | <code>study_brief.py</code> | 2: User-facing tools, voice, UI and runtime services | 153 |
 | <code>tools.py</code> | 2: User-facing tools, voice, UI and runtime services | 122 |
@@ -2302,239 +2302,6 @@ Priority 1: Conversation, intent routing and visible study behaviour.
 | 55 | regex candidate | <code>&#x27;)*&#x27;</code> | data file |
 | 55 | regex candidate | <code>&#x27;&#x27;</code> | data file |
 
-## reminder_card.py
-
-Priority 2: User-facing tools, voice, UI and runtime services.
-
-| Line | Kind | Value | Suggested home |
-| ---: | --- | --- | --- |
-| 47 | text match / keyword candidate | <code>&#x27;card&#x27;</code> | data file |
-| 48 | text match / keyword candidate | <code>&#x27;layout&#x27;</code> | data file |
-| 50 | numeric literal (review) | <code>1000</code> | config.json |
-| 53 | numeric literal (review) | <code>124</code> | config.json |
-| 53 | numeric literal (review) | <code>58</code> | config.json |
-| 53 | numeric literal (review) | <code>237</code> | config.json |
-| 86 | text match / keyword candidate | <code>&#x27;pad&#x27;</code> | data file |
-| 87 | text match / keyword candidate | <code>&#x27;radius&#x27;</code> | data file |
-| 90 | text match / keyword candidate | <code>&#x27;tail_len&#x27;</code> | data file |
-| 91 | text match / keyword candidate | <code>&#x27;tail_base&#x27;</code> | data file |
-| 92 | text match / keyword candidate | <code>&#x27;margin&#x27;</code> | data file |
-| 100 | text match / keyword candidate | <code>&#x27;breath_levels&#x27;</code> | data file |
-| 103 | text match / keyword candidate | <code>&#x27;max_rows&#x27;</code> | data file |
-| 120 | text match / keyword candidate | <code>&#x27;name&#x27;</code> | data file |
-| 120 | text match / keyword candidate | <code>&#x27;colour&#x27;</code> | data file |
-| 120 | text match / keyword candidate | <code>&#x27;priorities&#x27;</code> | data file |
-| 132 | numeric literal (review) | <code>96.0</code> | config.json |
-| 134 | numeric literal (review) | <code>1.0</code> | config.json |
-| 151 | time / duration / threshold / limit | <code>1.0</code> | config.json |
-| 155 | numeric literal (review) | <code>1</code> | config.json |
-| 155 | numeric literal (review) | <code>3</code> | config.json |
-| 158 | numeric literal (review) | <code>0</code> | config.json |
-| 160 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 160 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 160 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 160 | time / duration / threshold / limit | <code>255</code> | config.json |
-| 161 | numeric literal (review) | <code>0</code> | config.json |
-| 162 | numeric literal (review) | <code>2</code> | config.json |
-| 162 | numeric literal (review) | <code>2</code> | config.json |
-| 162 | numeric literal (review) | <code>1</code> | config.json |
-| 162 | numeric literal (review) | <code>255</code> | config.json |
-| 165 | numeric literal (review) | <code>2</code> | config.json |
-| 165 | numeric literal (review) | <code>1.3</code> | config.json |
-| 166 | numeric literal (review) | <code>2</code> | config.json |
-| 166 | numeric literal (review) | <code>1.3</code> | config.json |
-| 167 | numeric literal (review) | <code>1</code> | config.json |
-| 167 | numeric literal (review) | <code>2.4</code> | config.json |
-| 168 | numeric literal (review) | <code>255</code> | config.json |
-| 170 | text match / keyword candidate | <code>&#x27;left&#x27;</code> | data file |
-| 172 | numeric literal (review) | <code>0</code> | config.json |
-| 173 | time / duration / threshold / limit | <code>2</code> | config.json |
-| 173 | time / duration / threshold / limit | <code>2</code> | config.json |
-| 174 | numeric literal (review) | <code>0</code> | config.json |
-| 176 | numeric literal (review) | <code>0</code> | config.json |
-| 179 | numeric literal (review) | <code>0.55</code> | config.json |
-| 184 | numeric literal (review) | <code>2</code> | config.json |
-| 184 | text match / keyword candidate | <code>&#x27;right&#x27;</code> | data file |
-| 184 | numeric literal (review) | <code>2</code> | config.json |
-| 185 | numeric literal (review) | <code>2</code> | config.json |
-| 188 | numeric literal (review) | <code>0</code> | config.json |
-| 195 | time / duration / threshold / limit | <code>360</code> | config.json |
-| 195 | time / duration / threshold / limit | <code>360</code> | config.json |
-| 195 | time / duration / threshold / limit | <code>255</code> | config.json |
-| 204 | numeric literal (review) | <code>256</code> | config.json |
-| 205 | numeric literal (review) | <code>255</code> | config.json |
-| 205 | numeric literal (review) | <code>360</code> | config.json |
-| 205 | numeric literal (review) | <code>360</code> | config.json |
-| 207 | numeric literal (review) | <code>0</code> | config.json |
-| 207 | time / duration / threshold / limit | <code>255</code> | config.json |
-| 207 | time / duration / threshold / limit | <code>255</code> | config.json |
-| 207 | time / duration / threshold / limit | <code>6</code> | config.json |
-| 213 | numeric literal (review) | <code>0</code> | config.json |
-| 213 | numeric literal (review) | <code>0</code> | config.json |
-| 213 | numeric literal (review) | <code>0</code> | config.json |
-| 213 | numeric literal (review) | <code>0</code> | config.json |
-| 214 | numeric literal (review) | <code>150</code> | config.json |
-| 214 | numeric literal (review) | <code>79.2</code> | config.json |
-| 214 | numeric literal (review) | <code>255</code> | config.json |
-| 214 | numeric literal (review) | <code>0.8</code> | config.json |
-| 215 | numeric literal (review) | <code>255</code> | config.json |
-| 216 | numeric literal (review) | <code>255</code> | config.json |
-| 217 | numeric literal (review) | <code>255</code> | config.json |
-| 219 | numeric literal (review) | <code>0</code> | config.json |
-| 225 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 227 | numeric literal (review) | <code>1</code> | config.json |
-| 230 | numeric literal (review) | <code>180</code> | config.json |
-| 231 | numeric literal (review) | <code>255</code> | config.json |
-| 232 | numeric literal (review) | <code>255</code> | config.json |
-| 239 | numeric literal (review) | <code>2</code> | config.json |
-| 239 | numeric literal (review) | <code>16</code> | config.json |
-| 239 | numeric literal (review) | <code>1</code> | config.json |
-| 239 | numeric literal (review) | <code>3</code> | config.json |
-| 239 | numeric literal (review) | <code>5</code> | config.json |
-| 251 | numeric literal (review) | <code>48</code> | config.json |
-| 252 | numeric literal (review) | <code>0</code> | config.json |
-| 252 | numeric literal (review) | <code>0</code> | config.json |
-| 256 | numeric literal (review) | <code>0</code> | config.json |
-| 256 | numeric literal (review) | <code>0</code> | config.json |
-| 259 | numeric literal (review) | <code>0</code> | config.json |
-| 259 | numeric literal (review) | <code>0</code> | config.json |
-| 277 | text match / keyword candidate | <code>&#x27;right&#x27;</code> | data file |
-| 278 | numeric literal (review) | <code>2</code> | config.json |
-| 281 | numeric literal (review) | <code>2</code> | config.json |
-| 284 | numeric literal (review) | <code>2</code> | config.json |
-| 284 | numeric literal (review) | <code>2</code> | config.json |
-| 285 | text match / keyword candidate | <code>&#x27;right&#x27;</code> | data file |
-| 285 | text match / keyword candidate | <code>&#x27;left&#x27;</code> | data file |
-| 287 | text match / keyword candidate | <code>&#x27;left&#x27;</code> | data file |
-| 287 | text match / keyword candidate | <code>&#x27;right&#x27;</code> | data file |
-| 288 | text match / keyword candidate | <code>&#x27;right&#x27;</code> | data file |
-| 289 | numeric literal (review) | <code>2</code> | config.json |
-| 304 | numeric literal (review) | <code>-1</code> | config.json |
-| 325 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 353 | numeric literal (review) | <code>0</code> | config.json |
-| 358 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 375 | numeric literal (review) | <code>0</code> | config.json |
-| 381 | numeric literal (review) | <code>0</code> | config.json |
-| 384 | numeric literal (review) | <code>0</code> | config.json |
-| 385 | numeric literal (review) | <code>0.0</code> | config.json |
-| 390 | numeric literal (review) | <code>0.0</code> | config.json |
-| 396 | numeric literal (review) | <code>0</code> | config.json |
-| 396 | numeric literal (review) | <code>0</code> | config.json |
-| 412 | numeric literal (review) | <code>0</code> | config.json |
-| 421 | numeric literal (review) | <code>1</code> | config.json |
-| 424 | numeric literal (review) | <code>0</code> | config.json |
-| 437 | numeric literal (review) | <code>2</code> | config.json |
-| 442 | numeric literal (review) | <code>2</code> | config.json |
-| 451 | numeric literal (review) | <code>3</code> | config.json |
-| 451 | numeric literal (review) | <code>0</code> | config.json |
-| 454 | numeric literal (review) | <code>0</code> | config.json |
-| 454 | numeric literal (review) | <code>2</code> | config.json |
-| 457 | numeric literal (review) | <code>4</code> | config.json |
-| 460 | numeric literal (review) | <code>0</code> | config.json |
-| 460 | numeric literal (review) | <code>0</code> | config.json |
-| 462 | numeric literal (review) | <code>0</code> | config.json |
-| 462 | numeric literal (review) | <code>0</code> | config.json |
-| 465 | numeric literal (review) | <code>0</code> | config.json |
-| 465 | numeric literal (review) | <code>0</code> | config.json |
-| 476 | numeric literal (review) | <code>0</code> | config.json |
-| 476 | numeric literal (review) | <code>12</code> | config.json |
-| 477 | numeric literal (review) | <code>0</code> | config.json |
-| 477 | numeric literal (review) | <code>4</code> | config.json |
-| 480 | numeric literal (review) | <code>0</code> | config.json |
-| 483 | numeric literal (review) | <code>1</code> | config.json |
-| 483 | numeric literal (review) | <code>3</code> | config.json |
-| 484 | text match / keyword candidate | <code>&#x27;id&#x27;</code> | data file |
-| 488 | numeric literal (review) | <code>1</code> | config.json |
-| 493 | numeric literal (review) | <code>1</code> | config.json |
-| 493 | numeric literal (review) | <code>3</code> | config.json |
-| 494 | text match / keyword candidate | <code>&#x27;new&#x27;</code> | data file |
-| 500 | numeric literal (review) | <code>4</code> | config.json |
-| 500 | numeric literal (review) | <code>0</code> | config.json |
-| 506 | time / duration / threshold / limit | <code>30</code> | config.json |
-| 513 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 517 | numeric literal (review) | <code>0</code> | config.json |
-| 517 | numeric literal (review) | <code>0</code> | config.json |
-| 517 | numeric literal (review) | <code>0</code> | config.json |
-| 532 | numeric literal (review) | <code>120</code> | config.json |
-| 533 | numeric literal (review) | <code>-2</code> | config.json |
-| 533 | numeric literal (review) | <code>-1</code> | config.json |
-| 533 | numeric literal (review) | <code>0</code> | config.json |
-| 533 | numeric literal (review) | <code>1</code> | config.json |
-| 535 | numeric literal (review) | <code>0</code> | config.json |
-| 544 | time / duration / threshold / limit | <code>0.0</code> | config.json |
-| 544 | time / duration / threshold / limit | <code>1.0</code> | config.json |
-| 544 | time / duration / threshold / limit | <code>2</code> | config.json |
-| 545 | numeric literal (review) | <code>0</code> | config.json |
-| 557 | numeric literal (review) | <code>2</code> | config.json |
-| 557 | numeric literal (review) | <code>0</code> | config.json |
-| 557 | numeric literal (review) | <code>2</code> | config.json |
-| 557 | numeric literal (review) | <code>1</code> | config.json |
-| 559 | numeric literal (review) | <code>0</code> | config.json |
-| 559 | time / duration / threshold / limit | <code>16</code> | config.json |
-| 570 | time / duration / threshold / limit | <code>0</code> | config.json |
-| 570 | time / duration / threshold / limit | <code>8</code> | config.json |
-| 571 | numeric literal (review) | <code>0</code> | config.json |
-| 580 | numeric literal (review) | <code>3</code> | config.json |
-| 580 | numeric literal (review) | <code>0</code> | config.json |
-| 580 | numeric literal (review) | <code>6</code> | config.json |
-| 582 | numeric literal (review) | <code>0</code> | config.json |
-| 582 | numeric literal (review) | <code>6</code> | config.json |
-| 585 | numeric literal (review) | <code>4</code> | config.json |
-| 585 | numeric literal (review) | <code>0</code> | config.json |
-| 586 | numeric literal (review) | <code>6</code> | config.json |
-| 586 | numeric literal (review) | <code>0</code> | config.json |
-| 589 | numeric literal (review) | <code>71</code> | config.json |
-| 604 | numeric literal (review) | <code>2</code> | config.json |
-| 605 | numeric literal (review) | <code>4</code> | config.json |
-| 605 | numeric literal (review) | <code>0</code> | config.json |
-| 607 | numeric literal (review) | <code>2</code> | config.json |
-| 608 | numeric literal (review) | <code>4</code> | config.json |
-| 608 | numeric literal (review) | <code>0</code> | config.json |
-| 622 | numeric literal (review) | <code>7</code> | config.json |
-| 622 | numeric literal (review) | <code>1</code> | config.json |
-| 623 | numeric literal (review) | <code>1</code> | config.json |
-| 625 | numeric literal (review) | <code>0</code> | config.json |
-| 625 | numeric literal (review) | <code>6</code> | config.json |
-| 631 | numeric literal (review) | <code>5</code> | config.json |
-| 631 | numeric literal (review) | <code>0</code> | config.json |
-| 633 | numeric literal (review) | <code>0</code> | config.json |
-| 633 | numeric literal (review) | <code>10</code> | config.json |
-| 636 | numeric literal (review) | <code>1</code> | config.json |
-| 637 | numeric literal (review) | <code>1</code> | config.json |
-| 646 | time / duration / threshold / limit | <code>10</code> | config.json |
-| 652 | numeric literal (review) | <code>3</code> | config.json |
-| 652 | numeric literal (review) | <code>1</code> | config.json |
-| 679 | numeric literal (review) | <code>2</code> | config.json |
-| 685 | text match / keyword candidate | <code>&#x27;orb_gap&#x27;</code> | data file |
-| 686 | numeric literal (review) | <code>2</code> | config.json |
-| 698 | numeric literal (review) | <code>2</code> | config.json |
-| 698 | numeric literal (review) | <code>2</code> | config.json |
-| 699 | numeric literal (review) | <code>0</code> | config.json |
-| 699 | numeric literal (review) | <code>0</code> | config.json |
-| 700 | numeric literal (review) | <code>0</code> | config.json |
-| 700 | text match / keyword candidate | <code>&#x27;right&#x27;</code> | data file |
-| 702 | time / duration / threshold / limit | <code>2</code> | config.json |
-| 702 | time / duration / threshold / limit | <code>2</code> | config.json |
-| 720 | numeric literal (review) | <code>360</code> | config.json |
-| 724 | numeric literal (review) | <code>1</code> | config.json |
-| 754 | numeric literal (review) | <code>1</code> | config.json |
-| 754 | text match / keyword candidate | <code>&#x27;right&#x27;</code> | data file |
-| 754 | numeric literal (review) | <code>-1</code> | config.json |
-| 760 | numeric literal (review) | <code>1</code> | config.json |
-| 760 | numeric literal (review) | <code>1</code> | config.json |
-| 760 | numeric literal (review) | <code>3</code> | config.json |
-| 761 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 762 | time / duration / threshold / limit | <code>0.0</code> | config.json |
-| 762 | time / duration / threshold / limit | <code>1.0</code> | config.json |
-| 764 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 771 | numeric literal (review) | <code>0</code> | config.json |
-| 884 | numeric literal (review) | <code>1</code> | config.json |
-| 910 | numeric literal (review) | <code>2</code> | config.json |
-| 917 | numeric literal (review) | <code>10</code> | config.json |
-| 917 | numeric literal (review) | <code>0</code> | config.json |
-| 923 | numeric literal (review) | <code>12</code> | config.json |
-| 923 | numeric literal (review) | <code>0</code> | config.json |
-
 ## invest.py
 
 Priority 2: User-facing tools, voice, UI and runtime services.
@@ -2756,6 +2523,187 @@ Priority 2: User-facing tools, voice, UI and runtime services.
 | 1030 | numeric literal (review) | <code>0</code> | config.json |
 | 1033 | text match / keyword candidate | <code>&#x27;__main__&#x27;</code> | data file |
 | 1034 | numeric literal (review) | <code>1</code> | config.json |
+
+## reminder_card.py
+
+Priority 2: User-facing tools, voice, UI and runtime services.
+
+| Line | Kind | Value | Suggested home |
+| ---: | --- | --- | --- |
+| 48 | text match / keyword candidate | <code>&#x27;card&#x27;</code> | data file |
+| 49 | text match / keyword candidate | <code>&#x27;layout&#x27;</code> | data file |
+| 53 | numeric literal (review) | <code>1000</code> | config.json |
+| 89 | text match / keyword candidate | <code>&#x27;pad&#x27;</code> | data file |
+| 90 | text match / keyword candidate | <code>&#x27;radius&#x27;</code> | data file |
+| 93 | text match / keyword candidate | <code>&#x27;tail_len&#x27;</code> | data file |
+| 94 | text match / keyword candidate | <code>&#x27;tail_base&#x27;</code> | data file |
+| 95 | text match / keyword candidate | <code>&#x27;margin&#x27;</code> | data file |
+| 103 | text match / keyword candidate | <code>&#x27;breath_levels&#x27;</code> | data file |
+| 106 | text match / keyword candidate | <code>&#x27;max_rows&#x27;</code> | data file |
+| 123 | text match / keyword candidate | <code>&#x27;name&#x27;</code> | data file |
+| 123 | text match / keyword candidate | <code>&#x27;colour&#x27;</code> | data file |
+| 123 | text match / keyword candidate | <code>&#x27;priorities&#x27;</code> | data file |
+| 135 | numeric literal (review) | <code>96.0</code> | config.json |
+| 137 | numeric literal (review) | <code>1.0</code> | config.json |
+| 158 | numeric literal (review) | <code>1</code> | config.json |
+| 161 | numeric literal (review) | <code>0</code> | config.json |
+| 163 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 163 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 163 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 163 | time / duration / threshold / limit | <code>255</code> | config.json |
+| 164 | numeric literal (review) | <code>0</code> | config.json |
+| 165 | numeric literal (review) | <code>2</code> | config.json |
+| 165 | numeric literal (review) | <code>2</code> | config.json |
+| 165 | numeric literal (review) | <code>1</code> | config.json |
+| 165 | numeric literal (review) | <code>255</code> | config.json |
+| 168 | numeric literal (review) | <code>2</code> | config.json |
+| 169 | numeric literal (review) | <code>2</code> | config.json |
+| 170 | numeric literal (review) | <code>1</code> | config.json |
+| 171 | numeric literal (review) | <code>255</code> | config.json |
+| 173 | text match / keyword candidate | <code>&#x27;left&#x27;</code> | data file |
+| 175 | numeric literal (review) | <code>0</code> | config.json |
+| 176 | time / duration / threshold / limit | <code>2</code> | config.json |
+| 176 | time / duration / threshold / limit | <code>2</code> | config.json |
+| 177 | numeric literal (review) | <code>0</code> | config.json |
+| 179 | numeric literal (review) | <code>0</code> | config.json |
+| 187 | numeric literal (review) | <code>2</code> | config.json |
+| 187 | text match / keyword candidate | <code>&#x27;right&#x27;</code> | data file |
+| 187 | numeric literal (review) | <code>2</code> | config.json |
+| 188 | numeric literal (review) | <code>2</code> | config.json |
+| 191 | numeric literal (review) | <code>0</code> | config.json |
+| 198 | time / duration / threshold / limit | <code>360</code> | config.json |
+| 198 | time / duration / threshold / limit | <code>360</code> | config.json |
+| 198 | time / duration / threshold / limit | <code>255</code> | config.json |
+| 207 | numeric literal (review) | <code>256</code> | config.json |
+| 208 | numeric literal (review) | <code>255</code> | config.json |
+| 208 | numeric literal (review) | <code>360</code> | config.json |
+| 208 | numeric literal (review) | <code>360</code> | config.json |
+| 210 | numeric literal (review) | <code>0</code> | config.json |
+| 210 | time / duration / threshold / limit | <code>255</code> | config.json |
+| 210 | time / duration / threshold / limit | <code>255</code> | config.json |
+| 216 | numeric literal (review) | <code>0</code> | config.json |
+| 216 | numeric literal (review) | <code>0</code> | config.json |
+| 216 | numeric literal (review) | <code>0</code> | config.json |
+| 216 | numeric literal (review) | <code>0</code> | config.json |
+| 217 | numeric literal (review) | <code>255</code> | config.json |
+| 218 | numeric literal (review) | <code>255</code> | config.json |
+| 219 | numeric literal (review) | <code>255</code> | config.json |
+| 220 | numeric literal (review) | <code>255</code> | config.json |
+| 222 | numeric literal (review) | <code>0</code> | config.json |
+| 228 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 230 | numeric literal (review) | <code>1</code> | config.json |
+| 234 | numeric literal (review) | <code>255</code> | config.json |
+| 235 | numeric literal (review) | <code>255</code> | config.json |
+| 242 | numeric literal (review) | <code>2</code> | config.json |
+| 242 | numeric literal (review) | <code>16</code> | config.json |
+| 242 | numeric literal (review) | <code>1</code> | config.json |
+| 242 | numeric literal (review) | <code>3</code> | config.json |
+| 242 | numeric literal (review) | <code>5</code> | config.json |
+| 254 | numeric literal (review) | <code>48</code> | config.json |
+| 255 | numeric literal (review) | <code>0</code> | config.json |
+| 255 | numeric literal (review) | <code>0</code> | config.json |
+| 259 | numeric literal (review) | <code>0</code> | config.json |
+| 259 | numeric literal (review) | <code>0</code> | config.json |
+| 262 | numeric literal (review) | <code>0</code> | config.json |
+| 262 | numeric literal (review) | <code>0</code> | config.json |
+| 280 | text match / keyword candidate | <code>&#x27;right&#x27;</code> | data file |
+| 281 | numeric literal (review) | <code>2</code> | config.json |
+| 284 | numeric literal (review) | <code>2</code> | config.json |
+| 287 | numeric literal (review) | <code>2</code> | config.json |
+| 287 | numeric literal (review) | <code>2</code> | config.json |
+| 288 | text match / keyword candidate | <code>&#x27;right&#x27;</code> | data file |
+| 288 | text match / keyword candidate | <code>&#x27;left&#x27;</code> | data file |
+| 290 | text match / keyword candidate | <code>&#x27;left&#x27;</code> | data file |
+| 290 | text match / keyword candidate | <code>&#x27;right&#x27;</code> | data file |
+| 291 | text match / keyword candidate | <code>&#x27;right&#x27;</code> | data file |
+| 292 | numeric literal (review) | <code>2</code> | config.json |
+| 307 | numeric literal (review) | <code>-1</code> | config.json |
+| 328 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 356 | numeric literal (review) | <code>0</code> | config.json |
+| 361 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 378 | numeric literal (review) | <code>0</code> | config.json |
+| 384 | numeric literal (review) | <code>0</code> | config.json |
+| 387 | numeric literal (review) | <code>0</code> | config.json |
+| 388 | numeric literal (review) | <code>0.0</code> | config.json |
+| 393 | numeric literal (review) | <code>0.0</code> | config.json |
+| 399 | numeric literal (review) | <code>0</code> | config.json |
+| 399 | numeric literal (review) | <code>0</code> | config.json |
+| 415 | numeric literal (review) | <code>0</code> | config.json |
+| 427 | numeric literal (review) | <code>0</code> | config.json |
+| 440 | numeric literal (review) | <code>2</code> | config.json |
+| 445 | numeric literal (review) | <code>2</code> | config.json |
+| 454 | numeric literal (review) | <code>0</code> | config.json |
+| 457 | numeric literal (review) | <code>0</code> | config.json |
+| 463 | numeric literal (review) | <code>0</code> | config.json |
+| 463 | numeric literal (review) | <code>0</code> | config.json |
+| 465 | numeric literal (review) | <code>0</code> | config.json |
+| 465 | numeric literal (review) | <code>0</code> | config.json |
+| 468 | numeric literal (review) | <code>0</code> | config.json |
+| 468 | numeric literal (review) | <code>0</code> | config.json |
+| 479 | numeric literal (review) | <code>0</code> | config.json |
+| 480 | numeric literal (review) | <code>0</code> | config.json |
+| 483 | numeric literal (review) | <code>0</code> | config.json |
+| 487 | text match / keyword candidate | <code>&#x27;id&#x27;</code> | data file |
+| 491 | numeric literal (review) | <code>1</code> | config.json |
+| 497 | text match / keyword candidate | <code>&#x27;new&#x27;</code> | data file |
+| 503 | numeric literal (review) | <code>0</code> | config.json |
+| 516 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 520 | numeric literal (review) | <code>0</code> | config.json |
+| 520 | numeric literal (review) | <code>0</code> | config.json |
+| 520 | numeric literal (review) | <code>0</code> | config.json |
+| 535 | numeric literal (review) | <code>120</code> | config.json |
+| 537 | numeric literal (review) | <code>-1</code> | config.json |
+| 537 | numeric literal (review) | <code>0</code> | config.json |
+| 537 | numeric literal (review) | <code>1</code> | config.json |
+| 539 | numeric literal (review) | <code>0</code> | config.json |
+| 548 | time / duration / threshold / limit | <code>0.0</code> | config.json |
+| 548 | time / duration / threshold / limit | <code>1.0</code> | config.json |
+| 548 | time / duration / threshold / limit | <code>2</code> | config.json |
+| 549 | numeric literal (review) | <code>0</code> | config.json |
+| 561 | numeric literal (review) | <code>2</code> | config.json |
+| 561 | numeric literal (review) | <code>0</code> | config.json |
+| 561 | numeric literal (review) | <code>2</code> | config.json |
+| 563 | numeric literal (review) | <code>0</code> | config.json |
+| 574 | time / duration / threshold / limit | <code>0</code> | config.json |
+| 575 | numeric literal (review) | <code>0</code> | config.json |
+| 584 | numeric literal (review) | <code>0</code> | config.json |
+| 586 | numeric literal (review) | <code>0</code> | config.json |
+| 589 | numeric literal (review) | <code>0</code> | config.json |
+| 590 | numeric literal (review) | <code>0</code> | config.json |
+| 609 | numeric literal (review) | <code>0</code> | config.json |
+| 612 | numeric literal (review) | <code>0</code> | config.json |
+| 629 | numeric literal (review) | <code>0</code> | config.json |
+| 635 | numeric literal (review) | <code>0</code> | config.json |
+| 637 | numeric literal (review) | <code>0</code> | config.json |
+| 640 | numeric literal (review) | <code>1</code> | config.json |
+| 641 | numeric literal (review) | <code>1</code> | config.json |
+| 656 | numeric literal (review) | <code>1</code> | config.json |
+| 683 | numeric literal (review) | <code>2</code> | config.json |
+| 689 | text match / keyword candidate | <code>&#x27;orb_gap&#x27;</code> | data file |
+| 690 | numeric literal (review) | <code>2</code> | config.json |
+| 702 | numeric literal (review) | <code>2</code> | config.json |
+| 702 | numeric literal (review) | <code>2</code> | config.json |
+| 703 | numeric literal (review) | <code>0</code> | config.json |
+| 703 | numeric literal (review) | <code>0</code> | config.json |
+| 704 | numeric literal (review) | <code>0</code> | config.json |
+| 704 | text match / keyword candidate | <code>&#x27;right&#x27;</code> | data file |
+| 706 | time / duration / threshold / limit | <code>2</code> | config.json |
+| 706 | time / duration / threshold / limit | <code>2</code> | config.json |
+| 724 | numeric literal (review) | <code>360</code> | config.json |
+| 728 | numeric literal (review) | <code>1</code> | config.json |
+| 758 | numeric literal (review) | <code>1</code> | config.json |
+| 758 | text match / keyword candidate | <code>&#x27;right&#x27;</code> | data file |
+| 758 | numeric literal (review) | <code>-1</code> | config.json |
+| 764 | numeric literal (review) | <code>1</code> | config.json |
+| 764 | numeric literal (review) | <code>1</code> | config.json |
+| 765 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 766 | time / duration / threshold / limit | <code>0.0</code> | config.json |
+| 766 | time / duration / threshold / limit | <code>1.0</code> | config.json |
+| 768 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 775 | numeric literal (review) | <code>0</code> | config.json |
+| 915 | numeric literal (review) | <code>2</code> | config.json |
+| 922 | numeric literal (review) | <code>0</code> | config.json |
+| 928 | numeric literal (review) | <code>0</code> | config.json |
 
 ## time_parse.py
 
