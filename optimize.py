@@ -10,6 +10,9 @@ they only happen when explicitly called (as a tool Denisse's model can use,
 gated through the normal confirmation flow in safety.py, since disabling
 something at login is more consequential and worth a human glance).
 
+Thresholds, timings, paths, the startup locations and the wording are
+data: the "optimize" section of housekeeping.json (AGENTS.md Rule 0).
+
 Run:
     python optimize.py
 """
@@ -26,31 +29,45 @@ try:
 except ImportError:  # non-Windows -- startup-program management just no-ops
     winreg = None
 
+import housekeeping
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CLEANUP_LOG_FILE = os.path.join(BASE_DIR, "memory", "cleanup_log.json")
-DISABLED_STARTUP_DIR = os.path.join(BASE_DIR, "memory", "disabled_startup")
-DISABLED_REGISTRY_FILE = os.path.join(BASE_DIR, "memory", "disabled_startup_registry.json")
+CONFIG = {}
+_HIVES = {"HKCU": "HKEY_CURRENT_USER", "HKLM": "HKEY_LOCAL_MACHINE"}  # names stored in the backup file
 
-TEMP_DIR = os.environ.get("TEMP") or os.path.join(os.path.expanduser("~"), "AppData", "Local", "Temp")
-TEMP_QUIET_SECONDS = 24 * 60 * 60  # only remove temp files untouched this long
-TEMP_POLL_SECONDS = 60 * 60  # clean once an hour
 
-RESOURCE_POLL_SECONDS = 5 * 60  # check disk/memory every 5 minutes
-LOW_DISK_FREE_GB = 5.0
-LOW_DISK_FREE_PERCENT = 10.0
-HIGH_MEMORY_PERCENT = 90.0
+def configure(path=None) -> dict:
+    """(Re)load housekeeping.json's "optimize" section into the module values."""
+    global CONFIG, CLEANUP_LOG_FILE, DISABLED_STARTUP_DIR, DISABLED_REGISTRY_FILE, TEMP_DIR
+    global TEMP_QUIET_SECONDS, TEMP_POLL_SECONDS, RESOURCE_POLL_SECONDS
+    global LOW_DISK_FREE_GB, LOW_DISK_FREE_PERCENT, HIGH_MEMORY_PERCENT, STARTUP_RUN_KEYS, STARTUP_FOLDER
+    CONFIG = cfg = housekeeping.load(path)["optimize"]
+    CLEANUP_LOG_FILE = housekeeping.path(cfg["cleanup_log_file"])
+    DISABLED_STARTUP_DIR = housekeeping.path(cfg["disabled_startup_dir"])
+    DISABLED_REGISTRY_FILE = housekeeping.path(cfg["disabled_registry_file"])
+    TEMP_DIR = (housekeeping.path(cfg["temp_dir"]) if cfg["temp_dir"]
+                else os.environ.get("TEMP") or housekeeping.path(cfg["temp_dir_fallback"]))
+    TEMP_QUIET_SECONDS = cfg["temp_quiet_s"]  # only remove temp files untouched this long
+    TEMP_POLL_SECONDS = cfg["temp_poll_s"]
+    RESOURCE_POLL_SECONDS = cfg["resource_poll_s"]
+    LOW_DISK_FREE_GB = cfg["low_disk_free_gb"]
+    LOW_DISK_FREE_PERCENT = cfg["low_disk_free_percent"]
+    HIGH_MEMORY_PERCENT = cfg["high_memory_percent"]
+    STARTUP_RUN_KEYS = ([(getattr(winreg, _HIVES[h]), cfg["startup_run_key"]) for h in cfg["startup_hives"]]
+                        if winreg else [])
+    STARTUP_FOLDER = os.path.join(os.environ.get("APPDATA", ""), cfg["startup_folder"])
+    return CONFIG
 
-STARTUP_RUN_KEYS = (
-    [
-        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run"),
-        (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Run"),
-    ]
-    if winreg
-    else []
-)
-STARTUP_FOLDER = os.path.join(
-    os.environ.get("APPDATA", ""), r"Microsoft\Windows\Start Menu\Programs\Startup"
-)
+
+def _text(key, **fields) -> str:
+    return CONFIG["text"][key].format(**fields)
+
+
+def _system_drive() -> str:
+    return (CONFIG["system_drive"] or os.environ.get("SystemDrive") or CONFIG["system_drive_fallback"]) + "\\"
+
+
+configure()
 
 
 def _log(log_file: str, entry: dict) -> None:
@@ -63,7 +80,7 @@ def _log(log_file: str, entry: dict) -> None:
         except (json.JSONDecodeError, OSError):
             log = []
     log.append(entry)
-    log = log[-500:]  # keep it bounded
+    log = log[-CONFIG["log_keep"]:]  # keep it bounded
     with open(log_file, "w", encoding="utf-8") as f:
         json.dump(log, f, indent=2)
 
@@ -111,23 +128,23 @@ def get_system_status() -> str:
     """Report disk space, memory, and CPU usage in one readable summary."""
     lines = []
     try:
-        drive = (os.environ.get("SystemDrive") or "C:") + "\\"
+        drive = _system_drive()
         total, _, free = shutil.disk_usage(drive)
         free_gb, total_gb = free / 1024**3, total / 1024**3
-        lines.append(f"Disk ({drive}): {free_gb:.1f} GB free of {total_gb:.1f} GB ({100 * free / total:.0f}% free)")
+        lines.append(_text("disk", drive=drive, free_gb=free_gb, total_gb=total_gb, pct_free=100 * free / total))
     except OSError as e:
-        lines.append(f"Disk: Error ({e})")
+        lines.append(_text("disk_error", error=e))
 
     try:
         mem = psutil.virtual_memory()
-        lines.append(f"Memory: {mem.percent:.0f}% used ({mem.used / 1024**3:.1f} GB of {mem.total / 1024**3:.1f} GB)")
+        lines.append(_text("memory", percent=mem.percent, used_gb=mem.used / 1024**3, total_gb=mem.total / 1024**3))
     except Exception as e:
-        lines.append(f"Memory: Error ({e})")
+        lines.append(_text("memory_error", error=e))
 
     try:
-        lines.append(f"CPU: {psutil.cpu_percent(interval=0.5):.0f}% used")
+        lines.append(_text("cpu", percent=psutil.cpu_percent(interval=CONFIG["cpu_sample_s"])))
     except Exception as e:
-        lines.append(f"CPU: Error ({e})")
+        lines.append(_text("cpu_error", error=e))
 
     return "\n".join(lines)
 
@@ -140,17 +157,17 @@ def check_resource_warnings() -> list:
     version of this)."""
     warnings = []
     try:
-        drive = (os.environ.get("SystemDrive") or "C:") + "\\"
+        drive = _system_drive()
         total, _, free = shutil.disk_usage(drive)
         free_gb, pct_free = free / 1024**3, 100 * free / total
         if free_gb < LOW_DISK_FREE_GB or pct_free < LOW_DISK_FREE_PERCENT:
-            warnings.append(f"Low disk space on {drive}: {free_gb:.1f} GB free ({pct_free:.0f}%)")
+            warnings.append(_text("low_disk", drive=drive, free_gb=free_gb, pct_free=pct_free))
     except OSError:
         pass
     try:
         pct = psutil.virtual_memory().percent
         if pct > HIGH_MEMORY_PERCENT:
-            warnings.append(f"High memory usage: {pct:.0f}%")
+            warnings.append(_text("high_memory", percent=pct))
     except Exception:
         pass
     return warnings
@@ -169,16 +186,16 @@ def list_startup_programs() -> str:
                         name, value, _ = winreg.EnumValue(key, i)
                     except OSError:
                         break
-                    entries.append(f"{name} (registry): {value}")
+                    entries.append(_text("startup_registry", name=name, value=value))
                     i += 1
         except OSError:
             continue
     if os.path.isdir(STARTUP_FOLDER):
         for name in os.listdir(STARTUP_FOLDER):
-            if name.lower() == "desktop.ini":
-                continue  # a folder-view settings file, not a program
-            entries.append(f"{name} (Startup folder shortcut)")
-    return "\n".join(entries) if entries else "No startup programs found."
+            if name.lower() in {n.lower() for n in CONFIG["skip_startup_names"]}:
+                continue  # e.g. desktop.ini -- a folder-view settings file, not a program
+            entries.append(_text("startup_folder", name=name))
+    return "\n".join(entries) if entries else _text("no_startup")
 
 
 def _load_registry_backup() -> dict:
@@ -208,9 +225,9 @@ def disable_startup_program(name: str) -> str:
                 os.makedirs(DISABLED_STARTUP_DIR, exist_ok=True)
                 try:
                     shutil.move(os.path.join(STARTUP_FOLDER, fname), os.path.join(DISABLED_STARTUP_DIR, fname))
-                    return f"Disabled '{fname}'. Restore it any time with restore_startup_program."
+                    return _text("disabled_file", name=fname)
                 except OSError as e:
-                    return f"Error disabling '{fname}': {e}"
+                    return _text("disable_error", name=fname, error=e)
 
     for hive, subkey in STARTUP_RUN_KEYS:
         try:
@@ -223,11 +240,11 @@ def disable_startup_program(name: str) -> str:
                 backup[name] = {"hive": "HKCU" if hive == winreg.HKEY_CURRENT_USER else "HKLM", "value": value}
                 _save_registry_backup(backup)
                 winreg.DeleteValue(key, name)
-                return f"Disabled startup entry '{name}'. Restore it any time with restore_startup_program."
+                return _text("disabled_registry", name=name)
         except OSError:
             continue
 
-    return f"No startup program named '{name}' found (see list_startup_programs)."
+    return _text("disable_not_found", name=name)
 
 
 def restore_startup_program(name: str) -> str:
@@ -240,9 +257,9 @@ def restore_startup_program(name: str) -> str:
     if disabled_path and os.path.exists(disabled_path):
         try:
             shutil.move(disabled_path, os.path.join(STARTUP_FOLDER, os.path.basename(disabled_path)))
-            return f"Restored '{os.path.basename(disabled_path)}' to the Startup folder."
+            return _text("restored_file", name=os.path.basename(disabled_path))
         except OSError as e:
-            return f"Error restoring '{name}': {e}"
+            return _text("restore_error", name=name, error=e)
 
     backup = _load_registry_backup()
     if name in backup:
@@ -255,21 +272,21 @@ def restore_startup_program(name: str) -> str:
                 with winreg.OpenKey(h, subkey, 0, winreg.KEY_ALL_ACCESS) as key:
                     winreg.SetValueEx(key, name, 0, winreg.REG_SZ, entry["value"])
                 _save_registry_backup(backup)
-                return f"Restored startup entry '{name}'."
+                return _text("restored_registry", name=name)
             except OSError as e:
-                return f"Error restoring '{name}': {e}"
+                return _text("restore_error", name=name, error=e)
 
-    return f"No disabled startup program named '{name}' found to restore."
+    return _text("restore_not_found", name=name)
 
 
 def main() -> None:
-    print("Denisse optimize -- one-off run:")
+    print(_text("run_title"))
     print(get_system_status())
     print()
     cleaned = clean_temp_files()
-    print(f"Temp cleanup: removed {len(cleaned)} file(s).")
+    print(_text("run_cleaned", count=len(cleaned)))
     print()
-    print("Startup programs:")
+    print(_text("run_startup"))
     print(list_startup_programs())
 
 

@@ -3,7 +3,7 @@ Denisse -- background file organizer.
 
 Watches one or more folders (Downloads by default) and moves loose files
 into type subfolders (Documents, Images, Videos, Audio, Archives,
-Installers, Other) as they show up.
+Installers, Other by default) as they show up.
 
 Deliberately NOT LLM-driven: this runs unattended with nobody watching a
 confirmation prompt (see safety.py), so it sticks to a small deterministic
@@ -21,6 +21,9 @@ ruleset instead of letting a model decide what to run. Rules:
   you what she's done (e.g. via a future "what did you organize today"
   skill) and so you can audit or undo anything by hand.
 
+The folders, categories, timings, limits and wording are data: the
+"organize" section of housekeeping.json (AGENTS.md Rule 0).
+
 Run:
     python auto_organize.py
 """
@@ -31,30 +34,35 @@ import shutil
 import time
 import threading
 
+import housekeeping
+
 _organize_lock = threading.RLock()
 
 FILE_ATTRIBUTE_HIDDEN = 0x2
 FILE_ATTRIBUTE_SYSTEM = 0x4
 
-WATCH_FOLDERS = [
-    os.path.join(os.path.expanduser("~"), "Downloads"),
-]
-POLL_SECONDS = 15
-QUIET_SECONDS = 20  # leave a file alone until it's been untouched this long
-
-SKIP_SUFFIXES = (".crdownload", ".part", ".tmp", ".download")
-
-CATEGORIES = {
-    "Documents": {".pdf", ".doc", ".docx", ".txt", ".rtf", ".odt", ".xls", ".xlsx", ".ppt", ".pptx", ".csv", ".md"},
-    "Images": {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg", ".webp", ".heic", ".tiff"},
-    "Videos": {".mp4", ".mov", ".avi", ".mkv", ".wmv", ".flv", ".webm"},
-    "Audio": {".mp3", ".wav", ".flac", ".aac", ".m4a", ".ogg"},
-    "Archives": {".zip", ".rar", ".7z", ".tar", ".gz"},
-    "Installers": {".exe", ".msi", ".msix"},
-}
-
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-LOG_FILE = os.path.join(BASE_DIR, "memory", "organize_log.json")
+CONFIG = {}
+
+
+def configure(path=None) -> dict:
+    """(Re)load housekeeping.json's "organize" section into the module values."""
+    global CONFIG, WATCH_FOLDERS, POLL_SECONDS, QUIET_SECONDS, SKIP_SUFFIXES, CATEGORIES, LOG_FILE
+    CONFIG = housekeeping.load(path)["organize"]
+    WATCH_FOLDERS = [housekeeping.path(f) for f in CONFIG["watch_folders"]]
+    POLL_SECONDS = CONFIG["poll_s"]
+    QUIET_SECONDS = CONFIG["quiet_s"]  # leave a file alone until it's been untouched this long
+    SKIP_SUFFIXES = tuple(s.lower() for s in CONFIG["skip_suffixes"])
+    CATEGORIES = {c["folder"]: {e.lower() for e in c["extensions"]} for c in CONFIG["categories"]}
+    LOG_FILE = housekeeping.path(CONFIG["log_file"])
+    return CONFIG
+
+
+def _text(key, **fields) -> str:
+    return CONFIG["text"][key].format(**fields)
+
+
+configure()
 
 
 def _category_for(filename: str) -> str:
@@ -62,7 +70,7 @@ def _category_for(filename: str) -> str:
     for category, exts in CATEGORIES.items():
         if ext in exts:
             return category
-    return "Other"
+    return CONFIG["other_folder"]
 
 
 def _log_move(entry: dict) -> None:
@@ -75,7 +83,7 @@ def _log_move(entry: dict) -> None:
         except (json.JSONDecodeError, OSError):
             log = []
     log.append(entry)
-    log = log[-500:]  # keep it bounded
+    log = log[-CONFIG["log_keep"]:]  # keep it bounded
     with open(LOG_FILE, "w", encoding="utf-8") as f:
         json.dump(log, f, indent=2)
 
@@ -85,10 +93,11 @@ def _unique_destination(dest_dir: str, name: str) -> str:
     if not os.path.exists(dest_path):
         return dest_path
     base, ext = os.path.splitext(name)
-    n = 2
-    while os.path.exists(os.path.join(dest_dir, f"{base} ({n}){ext}")):
+    pattern = CONFIG["collision_name"]
+    n = CONFIG["first_collision_number"]
+    while os.path.exists(os.path.join(dest_dir, pattern.format(base=base, n=n, ext=ext))):
         n += 1
-    return os.path.join(dest_dir, f"{base} ({n}){ext}")
+    return os.path.join(dest_dir, pattern.format(base=base, n=n, ext=ext))
 
 
 def organize_folder(folder: str) -> list:
@@ -109,7 +118,7 @@ def _organize_folder(folder: str) -> list:
 
         if not os.path.isfile(path):
             continue  # leave subfolders alone, including our own category folders
-        if name.startswith("."):
+        if name.startswith(tuple(CONFIG["skip_name_prefixes"])):
             continue
         if any(name.lower().endswith(suf) for suf in SKIP_SUFFIXES):
             continue  # still downloading
@@ -138,7 +147,7 @@ def _organize_folder(folder: str) -> list:
             os.makedirs(dest_dir, exist_ok=True)
             shutil.move(path, dest_path)
         except OSError as e:
-            print(f"skip (error moving {name}): {e}")
+            print(_text("move_error", name=name, error=e))
             continue
 
         entry = {
@@ -149,23 +158,23 @@ def _organize_folder(folder: str) -> list:
         }
         _log_move(entry)
         moved.append(entry)
-        print(f"organized: {name} -> {category}/")
+        print(_text("moved", name=name, category=category))
 
     return moved
 
 
 def main():
-    print("Denisse auto-organize running. Watching:")
+    print(_text("watching"))
     for folder in WATCH_FOLDERS:
-        print(f"  {folder}")
-    print("Ctrl+C to stop.\n")
+        print(_text("watch_item", folder=folder))
+    print(_text("stop_hint"))
     try:
         while True:
             for folder in WATCH_FOLDERS:
                 organize_folder(folder)
             time.sleep(POLL_SECONDS)
     except KeyboardInterrupt:
-        print("\nStopped.")
+        print(_text("stopped"))
 
 
 if __name__ == "__main__":
