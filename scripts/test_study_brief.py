@@ -78,6 +78,10 @@ description: "5CCYB010 coursework, 30%, due 24 Nov 2026 — brief not yet read"
 """)
 note(EM + r"\Week 1\Electromagnetism Week 1.md", "---\nweek: 1\ntopic: Vectors\n---\n")
 note(EM + r"\Week 2\Electromagnetism Week 2.md", "---\nweek: 2\ntopic: Gauss\nstatus: files-only\n---\n")
+# A module with week notes and no coursework note at all (2026-11-04).
+CM = r"Atlas\Academic\SEM 1 Modules\5CCYB070 Computational Methods"
+note(CM + r"\Week 1\Computational Methods Week 1.md", "---\nweek: 1\ntopic: Floating point\n---\n")
+note(CM + r"\Week 2\Computational Methods Week 2.md", "---\nweek: 2\ntopic: Root finding\nstatus: scaffolded\n---\n")
 
 results = []
 
@@ -153,6 +157,23 @@ text = open(os.path.join(sb.DRAFTS, "2026-10-30 Electromagnetism study brief.md"
 check("existing write-up task not duplicated", "Write up Week 2" not in text and "already on your task list" in text)
 check("no question table: the Plan list is the work",
       "- [ ] Draft" in text and "Read the Electromagnetism coursework brief" in text)
+
+# -- no dated coursework: a brief with the date said unknown, never a guess --
+planner.clear_pending()
+reply = sb.run("prep me for computational methods", now)
+cm_path = os.path.join(sb.DRAFTS, "2026-10-30 Computational Methods study brief.md")
+check("undated module still gets a brief", os.path.exists(cm_path) and "study brief" in reply, reply[:160])
+check("the reply says the date is unknown", "due date is unknown" in reply and "couldn't finish" not in reply, reply)
+cm_text = open(cm_path, encoding="utf-8").read()
+check("the brief says the date is unknown and lists the week notes",
+      "Due date **unknown**" in cm_text and "Week 1]] (written)" in cm_text and "Week 2]] (scaffolded)" in cm_text)
+check("the unwritten week is the plan, undated",
+      "- Write up Week 2 (Root finding)" in cm_text and "by **" not in cm_text.split("## Plan")[1])
+check("undated steps are still offered", planner.pending(now) and planner.pending(now)[0]["due"] == "",
+      planner.pending(now))
+check("an undated brief passes its own check",
+      sb.verify(cm_path, json.load(open(sb._job_file("Computational Methods"))), today) == [])
+planner.clear_pending()
 
 # -- his edits survive a rerun ---------------------------------------------
 with open(path, "a", encoding="utf-8") as f:
