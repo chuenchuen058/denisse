@@ -1,0 +1,189 @@
+{
+  "_doc": "The tray (tray.py): which typed commands it handles itself before the model, its menu and on-screen wording, timings, limits, the chat flyout's sizes, fonts and colours. Edit tray.json, not this file: this one holds the shipped defaults, and any value in tray.json that is missing or invalid is logged and replaced by its default here (json_config.py). DENISSE_TRAY_CONFIG points at another file (tests). Sizes are logical pixels (scaled by the screen's DPI). Times say their unit in the key name. Read once at start-up. The orb's accent colours come from ui_theme.json's palette (accent, accent_bright), shared with the orb.",
+
+  "commands": {
+    "_doc": "Typed in the chat. route.<name> is 'tray' (the tray acts on a whole-message match itself, before and without the model: works with Ollama down, costs no model call, but the turn is not in her history) or 'model' (the message goes to the model like any other, which acts through its own tools -- study: the study_* tools; reminders: list_tasks, in chat rather than the card). With 'model', a match while the model isn't connected (or offline mode is on) still runs the tray's own action, so it never does nothing. Offline/online mode has no route: it has to work when the model can't. The study phrases themselves are tool_policy.json study_commands (shared with the wake word).",
+    "route": {
+      "study": "tray",
+      "reminders": "tray"
+    },
+    "_mode_phrases": "The whole message, any case, surrounding spaces and a trailing . or ! ignored. The first online phrase is the one the offline notice tells him to use.",
+    "offline_phrases": ["offline mode"],
+    "online_phrases": ["online mode"],
+    "_reminders": "Whole-message regex (lower-cased, spaces collapsed, trailing .!? dropped) that opens the reminder card. Whole-message only, so 'remind me to call the dentist' still goes to the model and becomes a task.",
+    "reminders": "^(?:(?:please\\s+)?(?:show|open|see|view|display|pull\\s+up)\\s+(?:me\\s+)?(?:my\\s+|the\\s+)?)?(?:reminders?|tasks?|task\\s+list|to-?do(?:\\s+list)?)(?:\\s+please)?$"
+  },
+
+  "text": {
+    "_doc": "Wording. {fields} are filled in by the code; a template may only use the fields shown.",
+    "menu": {
+      "talk": "Talk to Denisse",
+      "talk_with_hotkey": "Talk to Denisse ({hotkey})",
+      "reminders": "Reminders",
+      "pet_movement": "Pet movement",
+      "study_idle": "Study mode ({study_min} / {rest_min})",
+      "study_running": "Study mode ({status})",
+      "voice_console": "Voice mode (console)",
+      "mission_control": "Mission Control",
+      "independent_work": "Independent work",
+      "agent_activity": "What Denisse did",
+      "organize": "Auto-organize Downloads",
+      "optimize": "Auto-optimize (cleanup + monitoring)",
+      "wake_word": "Listen for \"hey Denisse\"",
+      "news": "Daily CNA news briefing",
+      "project_folder": "Project folder",
+      "quit": "Quit"
+    },
+    "icon_name": "denisse",
+    "icon_title": "Denisse",
+    "icon_title_with_hotkey": "Denisse -- {hotkey} to chat",
+    "popup_title": "Denisse",
+    "notify": {
+      "title": "Denisse",
+      "agent_job": "Denisse — {job}",
+      "wake_word": "\"hey Denisse\" — {command}",
+      "study": "Denisse -- {phase}",
+      "study_phase_study": "Study time",
+      "study_phase_rest": "Rest time",
+      "study_until": "Until {ends_at}",
+      "plate": "Denisse — on your plate",
+      "overdue": "OVERDUE: {task}",
+      "more": "...and {count} more",
+      "news": "Denisse — today's news"
+    },
+    "activity": {
+      "in_progress": "Run in progress.",
+      "none_yet": "No independent jobs have run yet.",
+      "unreadable": "I couldn't read the activity record. Check the local agent state."
+    },
+    "status": {
+      "online": "Online",
+      "offline": "Offline"
+    },
+    "chat": {
+      "close": "✕",
+      "stop_voice": "Stop voice",
+      "send": "➤",
+      "stop": "■",
+      "connecting": "Connecting to Denisse...",
+      "typing": "Denisse is typing...",
+      "thinking": "Thinking…",
+      "speech_stopped": "Speech stopped",
+      "heard": "🎤 heard: \"{text}\"",
+      "went_offline": "Offline. Type or say \"{online}\" to resume.",
+      "back_online": "Back online.",
+      "still_offline": "Offline -- say or type \"{online}\" to resume.",
+      "error": "Error: {error}",
+      "ellipsis": "…"
+    },
+    "confirm": {
+      "title": "Denisse wants to do something",
+      "question": "Allow {tool}({args})?"
+    },
+    "study_off": "Study mode off. Nice work.",
+    "news_prompt": "Give me a short summary of today's news.",
+    "tk_timeout": "the study clock didn't answer in time"
+  },
+
+  "timing": {
+    "_doc": "reminder_hour: the first reminder check at or after this local hour nags about due tasks (DENISSE_REMINDER_HOUR overrides). reminder_window_hours: due within this many hours counts as 'soon'. The unlock watcher polls every unlock_poll_s; a wall-clock jump of more than unlock_poll_s + sleep_jump_s means the machine slept; it shows the card at most once per unlock_min_gap_s, unlock_settle_s after the desktop is back. heard_display_ms: DENISSE_HEARD_DISPLAY_MS overrides.",
+    "reminder_hour": 8,
+    "reminder_poll_s": 900,
+    "reminder_window_hours": 48,
+    "startup_reminder_delay_ms": 10000,
+    "unlock_poll_s": 2,
+    "sleep_jump_s": 30,
+    "unlock_min_gap_s": 60,
+    "unlock_settle_s": 3,
+    "news_poll_s": 1800,
+    "thinking_max_ms": 120000,
+    "heard_display_ms": 8000,
+    "reveal_wait_s": 2.0,
+    "tk_call_timeout_s": 5.0,
+    "hotkey_focus_delay_ms": 50,
+    "anchor_poll_ms": 75,
+    "glow_frame_ms": 40,
+    "dashboard_probe_s": 1.0,
+    "happy_react_s": 3.0
+  },
+
+  "limits": {
+    "_doc": "Characters, unless named otherwise.",
+    "notify_chars": 220,
+    "activity_chars": 3500,
+    "wake_reply_chars": 90,
+    "wake_command_chars": 40,
+    "heard_chars": 60,
+    "plate_lines": 5
+  },
+
+  "dashboard_url": "http://127.0.0.1:{port}",
+
+  "chat": {
+    "_doc": "The chat flyout. width/height shrink to fit the work area less screen_margin. bubble_side_room / system_side_room: canvas width not used by wrapped text. glow_strip: the 'light worm' running up and down the sides, glow_step px per frame.",
+    "width": 320,
+    "height": 380,
+    "screen_margin": 20,
+    "anchor_margin": 10,
+    "anchor_gap": 8,
+    "bubble_pad_x": 9,
+    "bubble_pad_y": 6,
+    "bubble_gap": 5,
+    "bubble_margin": 6,
+    "bubble_chamfer": 9,
+    "bubble_side_room": 66,
+    "system_side_room": 24,
+    "canvas_inset": 24,
+    "typing_inset": 28,
+    "send_button": 30,
+    "status_dot": 8,
+    "glow_strip_w": 3,
+    "glow_strip_h": 70,
+    "glow_step": 4,
+    "supersample": 4,
+    "wheel_delta": 120
+  },
+
+  "fonts": {
+    "_doc": "stack: first installed family wins (TkDefaultFont if none). Sizes in points. icon_files: TrueType files tried for the tray icon's letter.",
+    "stack": ["Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", "Calibri", "Arial"],
+    "fallback": "Segoe UI",
+    "title": 11,
+    "status": 8,
+    "close": 10,
+    "stop_voice": 8,
+    "entry": 9,
+    "send": 11,
+    "typing": 8,
+    "body": 9,
+    "time": 7,
+    "icon_files": ["segoeuib.ttf", "arialbd.ttf"]
+  },
+
+  "icon": {
+    "_doc": "The tray icon: a letter in a ring, drawn so no icon file ships. letter_frac: letter height as a fraction of size.",
+    "size": 64,
+    "letter": "D",
+    "letter_frac": 0.55,
+    "ring_width": 3
+  },
+
+  "colours": {
+    "_doc": "#rrggbb. Tron-style: black void, thin glowing purple outlines. *_alpha are 0-255 tints over black.",
+    "icon_bg": "#0a0710",
+    "popup_bg": "#050308",
+    "popup_border": "#4c3575",
+    "text": "#ffffff",
+    "muted": "#a99bc4",
+    "status_ok": "#3ddc84",
+    "status_warn": "#e8b93b",
+    "status_bad": "#e2555a",
+    "panel_bg": "#0d0916",
+    "disc_fill": "#6d28d9",
+    "bubble_out_fg": "#ffffff",
+    "bubble_out_alpha": 40,
+    "bubble_in_outline": "#4c3575",
+    "bubble_in_fill": "#3a2a5c",
+    "bubble_in_alpha": 26
+  }
+}

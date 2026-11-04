@@ -80,11 +80,75 @@ from mission_control import get_status
 from safety import RISKY_TOOLS
 from voice_output import synthesize_inworld, prepare_audio, warm_up_audio, speak_streaming
 
+import json_config
+import mission_control
+import ui_theme
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Task reminders fire on the first check at or after this hour, once per
-# task per day. 8am local.
-REMINDER_HOUR = int(os.environ.get("DENISSE_REMINDER_HOUR", "8"))
+# tray.json: commands, routes, wording, timings, sizes, fonts and colours
+# (AGENTS.md Rule 0, 2026-11-04). The shipped values, key by key, are in
+# tray.defaults.json; a bad or missing value logs a line and uses that.
+CONFIG_FILE = os.path.join(BASE_DIR, "tray.json")
+DEFAULTS_FILE = os.path.join(BASE_DIR, "tray.defaults.json")
+CONFIG_ENV_VAR = "DENISSE_TRAY_CONFIG"
+ROUTES = ("tray", "model")  # what commands.route.<name> may say -- names the code acts on
+_COLOUR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+CONFIG = {}
+
+
+def _extra_checks(data: dict, defaults: dict, checker) -> dict:
+    cmds = data["commands"]
+    for name, route in cmds["route"].items():
+        if route not in ROUTES:
+            cmds["route"][name] = checker.bad(f"tray.commands.route.{name}", f"should be one of {ROUTES}",
+                                              defaults["commands"]["route"][name])
+    for key in ("offline_phrases", "online_phrases"):
+        if not [p for p in cmds[key] if p.strip()]:
+            cmds[key] = checker.bad(f"tray.commands.{key}", "is empty", defaults["commands"][key])
+    try:
+        re.compile(cmds["reminders"])
+    except re.error as e:
+        cmds["reminders"] = checker.bad("tray.commands.reminders", f"doesn't compile ({e})",
+                                        defaults["commands"]["reminders"])
+    for key, value in data["colours"].items():
+        if isinstance(value, str) and not _COLOUR_RE.match(value):
+            data["colours"][key] = checker.bad(f"tray.colours.{key}", "should be #rrggbb", defaults["colours"][key])
+        elif isinstance(value, int) and value > 255:
+            data["colours"][key] = checker.bad(f"tray.colours.{key}", "should be 0-255", defaults["colours"][key])
+    return data
+
+
+def _env_number(name: str, default):
+    """An env override of a data value (kept from before tray.json)."""
+    try:
+        return type(default)(os.environ[name])
+    except (KeyError, ValueError):
+        return default
+
+
+def configure(path=None) -> dict:
+    """(Re)load tray.json (or `path`, or $DENISSE_TRAY_CONFIG) and the
+    module values built from it. Tests call it with their own file."""
+    global CONFIG
+    path = path or os.environ.get(CONFIG_ENV_VAR) or CONFIG_FILE
+    CONFIG = json_config.load("tray", path, DEFAULTS_FILE, extra=_extra_checks)
+    _apply(CONFIG)
+    return CONFIG
+
+
+def _text(*keys, **fields) -> str:
+    """CONFIG['text'][k1][k2]... formatted with `fields`."""
+    value = CONFIG["text"]
+    for k in keys:
+        value = value[k]
+    return value.format(**fields) if fields else value
+
+
+def _clip(text: str, n: int) -> str:
+    return text if len(text) <= n else text[: n - 1] + _text("chat", "ellipsis")
+
+
 _reminder_stop_event = threading.Event()
 
 # Always launch console children (voice mode, Mission Control) with the real
@@ -98,55 +162,69 @@ PYTHON_EXE = os.path.join(_exe_dir, "python.exe")
 if not os.path.exists(PYTHON_EXE):
     PYTHON_EXE = sys.executable
 
-DASHBOARD_URL = "http://127.0.0.1:8765"
+def _apply(cfg: dict) -> None:
+    """Module values from tray.json. Kept as module names (POPUP_BG, ...)
+    because the drawing code and scripts/smoke_pet_chat.py read them."""
+    global DASHBOARD_URL, ACCENT, BG, POPUP_BG, POPUP_BORDER, POPUP_TEXT, POPUP_MUTED
+    global STATUS_OK, STATUS_WARN, STATUS_BAD, ACCENT_HEX, ACCENT_BRIGHT, HEADER_BG
+    global BUBBLE_OUT_OUTLINE, BUBBLE_OUT_FILL, BUBBLE_OUT_FG, BUBBLE_IN_OUTLINE, BUBBLE_IN_FILL, BUBBLE_IN_FG
+    global BUBBLE_CHAMFER, PANEL_BG, DISC_FILL, BUBBLE_PAD_X, BUBBLE_PAD_Y, BUBBLE_GAP, SEND_BTN_SIZE
+    global _FONT_STACK, FONT_FAMILY, REMINDER_HOUR, NEWS_POLL_SECONDS, THINKING_MAX_MS
+    global CHAT_WIDTH, CHAT_HEIGHT, HEARD_DISPLAY_MS, REVEAL_WAIT_S, SUPERSAMPLE
+    col, chat, timing = cfg["colours"], cfg["chat"], cfg["timing"]
+    DASHBOARD_URL = cfg["dashboard_url"].format(port=mission_control.PORT)
 
-ACCENT = (168, 85, 247)  # matches Mission Control's purple accent
-BG = (10, 7, 16)  # matches Mission Control's black background
+    # The accent is the orb's (ui_theme.json palette), so the tray icon,
+    # popup and orb stay one colour.
+    palette = ui_theme.load()["palette"]
+    ACCENT = _hex_to_rgb(palette["accent"])
+    ACCENT_HEX = palette["accent"]
+    ACCENT_BRIGHT = palette["accent_bright"]  # active/outgoing outlines
+    BG = _hex_to_rgb(col["icon_bg"])
 
-# Popup palette -- Tron-Legacy-inspired: pure black void, thin glowing
-# purple line-work on angular (chamfered, not rounded) panels, rather than
-# filled color blocks -- as hex strings since tkinter wants those rather
-# than RGB tuples.
-POPUP_BG = "#050308"  # near-pure black -- the "Grid" void
-POPUP_BORDER = "#4c3575"  # dim glow-line purple, used for resting/inactive outlines
-POPUP_TEXT = "#ffffff"
-POPUP_MUTED = "#a99bc4"
-STATUS_OK = "#3ddc84"
-STATUS_WARN = "#e8b93b"
-STATUS_BAD = "#e2555a"
-ACCENT_HEX = "#%02x%02x%02x" % ACCENT
-ACCENT_BRIGHT = "#c9a3ff"  # brightest glow-line purple, for active/outgoing outlines
+    # Popup palette -- Tron-Legacy-inspired: pure black void, thin glowing
+    # purple line-work on angular (chamfered, not rounded) panels, rather
+    # than filled color blocks. HEADER_BG matches the body so the header
+    # reads as one continuous panel, separated only by a thin glow line.
+    POPUP_BG = col["popup_bg"]
+    POPUP_BORDER = col["popup_border"]  # resting/inactive outlines
+    POPUP_TEXT = col["text"]
+    POPUP_MUTED = col["muted"]
+    STATUS_OK, STATUS_WARN, STATUS_BAD = col["status_ok"], col["status_warn"], col["status_bad"]
+    HEADER_BG = POPUP_BG
+    BUBBLE_OUT_OUTLINE = ACCENT_BRIGHT  # your messages -- bright glowing outline
+    BUBBLE_OUT_FILL = (*ACCENT, col["bubble_out_alpha"])  # faint tint, not a filled block
+    BUBBLE_OUT_FG = col["bubble_out_fg"]
+    BUBBLE_IN_OUTLINE = col["bubble_in_outline"]  # hers -- dim, no glow (hierarchy vs. yours)
+    BUBBLE_IN_FILL = (*_hex_to_rgb(col["bubble_in_fill"]), col["bubble_in_alpha"])
+    BUBBLE_IN_FG = POPUP_TEXT
+    # Solid fills, for widgets that can't do PIL alpha compositing.
+    PANEL_BG = col["panel_bg"]
+    DISC_FILL = col["disc_fill"]  # send button's solid glowing disc
 
-# No filled header bar or filled chat bubbles -- Tron panels are dark glass
-# with a thin glowing outline, not solid color blocks. HEADER_BG matches the
-# body background so the header blends in and reads as one continuous black
-# panel, separated only by a thin glow line (see ChatPopup.__init__).
-HEADER_BG = POPUP_BG
-BUBBLE_OUT_OUTLINE = ACCENT_BRIGHT  # your messages -- bright glowing outline
-BUBBLE_OUT_FILL = (*ACCENT, 40)  # faint purple tint over black, not a filled block
-BUBBLE_OUT_FG = "#ffffff"
-BUBBLE_IN_OUTLINE = "#4c3575"  # Denisse's messages -- dim outline, no glow (visual hierarchy vs. yours)
-BUBBLE_IN_FILL = (58, 42, 92, 26)  # barely-there tint, mostly just the void showing through
-BUBBLE_IN_FG = POPUP_TEXT
-BUBBLE_CHAMFER = 9  # corner cut size (px) -- angular sci-fi panel, not a rounded pill
+    BUBBLE_CHAMFER = chat["bubble_chamfer"]  # corner cut -- angular panel, not a pill
+    BUBBLE_PAD_X, BUBBLE_PAD_Y = chat["bubble_pad_x"], chat["bubble_pad_y"]
+    BUBBLE_GAP = chat["bubble_gap"]
+    SEND_BTN_SIZE = chat["send_button"]
+    SUPERSAMPLE = chat["supersample"]  # drawn this many times larger, then downsampled
+    CHAT_WIDTH, CHAT_HEIGHT = chat["width"], chat["height"]
 
-# Solid fill colors, for the few widgets that can't do PIL alpha compositing
-# (plain tk.Entry can't render a polygon outline+glow like the bubbles).
-PANEL_BG = "#0d0916"  # slightly lighter than POPUP_BG so it still reads as a distinct surface
-DISC_FILL = "#6d28d9"  # send button's solid glowing disc -- identity-disc purple
-BUBBLE_MAX_TEXT_W = 165  # px of wrapped text before a bubble wraps a line --
-# wider than a typical phone chat bubble on purpose: at the old 124px, most
-# replies wrapped into many short lines, which read as a wall of text for
-# something this narrow overall (see CHAT_WIDTH).
-BUBBLE_PAD_X, BUBBLE_PAD_Y = 9, 6
-BUBBLE_GAP = 5
-SEND_BTN_SIZE = 30
+    # Preferred font stack, most modern-looking first -- resolved to whichever
+    # is installed the first time a ChatPopup is built (needs a live Tk root).
+    _FONT_STACK = tuple(cfg["fonts"]["stack"])
+    FONT_FAMILY = cfg["fonts"]["fallback"]  # overwritten by _resolve_font_family()
 
-# Preferred font stack, most modern-looking first -- resolved to whichever
-# is actually installed the first time a ChatPopup is built (querying
-# available fonts needs a live Tk root, so this can't run at import time).
-_FONT_STACK = ("Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", "Calibri", "Arial")
-FONT_FAMILY = "Segoe UI"  # safe default, overwritten by _resolve_font_family()
+    # Task reminders fire on the first check at or after this hour, once per
+    # task per day.
+    REMINDER_HOUR = _env_number("DENISSE_REMINDER_HOUR", timing["reminder_hour"])
+    NEWS_POLL_SECONDS = timing["news_poll_s"]  # how often to check whether today's briefing is due
+    THINKING_MAX_MS = timing["thinking_max_ms"]  # never leave "thinking" stuck if a "done" gets lost
+    # How long the "heard: ..." live indicator stays up -- was 2.5s (too
+    # quick to read), lengthened on request.
+    HEARD_DISPLAY_MS = _env_number("DENISSE_HEARD_DISPLAY_MS", timing["heard_display_ms"])
+    # Longest the streamed voice waits for the Tk thread to reveal the reply
+    # bubble before speaking anyway (normally a few ms).
+    REVEAL_WAIT_S = timing["reveal_wait_s"]
 
 
 def _resolve_font_family():
@@ -184,6 +262,9 @@ def _hex_to_rgb(h: str) -> tuple:
     return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
 
 
+configure()
+
+
 def _chamfered_points(w: int, h: int, c: int) -> list:
     """Corner points for an octagon -- a rectangle with its four corners cut
     at 45 degrees -- the angular sci-fi-panel shape Tron Legacy's UI uses in
@@ -203,7 +284,7 @@ def _panel_image(
     crisp outline -- optionally with a soft glow bled out from behind it.
     Drawn at 4x scale then downsampled for anti-aliasing, same reasoning as
     the old rounded-rect helper this replaces."""
-    scale = 4
+    scale = SUPERSAMPLE
     w, h = max(w, 1), max(h, 1)
     pts = _chamfered_points(w * scale, h * scale, chamfer * scale)
 
@@ -225,7 +306,7 @@ def _panel_image(
 def _glow_line_image(w: int, rgb: tuple, thickness: int = 1, glow_pad: int = 3) -> ImageTk.PhotoImage:
     """A thin horizontal glowing line -- stands in for a filled bar as a
     boundary marker (e.g. under the chat popup's header)."""
-    scale = 4
+    scale = SUPERSAMPLE
     h = thickness + glow_pad * 2
     img = Image.new("RGBA", (w * scale, h * scale), (0, 0, 0, 0))
     cy = h * scale // 2
@@ -241,7 +322,7 @@ def _glow_line_image(w: int, rgb: tuple, thickness: int = 1, glow_pad: int = 3) 
 def _circle_image(d: int, rgb: tuple, glow: bool = False) -> tuple:
     """A filled circle, optionally with a soft blurred glow halo behind it
     (a restrained neon touch -- used for the send button's active state)."""
-    scale = 4
+    scale = SUPERSAMPLE
     pad = max(3, d // 4) if glow else 0  # modest room for the blur to bleed into -- kept small deliberately, restrained not neon-billboard
     size = d + pad * 2
     img = Image.new("RGBA", (size * scale, size * scale), (0, 0, 0, 0))
@@ -263,7 +344,7 @@ def _side_glow_image(w: int, h: int, rgb: tuple) -> ImageTk.PhotoImage:
     """A soft vertical glow blob, bright in the middle and fading at both
     ends -- the traveling 'light worm' segment run up/down the chat popup's
     left/right edges."""
-    scale = 4
+    scale = SUPERSAMPLE
     img = Image.new("RGBA", (w * scale, h * scale), (0, 0, 0, 0))
     cx = w * scale // 2
     glow_layer = Image.new("RGBA", (w * scale, h * scale), (0, 0, 0, 0))
@@ -276,17 +357,20 @@ def _side_glow_image(w: int, h: int, rgb: tuple) -> ImageTk.PhotoImage:
     return ImageTk.PhotoImage(img)
 
 
-def _make_icon_image(size: int = 64) -> Image.Image:
-    """Draw a simple 'D' badge so Denisse doesn't need a shipped icon asset."""
+def _make_icon_image(size: int = None) -> Image.Image:
+    """Draw a simple letter badge so Denisse doesn't need a shipped icon asset."""
+    icon = CONFIG["icon"]
+    size = size or icon["size"]
+    ring = icon["ring_width"]
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    draw.ellipse((2, 2, size - 3, size - 3), fill=BG, outline=ACCENT, width=3)
+    draw.ellipse((ring - 1, ring - 1, size - ring, size - ring), fill=BG, outline=ACCENT, width=ring)
 
-    text = "D"
+    text = icon["letter"]
     font = None
-    for font_name in ("segoeuib.ttf", "arialbd.ttf"):
+    for font_name in CONFIG["fonts"]["icon_files"]:
         try:
-            font = ImageFont.truetype(font_name, int(size * 0.55))
+            font = ImageFont.truetype(font_name, int(size * icon["letter_frac"]))
             break
         except OSError:
             continue
@@ -311,7 +395,7 @@ def _open_voice_console(icon, item):
 
 def _open_mission_control(icon, item):
     try:
-        urllib.request.urlopen(DASHBOARD_URL, timeout=1)
+        urllib.request.urlopen(DASHBOARD_URL, timeout=CONFIG["timing"]["dashboard_probe_s"])
         webbrowser.open(DASHBOARD_URL)  # already running, just open a tab
     except Exception:
         subprocess.Popen(
@@ -371,12 +455,12 @@ def _show_agent_activity(icon=None, item=None):
     engine = _get_agent_engine()
     try:
         state = json.loads(engine.state.read_text(encoding="utf-8")) if engine.state.exists() else {}
-        text = "\n\n".join(value.get("brief", "Run in progress.") for value in state.values())
-        text = text or "No independent jobs have run yet."
+        text = "\n\n".join(value.get("brief", _text("activity", "in_progress")) for value in state.values())
+        text = text or _text("activity", "none_yet")
     except (OSError, ValueError, AttributeError):
-        text = "I couldn't read the activity record. Check the local agent state."
+        text = _text("activity", "unreadable")
     error = engine.status()["error"]
-    _show_reply((error + "\n" if error else "") + text[:3500])
+    _show_reply((error + "\n" if error else "") + text[:CONFIG["limits"]["activity_chars"]])
 
 
 def _start_agent_workers():
@@ -394,7 +478,8 @@ def _start_agent_workers():
     engine.stop.clear()
     def notify(result):
         if _tray_icon is not None:
-            _tray_icon.notify(result["brief"][:220], "Denisse — " + result["job_id"].replace("_", " "))
+            _tray_icon.notify(result["brief"][:CONFIG["limits"]["notify_chars"]],
+                              _text("notify", "agent_job", job=result["job_id"].replace("_", " ")))
     for jobs in (("downloads",), ("task_review", "project_review")):
         ready = (lambda: True) if jobs == ("downloads",) else (
             lambda: not _is_manually_offline() and not _thinking_sources)
@@ -417,7 +502,7 @@ def _optimize_loop():
         for warning in optimize.check_resource_warnings():
             if _tray_icon is not None:
                 try:
-                    _tray_icon.notify(warning, "Denisse")
+                    _tray_icon.notify(warning, _text("notify", "title"))
                 except Exception:
                     pass  # notifications are best-effort, never fatal
         _optimize_stop_event.wait(optimize.RESOURCE_POLL_SECONDS)
@@ -455,11 +540,10 @@ def _on_wake_word_exchange(command: str, reply: str):
     if _tray_icon is None:
         return
 
-    def _truncate(s, n=90):
-        return s if len(s) <= n else s[: n - 1] + "…"
-
+    limits = CONFIG["limits"]
     try:
-        _tray_icon.notify(_truncate(reply), f'"hey Denisse" — {_truncate(command, 40)}')
+        _tray_icon.notify(_clip(reply, limits["wake_reply_chars"]),
+                          _text("notify", "wake_word", command=_clip(command, limits["wake_command_chars"])))
     except Exception:
         pass  # notifications are best-effort, never fatal
 
@@ -526,8 +610,9 @@ def _toggle_wake_word(icon, item):
 
 
 # Manual offline mode -- lets you pause Denisse's reply-processing on
-# demand, triggered only by saying or typing the exact phrase "offline
-# mode" (and back with "online mode"), never by clicking anything. Separate
+# demand, triggered only by typing an exact offline phrase (tray.json
+# commands.offline_phrases, shipped "offline mode"; back with an online
+# phrase) or saying wake_word.py's own, never by clicking anything. Separate
 # from whether Ollama itself is actually reachable (that's still what
 # _status_display's connected/model_ready checks reflect -- this just
 # forces the display to "Offline" and blocks new activity on top of that).
@@ -537,29 +622,44 @@ def _toggle_wake_word(icon, item):
 # param); same idea for typed chat (see ChatPopup._send).
 _manual_offline = threading.Event()
 
-_MODE_COMMAND_RE = {"offline mode": "offline", "online mode": "online"}
-
-
 def _match_mode_command(text: str):
     """-> 'offline', 'online', or None, matching wake_word.py's existing
     "exit"/"quit"/"stop listening" convention: the phrase, and nothing
-    else, modulo case/surrounding whitespace/trailing punctuation."""
-    return _MODE_COMMAND_RE.get(text.strip().lower().rstrip(".!"))
+    else, modulo case/surrounding whitespace/trailing punctuation. The
+    phrases are tray.json commands.offline_phrases / online_phrases -- a
+    fixed control word, not a guess at meaning: it has to work when the
+    model can't."""
+    said = text.strip().lower().rstrip(".!")
+    for mode in ("offline", "online"):
+        if said in (p.strip().lower() for p in CONFIG["commands"][f"{mode}_phrases"]):
+            return mode
+    return None
+
+
+def _online_phrase() -> str:
+    """The phrase the offline notices tell him to type."""
+    return next(p for p in CONFIG["commands"]["online_phrases"] if p.strip()).strip()
 
 
 # "show reminder", "show my reminders", "open the task list", or just
 # "reminders" -- typed in the chat, this opens the reminder card instead of
 # asking the model (asked 2026-10-07, in place of right-clicking the orb).
-# Whole-message only, so "remind me to call the dentist" still goes to
-# the model and becomes a task.
-_REMINDER_COMMAND = re.compile(
-    r"^(?:(?:please\s+)?(?:show|open|see|view|display|pull\s+up)\s+(?:me\s+)?(?:my\s+|the\s+)?)?"
-    r"(?:reminders?|tasks?|task\s+list|to-?do(?:\s+list)?)(?:\s+please)?$"
-)
-
-
+# The regex is tray.json commands.reminders; whole-message only, so "remind
+# me to call the dentist" still goes to the model and becomes a task.
 def _is_reminder_command(text: str) -> bool:
-    return bool(_REMINDER_COMMAND.match(" ".join(text.lower().rstrip(".!?").split())))
+    return bool(re.match(CONFIG["commands"]["reminders"], " ".join(text.lower().rstrip(".!?").split())))
+
+
+def _route(name: str) -> str:
+    """tray.json commands.route.<name>: 'tray' or 'model'."""
+    return CONFIG["commands"]["route"][name]
+
+
+def _tray_handles(name: str, brain_ready: bool) -> bool:
+    """Does the tray act on a matched `name` command itself? Always on the
+    'tray' route; on the 'model' route only while there is no model to ask,
+    so a matched command never just does nothing."""
+    return _route(name) == "tray" or not brain_ready
 
 
 def _is_manually_offline() -> bool:
@@ -585,8 +685,6 @@ def _refresh_chat_popup_status():
         root.after(0, _chat_popup.refresh_status)
 
 
-NEWS_POLL_SECONDS = 30 * 60  # check every 30 min whether today's briefing is due
-
 _news_thread = None
 _news_stop_event = threading.Event()
 
@@ -600,8 +698,8 @@ def _decline_risky_unattended(name, args):
 
 
 def _reminder_loop():
-    """Check every 15 minutes, so the nudge arrives daily and not only at
-    login. The machine stays on for days at a time (5+ days uptime is
+    """Check every tray.json timing.reminder_poll_s (15 minutes shipped),
+    so the nudge arrives daily and not only at login. The machine stays on for days at a time (5+ days uptime is
     normal here), so a login-only reminder can go a whole week without
     firing. needs_reminder() already dedupes per task per day, so a
     frequent poll costs nothing and simply catches the first check after
@@ -611,7 +709,7 @@ def _reminder_loop():
         now = datetime.now()
         if now.hour >= REMINDER_HOUR:
             _remind_due_tasks()
-        _reminder_stop_event.wait(15 * 60)
+        _reminder_stop_event.wait(CONFIG["timing"]["reminder_poll_s"])
 
 
 def _session_locked() -> bool:
@@ -639,22 +737,23 @@ def _unlock_watch_loop():
     the window procedure. Two signals: the lock screen going away, and a
     jump in wall-clock time (resumed from sleep without a lock screen).
     """
-    poll = 2
+    timing = CONFIG["timing"]
+    poll = timing["unlock_poll_s"]
     was_locked = _session_locked()
     last_tick = time.time()
     last_shown = 0.0
     while not _reminder_stop_event.wait(poll):
         now = time.time()
         locked = _session_locked()
-        slept = now - last_tick > poll + 30
+        slept = now - last_tick > poll + timing["sleep_jump_s"]
         last_tick = now
         if locked:
             was_locked = True
             continue
-        if (was_locked or slept) and now - last_shown > 60:
+        if (was_locked or slept) and now - last_shown > timing["unlock_min_gap_s"]:
             last_shown = now
             # A beat after unlocking, so it arrives once the desktop is back.
-            _reminder_stop_event.wait(3)
+            _reminder_stop_event.wait(timing["unlock_settle_s"])
             _remind_due_tasks(startup=True)
         was_locked = False
 
@@ -704,8 +803,9 @@ def _show_study_bubble(phase, ends_at, round_no, status=False):
     global _study_bubble
     if _floating_orb is None:
         if _tray_icon is not None:
-            title = "Study time" if phase == "study" else "Rest time"
-            _tray_icon.notify(f"Until {ends_at:%H:%M}", f"Denisse -- {title}")
+            title = _text("notify", "study_phase_study" if phase == "study" else "study_phase_rest")
+            _tray_icon.notify(_text("notify", "study_until", ends_at=f"{ends_at:%H:%M}"),
+                              _text("notify", "study", phase=title))
         return
     _close_study_bubble()
     _close_thinking_bubble()
@@ -734,7 +834,7 @@ def _stop_study_mode_main():
     if _study_mode is not None and _study_mode.active:
         _study_mode.stop()
         _close_study_bubble()
-        _show_reply_main("Study mode off. Nice work.")
+        _show_reply_main(_text("study_off"))
     if _tray_icon is not None:
         _tray_icon.update_menu()
 
@@ -761,7 +861,7 @@ def _on_study_change(mode):
         _tray_icon.update_menu()
 
 
-def _on_tk_thread(fn, timeout_s=5.0):
+def _on_tk_thread(fn, timeout_s=None):
     """Run `fn` on the Tk thread and return its result. Called from the
     brain's worker thread by study_mode's tool functions; a direct call
     when already on the main thread, so the CLI and tests don't deadlock."""
@@ -779,8 +879,8 @@ def _on_tk_thread(fn, timeout_s=5.0):
             done.set()
 
     root.after(0, run)
-    if not done.wait(timeout_s):
-        raise RuntimeError("the study clock didn't answer in time")
+    if not done.wait(timeout_s or CONFIG["timing"]["tk_call_timeout_s"]):
+        raise RuntimeError(_text("tk_timeout"))
     if "error" in box:
         raise box["error"]
     return box.get("result")
@@ -795,7 +895,9 @@ def _toggle_study_mode(icon=None, item=None):
 
 def _study_menu_text(item):
     status = _study_mode.status() if _study_mode is not None else ""
-    return f"Study mode ({status})" if status else "Study mode (25 / 5)"
+    if status:
+        return _text("menu", "study_running", status=status)
+    return _text("menu", "study_idle", study_min=study_mode.STUDY_MIN, rest_min=study_mode.REST_MIN)
 
 
 # Who is currently composing a reply ("chat", "wake"). A set rather than a
@@ -805,7 +907,6 @@ def _study_menu_text(item):
 _thinking_sources = set()
 _thinking_bubble = None
 _thinking_timeout_job = None
-THINKING_MAX_MS = 120_000  # never leave it stuck if a "done" gets lost
 
 
 def _runtime_state():
@@ -846,7 +947,7 @@ def _set_thinking_main(source: str, on: bool):
             _chat_popup.typing_label.config(text="")
         return
     if _chat_popup is not None:
-        _chat_popup.typing_label.config(text="Thinking…")
+        _chat_popup.typing_label.config(text=_text("chat", "thinking"))
         return  # the attached chat is already the pet's conversation bubble
     # The reminder card already sits beside the orb; don't stack a second.
     if _thinking_bubble is None and _reminder_card is None and _study_bubble is None and _floating_orb is not None:
@@ -899,7 +1000,7 @@ def _show_reply_main(text: str, _retry: bool = False, source=None):
     if _floating_orb is None or not (text or "").strip():
         return
     if not _retry:
-        _floating_orb.react("happy", 3.0)
+        _floating_orb.react("happy", CONFIG["timing"]["happy_react_s"])
     if _chat_popup is not None:
         if source != "chat":
             _chat_popup.receive_reply(text)
@@ -986,18 +1087,20 @@ def _remind_due_tasks(startup: bool = False):
     """
     try:
         tasks.pull_vault_ticks()  # respect anything ticked in Obsidian
-        overdue, soon = tasks.needs_reminder(hours=48)
+        overdue, soon = tasks.needs_reminder(hours=CONFIG["timing"]["reminder_window_hours"])
         if not startup and not (overdue or soon):
             return
         if _floating_orb is not None:
             root.after(0, _show_reminder_card)
         elif _tray_icon is not None and (overdue or soon):
-            lines = [f"OVERDUE: {tasks.describe(t)}" for t in overdue]
+            limits = CONFIG["limits"]
+            shown = limits["plate_lines"]
+            lines = [_text("notify", "overdue", task=tasks.describe(t)) for t in overdue]
             lines += [tasks.describe(t) for t in soon]
-            body = "\n".join(lines[:5])
-            if len(lines) > 5:
-                body += f"\n...and {len(lines) - 5} more"
-            _tray_icon.notify(body[:220], "Denisse — on your plate")
+            body = "\n".join(lines[:shown])
+            if len(lines) > shown:
+                body += "\n" + _text("notify", "more", count=len(lines) - shown)
+            _tray_icon.notify(body[:limits["notify_chars"]], _text("notify", "plate"))
         tasks.mark_reminded([t["id"] for t in overdue + soon])
     except Exception:
         pass  # a reminder failing must never take the tray down with it
@@ -1013,7 +1116,7 @@ def _news_briefing_loop():
                 brain = conversation.get_brain()
                 messages = conversation.replay()
                 turn_start = len(messages)
-                messages.append({"role": "user", "content": "Give me a short summary of today's news."})
+                messages.append({"role": "user", "content": _text("news_prompt")})
                 reply, messages = brain.respond(messages, confirm=_decline_risky_unattended)
                 conversation.record(messages[turn_start:])
                 news.mark_daily_briefing_done()
@@ -1028,7 +1131,7 @@ def _news_briefing_loop():
 
                 if _tray_icon is not None:
                     try:
-                        _tray_icon.notify(reply[:220], "Denisse — today's news")
+                        _tray_icon.notify(reply[:CONFIG["limits"]["notify_chars"]], _text("notify", "news"))
                     except Exception:
                         pass  # notifications are best-effort, never fatal
             except Exception:
@@ -1082,30 +1185,19 @@ def _quit(icon, item):
 def _status_display(status: dict) -> tuple:
     """-> (dot_color, message): just online/offline, no model name."""
     if _is_manually_offline():
-        return POPUP_MUTED, "Offline"
+        return POPUP_MUTED, _text("status", "offline")
     if not status.get("connected"):
-        return STATUS_BAD, "Offline"
+        return STATUS_BAD, _text("status", "offline")
     if not status.get("model_ready"):
-        return STATUS_WARN, "Online"
-    return STATUS_OK, "Online"
-
-
-CHAT_WIDTH, CHAT_HEIGHT = 320, 380
+        return STATUS_WARN, _text("status", "online")
+    return STATUS_OK, _text("status", "online")
 
 
 def _stop_speaking():
     """Immediate speech control, including replies still synthesizing."""
     wake_word.interrupt()
     if _chat_popup is not None:
-        _chat_popup.typing_label.config(text="Speech stopped")
-
-# How long the "🎤 heard: ..." live indicator stays up before clearing --
-# was 2.5s (too quick to actually read), lengthened on request.
-HEARD_DISPLAY_MS = int(os.environ.get("DENISSE_HEARD_DISPLAY_MS", "8000"))
-
-# Longest the streamed voice waits for the Tk thread to reveal the reply
-# bubble before speaking anyway (normally a few ms).
-REVEAL_WAIT_S = 2.0
+        _chat_popup.typing_label.config(text=_text("chat", "speech_stopped"))
 
 
 class ChatPopup:
@@ -1118,8 +1210,9 @@ class ChatPopup:
         self.win.configure(bg=POPUP_BG, highlightbackground=POPUP_BORDER, highlightthickness=1)
 
         area = _work_area(self.win.winfo_screenwidth(), self.win.winfo_screenheight())
-        w = min(_px(CHAT_WIDTH), area[2] - area[0] - _px(20))
-        h = min(_px(CHAT_HEIGHT), area[3] - area[1] - _px(20))
+        chat, fonts = CONFIG["chat"], CONFIG["fonts"]
+        w = min(_px(CHAT_WIDTH), area[2] - area[0] - _px(chat["screen_margin"]))
+        h = min(_px(CHAT_HEIGHT), area[3] - area[1] - _px(chat["screen_margin"]))
         self._window_size = w, h
         self._anchor_job = None
         self._anchor_geometry = None
@@ -1134,30 +1227,32 @@ class ChatPopup:
         name_col = tk.Frame(header, bg=HEADER_BG)
         name_col.pack(side="left", padx=_px(10), pady=_px(5), fill="x", expand=True)
         tk.Label(
-            name_col, text="Denisse", bg=HEADER_BG, fg=POPUP_TEXT, font=(FONT_FAMILY, 11, "bold")
+            name_col, text=_text("popup_title"), bg=HEADER_BG, fg=POPUP_TEXT, font=(FONT_FAMILY, fonts["title"], "bold")
         ).pack(anchor="w")
-        # Status dot + text -- toggled by saying or typing "offline mode" /
-        # "online mode" (see _match_mode_command), not by clicking anything.
+        # Status dot + text -- toggled by saying or typing an offline/online
+        # phrase (see _match_mode_command), not by clicking anything.
         status_sub = tk.Frame(name_col, bg=HEADER_BG)
         status_sub.pack(anchor="w")
         self._status_dot = tk.Canvas(
-            status_sub, width=_px(8), height=_px(8), bg=HEADER_BG, highlightthickness=0
+            status_sub, width=_px(chat["status_dot"]), height=_px(chat["status_dot"]), bg=HEADER_BG,
+            highlightthickness=0,
         )
-        self._status_dot_id = self._status_dot.create_oval(1, 1, _px(7), _px(7), fill="", outline="")
+        self._status_dot_id = self._status_dot.create_oval(1, 1, _px(chat["status_dot"] - 1),
+                                                           _px(chat["status_dot"] - 1), fill="", outline="")
         self._status_dot.pack(side="left")
         self._status_label = tk.Label(
-            status_sub, text="", bg=HEADER_BG, fg=POPUP_MUTED, font=(FONT_FAMILY, 8)
+            status_sub, text="", bg=HEADER_BG, fg=POPUP_MUTED, font=(FONT_FAMILY, fonts["status"])
         )
         self._status_label.pack(side="left", padx=(_px(4), 0))
         tk.Button(
-            header, text="✕", command=self.close, bg=HEADER_BG, fg=POPUP_MUTED,
+            header, text=_text("chat", "close"), command=self.close, bg=HEADER_BG, fg=POPUP_MUTED,
             activebackground=HEADER_BG, activeforeground=POPUP_TEXT, relief="flat", bd=0,
-            font=(FONT_FAMILY, 10), cursor="hand2",
+            font=(FONT_FAMILY, fonts["close"]), cursor="hand2",
         ).pack(side="right", padx=_px(10))
-        tk.Button(header, text="Stop voice", command=_stop_speaking,
+        tk.Button(header, text=_text("chat", "stop_voice"), command=_stop_speaking,
                   bg=HEADER_BG, fg=POPUP_MUTED, activebackground=HEADER_BG,
                   activeforeground=POPUP_TEXT, relief="flat", bd=0,
-                  font=(FONT_FAMILY, 8), cursor="hand2").pack(side="right")
+                  font=(FONT_FAMILY, fonts["stop_voice"]), cursor="hand2").pack(side="right")
 
         # Thin glowing line standing in for the header's old filled bar --
         # the one place a Tron panel actually earns a solid glow, since it
@@ -1172,7 +1267,7 @@ class ChatPopup:
         input_row.pack(side="bottom", fill="x", padx=_px(8), pady=(_px(3), _px(7)))
         self.entry = tk.Entry(
             input_row, bg=PANEL_BG, fg=POPUP_TEXT, insertbackground=POPUP_TEXT,
-            relief="flat", font=(FONT_FAMILY, 9), state="disabled",
+            relief="flat", font=(FONT_FAMILY, fonts["entry"]), state="disabled",
             # Dim glow-line purple at rest, brightens to the full accent on
             # focus -- same outline language as the chat panels.
             highlightthickness=1, highlightbackground=POPUP_BORDER, highlightcolor=ACCENT_HEX,
@@ -1201,14 +1296,14 @@ class ChatPopup:
         center = canvas_size // 2
         self._send_circle_id = self.send_btn.create_image(center, center, image=self._send_circle_off)
         self._send_arrow_id = self.send_btn.create_text(
-            center, center, text="➤", fill=POPUP_MUTED, font=(FONT_FAMILY, 11)
+            center, center, text=_text("chat", "send"), fill=POPUP_MUTED, font=(FONT_FAMILY, fonts["send"])
         )
         self.send_btn.tag_bind(self._send_circle_id, "<Button-1>", self._send_clicked)
         self.send_btn.tag_bind(self._send_arrow_id, "<Button-1>", self._send_clicked)
 
         self.typing_label = tk.Label(
-            self.win, text="", bg=POPUP_BG, fg=POPUP_MUTED, font=(FONT_FAMILY, 8, "italic"),
-            justify="left", wraplength=_px(CHAT_WIDTH - 28),
+            self.win, text="", bg=POPUP_BG, fg=POPUP_MUTED, font=(FONT_FAMILY, fonts["typing"], "italic"),
+            justify="left", wraplength=_px(CHAT_WIDTH - chat["typing_inset"]),
         )
         self.typing_label.pack(side="bottom", fill="x", padx=_px(14))
 
@@ -1217,17 +1312,17 @@ class ChatPopup:
         self.canvas.pack(fill="both", expand=True, padx=_px(6), pady=(_px(4), _px(2)))
         self.canvas.bind("<Enter>", lambda e: self.canvas.bind_all("<MouseWheel>", self._on_wheel))
         self.canvas.bind("<Leave>", lambda e: self.canvas.unbind_all("<MouseWheel>"))
-        self._font = tkfont.Font(family=FONT_FAMILY, size=9)
-        self._time_font = tkfont.Font(family=FONT_FAMILY, size=7)
-        self._y = _px(6)
+        self._font = tkfont.Font(family=FONT_FAMILY, size=fonts["body"])
+        self._time_font = tkfont.Font(family=FONT_FAMILY, size=fonts["time"])
+        self._y = _px(chat["bubble_margin"])
         self._bubble_images = []  # keep PhotoImage refs alive (Tk won't otherwise)
 
         # -- side glow: a soft purple "light worm" traveling up the left
         # edge and down the right edge, on a loop -- placed (not packed) so
         # it overlays the existing layout as a thin strip rather than
         # taking up its own space. --
-        strip_w = _px(3)
-        self._glow_strip_h = _px(70)
+        strip_w = _px(chat["glow_strip_w"])
+        self._glow_strip_h = _px(chat["glow_strip_h"])
         self._side_glow_img = _side_glow_image(strip_w, self._glow_strip_h, _hex_to_rgb(ACCENT_HEX))
         self._glow_left = tk.Canvas(self.win, width=strip_w, bg=POPUP_BG, highlightthickness=0, bd=0)
         self._glow_left.place(x=0, y=0, width=strip_w, height=h)
@@ -1255,7 +1350,7 @@ class ChatPopup:
         self._render_history()
 
         self._connecting_y = self._y
-        self._add_system("Connecting to Denisse...", tag="connecting")
+        self._add_system(_text("chat", "connecting"), tag="connecting")
         threading.Thread(target=self._init_brain, daemon=True).start()
 
     # -- startup --
@@ -1270,12 +1365,13 @@ class ChatPopup:
                 ow = _floating_orb.win
                 orb = (ow.winfo_x(), ow.winfo_y(), _floating_orb.total_px)
             w, h = self._window_size
-            x, y, _, _ = _place(w, h, 0, area, _px(10), orb=orb, gap=-_px(8))
+            chat = CONFIG["chat"]
+            x, y, _, _ = _place(w, h, 0, area, _px(chat["anchor_margin"]), orb=orb, gap=-_px(chat["anchor_gap"]))
             geometry = f"{w}x{h}{x:+d}{y:+d}"
             if geometry != self._anchor_geometry:
                 self.win.geometry(geometry)
                 self._anchor_geometry = geometry
-            self._anchor_job = self.win.after(75, self._follow_anchor)
+            self._anchor_job = self.win.after(CONFIG["timing"]["anchor_poll_ms"], self._follow_anchor)
         except tk.TclError:
             pass
 
@@ -1289,7 +1385,7 @@ class ChatPopup:
                 self.messages = history
                 self.canvas.delete("all")
                 self._bubble_images.clear()
-                self._y = _px(6)
+                self._y = _px(CONFIG["chat"]["bubble_margin"])
                 self._render_history()
                 return
         # Timer/study alerts aren't conversation records. They still have
@@ -1314,7 +1410,7 @@ class ChatPopup:
         self.brain = brain
         self.canvas.delete("connecting")
         bounds = self.canvas.bbox("all")
-        self._y = bounds[3] + _px(BUBBLE_GAP) if bounds else _px(6)
+        self._y = bounds[3] + _px(BUBBLE_GAP) if bounds else _px(CONFIG["chat"]["bubble_margin"])
         if err:
             self._add_system(err)
         else:
@@ -1340,7 +1436,7 @@ class ChatPopup:
         )
         self.send_btn.itemconfig(
             self._send_arrow_id, fill=BUBBLE_OUT_FG if enabled else POPUP_MUTED,
-            text="➤" if enabled else "■"
+            text=_text("chat", "send" if enabled else "stop")
         )
         self.send_btn.config(cursor="hand2")
 
@@ -1367,7 +1463,7 @@ class ChatPopup:
 
     def _canvas_w(self) -> int:
         w = self.canvas.winfo_width()
-        return w if w > 1 else _px(CHAT_WIDTH) - _px(24)
+        return w if w > 1 else _px(CHAT_WIDTH) - _px(CONFIG["chat"]["canvas_inset"])
 
     def _autoscroll(self):
         self.canvas.config(scrollregion=(0, 0, self._canvas_w(), self._y))
@@ -1376,10 +1472,11 @@ class ChatPopup:
 
     def _add_bubble(self, who: str, text: str):
         is_out = who == "you"
-        pad_x, pad_y, gap, margin = _px(BUBBLE_PAD_X), _px(BUBBLE_PAD_Y), _px(BUBBLE_GAP), _px(6)
+        chat = CONFIG["chat"]
+        pad_x, pad_y, gap, margin = _px(BUBBLE_PAD_X), _px(BUBBLE_PAD_Y), _px(BUBBLE_GAP), _px(chat["bubble_margin"])
         lines = []
         for paragraph in text.splitlines() or [""]:
-            lines.extend(self._wrap_text(paragraph, self._canvas_w() - _px(66)))
+            lines.extend(self._wrap_text(paragraph, self._canvas_w() - _px(chat["bubble_side_room"])))
         line_h = self._font.metrics("linespace")
         ts = datetime.now().strftime("%H:%M")
         text_w = max(self._font.measure(l) for l in lines)
@@ -1423,7 +1520,7 @@ class ChatPopup:
 
     def _add_system(self, text: str, tag: str = None):
         canvas_w = self._canvas_w()
-        lines = self._wrap_text(text, canvas_w - _px(24))
+        lines = self._wrap_text(text, canvas_w - _px(CONFIG["chat"]["system_side_room"]))
         line_h = self._time_font.metrics("linespace")
         kwargs = {"tags": (tag,)} if tag else {}
         y = self._y
@@ -1437,7 +1534,7 @@ class ChatPopup:
         self._autoscroll()
 
     def _on_wheel(self, event):
-        self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        self.canvas.yview_scroll(int(-1 * (event.delta / CONFIG["chat"]["wheel_delta"])), "units")
 
     def _render_history(self):
         for m in self.messages:
@@ -1472,20 +1569,25 @@ class ChatPopup:
         if mode == "offline":
             self.entry.delete(0, "end")
             _go_offline()
-            self._add_system('Offline. Type or say "online mode" to resume.')
+            self._add_system(_text("chat", "went_offline", online=_online_phrase()))
             return "break"
         if mode == "online":
             self.entry.delete(0, "end")
             _go_online()
-            self._add_system("Back online.")
+            self._add_system(_text("chat", "back_online"))
             return "break"
 
-        # Straight off disk, no model call -- works even while a reply is
-        # composing or Ollama is down. The chat steps aside so the card,
-        # which sits beside the orb, isn't hidden behind it -- unless a
-        # reply is still on its way, which closing would throw away.
+        # On the 'tray' route (tray.json commands.route): straight to the
+        # clock / off disk, no model call -- works even while a reply is
+        # composing or Ollama is down. On the 'model' route the message goes
+        # to the model below, which acts through its own tools (the study_*
+        # set, list_tasks) and keeps the turn in her history; the tray only
+        # steps in while there's no model to ask. The chat steps aside so
+        # the card, which sits beside the orb, isn't hidden behind it --
+        # unless a reply is still on its way, which closing would throw away.
+        brain_ready = self.brain is not None and not _is_manually_offline()
         study = _match_study_command(text)
-        if study:
+        if study and _tray_handles("study", brain_ready):
             self.entry.delete(0, "end")
             if not self.busy:
                 self.close()
@@ -1495,7 +1597,7 @@ class ChatPopup:
                 _stop_study_mode()
             return "break"
 
-        if _is_reminder_command(text):
+        if _is_reminder_command(text) and _tray_handles("reminders", brain_ready):
             self.entry.delete(0, "end")
             if not self.busy:
                 self.close()
@@ -1506,7 +1608,7 @@ class ChatPopup:
             return "break"
         if _is_manually_offline():
             self.entry.delete(0, "end")
-            self._add_system('Offline -- say or type "online mode" to resume.')
+            self._add_system(_text("chat", "still_offline", online=_online_phrase()))
             return "break"
 
         self.entry.delete(0, "end")
@@ -1524,7 +1626,7 @@ class ChatPopup:
         self.busy = True
         self.entry.config(state="normal")  # keep typed speech controls usable
         self._set_send_enabled(False)
-        self.typing_label.config(text="Denisse is typing...")
+        self.typing_label.config(text=_text("chat", "typing"))
         _set_thinking("chat", True)
 
         threading.Thread(target=self._respond_worker, daemon=True).start()
@@ -1554,8 +1656,8 @@ class ChatPopup:
         def ask():
             summary = ", ".join(f"{k}={v!r}" for k, v in args.items())
             result["answer"] = messagebox.askyesno(
-                "Denisse wants to do something",
-                f"Allow {name}({summary})?",
+                _text("confirm", "title"),
+                _text("confirm", "question", tool=name, args=summary),
                 parent=self.win,
             )
             done.set()
@@ -1570,7 +1672,7 @@ class ChatPopup:
         try:
             if err:
                 self.typing_label.config(text="")
-                self._add_system(f"Error: {err}")
+                self._add_system(_text("chat", "error", error=err))
                 self._finish_turn()
                 return
         except tk.TclError:
@@ -1679,8 +1781,8 @@ class ChatPopup:
         try:
             if self._heard_clear_job is not None:
                 self.win.after_cancel(self._heard_clear_job)
-            display = text if len(text) <= 60 else text[:59] + "…"
-            self.typing_label.config(text=f'🎤 heard: "{display}"')
+            display = _clip(text, CONFIG["limits"]["heard_chars"])
+            self.typing_label.config(text=_text("chat", "heard", text=display))
             self._heard_clear_job = self.win.after(HEARD_DISPLAY_MS, self._clear_heard)
         except tk.TclError:
             pass  # popup closed out from under this async callback -- fine
@@ -1702,7 +1804,7 @@ class ChatPopup:
     # -- lifecycle --
 
     def _animate_side_glow(self, win_h: int):
-        step = _px(4)
+        step = _px(CONFIG["chat"]["glow_step"])
         try:
             x, y = self._glow_left.coords(self._glow_left_id)
             y += step
@@ -1717,7 +1819,8 @@ class ChatPopup:
             self._glow_right.coords(self._glow_right_id, x2, y2)
         except tk.TclError:
             return  # popup closed out from under this timer -- just stop
-        self._glow_anim_job = self.win.after(40, lambda: self._animate_side_glow(win_h))
+        self._glow_anim_job = self.win.after(CONFIG["timing"]["glow_frame_ms"],
+                                             lambda: self._animate_side_glow(win_h))
 
     def close(self):
         global _chat_popup
@@ -1794,7 +1897,7 @@ def _on_global_hotkey():
             except tk.TclError:
                 pass
 
-    root.after(50, _focus_input)  # after _open_chat's own root.after(0, ...)
+    root.after(CONFIG["timing"]["hotkey_focus_delay_ms"], _focus_input)  # after _open_chat's root.after(0, ...)
 
 
 _explain_hotkey = None  # explain_hotkey's GlobalHotkey once registered
@@ -1820,7 +1923,7 @@ def _on_explain_hotkey(req):
         except tk.TclError:
             pass
 
-    root.after(50, _deliver)  # after _open_chat's own root.after(0, ...)
+    root.after(CONFIG["timing"]["hotkey_focus_delay_ms"], _deliver)  # after _open_chat's root.after(0, ...)
 
 
 def _toggle_pet_motion(icon=None, item=None):
@@ -1828,6 +1931,44 @@ def _toggle_pet_motion(icon=None, item=None):
         if _floating_orb is not None:
             _floating_orb.motion_enabled = not _floating_orb.motion_enabled
     root.after(0, toggle)
+
+
+def _build_menu(hotkey_label: str = "") -> pystray.Menu:
+    """The tray icon's right-click menu; wording is tray.json text.menu."""
+    m = CONFIG["text"]["menu"]
+    return pystray.Menu(
+        pystray.MenuItem(m["talk_with_hotkey"].format(hotkey=hotkey_label) if hotkey_label else m["talk"],
+                         _open_chat, default=True),
+        pystray.MenuItem(m["reminders"], _open_reminders),
+        pystray.MenuItem(
+            m["pet_movement"], _toggle_pet_motion,
+            checked=lambda item: _floating_orb is not None and _floating_orb.motion_enabled,
+        ),
+        pystray.MenuItem(
+            _study_menu_text, _toggle_study_mode, checked=lambda item: _study_mode is not None and _study_mode.active
+        ),
+        pystray.MenuItem(m["voice_console"], _open_voice_console),
+        pystray.MenuItem(m["mission_control"], _open_mission_control),
+        pystray.MenuItem(m["independent_work"], _toggle_independent_work,
+                         checked=lambda item: _get_agent_engine().status()["enabled"]),
+        pystray.MenuItem(m["agent_activity"], _show_agent_activity),
+        pystray.MenuItem(
+            m["organize"], _toggle_organize, checked=lambda item: _is_organizing(),
+            enabled=lambda item: _get_agent_engine().status()["enabled"]
+        ),
+        pystray.MenuItem(
+            m["optimize"], _toggle_optimize, checked=lambda item: _is_optimizing()
+        ),
+        pystray.MenuItem(
+            m["wake_word"], _toggle_wake_word, checked=lambda item: _is_listening_for_wake_word()
+        ),
+        pystray.MenuItem(
+            m["news"], _toggle_news_briefing, checked=lambda item: _is_news_briefing_active()
+        ),
+        pystray.MenuItem(m["project_folder"], _open_project_folder),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem(m["quit"], _quit),
+    )
 
 
 def main():
@@ -1857,43 +1998,12 @@ def main():
     except Exception:
         _explain_hotkey = None
 
-    menu = pystray.Menu(
-        pystray.MenuItem(f"Talk to Denisse ({hotkey_label})" if hotkey_label else "Talk to Denisse",
-                         _open_chat, default=True),
-        pystray.MenuItem("Reminders", _open_reminders),
-        pystray.MenuItem(
-            "Pet movement", _toggle_pet_motion,
-            checked=lambda item: _floating_orb is not None and _floating_orb.motion_enabled,
-        ),
-        pystray.MenuItem(
-            _study_menu_text, _toggle_study_mode, checked=lambda item: _study_mode is not None and _study_mode.active
-        ),
-        pystray.MenuItem("Voice mode (console)", _open_voice_console),
-        pystray.MenuItem("Mission Control", _open_mission_control),
-        pystray.MenuItem("Independent work", _toggle_independent_work,
-                         checked=lambda item: _get_agent_engine().status()["enabled"]),
-        pystray.MenuItem("What Denisse did", _show_agent_activity),
-        pystray.MenuItem(
-            "Auto-organize Downloads", _toggle_organize, checked=lambda item: _is_organizing(),
-            enabled=lambda item: _get_agent_engine().status()["enabled"]
-        ),
-        pystray.MenuItem(
-            "Auto-optimize (cleanup + monitoring)", _toggle_optimize, checked=lambda item: _is_optimizing()
-        ),
-        pystray.MenuItem(
-            'Listen for "hey Denisse"', _toggle_wake_word, checked=lambda item: _is_listening_for_wake_word()
-        ),
-        pystray.MenuItem(
-            "Daily CNA news briefing", _toggle_news_briefing, checked=lambda item: _is_news_briefing_active()
-        ),
-        pystray.MenuItem("Project folder", _open_project_folder),
-        pystray.Menu.SEPARATOR,
-        pystray.MenuItem("Quit", _quit),
-    )
+    menu = _build_menu(hotkey_label)
     global _tray_icon
+    text = CONFIG["text"]
     _tray_icon = pystray.Icon(
-        "denisse", _make_icon_image(),
-        f"Denisse -- {hotkey_label} to chat" if hotkey_label else "Denisse", menu,
+        text["icon_name"], _make_icon_image(),
+        text["icon_title_with_hotkey"].format(hotkey=hotkey_label) if hotkey_label else text["icon_title"], menu,
     )
     _start_optimizing()
     if news.briefing_enabled():
@@ -1912,7 +2022,7 @@ def main():
         _show_reply(msg)
         if _tray_icon is not None:
             try:
-                _tray_icon.notify(msg[:220], "Denisse")
+                _tray_icon.notify(msg[:CONFIG["limits"]["notify_chars"]], _text("notify", "title"))
             except Exception:
                 pass
 
@@ -1955,7 +2065,7 @@ def main():
     # machine that just stays on. Delayed so it doesn't fight the tray icon
     # and orb for the first seconds of startup.
     root.after(
-        10_000,
+        CONFIG["timing"]["startup_reminder_delay_ms"],
         lambda: threading.Thread(target=_remind_due_tasks, kwargs={"startup": True}, daemon=True).start(),
     )
     threading.Thread(target=_reminder_loop, daemon=True).start()
