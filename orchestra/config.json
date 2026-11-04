@@ -29,7 +29,7 @@
   "_parallel_lanes": "One task per lane at the same time (claude + codex + gemini), each with its own lock; state saves merge and merges/pushes take turns. Task Scheduler must allow parallel instances. false = one task at a time.",
 
   "lane_slots": {"claude": 1, "codex": 1, "copilot": 1},
-  "_lane_slots": "How many tasks of one lane may run at once, normally. A campaign (.review/campaign.json, see orchestra/campaign.py) may raise it until its stop_at; the Max-plan sprint (Claude 3 until Wed 4 Nov 18:00 London) lives there, not here.",
+  "_lane_slots": "How many tasks of one lane may run at once, normally. A campaign (.review/campaign.json, see orchestra/campaign.py) may raise it until its stop_at; the Max-plan sprint (Claude 3, 2-4 Nov 2026) ended Wed 4 Nov 18:00 London; these are the normal values again.",
 
   "lane_fallback": {"codex": "claude", "copilot": "claude"},
   "_lane_fallback": "While a lane is limited (usage limit seen in its log, see limit_patterns below), its tasks run on this lane instead, unless the task header says Lane-Fixed: yes. The fallback lane's slots still apply. {} turns it off.",
@@ -88,7 +88,7 @@
   "_auth_patterns": "A run that dies because the lane's CLI isn't signed in (3 Nov 2026, 18:06: Claude's OAuth sign-in expired and 9 tasks were parked as NO_REPORT in an hour) is treated like a usage limit: the attempt isn't counted and the lane waits auth_retry_min before the next try. Patterns are case-insensitive regexes against the tail of the lane log. A reviewer that can't sign in parks the PASS for a --merge-only re-run instead of blocking it.",
 
   "daily_spend_cap_usd": 5.0,
-  "_daily_spend_cap_usd_note": "The normal cap. The sprint's $400 (2 Nov 2026: spare Claude allowance before it resets; claude -p's total_cost_usd is notional on his plan) is a campaign override that ends at its stop_at by itself.",
+  "_daily_spend_cap_usd_note": "The normal cap. The sprint's $400 (2 Nov 2026: spare Claude allowance before it resets; claude -p's total_cost_usd is notional on his plan) was a campaign override; the sprint ended Wed 4 Nov 18:00 London, so $5 applies again.",
   "_daily_spend_cap_usd": "Summed from claude -p total_cost_usd. Runs killed before reporting are charged an estimate from minutes x today's cost per minute. Thomas's ledger saw under half of a 20-hour spend.",
   "unknown_cost_per_min_usd": 0.10,
 
