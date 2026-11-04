@@ -50,92 +50,101 @@ import datetime
 import json
 import os
 import re
+from pathlib import Path
+
+import json_config
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-LEARNED_FILE = os.path.join(BASE_DIR, "memory", "learned.json")
 
-# Tool results that mean the call did not do what was asked. Matched at the
-# start of the result or as a whole phrase -- tools report failure in prose,
-# and a substring like "error" alone would also match a news headline.
-_TOOL_FAILURE = re.compile(
-    r"^(error\b|failed\b|could ?n[o']t\b|unable to\b|no skill named\b|unknown tool\b)"
-    r"|doesn't see an active device"
-    r"|\bnot found\b"
-    r"|\bno such file\b"
-    r"|\bpermission denied\b"
-    r"|^the system cannot find\b"
-    r"|is not recognized as an internal or external command"
-    r"|^no files matching\b"
-    r"|^no single open task matched\b"
-    r"|^don'?t know a location\b",
-    re.IGNORECASE,
-)
+# What counts as a tool failing, a reply admitting it, a reply claiming an
+# action, and his correction or praise -- every phrase list -- plus the
+# report's sizes live in learning.json (AGENTS.md Rule 0), checked by
+# json_config.py against learning.defaults.json; configure() reloads it.
+# The grammar stays here: a correction is any number of lead-ins then a
+# phrase at the start; praise is at most one lead-in then a phrase.
+CONFIG_ENV_VAR = "DENISSE_LEARNING_CONFIG"
+CONFIG_FILE = Path(__file__).with_name("learning.json")
+DEFAULTS_FILE = Path(__file__).with_name("learning.defaults.json")
 
-# A reply that owns up to a failure. If the tools failed and the reply says
-# one of these, she handled it honestly and the turn isn't held against her.
-_ADMITS_FAILURE = re.compile(
-    r"\b(couldn'?t|could not|can'?t|cannot|unable|sorry|didn'?t work|doesn'?t|"
-    r"isn'?t|wasn'?t|failed|no skill|not (?:able|available|found|open|running))\b",
-    re.IGNORECASE,
-)
+_NEVER = re.compile(r"(?!)")
 
-# The next user message telling her the last reply was wrong. Anchored at
-# the start: "no" inside a sentence ("no rush") is not a correction.
-#
-# 2026-10-30: widened to how he actually says it. Across 146 real turns the
-# first version caught "no i meant..." and missed "still not what im
-# asking", "bro you clearly did not understand me", "what?", "what did i
-# just say" and "its too long" -- so 10 bad turns were found where there
-# were nearer 20. Every complaint brain.py reruns (_COMPLAINT) must also
-# count here; scripts/test_feedback.py checks that.
-_CORRECTION = re.compile(
-    r"^\s*(?:(?:bro|okay|ok|no|um+|but)[,!.]?\s+)*(?:"
-    r"/bad\b|no\b(?!\s+(?:worries|problem|rush|thanks))|nope\b|wrong\b|not that\b|that'?s (?:not|wrong)\b|i meant\b|"
-    r"i said\b|not what i\b|you didn'?t\b|that didn'?t\b|it didn'?t\b"
-    r"|still (?:not|wrong)\b"
-    r"|you (?:clearly |still )?(?:did not|didn'?t|do not|don'?t) (?:understand|get|listen|answer)\b"
-    r"|do you (?:even )?understand(?: me| what i (?:said|say|mean|meant|asked))?\s*\?*\s*$"
-    r"|what did i (?:just )?(?:say|ask)\b"
-    r"|you'?re not listening\b|you are not listening\b"
-    r"|(?:you'?re|you are) still talk\w*"
-    r"|(?:that'?s|it'?s|its|this is) (?:way )?too long\b"
-    r"|(?:what|huh)\s*\?*\s*$|is there a problem\s*\?*\s*$"
-    r")",
-    re.IGNORECASE,
-)
 
-# A reply saying something was DONE. brain.py uses the same pattern live,
-# to send her back before a false "done" reaches him; here it labels the
-# ones that got through. From 2026-10-20: "stop timer" -> no tool -> "Done."
-CLAIMS_DONE = re.compile(
-    r"^\s*(?:done|all done|all set|sorted|ok(?:ay)?[,.]?\s+done)\b\s*(?:[.!,:]|$)"
-    r"|\b(?:has|have) been (?:started|stopped|set|turned (?:on|off)|completed|opened"
-    r"|closed|cancell?ed|created|saved|added|removed|paused|played|scheduled)\b"
-    r"|\bi(?:'ve| have)?\s+(?:just\s+)?(?:started|stopped|set|turned|opened|closed"
-    r"|cancell?ed|created|saved|added|removed|paused|scheduled)\b"
-    r"|\b(?:has|is now)\s+(?:started|stopped|running)\b"
-    r"|\b(?:timer|pomodoro|spotify|music)\s+is\s+(?:running|paused|playing|off|on)\b"
-    # "Sutuy timer paused." (2026-11-03) -- a thing named, then a done-verb,
-    # with no "has been" or "I've" in front of it. The thing was music.
-    r"|\b(?:timer|session|pomodoro|study\s+mode|music|spotify|song)\b[^.!?\n]{0,30}?"
-    r"\b(?:paused|stopped|started|resumed|cancell?ed|ended)\b"
-    r"|\b(?:file|document|cv|resume)\b.{0,40}\bis\s+(?:now\s+)?open\b"
-    r"|\bsuccessfully\b",
-    re.IGNORECASE,
-)
+def _alt(fragments) -> str:
+    return "|".join(fragments)
 
-# Approval of the reply, not agreement to her question: "yes please" and a
-# bare "okay" answer an offer and stay unknown. 2026-10-30: his real praise
-# was "thats good" and "okay that good", and neither counted -- 0 good turns
-# in 146, so no lesson could ever be confirmed.
-_THANKS = re.compile(
-    r"^\s*(?:(?:okay|ok|yes|yeah|oh)[,!.]?\s+)?(?:"
-    r"/good|thanks|thank you|thx|ty\b|cheers|perfect|great|nice|awesome|good job|well done|"
-    r"that work(?:s|ed)|it work(?:s|ed)|that'?s right|exactly\b|correct\b|spot on|"
-    r"(?:that'?s|thats|that|this is|it'?s|its) (?:good|great|perfect|better|correct|it|right|"
-    r"what i (?:wanted|meant|asked))\b|good(?:\s+one)?\s*[.!]*\s*$|love it|nice one)",
-    re.IGNORECASE,
-)
+
+def _compile(pattern: str):
+    return re.compile(pattern, re.IGNORECASE) if pattern else _NEVER
+
+
+def _tool_failure(c):
+    parts = ([rf"^(?:{_alt(c['starts_with'])})"] if c["starts_with"] else []) + list(c["contains"])
+    return _compile(_alt(parts))
+
+
+def _admits_failure(c):
+    return _compile(rf"\b(?:{_alt(c['words'])})\b" if c["words"] else "")
+
+
+def _lead_in(c, repeat: str):
+    lead = rf"(?:(?:{_alt(c['lead_ins'])})[,!.]?\s+){repeat}" if c["lead_ins"] else ""
+    return _compile(rf"^\s*{lead}(?:{_alt(c['phrases'])})" if c["phrases"] else "")
+
+
+_BUILDERS = {
+    "tool_failure": (("starts_with", "contains"), _tool_failure),
+    "admits_failure": (("words",), _admits_failure),
+    "correction": (("lead_ins", "phrases"), lambda c: _lead_in(c, "*")),
+    "praise": (("lead_ins", "phrases"), lambda c: _lead_in(c, "?")),
+    "claims_done": (("patterns",), lambda c: _compile(_alt(c["patterns"]))),
+}
+
+
+def _extra_checks(data: dict, defaults: dict, checker) -> dict:
+    """Every fragment must compile, alone and once built into its pattern."""
+    for section, (keys, build) in _BUILDERS.items():
+        try:
+            for key in keys:
+                for frag in data[section][key]:
+                    if not frag:
+                        raise re.error(f"empty pattern in {key}")
+                    re.compile(frag)
+            build(data[section])
+        except re.error as e:
+            data[section] = checker.bad(f"learning.{section}", f"has a bad pattern ({e})", defaults[section])
+    return data
+
+
+CONFIG: dict = {}
+
+
+def configure(path=None) -> dict:
+    """(Re)load learning.json (or ``path``, or $DENISSE_LEARNING_CONFIG)
+    and rebind the module patterns from it.
+
+    brain.py binds CLAIMS_DONE once at import; a reload reaches it on the
+    next start.
+    """
+    global CONFIG, LEARNED_FILE, _TOOL_FAILURE, _ADMITS_FAILURE, _CORRECTION, CLAIMS_DONE, _THANKS
+    path = path or os.environ.get(CONFIG_ENV_VAR) or CONFIG_FILE
+    CONFIG = json_config.load("learning", path, DEFAULTS_FILE, extra=_extra_checks)
+    LEARNED_FILE = os.path.join(BASE_DIR, *CONFIG["learned_file"].replace("\\", "/").split("/"))
+    # Tool results that mean the call did not do what was asked.
+    _TOOL_FAILURE = _BUILDERS["tool_failure"][1](CONFIG["tool_failure"])
+    # A reply that owns up to a failure.
+    _ADMITS_FAILURE = _BUILDERS["admits_failure"][1](CONFIG["admits_failure"])
+    # The next user message telling her the last reply was wrong.
+    _CORRECTION = _BUILDERS["correction"][1](CONFIG["correction"])
+    # A reply saying something was DONE (shared with brain.py).
+    CLAIMS_DONE = _BUILDERS["claims_done"][1](CONFIG["claims_done"])
+    # Approval of the reply. 2026-10-30: his real praise was "thats good"
+    # and "okay that good", and neither counted -- 0 good turns in 146, so
+    # no lesson could ever be confirmed.
+    _THANKS = _BUILDERS["praise"][1](CONFIG["praise"])
+    return CONFIG
+
+
+configure()
 
 
 def tool_failed(result: str) -> bool:
@@ -247,8 +256,9 @@ def learn(history: list) -> dict:
     }
 
 
-def run(history: list | None = None, out_file: str = LEARNED_FILE) -> dict:
+def run(history: list | None = None, out_file: str | None = None) -> dict:
     """Learn from the stored history and write memory/learned.json."""
+    out_file = out_file or LEARNED_FILE
     if history is None:
         import memory_store
         history = memory_store.load_history()
@@ -260,8 +270,9 @@ def run(history: list | None = None, out_file: str = LEARNED_FILE) -> dict:
     return result
 
 
-def summary(result: dict, limit: int = 5) -> list:
+def summary(result: dict, limit: int | None = None) -> list:
     """Markdown lines for the nightly eval report."""
+    limit = CONFIG["report"]["limit"] if limit is None else limit
     c = result["counts"]
     lines = [
         f"- {result['turns']} live turns: {c['good']} good, {c['bad']} bad, "
@@ -273,7 +284,7 @@ def summary(result: dict, limit: int = 5) -> list:
         lines += ["", "Candidate eval cases (worst first):", ""]
         for f in result["failures"][:limit]:
             times = f" ×{f['count']}" if f["count"] > 1 else ""
-            lines.append(f"- `{f['prompt'][:80]}`{times} — {f['reason']}; "
+            lines.append(f"- `{f['prompt'][:CONFIG['report']['prompt_chars']]}`{times} — {f['reason']}; "
                          f"tools `{f['tools'] or 'none'}`")
     return lines
 
@@ -285,7 +296,7 @@ def main() -> None:
     except AttributeError:
         pass
     result = run()
-    print("\n".join(summary(result, limit=20)))
+    print("\n".join(summary(result, limit=CONFIG["report"]["cli_limit"])))
     print(LEARNED_FILE)
 
 
