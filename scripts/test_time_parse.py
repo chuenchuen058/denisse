@@ -301,5 +301,19 @@ class PartSourceTest(unittest.TestCase):
         self.assertEqual(resolved("tomorrow morning"), default)
 
 
+class OnlyATime(unittest.TestCase):
+    """A reminder whose text is nothing but its time has no subject
+    (tool_policy's task_has_subject check, 2026-11-04)."""
+
+    def test_a_bare_time_is_only_a_time(self):
+        for text in ("Thursday", "remind me thursday", "tomorrow at 5", "at 5", "in 20 mins", "tonight", "next monday 9am",
+                     "me", "remind me"):
+            self.assertTrue(tp.only_a_time(text), text)
+
+    def test_anything_with_a_subject_is_not(self):
+        for text in ("robotics meeting", "call mum", "dentist tomorrow", "lunch", "", "email Ben friday at 5"):
+            self.assertFalse(tp.only_a_time(text), text)
+
+
 if __name__ == "__main__":
     unittest.main()

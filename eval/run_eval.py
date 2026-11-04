@@ -126,6 +126,33 @@ def check(case: dict, reply: str, tools: list, sources: list | None = None) -> l
         if made_up:
             fails.append(f"invented path(s) {made_up}")
 
+    fails += _expect_fails(e, reply, tools)
+
+    # Leaks are checked on every case, not only the ones that list them:
+    # on 2026-10-20 the weather and news replies narrated their tool calls
+    # and passed, and the news one went into dataset.jsonl.
+    always = LEAKS + POSIX_LEAKS + ([] if case.get("misheard_ok") else MISHEARD)
+    for s in dict.fromkeys(list(e.get("deny", [])) + always):
+        if s.lower() in low:
+            fails.append(f"contains {s!r}")
+
+    if low.lstrip().startswith(("assistant", "user:", "system:")):
+        fails.append("starts with a role name")
+
+    named = sorted(n for n in _tool_names() if n in low)
+    if named:
+        fails.append(f"names tool {named}")
+
+    return fails
+
+
+def _expect_fails(e: dict, reply: str, tools: list) -> list:
+    """The checks an `expect` dict names itself -- everything except `deny`
+    and the always-on leak checks in check(). Split out so `any_of` can
+    judge alternatives: "opens it, or asks one short question" is two
+    different right answers."""
+    low = (reply or "").lower()
+    fails = []
     if e.get("no_tools") and tools:
         fails.append(f"called {tools} but should have called nothing")
 
@@ -148,25 +175,32 @@ def check(case: dict, reply: str, tools: list, sources: list | None = None) -> l
     if len((reply or "").split()) < e.get("min_words", 0):
         fails.append(f"under {e['min_words']} words")
 
+    # in_order: these tools were all called, first calls in this order --
+    # "searched, then opened", never an open on a guessed path first.
+    order = e.get("in_order")
+    if order:
+        first = [tools.index(t) if t in tools else None for t in order]
+        if None in first or first != sorted(first):
+            fails.append(f"called {tools or 'nothing'}, wanted {order} in that order")
+
+    if "max_words" in e and len((reply or "").split()) > e["max_words"]:
+        fails.append(f"over {e['max_words']} words ({len((reply or '').split())})")
+
     anyof = e.get("contains_any")
     if anyof and not any(s.lower() in low for s in anyof):
         fails.append(f"missing any of {anyof!r}")
 
-    # Leaks are checked on every case, not only the ones that list them:
-    # on 2026-10-20 the weather and news replies narrated their tool calls
-    # and passed, and the news one went into dataset.jsonl.
-    always = LEAKS + POSIX_LEAKS + ([] if case.get("misheard_ok") else MISHEARD)
-    for s in dict.fromkeys(list(e.get("deny", [])) + always):
-        if s.lower() in low:
-            fails.append(f"contains {s!r}")
+    # contains_each: several contains_any groups, and every group must
+    # match -- "refuses" and "says why" are two separate things to find.
+    for group in e.get("contains_each", []):
+        if not any(s.lower() in low for s in group):
+            fails.append(f"missing any of {group!r}")
 
-    if low.lstrip().startswith(("assistant", "user:", "system:")):
-        fails.append("starts with a role name")
-
-    named = sorted(n for n in _tool_names() if n in low)
-    if named:
-        fails.append(f"names tool {named}")
-
+    alts = e.get("any_of")
+    if alts:
+        tried = [_expect_fails(a, reply, tools) for a in alts]
+        if all(tried):
+            fails.append("no acceptable answer: " + " / ".join("; ".join(t) for t in tried))
     return fails
 
 
@@ -326,8 +360,15 @@ def _run_case(brain, case: dict, history: list, mode) -> dict:
 
     tools: list = []
 
+    fixtures = case.get("fixtures") or {}
+
     def spy(name, args):
         tools.append(name)
+        # A fixtured tool never really runs, so letting it through is safe:
+        # that is how a case says "Spotify has no device" instead of the
+        # veto's "user declined".
+        if name in fixtures:
+            return True
         return name not in safety.RISKY_TOOLS and name not in EVAL_VETO
 
     # `before` is a case's own scripted earlier turns, for follow-ups like
@@ -353,14 +394,16 @@ def _run_case(brain, case: dict, history: list, mode) -> dict:
     # note, a failing search) or a tool that must not really run (a timer
     # would pop up on his screen 25 minutes into the night). Restored after.
     import tools as _tools_mod
-    fixtures = case.get("fixtures") or {}
-    real = {n: _tools_mod.TOOL_FUNCTIONS.get(n) for n in fixtures}
+    real ={n: _tools_mod.TOOL_FUNCTIONS.get(n) for n in fixtures}
     for n, text in fixtures.items():
         _tools_mod.TOOL_FUNCTIONS[n] = (lambda _t: (lambda **_kw: _t))(text)
     started = time.monotonic()
     out_msgs = []
+    after = {}
     try:
-        with _fake_desktop(case.get("desktop")), _fixture_vault(case.get("vault")):
+        with _fake_desktop(case.get("desktop")), _fixture_vault(case.get("vault")), \
+                _case_preferences(case.get("preferences"), after), \
+                _case_tasks(case.get("tasks"), after):
             reply, out_msgs = brain.respond(messages, confirm=spy)
         error = None
     except Exception as exc:
@@ -378,6 +421,12 @@ def _run_case(brain, case: dict, history: list, mode) -> dict:
                 if m.get("role") == "tool"]
 
     fails = [error] if error else check(case, reply, tools, sources)
+    e = case["expect"]
+    if e.get("preference_saved") and not error and not after.get("preference_added"):
+        fails.append("no reply preference was saved")
+    for word in ([] if error else e.get("tasks_gone", [])):
+        if any(word.lower() in t for t in after.get("open_tasks", [])):
+            fails.append(f"a task about {word!r} is still open")
     # A study case can say what state the clock must be left in.
     want = (case.get("study") or {}).get("ends")
     if want is not None and mode is not None and not error:
@@ -395,6 +444,56 @@ def _run_case(brain, case: dict, history: list, mode) -> dict:
         "robotic": robotic(reply),
         "follow_up": bool(case.get("before")),
     }
+
+
+@contextlib.contextmanager
+def _case_preferences(seed, after: dict):
+    """Every model case starts from its own reply preferences -- the ones it
+    lists in `preferences` (his "from now on ..." lines), else none -- and
+    the file is put back afterwards, so a preference one case saves can't
+    make a later case pass or fail. `after["preference_added"]` says
+    whether the turn saved one."""
+    import reply_preferences as rp
+    path = Path(rp.FILE)
+    old = path.read_text(encoding="utf-8") if path.exists() else None
+    path.unlink(missing_ok=True)
+    for text in seed or []:
+        rp.add(text)
+    n = len(rp.load())
+    try:
+        yield
+    finally:
+        after["preference_added"] = len(rp.load()) > n
+        if old is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_text(old, encoding="utf-8")
+
+
+@contextlib.contextmanager
+def _case_tasks(seed, after: dict):
+    """`tasks`: the case runs on its own task store -- the one known task
+    plus these [text, due] pairs -- put back afterwards, so a reminder some
+    other case added can't make "cancel the robotics one" ambiguous.
+    Without the key the shared scratch store is used, as before.
+    `after["open_tasks"]` is the open task texts when the turn ended."""
+    if seed is None:
+        yield
+        return
+    import tasks as tasks_mod
+    path = Path(tasks_mod.TASKS_FILE)
+    old = path.read_text(encoding="utf-8") if path.exists() else None
+    reseed_tasks(path)
+    for text, due in seed:
+        tasks_mod.add_task(text, due)
+    try:
+        yield
+    finally:
+        after["open_tasks"] = [t["text"].lower() for t in tasks_mod.list_tasks()]
+        if old is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_text(old, encoding="utf-8")
 
 
 def write_dataset(results: dict) -> int:
@@ -581,6 +680,8 @@ def main() -> int:
     ap.add_argument("--json", metavar="PATH", help="also write every result, timing and GPU reading here")
     ap.add_argument("--only", metavar="IDS", help="run only these case ids (comma-separated); a subset "
                     "run, so it curates nothing and skips the learning pass")
+    ap.add_argument("--group", metavar="NAME", help="run only cases whose `group` is NAME or starts "
+                    "with NAME: (e.g. chuen for every chuen:<area> case); a subset run like --only")
     add_gpu_args(ap)
     args = ap.parse_args()
 
@@ -590,7 +691,13 @@ def main() -> int:
         pass
 
     cases, subset = CASES, None
-    if args.only:
+    if args.group:
+        cases = in_group(CASES, args.group)
+        if not cases:
+            print(f"FATAL: no cases in group {args.group!r}")
+            return 2
+        subset = {"ref": "--group", "reasons": [f"group {args.group}: {len(cases)} cases"]}
+    elif args.only:
         wanted = [s.strip() for s in args.only.split(",") if s.strip()]
         known = {c["id"] for c in CASES}
         missing = [w for w in wanted if w not in known]
@@ -713,8 +820,29 @@ def _run(args, cases, subset, out_dir, lease) -> int:
           f"python {t['other_s']}  learning {t['learning_s']}"
           + (f"  | GPU at start {gpu['util_pct']}%" if gpu.get("util_pct") is not None else "")
           + ("  NOISY" if gpu.get("noisy") else ""))
+    for line in group_lines(results, cases):
+        print(line)
     print(where)
     return 0 if results["live_pass"] == n else 1
+
+
+def in_group(cases: list, name: str) -> list:
+    """Cases whose `group` is `name` or sits under it (`name:<area>`)."""
+    return [c for c in cases if c.get("group") == name or (c.get("group") or "").startswith(name + ":")]
+
+
+def group_lines(results: dict, cases: list) -> list:
+    """Pass counts per `group`, per condition -- "" when no case has one."""
+    groups = list(dict.fromkeys(c["group"] for c in cases if c.get("group")))
+    out = []
+    for g in groups:
+        ids = {c["id"] for c in cases if c.get("group") == g}
+        cells = []
+        for cond in ("clean", "live"):
+            rs = [r for r in results.get(cond, []) if r["id"] in ids]
+            cells.append(f"{cond} {sum(r['passed'] for r in rs)}/{len(rs)}")
+        out.append(f"  {g:22} " + "  ".join(cells))
+    return out
 
 
 def lease_info(lease) -> dict:

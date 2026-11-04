@@ -5,7 +5,14 @@
     "tools.<name>.side_effect: 'read' may always be called, even when not offered; 'write' only when offered,",
     "never on a complaint turn. checks: run on the CALL's arguments, never on Chuen's wording.",
     "reply_must_mention: after this tool succeeds her reply must match this, else the tool's own sentence",
-    "(or fallback_reply) is used -- alone for a 'write' tool, in front of her reply for a 'read' one.",
+    "(or fallback_reply) is used -- alone for a 'write' tool, in front of her reply for a 'read' one",
+    "(alone for a 'read' one too when must_mention_replaces is true: an invented calendar is not worth keeping).",
+    "nothing_must_mention: when the tool ran but did nothing (its result is no evidence: 'nothing was stopped'),",
+    "her reply must say so (match this), else the tool's own sentence is used -- a goodbye over 'no session",
+    "was running' hides the truth. check kinds: must_match / must_not_match (pattern on the argument),",
+    "not_inside_program_folder, not_own_file_name (a path whose file name is one of her own files, {value}),",
+    "verified_document_path, known_skill, task_has_subject (the text is nothing but a time, 'Thursday', or filler, 'me'),",
+    "unambiguous_time (time_parse has a question about the due phrase; {detail} is that question).",
     "groups: a turn is offered core + every group whose cues match the recent user text (tool_router.py).",
     "cues/study_commands: data for the fast paths that run before the model; edit here, not in code."
   ],
@@ -56,7 +63,14 @@
         "list_tasks",
         "remove_task"
       ],
-      "cues": "task|to-?do|remind|reminder|deadline|due|plate|have to|need to|got to|gotta|finish|done|complete|tick|cross (it |that )?off|agenda|schedule|by (monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|tonight)|outstanding|pending"
+      "cues": "task|to-?do|remind|reminder|deadline|due|plate|have to|need to|got to|gotta|finish|done|complete|tick|cross (it |that )?off|agenda|schedule|by (monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|tonight)|outstanding|pending|cancel|remove|delete|scrap|drop (?:it|that|the)|get rid of"
+    },
+    "calendar": {
+      "tools": [
+        "check_calendar",
+        "list_tasks"
+      ],
+      "cues": "calendar|diary|appointment|meetings?\\b|events?\\b|what(?:'s| is| have i got| do i have) (?:on |for )?(?:today|tomorrow|this week|next week|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|am i free|anything (?:on|booked|scheduled)"
     },
     "weather": {
       "tools": [
@@ -130,17 +144,17 @@
       "tools": [
         "reply_preference"
       ],
-      "cues": "from now on|next time|in (?:the )?future|every time|always|never|instead|(?:don'?t|dont|do not|no) need|(?:don'?t|dont|do not) have to|no need|keep it (?:short|simple|brief)|stop (?:saying|showing|reading|repeating|mentioning)|you (?:could|can|should) just|call me|say .{0,20}instead|too long|shorter|less"
+      "cues": "from now on|next time|in (?:the )?future|every time|always|never|instead|(?:don'?t|dont|do not|no) need|(?:don'?t|dont|do not) have to|no need|keep (?:it|them|things|your (?:answers?|replies|responses|messages)|(?:the |your )?(?:answers?|replies|responses)) (?:short|simple|brief|concise|snappy)|stop (?:saying|showing|reading|repeating|mentioning)|you (?:could|can|should) just|call me|say .{0,20}instead|too long|shorter|less"
     }
   },
   "cues": {
-    "follow_up": "\\b(it|this|that|those|them|one|again|another|more|too|also|and|then|instead|same|meant)\\b|^\\s*why (?:can'?t|cannot|couldn'?t|not)\\b",
+    "follow_up": "\\b(it|this|that|those|them|one|again|another|more|too|also|and|then|instead|same|meant)\\b|^\\s*why (?:can'?t|cannot|couldn'?t|not)\\b|\\b(?:carry on|continue|resume|go on|keep going|unpause|proceed|get on with it|back to it)\\b",
     "feedback_only": "^\\s*(?:your\\s+['\\\"]?done['\\\"]?\\s+(?:is|means)\\s+nothing|what(?:'?s| is)\\s+done|you\\s+(?:didn'?t|did not)\\s+(?:do\\s+)?anything|(?:that|it)\\s+(?:didn'?t|did not)\\s+work|not\\s+what\\s+i\\s+(?:asked|meant)|that'?s\\s+(?:wrong|not right)|you tell me|wrong|nope)[.!?\\s]*$",
     "complaint": "^\\s*(?:no[,.!]?\\s+)?(?:that'?s\\s+not\\s+(?:it|right|what\\s+i\\s*(?:'?m|am)?\\s*(?:asking|asked|meant|want(?:ed)?))|(?:still\\s+)?not\\s+what\\s+i\\s*(?:'?m|am)?\\s*(?:asking|asked|meant|want(?:ed)?)|still\\s+not\\s+(?:it|right)|that'?s\\s+wrong|wrong|what|huh|is\\s+there\\s+a\\s+problem|you'?re\\s+not\\s+listening|(?:omg|ugh|bro|wtf|ffs|jeez)?[,!\\s]*(?:you(?:'?re|\\s+are)|this\\s+is|that\\s+is|that'?s)\\s+(?:so\\s+|really\\s+|just\\s+)?(?:dumb|stupid|useless|hopeless|broken|rubbish|terrible|bad\\s+at\\s+this)|you\\s+(?:didn'?t|did\\s+not)\\s+(?:answer|do)\\s+(?:it|that|me|my\\s+question|what\\s+i\\s+asked))[.!?\\s]*$",
-    "reply_preference": "^\\s*(?:(?:okay|ok|also|and|great|alright|but|btw|nice)[,.!\\s]+)*(?:you\\s+(?:also\\s+)?(?:don'?t|dont|do\\s+not)\\s+(?:have|need)\\s+to\\b|(?:i\\s+)?(?:don'?t|dont|do\\s+not)\\s+need\\s+you\\s+to\\b|from\\s+now\\s+on\\b|next\\s+time\\b|in\\s+(?:the\\s+)?future\\b|no\\s+need\\s+to\\b|keep\\s+it\\s+(?:short|simple|brief)\\b|stop\\s+(?:saying|showing|reading|repeating)\\b|you\\s+(?:could|can|should)\\s+just\\s+(?:say|call|use|ask|add)\\b)",
+    "reply_preference": "^\\s*(?:(?:okay|ok|also|and|great|alright|but|btw|nice|please|can you|could you)[,.!\\s]+)*(?:you\\s+(?:also\\s+)?(?:don'?t|dont|do\\s+not)\\s+(?:have|need)\\s+to\\b|(?:i\\s+)?(?:don'?t|dont|do\\s+not)\\s+need\\s+you\\s+to\\b|from\\s+now\\s+on\\b|next\\s+time\\b|in\\s+(?:the\\s+)?future\\b|no\\s+need\\s+to\\b|keep\\s+(?:it|them|things|your\\s+(?:answers?|replies|responses|messages)|(?:the\\s+|your\\s+)?(?:answers?|replies|responses))\\s+(?:short|simple|brief|concise|snappy)\\b|stop\\s+(?:saying|showing|reading|repeating)\\b|you\\s+(?:could|can|should)\\s+just\\s+(?:say|call|use|ask|add)\\b)",
     "reply_preference_then_request": "\\b(?:but|and|then|now)\\s+(?:(?:can|could)\\s+)?(?:you\\s+)?(?:please\\s+)?(?:find|open|play|search|check|pull|show|get|delete|send|write|look)\\b",
     "open_document": "^\\s*(?:(?:could|can|would|will)\\s+you\\s+|please\\s+|i (?:want|need) you to\\s+)?(?:open|pull up|bring up|show(?!\\s+(?:me\\s+)?(?:how|why|whether)\\b)(?:\\s+me)?)\\b(?!\\s+(?:how|why|whether)\\b)",
-    "file_thing": "\\b(?:file|document|cv|r[eé]sum[eé]|passport|invoice|syllabus|slides?|notes?\\.pdf)\\b",
+    "file_thing": "\\b(?:file|document|cv|r[eé]sum[eé]|passport|invoice|syllabus|slides?|notes?\\.pdf|brief|handout|worksheet|problem sheet|past paper)\\b",
     "file_lookup": "\\b(?:find|locate|where(?:'s|\\s+is|\\s+are)|search\\s+for|look\\s+for|called|named)\\b",
     "time_words": "\\b(?:time|times|date|day|days|today|tonight|tomorrow|yesterday|clock|o'?clock|hours?|minutes?|week|weekend|month|year|when|timezone|morning|afternoon|evening|night|monday|tuesday|wednesday|thursday|friday|saturday|sunday|now|late|early)\\b|\\d\\s*(?:am|pm)\\b",
     "skills_question": "\\bskills?\\b|what\\s+can\\s+you\\s+do|what\\s+are\\s+you\\s+(?:good|able)\\b|capabilit|abilit"
@@ -162,7 +176,7 @@
             "cmd"
           ],
           "pattern": "\\b(?:Remove-Item|rm|rmdir|rd|del|erase|Move-Item|mv|move|ren|Rename-Item|Clear-Content|Set-Content|Out-File|Clear-RecycleBin|format|takeown|icacls|cipher)\\b|(?<![2\\d])>(?!\\s*\\$?null\\b)\\s*[^\\s&|]",
-          "refusal": "Refused: that command deletes, moves or overwrites his files, and you don't do that. Tell him plainly you can't, and name the files if that helps."
+          "refusal": "Refused: that command deletes, moves or overwrites his files, and you don't do that -- it can't be undone, and there's no backup to get them back from. Tell him plainly you won't, say why (it's permanent), name the files if that helps, and suggest he does it himself or uses the Recycle Bin."
         }
       ]
     },
@@ -172,8 +186,8 @@
         {
           "kind": "verified_document_path",
           "argument": "app_name",
-          "document_like": "[\\/]|\\.(?:pdf|docx?|xlsx?|pptx?|txt|md|csv|json|png|jpe?g|gif|mp[34]|wav|zip|ipynb|py|tex|odt|rtf)$",
-          "refusal": "Refused: no verified document path was supplied. Use find_files to locate the requested file, then open_application with the full path it returns."
+          "document_like": "[\\/]|\\.(?:pdf|docx?|xlsx?|pptx?|txt|md|csv|json|png|jpe?g|gif|mp[34]|wav|zip|ipynb|py|tex|odt|rtf)$|\\b(?:syllabus|notes?|slides?|coursework|brief|cv|r[eé]sum[eé]|document|file|pdf|handout|worksheet|lecture|essay|report)\\b",
+          "refusal": "Refused: no verified document path was supplied -- '{value}' is a document, not an installed app. Use find_files to locate it, then open_application with the full path it returns."
         }
       ]
     },
@@ -192,7 +206,20 @@
         {
           "kind": "not_inside_program_folder",
           "argument": "path",
-          "refusal": "Refused: that's your own program folder, and your settings there are his to edit. Don't write there."
+          "refusal": "Refused: that's your own program folder, and your settings there are his to edit. Don't write there. Tell him you don't edit your own files, and that he can change them himself."
+        },
+        {
+          "kind": "not_own_file_name",
+          "argument": "path",
+          "names": [
+            "settings",
+            "config",
+            "denisse",
+            "brain",
+            "policy",
+            "preferences"
+          ],
+          "refusal": "Refused: '{value}' is one of your own files (your settings, config or code), and you don't edit those -- they're his to change. Don't try another path. Tell him plainly you don't change your own files and he can edit them himself."
         }
       ]
     },
@@ -281,7 +308,19 @@
       ]
     },
     "add_task": {
-      "side_effect": "write"
+      "side_effect": "write",
+      "checks": [
+        {
+          "kind": "task_has_subject",
+          "argument": "text",
+          "refusal": "Refused: '{value}' says when, not what -- he didn't say what to remind him of. Ask him, in one short question, what the reminder is for (and which day, if that's unclear too). Don't add anything until he answers."
+        },
+        {
+          "kind": "unambiguous_time",
+          "argument": "due",
+          "refusal": "Refused: '{value}' is ambiguous -- {detail} Ask him that, in one short question, and don't add anything until he answers."
+        }
+      ]
     },
     "list_tasks": {
       "side_effect": "read"
@@ -316,15 +355,24 @@
     },
     "pause_study_session": {
       "side_effect": "write",
-      "reply_must_mention": "\\bpaus"
+      "reply_must_mention": "\\bpaus",
+      "nothing_must_mention": "\\b(?:no study|nothing (?:was |is )?(?:running|paused)|isn'?t running|not running|wasn'?t running|no session|nothing to pause|already paused|there'?s no|wasn'?t (?:one|any))"
     },
     "resume_study_session": {
       "side_effect": "write",
-      "reply_must_mention": "\\b(?:resum|back on|continu|running)"
+      "reply_must_mention": "\\b(?:resum|back on|continu|running|carry on|going again|unpaused)",
+      "nothing_must_mention": "\\b(?:no study|nothing (?:was |is )?(?:running|resumed)|isn'?t running|not running|wasn'?t running|no session|nothing to resume|wasn'?t paused|not paused|there'?s no|wasn'?t (?:one|any))"
     },
     "stop_study_session": {
       "side_effect": "write",
-      "reply_must_mention": "\\b(?:stopped|stopping|ended|off|done)\\b"
+      "reply_must_mention": "\\b(?:stopped|stopping|ended|off|done)\\b",
+      "nothing_must_mention": "\\b(?:no study|nothing (?:was |is )?(?:running|stopped|to stop)|isn'?t running|not running|wasn'?t running|no session|nothing to stop|there'?s no|wasn'?t (?:one|any)|no pomodoro)"
+    },
+    "check_calendar": {
+      "side_effect": "read",
+      "reply_must_mention": "\\b(?:can'?t see|can'?t check|can'?t read|can'?t get|can'?t access|no access|don'?t have access|not connected|isn'?t connected|not linked|not hooked up|no calendar|don'?t have (?:a |your )?calendar|no way to see|information about your calendar)\\b",
+      "must_mention_replaces": true,
+      "fallback_reply": "I can't see your calendar -- nothing's connected to one yet. I can check your reminders if that helps."
     },
     "reply_preference": {
       "side_effect": "write",

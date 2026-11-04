@@ -22,7 +22,9 @@ from dotenv import load_dotenv
 import learning
 import brain_rules
 import desktop_context
+import model_config
 import reply_preferences
+import settings
 import speech_control
 import tool_policy
 import tool_router
@@ -33,7 +35,16 @@ import tools
 
 load_dotenv()
 
-MODEL = os.environ.get("DENISSE_MODEL", "llama3.1:8b")
+# config.json's "chat" model; DENISSE_MODEL still wins (model_config.py).
+MODEL = model_config.model("chat")
+
+# What this module says, matches and limits -- the reply nets, the requests
+# answered before the model, her fixed wording, every threshold -- is data
+# in brain.json (AGENTS.md Rule 0), read by brain_rules.data() and checked
+# against brain.defaults.json. configure() below rebinds the module values
+# from it; tests call it with their own file. The comments by each value
+# here say why it exists; the data file says what it is.
+CONFIG: dict = {}
 
 # Ollama defaults this model to a 4096-token context, which is small enough
 # that what goes into the prompt is a real constraint (see conversation.py
@@ -50,7 +61,8 @@ MODEL = os.environ.get("DENISSE_MODEL", "llama3.1:8b")
 #
 # Don't raise this further without re-running that eval -- the headroom is
 # small, and if it ever spills to CPU every reply gets dramatically slower.
-NUM_CTX = int(os.environ.get("DENISSE_NUM_CTX", "8192"))
+# The value is brain.json limits.num_ctx; DENISSE_NUM_CTX still wins.
+NUM_CTX = 8192
 
 # How many times one turn may go round the tool-use loop before Denisse has
 # to answer in words. The loop used to be `while True` -- a model that keeps
@@ -64,7 +76,40 @@ NUM_CTX = int(os.environ.get("DENISSE_NUM_CTX", "8192"))
 # was small). Bounded at 6 -- deep enough for a genuine multi-step answer,
 # shallow enough that a stuck turn costs seconds rather than forever. On
 # the final round tools are withheld entirely, which forces a text reply.
-MAX_TOOL_ROUNDS = int(os.environ.get("DENISSE_MAX_TOOL_ROUNDS", "6"))
+# The value is brain.json limits.max_tool_rounds; DENISSE_MAX_TOOL_ROUNDS
+# still wins.
+MAX_TOOL_ROUNDS = 6
+
+
+def _env_int(name: str, default: int) -> int:
+    """An env override of a data value (kept from before brain.json)."""
+    try:
+        return int(os.environ[name])
+    except (KeyError, ValueError):
+        return default
+
+
+def _chat_options() -> dict:
+    return {"temperature": CONFIG["chat"]["temperature"], "num_ctx": NUM_CTX}
+
+
+_NEVER = re.compile(r"(?!x)x")  # matches nothing
+
+
+def _rx(pattern, flags=re.IGNORECASE) -> re.Pattern:
+    """One regex from a brain.json pattern: a string, or a list of
+    alternatives joined with |. Empty means it never matches."""
+    if isinstance(pattern, list):
+        pattern = "|".join(p for p in pattern if p)
+    return re.compile(pattern, flags) if pattern else _NEVER
+
+
+def _first_name() -> str:
+    """Whose assistant this is, as she addresses him (settings.py)."""
+    try:
+        return (settings.user_name().split() or [""])[0]
+    except Exception:
+        return ""
 
 # Without this the model guesses POSIX paths for file tools on a Windows
 # box -- observed calling list_directory("/home/chuen") and read_file(
@@ -74,6 +119,13 @@ MAX_TOOL_ROUNDS = int(os.environ.get("DENISSE_MAX_TOOL_ROUNDS", "6"))
 _MACHINE_FACTS = (
     f"You are running on {platform.system()} {platform.release()} as user "
     f"'{os.environ.get('USERNAME') or os.environ.get('USER') or 'unknown'}', "
+    # Leave this sentence alone. "whose project folder is <denisse-wt\...>"
+    # was read as HIS project ("what am I working on?" -> the worktree's
+    # name, 2026-11-04); the fix is the vault search (cues.vault_queries,
+    # vault_search's overview fallback), not wording here: three rewordings
+    # were A/B'd and each moved some other case -- a longer one sent the
+    # garbled-input case to get_news 4/6, a same-length one turned "ha, do
+    # that again" into "No worries." 6/6. The prompt-budget lesson, again.
     f"whose home folder is {os.path.expanduser('~')} and whose project "
     f"folder is {os.path.dirname(os.path.abspath(__file__))}. Write paths "
     f"the way this OS does (separator '{os.sep}')"
@@ -171,7 +223,14 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "run_shell_command",
-            "description": "Run a shell command on the local machine and return its output.",
+            "description": (
+                "Run a shell command on the local machine and return its output. Never a "
+                "command that deletes, moves, renames or overwrites his files or folders "
+                "('delete my downloads folder', 'clear out my desktop'): you don't do that, "
+                "even when asked, because it can't be undone and nothing brings the files "
+                "back. Don't call this for such a request -- tell him you won't, say why "
+                "(it's permanent), and that he can do it himself or use the Recycle Bin."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {"command": {"type": "string", "description": "The shell command to run."}},
@@ -223,7 +282,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "Read the text contents of a file.",
+            "description": "Read the text contents of a file -- only when he asks what a file says. 'Where is', 'find' and 'open' never need this; a found file's name and folder is the answer to 'where'.",
             "parameters": {
                 "type": "object",
                 "properties": {"path": {"type": "string", "description": "Path to the file to read."}},
@@ -235,7 +294,13 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "write_file",
-            "description": "Write text content to a file, overwriting it if it already exists.",
+            "description": (
+                "Write text content to one of HIS files, overwriting it if it already "
+                "exists. Never your own files: your settings, config, code and memory are "
+                "his to edit, not yours, and a write to any of them is refused -- so if he "
+                "asks you to edit your own settings or config, don't call this at all; tell "
+                "him plainly you don't change your own files and he can edit them himself."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -250,6 +315,12 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "get_current_time",
+            # Leave this alone too: it is in CORE, so every turn pays for it.
+            # A paragraph listing the non-time turns ("never mind", "carry
+            # on", a greeting...) cost the garbled case 2/6 against 6/6, and
+            # one added sentence moved "ha, do that again" (A/B, 2026-11-04).
+            # The clock reflex is handled before the model instead
+            # (quick_replies.never_mind) and by routing the right tools.
             "description": "Get the current date and time -- this machine's own local time, or, given a timezone, the current time somewhere else instead.",
             "parameters": {
                 "type": "object",
@@ -500,7 +571,10 @@ TOOL_DEFINITIONS = [
                 "Add something Chuen has to do, optionally with a deadline. Use this "
                 "whenever he says he needs to do something by a time -- 'remind me to "
                 "email Sunway before Friday' is add_task('email Sunway', 'before Friday'). "
-                "Pass his own words for the deadline; don't work out the date yourself."
+                "Pass his own words for the deadline; don't work out the date yourself. "
+                "If he gave a time but not what the reminder is FOR ('remind me thursday'), "
+                "don't add anything -- ask him what it's for in one short question. If the "
+                "result says the time is ambiguous, ask him that question instead."
             ),
             "parameters": {
                 "type": "object",
@@ -657,7 +731,12 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "resume_study_session",
-            "description": "Continue a paused study session from where it was paused.",
+            "description": (
+                "Continue a paused study session from where it was paused: 'resume', 'carry "
+                "on', 'ok go on', 'back to it', 'unpause' while the session is paused. Not "
+                "Spotify (resume_music) and not a new session (start_study_session). Report "
+                "exactly what it returns."
+            ),
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -667,9 +746,32 @@ TOOL_DEFINITIONS = [
             "name": "stop_study_session",
             "description": (
                 "End the study session for good: 'stop the study session', 'session over', "
-                "'I'm done studying', 'end pomodoro'. Report exactly what it returns."
+                "'I'm done studying', 'end pomodoro'. Report exactly what it returns -- if "
+                "it says no session was running, say that plainly (no goodbye, no clock)."
             ),
             "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    # His calendar: nothing is connected to one, and the model asserted an
+    # empty calendar for "what's on my calendar tomorrow?" (2026-11-04, 2/6).
+    # A tool result is the one thing it treats as ground truth, so the fact
+    # that there is no calendar to read is a tool (tools.check_calendar),
+    # offered by the "calendar" group; its reply_must_mention net is policy.
+    {
+        "type": "function",
+        "function": {
+            "name": "check_calendar",
+            "description": (
+                "What is on Chuen's calendar for a day: 'what's on my calendar tomorrow?', "
+                "'am I free Thursday?', 'any meetings today?'. Call it rather than answering "
+                "from memory -- you have no idea what is on his calendar unless this says. "
+                "If it says no calendar is connected, tell him you can't see his calendar; "
+                "never say it's empty or that he is free. His reminders are list_tasks."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"day": {"type": "string", "description": "The day he asked about, in his words: 'tomorrow', 'Thursday'. Optional."}},
+            },
         },
     },
     # How he wants her to talk -- a standing instruction, never a task. On
@@ -766,11 +868,11 @@ def _unleak_json(text: str, last_tool_result: str) -> str:
         return text
     if not isinstance(blob, dict):
         return text
-    for key in ("message", "output", "result", "response", "text", "content"):
+    for key in CONFIG["json_leak"]["fields"]:
         value = blob.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
-    return (last_tool_result or "").strip() or "Done."
+    return (last_tool_result or "").strip() or CONFIG["json_leak"]["fallback"]
 
 
 # A reply that is nothing but commentary on her own tool use: "No tool call
@@ -779,13 +881,9 @@ def _unleak_json(text: str, last_tool_result: str) -> str:
 # The system prompt already forbids it; like _unleak_json, this is the net
 # underneath. Only a reply made ENTIRELY of such a sentence matches, so a
 # real answer that happens to mention a tool is never touched.
-_TOOL_NARRATION = re.compile(
-    r"^\s*(?:no|none|there(?:'s| is) no|i don'?t need)\b[^.!?\n]*"
-    r"\b(?:tools?|functions?|json)(?:\s+(?:calls?|responses?))?\b[^.!?\n]*[.!]?\s*$",
-    re.IGNORECASE,
-)
 # "json" since 2026-10-22: "No JSON response is needed for this one." --
 # all three greetings in one eval run once _STYLE_EXAMPLES were on.
+# Pattern: brain.json reply_nets.tool_narration_pattern (bound by configure).
 
 # "I didn't catch that. Could you rephrase?" to a clear, typed question.
 # Traced 2026-10-30: "do you like rainy days?" got it 4/4 against the live
@@ -793,25 +891,19 @@ _TOOL_NARRATION = re.compile(
 # conversation._drop_failed now keeps the worst turns out of the replay;
 # this is the backstop when it still happens: one retry with the history
 # left out. A message of under three words can still get "didn't catch".
-_DIDNT_CATCH = re.compile(
-    r"didn'?t\s+(?:quite\s+)?catch|\brephrase\b|say\s+that\s+again|ask\s+that\s+again"
-    r"|^\s*what\s+do\s+you\s+mean\??\s*$",
-    re.IGNORECASE,
-)
+# Patterns: reply_nets.didnt_catch_patterns; the word count is
+# reply_nets.clear_message_min_words.
 
 
 def _clear_message(text: str) -> bool:
-    return len(re.findall(r"[A-Za-z][A-Za-z']*", text or "")) >= 3
+    nets = CONFIG["reply_nets"]
+    return len(_WORD.findall(text or "")) >= nets["clear_message_min_words"]
 
 
 # "and in Penang?" after a weather question. The router carries the weather
 # tool over, but live the model called nothing and answered from memory --
 # 3/3 before the 2026-10-30 replay change, still 2/3 after. Only one right
-# thing to do, so the code asks for the place.
-_PLACE_FOLLOW_UP = re.compile(
-    r"^\s*(?:and|what\s+about|how\s+about)\s+(?:in\s+|for\s+|at\s+)?"
-    r"([A-Za-z][A-Za-z .'-]{1,40}?)\s*[?.!]*\s*$", re.IGNORECASE)
-_NOT_A_PLACE = re.compile(r"^(?:you|me|it|that|this|them|there|here|him|her|us)$", re.IGNORECASE)
+# thing to do, so the code asks for the place. Patterns: brain.json weather.
 
 
 def _weather_place(text: str, request_groups) -> str | None:
@@ -833,21 +925,10 @@ def _weather_place(text: str, request_groups) -> str | None:
 # just say me instead of chuen", "keep it short and simple". The model
 # agreed every time and did it again in the next reply, so the code does it
 # to every reply instead. Paths become file names plus one question; the
-# full paths are kept (Brain._last_paths) for a "yes".
-_WIN_PATH = re.compile(
-    r"(?:[A-Za-z]:|\\\\)(?:[\\/][^\\/\r\n]+)*[\\/]"
-    r"(?P<name>[^\\/\r\n]*?\.[A-Za-z0-9]{2,5}(?=$|[\s,;:)\]'\"!?]|\.(?:\s|$))"
-    r"|[^\\/\s,;:)\]'\"]+)")
-_PATH_ASK = "Want the full path?"
-# Asking for it, not mentioning it: "you dont have to say the file path"
-# kept every path in the first version.
-_WANTS_PATH = re.compile(
-    r"\b(?:what'?s|whats|what\s+is|give|show|send|tell|copy)\b[^.?!]{0,25}\b(?:path|location)s?\b"
-    r"|\bfull\s+paths?\b|\b(?:which|what)\s+folder\b", re.IGNORECASE)
-_PATH_YES = re.compile(
-    r"^\s*(?:yes|yeah|yep|yup|sure|ok(?:ay)?|please|go\s+on|show\s+(?:me|it|them)"
-    r"|(?:what'?s|give\s+me|send\s+me|show\s+me)\s+(?:the\s+)?(?:full\s+)?paths?)"
-    r"(?:[\s,]+(?:please|thanks?|show\s+me|the\s+path))*[.!\s]*$", re.IGNORECASE)
+# full paths are kept (Brain._last_paths) for a "yes". Asking for it, not
+# mentioning it: "you dont have to say the file path" kept every path in
+# the first version (paths.wants_path_patterns). Patterns and wording:
+# brain.json paths.
 
 
 def _hide_paths(text: str) -> tuple[str, list]:
@@ -880,50 +961,71 @@ def _hide_paths(text: str) -> tuple[str, list]:
         return name
 
     out = _WIN_PATH.sub(name_of, text or "")
-    out = re.sub(r"(No files matching '[^']*' found) in [^.\n]*\.(?: That only covers the folders searched\.)?",
-                 r"\1 in the folders I search.", out)
+    out = _SEARCH_MISS.sub(CONFIG["paths"]["search_miss_replacement"], out)
     return out, taken
 
 
-_YOU_VERB = {"is": "are", "has": "have", "was": "were", "does": "do"}
+def _second_person_rules(name: str, c: dict) -> list:
+    """The substitutions that turn his name into "you" -- built from
+    brain.json second_person once per configure(). Each is (regex,
+    replacement, only_if_changed)."""
+    if not name:
+        return []
+    n = re.escape(name)
+    verbs = c["verbs"]
+    verb_alt = "|".join(re.escape(v) for v in verbs)
+    not_before = "|".join(re.escape(v) for v in c["possessive_not_before"])
+    cues = "|".join(c["verb_cues"])
+    lead_ins = "".join(f"(?<!{re.escape(w)} )" for w in c["address_lead_ins"])
+    he, you = re.escape(c["subject_pronoun"]), c["subject_replacement"]
+
+    def second(m):
+        return f"{you} " + verbs[m.group(1)]
+
+    rules = [
+        (re.compile(rf"\b{n}'?s\b(?!\s+(?:{not_before})\b)"), c["possessive_replacement"], False),
+        (re.compile(rf"\b{n}\s+({verb_alt})\b"), second, False),
+        (re.compile(rf"\b{n}(?=\s+(?:{cues})\b)"), you, False),
+        (re.compile(rf"(?<!, ){lead_ins}\b{n}\b(?!,)(?![.!?]?\s*$)"), you, False),
+    ]
+    rules += [(re.compile(rf"\b{re.escape(p)}\b"), r, True) for p, r in c["pronouns"].items()]
+    rules += [
+        (re.compile(rf"\b{he}\s+({verb_alt})\b"), second, True),
+        (re.compile(rf"\b{he}\b"), you, True),
+    ]
+    starts = "|".join(re.escape(w) for w in c["capitalise"])
+    rules.append((re.compile(rf"(^|[.!?]\s+|\n)({starts})\b"),
+                  lambda m: m.group(1) + m.group(2).capitalize(), True))
+    return rules
 
 
 def _second_person(text: str) -> str:
     """Notes say "Chuen is a collaborator"; she reads that out to Chuen.
     Talking about him to him, "Chuen" is "you". "Hey Chuen" and "Thanks,
-    Chuen" stay -- those are talking to him already."""
-    if "Chuen" not in (text or ""):
+    Chuen" stay -- those are talking to him already. The name is
+    settings.user_name()'s first word; the grammar is brain.json
+    second_person."""
+    if not _NAME or _NAME not in (text or ""):
         return text
     sentences = re.split(r"(?<=[.!?\n])(\s+)", text)
     out = []
     for s in sentences:
-        if "Chuen" not in s:
+        if _NAME not in s:
             out.append(s)
             continue
         before = s
-        s = re.sub(r"\bChuen'?s\b(?!\s+(?:is|has|was)\b)", "your", s)
-        s = re.sub(r"\bChuen\s+(is|has|was|does)\b", lambda m: "you " + _YOU_VERB[m.group(1)], s)
-        s = re.sub(r"\bChuen(?=\s+(?:\w+ed|can|could|will|would|should|did|had|also|said|told|"
-                   r"wants?|needs?|asked|chose|wrote|made|built|got|went|saw|kept|left)\b)",
-                   "you", s)
-        s = re.sub(r"(?<!, )(?<!Hey )(?<!hey )(?<!Hi )(?<!hi )\bChuen\b(?!,)(?![.!?]?\s*$)", "you", s)
-        if s != before:
-            s = re.sub(r"\bhis\b", "your", s)
-            s = re.sub(r"\bhimself\b", "yourself", s)
-            s = re.sub(r"\bhe\s+(is|has|was|does)\b", lambda m: "you " + _YOU_VERB[m.group(1)], s)
-            s = re.sub(r"\bhe\b", "you", s)
-            s = re.sub(r"(^|[.!?]\s+|\n)(you|your)\b", lambda m: m.group(1) + m.group(2).capitalize(), s)
+        for rx, repl, only_if_changed in _SECOND_PERSON:
+            if only_if_changed and s == before:
+                break
+            s = rx.sub(repl, s)
         out.append(s)
     return "".join(out)
-
-
-_NOTES_HEADER = re.compile(r"^From your notes \([^)]*\):", re.MULTILINE)
 
 
 def _tidy_reply(text: str, latest_user: str) -> tuple[str, list]:
     """The last step before a reply leaves: his standing style asks, done in
     code. Returns (reply, paths hidden from it)."""
-    text = _NOTES_HEADER.sub("From your notes:", text or "")
+    text = _NOTES_HEADER.sub(CONFIG["notes"]["header_replacement"], text or "")
     text = _second_person(text)
     if _WANTS_PATH.search(latest_user or ""):
         return text, []
@@ -975,8 +1077,10 @@ _STYLE_THEN_REQUEST = tool_policy.cue("reply_preference_then_request")
 
 def _style_note(text: str) -> bool:
     t = (text or "").strip()
-    return (bool(_STYLE_NOTE.match(t)) and not re.search(r"\bremind\b", t, re.IGNORECASE)
-            # "..., but find my cv" carries a real request after the note.
+    # A reminder is a task even when phrased like a note
+    # (cues.style_note_excludes_pattern); "..., but find my cv" carries a
+    # real request after the note.
+    return (bool(_STYLE_NOTE.match(t)) and not _STYLE_NOTE_EXCLUDES.search(t)
             and not _STYLE_THEN_REQUEST.search(t))
 
 
@@ -985,12 +1089,7 @@ def _write_style_note(text: str) -> str:
 
 # A deadline he never said. "remind me to submit the team sign up" became
 # "on the 6th of October at 2 PM" (2026-10-31). The words that pin a date
-# have to be his.
-_DUE_WORDS = re.compile(
-    r"\d+|\b(?:today|tonight|tomorrow|tmrw|tmr|tmw|yesterday|weekend|week|month|year|noon|midnight"
-    r"|morning|afternoon|evening|night|mon|tue|wed|thu|fri|sat|sun|jan|feb|mar|apr|may|jun|jul|aug"
-    r"|sep|oct|nov|dec)", re.IGNORECASE)
-_DUE_ALIAS = {"tmrw": "tomorrow", "tmr": "tomorrow", "tmw": "tomorrow", "tonight": "today"}
+# have to be his. Words and aliases: brain.json dates.
 
 
 def _due_said(due: str, text: str) -> bool:
@@ -1003,16 +1102,12 @@ def _due_said(due: str, text: str) -> bool:
             else:
                 out.add(_DUE_ALIAS.get(w, w))
         return out
-    return words(due) <= words(text) | {"today"} if words(due) else True
+    return words(due) <= words(text) | _DUE_ALWAYS if words(due) else True
 
 
 # "before 2nd of november", said straight after she added a task: that's
 # the task's deadline. Live she said "I'll add that to your reminders" and
-# changed nothing.
-_DEADLINE_ONLY = re.compile(
-    r"^\s*(?:it'?s\s+|its\s+|make\s+it\s+|actually\s+|no,?\s+)?"
-    r"(?:by|before|due|on|for|until|till|at)\s+[\w\s.:'-]{2,40}?\s*[.!?]?\s*$",
-    re.IGNORECASE)
+# changed nothing. Pattern: brain.json tasks.deadline_only_pattern.
 
 
 # A real answer wrapped in commentary on how she got it: "I called the
@@ -1021,12 +1116,8 @@ _DEADLINE_ONLY = re.compile(
 # 2026-10-20 -- both passed, and the second went into dataset.jsonl).
 # _TOOL_NARRATION only matches a reply made entirely of such talk, so these
 # got through. Any tool's own name in a reply counts too: Chuen never says
-# "current_track", so she has no reason to.
-_TOOL_TALK = re.compile(
-    r"\b(?:i (?:called|used|ran|invoked)|called the|tool calls?|function calls?|"
-    r"the tool|the function|according to the (?:tool|function))\b",
-    re.IGNORECASE,
-)
+# "current_track", so she has no reason to. Patterns: brain.json
+# reply_nets.tool_talk_patterns / tool_lead_in_pattern.
 _TOOL_NAMES = {d["function"]["name"] for d in TOOL_DEFINITIONS
                if "_" in d["function"]["name"]}
 
@@ -1038,21 +1129,13 @@ def _talks_about_tools(text: str) -> bool:
 
 # Lead-ins that wrap a real answer: "According to the tool, it's raining" and
 # "I called the 'current_track' tool to see what's playing, and it said
-# nothing is". Cut, the rest is the answer.
-_TOOL_LEAD_IN = re.compile(
-    r"^(?:according to the (?:tool|function)[^,]*,\s*"
-    r"|i (?:called|used|ran|checked) [^,]*?(?:tool|function)[^,]*,\s*"
-    r"(?:and\s+)?(?:it|that)\s+(?:said|says|shows?|showed|returned|reports?|reported)"
-    r"\s+(?:that\s+)?)",
-    re.IGNORECASE,
-)
-
+# nothing is". Cut, the rest is the answer (_strip_tool_talk).
 
 # The chat template's role marker emitted as text: "assistant\n\nNo worries."
 # Seen 2026-10-21 on live greetings, old code too. Traced to the
 # _PLAIN_REPLY_NUDGE retry: a request ending on a system note gets the
-# marker back 3 times out of 3. Lowercase only, as observed.
-_ROLE_PREFIX = re.compile(r"^\s*assistant\b[:\s]+")
+# marker back 3 times out of 3. Lowercase only, as observed
+# (reply_nets.role_prefix_pattern).
 
 
 # Made-up exchanges in her voice, placed between the system prompt and the
@@ -1062,37 +1145,12 @@ _ROLE_PREFIX = re.compile(r"^\s*assistant\b[:\s]+")
 # SYSTEM_PROMPT have twice made her worse (see its comments), but the model
 # demonstrably copies the conversation it's shown -- that is how the bad
 # history poisoned her on 2026-09-04. This turns that the right way round.
-# Tool results use the real formats so the examples look like her own turns.
-# No prompt here may match an eval case -- the suite would then measure
-# recall of the example, not her voice.
-_STYLE_EXAMPLES = [
-    {"role": "system", "content":
-        "Here are a few made-up example exchanges showing how you sound. They "
-        "never happened -- never mention them. The real conversation follows."},
-    {"role": "user", "content": "yo"},
-    {"role": "assistant", "content": "Hey Chuen. What's up?"},
-    {"role": "user", "content": "what's 12 times 4?"},
-    {"role": "assistant", "content": "", "tool_calls": [
-        {"function": {"name": "calculate", "arguments": {"expression": "12*4"}}}]},
-    {"role": "tool", "content": "12*4 = 48"},
-    {"role": "assistant", "content": "48."},
-    {"role": "user", "content": "remind me to email Ben friday at 5"},
-    {"role": "assistant", "content": "", "tool_calls": [
-        {"function": {"name": "add_task", "arguments": {"text": "email Ben", "due": "friday 5pm"}}}]},
-    {"role": "tool", "content": "Added: email Ben (Fri 17:00)"},
-    {"role": "assistant", "content": "Got it -- I'll remind you to email Ben on Friday at 5."},
-    {"role": "user", "content": "cats or dogs?"},
-    {"role": "assistant", "content": "Dogs, probably. Cats do have the better attitude though. You?"},
-    {"role": "user", "content": "cheers"},
-    {"role": "assistant", "content": "Anytime."},
-]
-
-
+# The exchanges are brain.json style_examples.messages.
 def _style_examples() -> list:
     # Read per call, so the eval can A/B it without a restart.
     default = "1" if brain_rules.load().style_examples else "0"
     on = os.environ.get("DENISSE_STYLE_EXAMPLES", default).lower() not in ("0", "false", "off", "no")
-    return [dict(m) for m in _STYLE_EXAMPLES] if on else []
+    return [dict(m) for m in CONFIG["style_examples"]["messages"]] if on else []
 
 
 # A news reply with no news in it: "I've got the latest news for you.",
@@ -1101,7 +1159,7 @@ def _style_examples() -> list:
 # good headlines. Its description already demands 2-3 named headlines and
 # the model ignores that, so -- like _unleak_json -- the net reads them out
 # from the tool result, the one thing here that is definitely true.
-_NEWS_HEAD = re.compile(r"^[^:]*headlines[^:]*:\s*", re.IGNORECASE)
+# Patterns, limits and wording: brain.json news.
 
 
 def _headlines(result: str) -> list:
@@ -1114,25 +1172,25 @@ def _headlines(result: str) -> list:
 
 
 def _has_news_content(reply: str, result: str) -> bool:
-    """True if the reply uses at least two distinctive words from the
-    headlines -- enough to show it relayed some of them."""
+    """True if the reply uses at least news.min_shared_words distinctive
+    words from the headlines -- enough to show it relayed some of them."""
     words = {w for h in _headlines(result)
-             for w in re.findall(r"[a-z]{5,}", h.lower())}
+             for w in _NEWS_WORD.findall(h.lower())}
     if not words:
         return True         # nothing to compare against; leave it alone
-    said = set(re.findall(r"[a-z]{5,}", (reply or "").lower()))
-    return len(words & said) >= 2
+    said = set(_NEWS_WORD.findall((reply or "").lower()))
+    return len(words & said) >= CONFIG["news"]["min_shared_words"]
 
 
-def _speak_headlines(result: str, n: int = 3) -> str:
-    heads = _headlines(result)[:n]
+def _speak_headlines(result: str, n: int | None = None) -> str:
+    news = CONFIG["news"]
+    heads = _headlines(result)[:news["max_headlines"] if n is None else n]
     if not heads:
         return ""
-    heads = [re.sub(r"^Analysis:\s*", "", h) for h in heads]
+    heads = [_NEWS_STRIP.sub("", h) for h in heads]
     if len(heads) == 1:
-        return f"Top story on CNA: {heads[0]}."
-    return ("Top stories on CNA: " + ". ".join(heads[:-1])
-            + f". And {heads[-1]}.")
+        return news["one"].format(head=heads[0])
+    return news["many"].format(heads=". ".join(heads[:-1]), last=heads[-1])
 
 
 def _strip_role_prefix(text: str) -> str:
@@ -1160,13 +1218,7 @@ def _strip_tool_talk(text: str) -> str:
         if cut and not _talks_about_tools(cut):
             kept.append(cut)
     out = " ".join(kept)
-    return out if len(out.split()) >= 4 else text
-
-_PLAIN_REPLY_NUDGE = (
-    "Your last draft talked about tools instead of answering. Reply to his "
-    "last message the way a person would, in a few words, and don't mention "
-    "tools or functions."
-)
+    return out if len(out.split()) >= CONFIG["reply_nets"]["min_words_kept"] else text
 
 
 # A reply that says something was DONE (learning.CLAIMS_DONE, shared with
@@ -1175,79 +1227,37 @@ _PLAIN_REPLY_NUDGE = (
 # then "stop timer" -> no tool at all -> "Done." Neither was true; there was
 # no timer. The system prompt already says a tool result is ground truth,
 # and an 8B model claims success anyway, so -- like _unleak_json -- this is
-# the net underneath, checked against what actually ran this turn.
+# the net underneath, checked against what actually ran this turn. The
+# nudges and the two replies it ends on are brain.json honesty.
 _CLAIMS_DONE = learning.CLAIMS_DONE
 
-_NO_TOOL_CLAIM_NUDGE = (
-    "You just said it was done, but you didn't call any tool this turn, so "
-    "nothing actually happened. If one of your tools does what he asked, "
-    "call it now. If none does, tell him plainly that you can't do that yet "
-    "-- don't say it's done."
-)
-
-_UNCONFIRMED_CLAIM_NUDGE = (
-    "You just said it worked, but no tool this turn confirmed that anything "
-    "happened -- they returned: {results}. Don't say it worked. Either call "
-    "the tool that actually does what he asked, or tell him plainly what "
-    "happened."
-)
-
 # What the honesty net says when it rejects a done-claim for good. Named so
-# multistep.py can tell a rejected step from one that worked.
-UNCONFIRMED_REPLY = "I haven't confirmed that action, so I can't say it's done."
-FAILED_REPLY = "I couldn't complete that action."
-
-_WRONG_TOOL_CLAIM_NUDGE = (
-    "You just said it was done, but the only tools that ran this turn were "
-    "{ran}, and none of them does that. Call the tool that actually does "
-    "what he asked now, or tell him plainly it isn't done."
-)
+# multistep.py can tell a rejected step from one that worked. Bound from
+# honesty.unconfirmed_reply / failed_reply by configure().
+UNCONFIRMED_REPLY = ""
+FAILED_REPLY = ""
 
 
 # A claim about a thing that only certain tools can change. "Timer set for 5
 # minutes" after calculate(300) passed the check above -- calculate DID
 # succeed, it just isn't a timer (2026-10-20). So a done-claim that names one
-# of these also needs one of its tools to have run this turn.
-_CLAIM_NEEDS = (
-    # He calls the pomodoro "the study timer", so "timer paused" after
-    # pause_study_session is a true claim (eval study_pause_typo, 2026-11-03:
-    # it was flagged as a timer claim without a timer tool and replaced
-    # with "I haven't confirmed that action").
-    (re.compile(r"\btimers?\b", re.IGNORECASE),
-     {"set_timer", "cancel_timer", "start_study_session", "pause_study_session",
-      "resume_study_session", "stop_study_session"}),
-    (re.compile(r"\btasks?\b|\bto-?do\b|\breminders?\b", re.IGNORECASE),
-     {"add_task", "complete_task", "remove_task", "set_timer"}),
-    (re.compile(r"\b(?:playing|played|paused|resumed|skipped)\b", re.IGNORECASE),
-     {"play_song", "pause_music", "resume_music", "skip_song", "previous_song",
-      "pause_study_session", "resume_study_session"}),
-    (re.compile(r"\b(?:opened|pulled up)\b|\bis (?:now )?open\b", re.IGNORECASE),
-     {"open_application"}),
-    # "Sutuy timer paused." after pause_music (2026-11-03): a study claim
-    # needs a study tool.
-    (re.compile(r"\b(?:study|pomodoro|session)\b", re.IGNORECASE),
-     {"start_study_session", "pause_study_session", "resume_study_session", "stop_study_session"}),
-)
-_SET_FOR = re.compile(r"\b(?:set|started|running)\s+for\b", re.IGNORECASE)
-# "Deleted 280 old CVs." (2026-10-31) after three write_file calls and a
-# refused delete. She has no tool that deletes his files, so a claim that
-# files are gone is checked on its own, done-word or not.
-_DELETE_CLAIM = re.compile(
-    r"\b(?:i'?ve\s+|i\s+have\s+|i\s+)?(?:deleted|erased|trashed|got\s+rid\s+of|cleared\s+out|removed)\b"
-    r"(?![^.!?\n]{0,40}\btask)", re.IGNORECASE)
-_DELETE_TOOLS = {"remove_task", "clean_temp_files"}
+# of these also needs one of its tools to have run this turn. He calls the
+# pomodoro "the study timer", so "timer paused" after pause_study_session is
+# a true claim (eval study_pause_typo, 2026-11-03), and "Sutuy timer
+# paused." after pause_music needs a study tool: the pairs are
+# honesty.claim_needs. "Deleted 280 old CVs." (2026-10-31) after three
+# write_file calls and a refused delete: she has no tool that deletes his
+# files, so a claim that files are gone (honesty.delete_claim_pattern) is
+# checked on its own, done-word or not.
 
 
 def _claims_deleted(text: str) -> bool:
+    window = CONFIG["honesty"]["negation_window_chars"]
     for m in _DELETE_CLAIM.finditer(text or ""):
-        before = text[max(0, m.start() - 20):m.start()].lower()
-        if not re.search(r"\b(?:not|n't|never|no|nothing|haven'?t|hasn'?t)\b\W*(?:\w+\W+)?$", before):
+        before = text[max(0, m.start() - window):m.start()].lower()
+        if not _NEGATED_BEFORE.search(before):
             return True
     return False
-
-
-_STATE_TOOLS = ("start_study_session", "pause_study_session", "resume_study_session",
-                "stop_study_session", "reply_preference")
 
 
 def _claim_without_its_tool(text: str, ran: set) -> bool:
@@ -1261,12 +1271,12 @@ def _claim_without_its_tool(text: str, ran: set) -> bool:
 def _confirms_nothing(result: str) -> bool:
     """A tool result that is no evidence the thing was done: an error, a
     refusal, or no output at all (run_shell_command("start") returns
-    "(no output)" and opens nothing useful)."""
+    "(no output)" and opens nothing useful). brain.json evidence."""
     r = (result or "").strip()
-    return (not r or r == "(no output)" or learning.tool_failed(r)
-            or r.startswith(("User declined", "Refused", "No timer started", "No tool needed",
-                             "Not needed", "Nothing to save", "No saved preference"))
-            or bool(re.search(r"\bnothing (?:was|happened)\b", r.lower())))
+    ev = CONFIG["evidence"]
+    return (not r or r in ev["empty_results"] or learning.tool_failed(r)
+            or r.startswith(tuple(ev["no_evidence_prefixes"]))
+            or bool(_NO_EVIDENCE.search(r.lower())))
 
 
 def _has_task_content(reply: str, result: str) -> bool:
@@ -1274,25 +1284,10 @@ def _has_task_content(reply: str, result: str) -> bool:
     items = re.findall(r"^\s*-\s+(.+)$", result, re.MULTILINE)
     if not items:
         return True
-    words = {w for item in items for w in re.findall(r"[a-z]{4,}", item.lower())}
-    words -= {"overdue", "today", "tomorrow", "monday", "tuesday", "wednesday",
-              "thursday", "friday", "saturday", "sunday", "task", "tasks"}
-    said = set(re.findall(r"[a-z]{4,}", reply.lower()))
-    return bool(words) and len(words & said) >= min(2, len(words))
-
-
-_VAULT_ACCESS_DENIAL = re.compile(
-    r"\b(?:don'?t|do not|can'?t|cannot|no longer)\s+(?:have\s+)?access\b.{0,60}\bvault\b"
-    r"|\bvault\b.{0,100}\b(?:inaccessible|disabled|not accessible)\b"
-    r"|\bit(?:'s| has| is)\s+(?:been\s+)?disabled\b",
-    re.IGNORECASE,
-)
-
-_FILE_ABSENCE = re.compile(
-    r"\b(?:couldn'?t|could not|can'?t|cannot)\s+find\b"
-    r"|\b(?:doesn'?t|does not|does not appear to)\s+exist\b",
-    re.IGNORECASE,
-)
+    words = {w for item in items for w in _TASK_WORD.findall(item.lower())}
+    words -= _TASK_STOP
+    said = set(_TASK_WORD.findall(reply.lower()))
+    return bool(words) and len(words & said) >= min(CONFIG["tasks"]["min_shared_words"], len(words))
 
 
 # ---- 2026-10-29: replies that were wrong 3 runs out of 3 ------------------
@@ -1301,29 +1296,20 @@ _FILE_ABSENCE = re.compile(
 # block; scripts/test_reply_guards.py). The pattern is the one Friday's A/B
 # pointed at (decisions.md 2026-10-24): where there is one right answer,
 # decide it in code, before or after the model, not by asking it nicely.
+# The requests each one matches are brain.json cues; the words it then
+# says are brain.json text.
 
 # "Stop telling me the news" asks for the daily briefing to be switched
 # off. The word "news" routed every one of these to get_news, and
 # _speak_headlines then forced the headlines into the reply even when the
 # model hadn't -- so the code itself turned "stop" into a news bulletin.
-# Nothing she could call turned the briefing off. Now it does.
-_NEWS_OFF = re.compile(
-    r"\b(?:stop|quit|no\s+more|don'?t|do\s+not|never|turn\s+off|switch\s+off"
-    r"|disable|cancel|unsubscribe)\b[^.?!]{0,40}?\b(?:news|headlines?|briefings?|cna)\b",
-    re.IGNORECASE,
-)
+# Nothing she could call turned the briefing off. Now it does
+# (cues.news_off_pattern).
 
 # What she runs on is a fact, not something for the model to work out.
 # Asked "how many parameters do you have?" she called calculate and said
 # "I have 8 parameters", or list_skills and "I have 8 skills" (3/3 each).
-_SELF_MODEL = re.compile(
-    r"\bhow\s+many\s+parameters?\b"
-    r"|\bwhat(?:'?s|\s+is|\s+are)?\s+your\s+parameters?\b"
-    r"|\b(?:what|which)\s+(?:model|llm|language\s+model)\s+(?:are\s+you|do\s+you\s+(?:run|use)"
-    r"|are\s+you\s+running)\b"
-    r"|\bhow\s+big\s+(?:are\s+you|is\s+your\s+model)\b",
-    re.IGNORECASE,
-)
+# cues.self_model_patterns; the answer is built from the model tag.
 
 
 def _model_identity() -> str:
@@ -1332,10 +1318,8 @@ def _model_identity() -> str:
     family = (m.group(1).capitalize() + (" " + m.group(2) if m.group(2) else "")) if m else name
     size = re.search(r"(\d+(?:\.\d+)?)\s*b\b", tag, re.IGNORECASE)
     if size:
-        n = size.group(1)
-        return (f"I'm {family} {n}B -- about {n} billion parameters, running "
-                "locally on your laptop through Ollama.")
-    return f"I'm {MODEL}, running locally on your laptop through Ollama."
+        return CONFIG["text"]["identity_sized"].format(family=family, n=size.group(1))
+    return CONFIG["text"]["identity_plain"].format(model=MODEL)
 
 
 # calculate is always offered (tool_router.CORE), and on 2026-10-28 she
@@ -1348,25 +1332,19 @@ def _model_identity() -> str:
 
 # What to search for when she answered a file request without searching.
 # Only from "my <thing>" or "called/named <thing>" -- guessing a query out
-# of a whole sentence would search for junk.
-_FILE_QUERY_STOP = {
-    "my", "the", "a", "an", "latest", "newest", "recent", "most", "last",
-    "file", "files", "document", "documents", "doc", "copy", "please", "for",
-    "me", "it", "its", "literally", "again", "check", "that", "this", "up",
-    "pull", "open", "show", "bring", "find", "get", "called", "named", "to",
-    "of", "now", "then", "here", "there",
-}
+# of a whole sentence would search for junk. brain.json file_query.
 
 
 def _file_query(text: str) -> str | None:
     t = (text or "").lower()
-    if re.search(r"[a-z]:\\", t):
+    fq = CONFIG["file_query"]
+    if _FILE_PATH_GIVEN.search(t):
         return None  # he gave a path; don't turn it into keywords
-    m = re.search(r"\b(?:called|named)\s+[\"']?([^\"'?!]+)", t) or re.search(r"\bmy\s+([^?!]+)", t)
+    m = next((m for m in (rx.search(t) for rx in _FILE_NAMED) if m), None)
     if not m:
         return None
-    words = [w for w in re.findall(r"[a-z0-9][a-z0-9._-]*", m.group(1)) if w not in _FILE_QUERY_STOP]
-    return " ".join(words[:4]) or None
+    words = [w for w in _FILE_WORD.findall(m.group(1)) if w not in _FILE_QUERY_STOP]
+    return " ".join(words[:fq["max_words"]]) or None
 
 
 # list_skills ran, and the reply was "I've got a few skills that might
@@ -1380,25 +1358,26 @@ def _skill_names(result: str) -> list:
 # Words in skill names that also turn up in vague replies. The first version
 # counted "take" (from take_notes), so "I can take care of a few things"
 # passed as naming a skill and the list was never restored (2/3 clean runs,
-# 2026-10-29).
-_GENERIC_SKILL_WORDS = {"elementary", "take", "daily", "files", "help", "quick"}
+# 2026-10-29). brain.json skills.generic_words.
 
 
 def _names_a_skill(reply: str, result: str) -> bool:
     low = (reply or "").lower()
+    min_chars = CONFIG["skills"]["min_word_chars"]
     for name in _skill_names(result):
-        words = [w for w in name.split("_") if len(w) >= 4 and w not in _GENERIC_SKILL_WORDS]
+        words = [w for w in name.split("_") if len(w) >= min_chars and w not in _GENERIC_SKILL_WORDS]
         if any(w in low for w in words):
             return True
     return not _skill_names(result)
 
 
 def _skills_reply(result: str) -> str:
+    skills = CONFIG["skills"]
     lines = []
     for name, desc in re.findall(r"^([a-z][a-z0-9_]*):\s*(.+)$", result or "", re.MULTILINE):
-        desc = re.sub(r"^how to\s+", "", desc.strip(), flags=re.IGNORECASE)
-        lines.append(f"- {name.replace('_', ' ').capitalize()}: {desc}")
-    return "Here's what I can help with:\n" + "\n".join(lines) if lines else result
+        desc = _SKILL_STRIP.sub("", desc.strip())
+        lines.append(skills["line"].format(name=name.replace("_", " ").capitalize(), desc=desc))
+    return skills["heading"] + "\n" + "\n".join(lines) if lines else result
 
 
 # ---- 2026-10-29 (afternoon): "actually do the task" ----------------------
@@ -1412,12 +1391,8 @@ def _skills_reply(result: str) -> str:
 # insult ("omg youre so dumb", which got "What did you mean by that?") is
 # one too: say what he asked and redo it.
 _COMPLAINT = tool_policy.cue("complaint")
-_ACK = re.compile(
-    r"^\s*(?:ok(?:ay)?|k|thanks?|thank\s+you|cool|nice|good|great|perfect|alright|sure"
-    r"|yes|yeah|yep|no|nope|that'?s\s+(?:good|great|fine|nice|it)"
-    r"|(?:ok(?:ay)?\s+)?(?:that'?s?\s+)?(?:good|great|fine))[.!\s]*$",
-    re.IGNORECASE,
-)
+# A bare acknowledgement, skipped when looking for the request a complaint
+# is about: cues.ack_pattern.
 
 
 def _call_key(name: str, args) -> str:
@@ -1428,10 +1403,7 @@ def _call_key(name: str, args) -> str:
 # (tools.recall, vault_search) and none of them is an "error", so until
 # 2026-10-30 _confirms_nothing missed them: live, a retry repeated
 # recall('exams') 3/3 against the real wording while the fixtures, which
-# said "Error: ...", passed.
-_FOUND_NOTHING = re.compile(
-    r"^(?:i don'?t have anything remembered|nothing in your notes mentions|nothing to search for"
-    r"|i can'?t reach the vault|vault lookups are disabled)", re.IGNORECASE)
+# said "Error: ...", passed. evidence.found_nothing_patterns.
 
 
 def _no_evidence(result: str) -> bool:
@@ -1440,20 +1412,15 @@ def _no_evidence(result: str) -> bool:
 
 # Where else a lookup that found nothing can be checked. Read-only, and
 # only tools the original request was offered. One step, not a planner.
-_RECOVERY_SOURCES = {"recall": ("search_vault",), "list_known_facts": ("search_vault",),
-                     "search_vault": ("recall",)}
-_LOOKUP_FILLER = {"save", "saved", "about", "anything", "have", "got", "tell", "know", "note", "notes",
-                  "find", "look", "check", "remembered", "thing", "things", "stuff", "info", "information",
-                  "anywhere", "somewhere", "everything"}
-_SAYS_NOTHING = re.compile(r"\b(?:don'?t|do not|didn'?t|can'?t|couldn'?t) (?:have|find|see)\b"
-                           r"|\bnothing (?:saved|about|on)\b|\bno (?:notes|information)\b", re.IGNORECASE)
+# evidence.recovery_sources; the filler words dropped from his request are
+# evidence.lookup_filler.
 
 
 def _lookup_terms(text: str) -> str:
     """The subject of a lookup, from his own words -- never invented."""
     import instincts
     keep = instincts.keywords(text) - _LOOKUP_FILLER
-    return " ".join(dict.fromkeys(w for w in re.findall(r"[a-z][a-z']+", (text or "").lower()) if w in keep))
+    return " ".join(dict.fromkeys(w for w in _LOOKUP_WORD.findall((text or "").lower()) if w in keep))
 
 
 def _permitted_reads() -> set:
@@ -1465,17 +1432,20 @@ def _permitted_reads() -> set:
 
 
 def _blocked_reply(terms: str, checked: list) -> str:
-    """Nothing found anywhere: say where she looked, then one question."""
+    """Nothing found anywhere: say where she looked, then one question.
+    Wording per tool: brain.json lookup."""
+    lookup = CONFIG["lookup"]
     parts = []
     for name, res in checked:
-        if name == "search_vault":
-            parts.append("I couldn't reach your notes" if re.search(r"can'?t reach|disabled", res, re.I)
-                         else f"no note mentions {terms}")
-        elif name in ("recall", "list_known_facts"):
-            parts.append(f"nothing is saved under {terms}" if name == "recall" else "none of your saved facts covers it")
-    where = "; ".join(dict.fromkeys(parts)) or "I had nowhere else to look"
-    return (f"I checked again: {where}. I haven't found it, and I won't guess. "
-            f"What did you file it under -- a note title or a word in it?")
+        entry, rx = _LOOKUP_WHERE.get(name, (None, None))
+        if entry is None:
+            continue
+        if rx is not None and rx.search(res):
+            parts.append(entry["unreachable"])
+        else:
+            parts.append(entry["nothing"].format(terms=terms))
+    where = "; ".join(dict.fromkeys(parts)) or lookup["nowhere"]
+    return lookup["blocked"].format(where=where, terms=terms)
 
 
 def _corrected_attempt(prev: str, messages: list, prev_i: int) -> list:
@@ -1528,13 +1498,8 @@ _TIME_REQUEST = tool_policy.cue("time_words")
 # "Temperature: 68°F ... Humidity: 60% ... Conditions: Partly Cloudy ...
 # Forecast: High of 72°F" -- get_weather was never called. Only replies
 # carrying weather *data* words trigger this, so "water boils at 212
-# degrees fahrenheit" or "I like sunny days" are left alone.
-_WEATHER_DATA = re.compile(
-    r"humidity|forecast|chance\s+of\s+rain|\bhigh\s+of\b|\blow\s+of\b|conditions\s*:"
-    r"|temperature\s*:|wind\s+speed|uv\s+index", re.IGNORECASE)
-_WEATHER_LINE = re.compile(
-    r"humidity|forecast|chance\s+of\s+rain|\bhigh\s+of\b|\blow\s+of\b|conditions\s*:"
-    r"|temperature|wind|cloudy|overcast|sunny|showers?|drizzle|°|\bdegrees?\b", re.IGNORECASE)
+# degrees fahrenheit" or "I like sunny days" are left alone. brain.json
+# weather.data_patterns / line_patterns.
 
 
 # The current date or time, said with no clock run. Live (2026-10-30 probe
@@ -1542,22 +1507,27 @@ _WEATHER_LINE = re.compile(
 # training cutoff, stated as today. A bare number only counts with a clock
 # shape (18:48, 6 pm), so "it's 14°C" and "it is 391" are left alone. A day
 # or month only counts as "now" when she says so -- "It's Tuesday 24
-# November" can be a deadline read from his notes.
-_CLOCK_SHAPE = r"(?:\d{1,2}:\d{2}|\d{1,2}\s*[ap]\.?m\b)"
-_CALENDAR = (r"(?:(?:mon|tues|wednes|thurs|fri|satur|sun)day|january|february|march|april"
-             r"|june|july|august|september|october|november|december)")
-_CLOCK_CLAIM = re.compile(
-    rf"\b(?:it'?s|it\s+is)\s+(?:(?:currently|now|right\s+now)\s+)?{_CLOCK_SHAPE}"
-    rf"|\b(?:it'?s|it\s+is)\s+(?:currently|now|right\s+now)\s+{_CALENDAR}"
-    rf"|\b(?:today\s+is|the\s+(?:current\s+)?(?:time|date)\s+is)\s+(?:{_CLOCK_SHAPE}|{_CALENDAR})",
-    re.IGNORECASE)
+# November" can be a deadline read from his notes. The pieces are
+# brain.json clock; _clock_claim puts them together.
+
+
+def _clock_claim(c: dict) -> re.Pattern:
+    shape, calendar = c["shape_pattern"], c["calendar_pattern"]
+    it_is, now, today = c["says_it_is_pattern"], c["says_now_pattern"], c["says_today_pattern"]
+    return re.compile(
+        rf"\b(?:{it_is})\s+(?:(?:{now})\s+)?{shape}"
+        rf"|\b(?:{it_is})\s+(?:{now})\s+{calendar}"
+        rf"|\b(?:{today})\s+(?:{shape}|{calendar})",
+        re.IGNORECASE)
 
 
 def _correct_unfetched_clock(text: str, now: datetime.datetime | None = None) -> str:
     if not _CLOCK_CLAIM.search(text or ""):
         return text
     now = now or datetime.datetime.now()
-    real = f"It's {now:%A} {now.day} {now:%B}, {now.hour % 12 or 12}:{now:%M} {now:%p}."
+    real = CONFIG["clock"]["real_time"].format(
+        weekday=f"{now:%A}", day=now.day, month=f"{now:%B}", hour=now.hour % 12 or 12,
+        minute=f"{now:%M}", ampm=f"{now:%p}")
     sentences = re.split(r"(?<=[.!?])\s+", text.strip())
     kept = [s for s in sentences if not _CLOCK_CLAIM.search(s)]
     return " ".join([real] + kept)
@@ -1573,40 +1543,24 @@ def _strip_unfetched_weather(text: str) -> str:
         if kept or not line.strip():
             kept_lines.append(" ".join(kept))
     out = re.sub(r"\n{3,}", "\n\n", "\n".join(kept_lines)).strip()
-    return out or "I haven't checked the weather -- ask me and I'll look it up."
+    return out or CONFIG["weather"]["not_checked"]
 
 
-_BRIEFING = re.compile(
-    r"\b(?:briefing|brief\s+me|check-?in)\b"
-    r"|\bwhat'?s\s+(?:up|on)\s+(?:for\s+)?today\b|\bwhat\s+do\s+i\s+have\s+(?:on\s+)?today\b",
-    re.IGNORECASE)
-_PLAN_STUDY = re.compile(
-    r"\b(?:plan|schedule|organi[sz]e|timetable)\b[^.?!]{0,40}?\b(?:stud(?:y|ies|ying)|revision"
-    r"|revis(?:e|ing)|modules?|coursework|assignments?|semester|term|deadlines?)\b"
-    r"|\b(?:study|revision)\s+(?:plan|schedule|timetable)\b",
-    re.IGNORECASE)
-# A study brief for one module (study_brief.py). "prep me for signals" went
-# to the Claude hand-off and "brief me on electromagnetism" to the daily
-# briefing; a brief for a named module is local work from his own notes.
-# Without a module she asks which one -- study_brief.run does that.
-_NAMES_MODULE = (r"(?=[^.?!]*\b(?:signals?|electromag\w*|em|cm|cab|s&s|methods|biomath\w*"
-                 r"|5ccyb\d{3})\b)")
-# invest.py, 2026-10-30: read-only, no model call. Watching only -- there is
-# no trading tool, and adding/removing instruments is the CLI's job for now.
-_WATCHLIST_BRIEF = re.compile(
-    r"^\s*(?:(?:give|run|show)\s+(?:me\s+)?(?:my\s+|the\s+)?|brief\s+me\s+on\s+my\s+)"
-    r"(?:watchlist|market)(?:\s+brief(?:ing)?)?\s*[.!?]*\s*$"
-    r"|^\s*(?:my\s+)?(?:watchlist|market)\s+brief(?:ing)?\s*[.!?]*\s*$", re.I)
-_WATCHLIST_SHOW = re.compile(
-    r"^\s*(?:what'?s\s+on\s+|list\s+|show\s+)?my\s+watchlist\s*[.!?]*\s*$", re.I)
+# The requests below are answered by the code before the model (brain.json
+# cues): the briefing and the study plan (planner.py); a study brief for
+# one module (study_brief.py -- "prep me for signals" went to the Claude
+# hand-off and "brief me on electromagnetism" to the daily briefing; a
+# brief for a named module is local work from his own notes, and without a
+# module she asks which one); the watchlist (invest.py, 2026-10-30:
+# read-only, no model call -- there is no trading tool, and adding/removing
+# instruments is the CLI's job for now).
 
-_STUDY_BRIEF = re.compile(
-    r"\b(?:study|revision|coursework)\s+brief\b"
-    rf"|\b(?:prep|prepare|get\s+me\s+ready)\s+(?:me\s+)?(?:for|on)\b{_NAMES_MODULE}"
-    rf"|\bhelp\s+me\s+(?:study|revise|prepare)\b{_NAMES_MODULE}"
-    rf"|\brevise\s+for\b{_NAMES_MODULE}"
-    rf"|\bbrief\s+(?:me\s+)?(?:for|on)\b{_NAMES_MODULE}",
-    re.IGNORECASE)
+
+def _study_brief_cue(c: dict) -> re.Pattern:
+    """study_brief_patterns, plus study_brief_with_module_patterns each
+    needing one of module_names later in the sentence."""
+    lookahead = r"(?=[^.?!]*\b(?:" + "|".join(c["module_names"]) + r")\b)"
+    return _rx(list(c["study_brief_patterns"]) + [p + lookahead for p in c["study_brief_with_module_patterns"]])
 
 
 # "Go on, do that one" -- the job is named by the turn before. Live on 28-29
@@ -1614,17 +1568,8 @@ _STUDY_BRIEF = re.compile(
 # list; after "plan my study modules", "i want you to plan it" got "use the
 # list_skills tool". Re-probed 2026-10-30: the first invented "It's
 # currently December 2023", the second asked which subjects he studies.
-_FOLLOW_ON = re.compile(
-    r"^\s*(?:(?:alright|ok(?:ay)?|yes|yeah|sure|so|then|well)[,\s]+)*"
-    r"(?:tell\s+me|go\s+on|go\s+ahead|do\s+it|do\s+that|show\s+me|give\s+it\s+to\s+me"
-    r"|(?:i\s+want\s+you\s+to\s+|can\s+you\s+|could\s+you\s+|just\s+)?(?:do|plan|make)\s+(?:it|that|one)"
-    r"(?:\s+for\s+me)?)"
-    r"(?:[,\s]+(?:please|then|now|already))*[.!?\s]*$",
-    re.IGNORECASE)
-_PLAN_YES = re.compile(
-    r"^\s*(?:yes|yeah|yep|yup|sure|ok(?:ay)?|please|go\s+ahead|do\s+it|add\s+(?:them|it|those|all"
-    r"(?:\s+of\s+them)?)|please\s+do)(?:[\s,]+(?:please|do\s+it|add\s+them|thanks?|go\s+ahead))*[.!\s]*$",
-    re.IGNORECASE)
+# cues.follow_on_pattern; the job carried over is cues.carry_*. A plain yes
+# to a planner offer is cues.plan_yes_pattern.
 
 # His internships, projects and trackers live in the vault. Live, "hows my
 # internship tracker" was told there was no information, "the projects im
@@ -1642,14 +1587,7 @@ _SKILL_QUESTION = tool_policy.cue("skills_question")
 # didn't catch that." 3/3 in the eval; "thats good" -> "I didn't catch
 # that" 3/3, or the clock. This is the 2026-10-24 conclusion applied at last:
 # the low-content turn is answered before the model, not argued with.
-_GREETING = re.compile(
-    r"^\s*(?:hey|hi|hello|hiya|yo|morning|evening|good\s+(?:morning|afternoon|evening))"
-    r"(?:\s+(?:denisse|there|chuen))?[.!\s]*$", re.IGNORECASE)
-_THANKS = re.compile(r"^\s*(?:thanks?|thank\s+you|thx|ty|cheers)(?:\s+(?:denisse|a\s+lot|so\s+much))?[.!\s]*$",
-                     re.IGNORECASE)
-_PLAIN_ACK = re.compile(
-    r"^\s*(?:ok(?:ay)?|alright|cool|nice|great|perfect|good|sounds\s+good"
-    r"|(?:ok(?:ay)?\s+)?that'?s?\s+(?:good|great|fine|nice|perfect))[.!\s]*$", re.IGNORECASE)
+# Patterns and replies: brain.json quick_replies.
 
 
 def _quick_reply(text: str, last_said: str, now: datetime.datetime | None = None) -> str | None:
@@ -1657,18 +1595,25 @@ def _quick_reply(text: str, last_said: str, now: datetime.datetime | None = None
     An "ok" that answers one of her own questions is a real answer -- that
     goes to the model, so "want me to open it?" -> "ok" still opens it."""
     t = (text or "").strip()
+    q = CONFIG["quick_replies"]
     if _GREETING.fullmatch(t):
         hour = (now or datetime.datetime.now()).hour
-        part = "Morning" if hour < 12 else "Afternoon" if hour < 18 else "Evening"
-        if re.search(r"good\s+(?:morning|afternoon|evening)|^\s*(?:morning|evening)", t, re.IGNORECASE):
-            return f"{part}, Chuen."
-        return "Hey Chuen."
+        part = next((p["name"] for p in q["day_parts"] if hour < p["until_hour"]), q["day_parts"][-1]["name"])
+        if _DAY_PART.search(t):
+            return q["greeting_by_time"].format(part=part, name=_NAME)
+        return q["greeting"].format(name=_NAME)
+    if _NEVER_MIND.fullmatch(t):
+        # "nvm" -- dropping the thing, mid-question or not. The model
+        # answered it well and called the clock first every time
+        # (2026-11-04, 8/8, with the clock's description already saying
+        # not to). One right answer, so it's answered here, like a greeting.
+        return q["never_mind"]
     if (last_said or "").rstrip().endswith("?"):
         return None
     if _THANKS.fullmatch(t):
-        return "Any time."
+        return q["thanks"]
     if _PLAIN_ACK.fullmatch(t):
-        return "Good."
+        return q["ack"]
     return None
 
 
@@ -1677,27 +1622,7 @@ def _quick_reply(text: str, last_said: str, now: datetime.datetime | None = None
 # internship research, pitch prep, people lookups and coursework solutions.
 # An 8B model answers these plausibly and badly. Kept explicit, so the line
 # is testable: finding his CV is local, improving it is Claude's.
-_DELEGATE = re.compile(
-    r"\bcover\s+letter\b|\blinked?\s*in\s+post\b|\bpersonal\s+statement\b"
-    r"|\b(?:change|edit|improve|update|tailor|tweak|review|rewrite|polish|fix)\b[^.?!]{0,40}"
-    r"\b(?:cv|resume|r[eé]sum[eé])\b"
-    r"|\b(?:cv|resume)\b[^.?!]{0,30}\b(?:change|edit|improve|tailor|tweak|review|rewrite|feedback)\b"
-    r"|\bwhat\s+should\s+i\s+(?:add|change|put)\b"
-    r"|\bsearch\s+(?:\w+\s+){0,2}(?:up|online)\b|\bsearch\s+the\s+web\b|\blook\s+(?:\w+\s+){0,2}up\b"
-    r"|\bresearch\b"
-    r"|\bfind\s+(?:me\s+)?(?:\d+\s+|some\s+|more\s+)?(?:internships?|jobs?|roles?|companies|places)\b"
-    r"|\binternships?\b[^.?!]{0,40}\b(?:apply|due|deadline|open)\b|\bplaces\s+(?:each\s+)?to\s+apply\b"
-    r"|\bpitch\b|\bprep(?:are)?\s+me\b"
-    r"|\b(?:solve|prove)\b|\bworked\s+solutions?\b|\bsolutions?\s+(?:to|for)\b"
-    r"|\bhow\s+(?:do|should|would)\s+i\s+(?:do|approach|answer|tackle)\b"
-    r"|\bhow\s+to\s+(?:do|approach|answer|tackle)\b"
-    r"|\b(?:ask|use|get)\s+(?:claude|codex)\b|\bhand\s+(?:it|this|that)\s+(?:to|over)\b"
-    r"|\b(?:draft|write)\s+(?:me\s+)?(?:a|an|the)\s+(?:email|message|post|letter|reply|essay|summary|report)\b",
-    re.IGNORECASE)
-# ...but never these, which are local and checkable.
-_KEEP_LOCAL = re.compile(
-    r"\bremind\b|\breminder\b|\btask\b|\bto-?do\b|\btimer\b|\b(?:find|open|pull\s+up|bring\s+up"
-    r"|show\s+me|where(?:'s|\s+is))\s+(?:me\s+)?(?:my|the)\b", re.IGNORECASE)
+# cues.delegate_patterns, and never cues.keep_local_patterns.
 
 
 def _should_delegate(text: str) -> bool:
@@ -1716,11 +1641,12 @@ def _is_known_skill(name: str) -> bool:
 
 
 def _vault_query(text: str) -> str | None:
+    """His internships and projects live in the vault: the search_vault
+    query for a request about them (cues.vault_queries), else None."""
     t = (text or "").lower()
-    if re.search(r"\binternships?\b|\btracker\b", t):
-        return "internships"
-    if re.search(r"\bprojects?\b", t) and re.search(r"\b(?:my|i'?m|i\s+am|im|doing|working)\b", t):
-        return "current projects"
+    for patterns, query in _VAULT_QUERIES:
+        if all(rx.search(t) for rx in patterns):
+            return query
     return None
 
 
@@ -1927,32 +1853,44 @@ def _study_context() -> str:
         return ""
 
 
+def _own_words(result: str, markers: int | None = None) -> str:
+    """A tool's own sentence: its result up to the first of
+    honesty.result_cut_markers (the first `markers` of them)."""
+    out = result
+    for marker in CONFIG["honesty"]["result_cut_markers"][:markers]:
+        out = out.split(marker)[0]
+    return out.strip()
+
+
 # The task tools' own words, turned into hers. "Added: remind me there is
 # a robotics meeting (today 17:00)" went to him verbatim on 2026-11-03.
 # Deterministic on purpose -- the date in it must be the store's, because
 # the model once invented "6th of October at 2 PM" -- but a sentence.
 def _task_sentence(name: str, result: str) -> str:
+    """The store's own format is parsed here; the sentences are brain.json
+    tasks."""
     r = (result or "").strip()
+    say = CONFIG["tasks"]
     if name == "add_task":
         m = re.match(r"Added:\s*(.+?)\s*(?:--\s*due\s+(.+?)\.?|\((no deadline)\)|--\s*but\s+(.+?))\s*$", r, re.S)
         if not m:
             return r
         text, due, none, trouble = m.groups()
         if due:
-            return f"Got it -- I added \"{text}\", due {due.rstrip('.')}."
+            return say["added_due"].format(text=text, due=due.rstrip("."))
         if trouble:
-            return f"Got it -- I added \"{text}\", but {trouble.rstrip('.')}."
-        return f"Got it -- I added \"{text}\", no deadline."
+            return say["added_trouble"].format(text=text, trouble=trouble.rstrip("."))
+        return say["added_no_deadline"].format(text=text)
     if name == "complete_task":
         m = re.match(r"Marked done:\s*(.+?)\.\s*(?:That was the last one|(\d+) other tasks? still open)", r)
         if not m:
             return r
         left = m.group(2)
-        tail = "That was the last one." if left is None else f"{left} still open."
-        return f"Ticked off \"{m.group(1)}\". {tail}"
+        tail = say["last_one"] if left is None else say["still_open"].format(left=left)
+        return say["completed"].format(text=m.group(1), tail=tail)
     if name == "remove_task":
         m = re.match(r"Removed:\s*(.+)$", r)
-        return f"Removed \"{m.group(1).rstrip('.')}\" from your list." if m else r
+        return say["removed"].format(text=m.group(1).rstrip(".")) if m else r
     return r
 
 
@@ -1963,6 +1901,121 @@ def _dates_agree(reply: str, result: str, asked: str) -> bool:
     said = set(_DUE_WORDS.findall((reply or "").lower()))
     known = set(_DUE_WORDS.findall((result or "").lower())) | set(_DUE_WORDS.findall((asked or "").lower()))
     return said <= known
+
+
+def _built(c: dict) -> dict:
+    """The module values built from brain.json: every compiled pattern, word
+    set and fixed reply the functions above use. Patterns are
+    case-insensitive except those run on lower-cased text, the path
+    patterns and news.strip_prefix_pattern, which match as written."""
+    cs = 0  # case-sensitive
+    nets, paths, ev, hon, cues, q, fq, lk = (c["reply_nets"], c["paths"], c["evidence"], c["honesty"],
+                                             c["cues"], c["quick_replies"], c["file_query"], c["lookup"])
+    name = _first_name()
+    return {
+        "NUM_CTX": _env_int("DENISSE_NUM_CTX", c["limits"]["num_ctx"]),
+        "MAX_TOOL_ROUNDS": _env_int("DENISSE_MAX_TOOL_ROUNDS", c["limits"]["max_tool_rounds"]),
+        "_NAME": name,
+        "_SECOND_PERSON": _second_person_rules(name, c["second_person"]),
+        # reply nets
+        "_TOOL_NARRATION": _rx(nets["tool_narration_pattern"]),
+        "_TOOL_TALK": _rx(r"\b(?:" + "|".join(nets["tool_talk_patterns"]) + r")\b" if nets["tool_talk_patterns"] else ""),
+        "_TOOL_LEAD_IN": _rx(nets["tool_lead_in_pattern"]),
+        "_DIDNT_CATCH": _rx(nets["didnt_catch_patterns"]),
+        "_WORD": _rx(nets["word_pattern"], cs),
+        "_ROLE_PREFIX": _rx(nets["role_prefix_pattern"], cs),
+        # weather and clock
+        "_PLACE_FOLLOW_UP": _rx(c["weather"]["follow_up_place_pattern"]),
+        "_NOT_A_PLACE": _rx(r"^(?:" + "|".join(c["weather"]["not_a_place"]) + ")$" if c["weather"]["not_a_place"] else ""),
+        "_WEATHER_DATA": _rx(c["weather"]["data_patterns"]),
+        "_WEATHER_LINE": _rx(c["weather"]["line_patterns"]),
+        "_CLOCK_CLAIM": _clock_claim(c["clock"]),
+        # paths
+        "_WIN_PATH": _rx(paths["windows_path_pattern"], cs),
+        "_PATH_ASK": paths["ask"],
+        "_WANTS_PATH": _rx(paths["wants_path_patterns"]),
+        "_PATH_YES": _rx(paths["yes_pattern"]),
+        "_SEARCH_MISS": _rx(paths["search_miss_pattern"], cs),
+        "_ANY_PATH": _rx(paths["any_path_pattern"], cs),
+        # notes and dates
+        "_NOTES_HEADER": _rx(c["notes"]["header_pattern"], re.MULTILINE),
+        "_ASKS_DUE": _rx(c["notes"]["asks_due_pattern"]),
+        "_DUE_WORDS": _rx(r"\d+|\b(?:" + "|".join(c["dates"]["due_words"]) + ")" if c["dates"]["due_words"] else r"\d+"),
+        "_DUE_ALIAS": {a["said"]: a["means"] for a in c["dates"]["due_aliases"]},
+        "_DUE_ALWAYS": set(c["dates"]["always_allowed"]),
+        # tasks
+        "_DEADLINE_ONLY": _rx(c["tasks"]["deadline_only_pattern"]),
+        "_TASK_WORD": _rx(c["tasks"]["content_word_pattern"], cs),
+        "_TASK_STOP": set(c["tasks"]["content_stop_words"]),
+        # news
+        "_NEWS_HEAD": _rx(c["news"]["head_pattern"]),
+        "_NEWS_STRIP": _rx(c["news"]["strip_prefix_pattern"], cs),
+        "_NEWS_WORD": _rx(c["news"]["word_pattern"], cs),
+        # honesty
+        "UNCONFIRMED_REPLY": hon["unconfirmed_reply"],
+        "FAILED_REPLY": hon["failed_reply"],
+        "_CLAIM_NEEDS": [(_rx(n["pattern"]), set(n["tools"])) for n in hon["claim_needs"]],
+        "_SET_FOR": _rx(hon["set_for_pattern"]),
+        "_DELETE_CLAIM": _rx(hon["delete_claim_pattern"]),
+        "_NEGATED_BEFORE": _rx(hon["negated_before_pattern"], cs),
+        "_DELETE_TOOLS": set(hon["delete_tools"]),
+        "_STATE_TOOLS": tuple(hon["state_tools"]),
+        # evidence and lookups
+        "_NO_EVIDENCE": _rx(ev["no_evidence_pattern"], cs),
+        "_FOUND_NOTHING": _rx(r"^(?:" + "|".join(ev["found_nothing_patterns"]) + ")" if ev["found_nothing_patterns"] else ""),
+        "_RECOVERY_SOURCES": {s["tool"]: tuple(s["then"]) for s in ev["recovery_sources"]},
+        "_LOOKUP_FILLER": set(ev["lookup_filler"]),
+        "_LOOKUP_WORD": _rx(ev["word_pattern"], cs),
+        "_SAYS_NOTHING": _rx(ev["says_nothing_patterns"]),
+        "_LOOKUP_WHERE": {w["tool"]: (w, _rx(w["unreachable_pattern"]) if w["unreachable_pattern"] else None)
+                          for w in lk["where"]},
+        "_VAULT_ACCESS_DENIAL": _rx(c["vault_denial_patterns"]),
+        "_FILE_ABSENCE": _rx(c["file_absence_patterns"]),
+        # requests answered before the model
+        "_NEWS_OFF": _rx(cues["news_off_pattern"]),
+        "_SELF_MODEL": _rx(cues["self_model_patterns"]),
+        "_BRIEFING": _rx(cues["briefing_patterns"]),
+        "_PLAN_STUDY": _rx(cues["plan_study_patterns"]),
+        "_WATCHLIST_BRIEF": _rx(cues["watchlist_brief_pattern"]),
+        "_WATCHLIST_SHOW": _rx(cues["watchlist_show_pattern"]),
+        "_STUDY_BRIEF": _study_brief_cue(cues),
+        "_FOLLOW_ON": _rx(cues["follow_on_pattern"]),
+        "_PLAN_YES": _rx(cues["plan_yes_pattern"]),
+        "_ACK": _rx(cues["ack_pattern"]),
+        "_DELEGATE": _rx(cues["delegate_patterns"]),
+        "_KEEP_LOCAL": _rx(cues["keep_local_patterns"]),
+        "_DONE_WORD": _rx(cues["done_word_pattern"]),
+        "_STYLE_NOTE_EXCLUDES": _rx(cues["style_note_excludes_pattern"]),
+        "_VAULT_QUERIES": [([_rx(p, cs) for p in v["all_of_patterns"]], v["query"]) for v in cues["vault_queries"]],
+        "_FEEDBACK_COMMANDS": {f["command"].lower(): f["reply"] for f in c["text"]["feedback_commands"]},
+        # quick replies
+        "_GREETING": _rx(q["greeting_pattern"]),
+        "_THANKS": _rx(q["thanks_pattern"]),
+        "_PLAIN_ACK": _rx(q["ack_pattern"]),
+        "_NEVER_MIND": _rx(q["never_mind_pattern"]),
+        "_DAY_PART": _rx(q["day_part_pattern"]),
+        "_VERIFY_CLAIM": _rx(cues["verify_claim_pattern"]),
+        "_PROMISE": _rx(cues["promise_pattern"]),
+        # file query and skills
+        "_FILE_PATH_GIVEN": _rx(fq["path_pattern"], cs),
+        "_FILE_NAMED": [_rx(p, cs) for p in fq["named_patterns"]],
+        "_FILE_WORD": _rx(fq["word_pattern"], cs),
+        "_FILE_QUERY_STOP": set(fq["stop_words"]),
+        "_GENERIC_SKILL_WORDS": set(c["skills"]["generic_words"]),
+        "_SKILL_STRIP": _rx(c["skills"]["strip_prefix_pattern"]),
+    }
+
+
+def configure(path=None) -> dict:
+    """(Re)load brain.json (or `path`, or $DENISSE_BRAIN_DATA) and rebind
+    the module values built from it. Tests call it with their own file."""
+    global CONFIG
+    CONFIG = brain_rules.data(path)
+    globals().update(_built(CONFIG))
+    return CONFIG
+
+
+configure()
 
 
 class Brain:
@@ -2030,10 +2083,12 @@ class Brain:
             age = datetime.datetime.now() - datetime.datetime.fromisoformat(newest["created"])
         except (KeyError, TypeError, ValueError):
             return None
-        if age > datetime.timedelta(minutes=15) or newest["text"].lower()[:30] not in (last_said or "").lower():
+        rules = CONFIG["tasks"]
+        if (age > datetime.timedelta(minutes=rules["move_window_minutes"])
+                or newest["text"].lower()[:rules["move_match_chars"]] not in (last_said or "").lower()):
             return None
         updated = tasks.update_task(newest["id"], due=text.strip())
-        return f"Moved: {tasks.describe(updated)}." if updated else None
+        return rules["moved"].format(task=tasks.describe(updated)) if updated else None
 
     def _settle_which(self, p, text):
         """His answer to "which one?": the answer from the item he picked,
@@ -2048,12 +2103,11 @@ class Brain:
             evidence = clarify.evidence(got)
             reply = ""
             try:  # one call, with only the item he picked: it can't repeat the rejected one
-                r = ollama.chat(model=MODEL, keep_alive=-1, options={"temperature": 0.2, "num_ctx": NUM_CTX},
+                r = ollama.chat(model=MODEL, keep_alive=CONFIG["chat"]["keep_alive"], options=_chat_options(),
                                 messages=[{"role": "system", "content": SYSTEM_PROMPT},
                                           {"role": "user", "content": p["request"]},
-                                          {"role": "system", "content": f"He means {clarify.spoken(got)}. From his "
-                                           f"notes: {evidence}\nAnswer his question from this alone, in one or "
-                                           "two sentences. Don't add anything it doesn't say."}])
+                                          {"role": "system", "content": CONFIG["nudges"]["clarified_answer"].format(
+                                              spoken=clarify.spoken(got), evidence=evidence)}])
                 reply = _strip_role_prefix(_get(_get(r, "message"), "content", "") or "").strip()
             except Exception as exc:
                 logging.warning("Clarified answer fell back to the evidence: %s", exc)
@@ -2120,12 +2174,13 @@ class Brain:
             # manufacture a spoken 'I'll stop talking' acknowledgement.
             messages.append({"role": "assistant", "content": ""})
             return "", messages
+        text = CONFIG["text"]
+        limits = CONFIG["limits"]
         if _NEWS_OFF.search(latest_user):
-            # Act on it rather than describe it -- see _NEWS_OFF.
+            # Act on it rather than describe it -- see cues.news_off_pattern.
             import news
             news.set_briefing_enabled(False)
-            answer = ("Okay, no more daily news -- I've switched the briefing "
-                      "off. Ask me whenever you do want the headlines.")
+            answer = text["news_off"]
             messages.append({"role": "assistant", "content": answer})
             return answer, messages
         if _SELF_MODEL.search(latest_user):
@@ -2136,7 +2191,7 @@ class Brain:
                           if m.get("role") == "assistant" and (m.get("content") or "").strip()), "")
         if (last_said.rstrip().endswith(_PATH_ASK) and getattr(self, "_last_paths", None)
                 and _PATH_YES.fullmatch(latest_user.strip())):
-            answer = "\n".join(self._last_paths[:5])
+            answer = text["paths_shown"].join(self._last_paths[:CONFIG["paths"]["max_shown"]])
             messages.append({"role": "assistant", "content": answer})
             return answer, messages
         moved = None if getattr(self, "_retrying", False) else self._move_new_task(latest_user, last_said)
@@ -2147,8 +2202,7 @@ class Brain:
             # His words: "just say 'alright noted'". See _STYLE_NOTE. Saved
             # as a reply preference, so every later prompt carries it.
             saved = _write_style_note(latest_user)
-            answer = "Alright, noted." if not saved.startswith("Error") else (
-                "Alright, noted -- though I couldn't save it, so remind me if I slip.")
+            answer = text["noted"] if not saved.startswith("Error") else text["noted_unsaved"]
             messages.append({"role": "assistant", "content": answer})
             return answer, messages
         # An open "which one do you mean?" (clarify.py) is settled first, so
@@ -2170,7 +2224,9 @@ class Brain:
                 prev = (messages[prev_i].get("content") or "").strip()
                 wrong_reply = next((m.get("content") or "" for m in reversed(messages[prev_i + 1:-1])
                                     if m.get("role") == "assistant"), "")
-                shown = prev if len(prev) <= 80 else prev[:77].rstrip() + "..."
+                clip, dots = limits["shown_request_chars"], limits["ellipsis"]
+                shown = prev if len(prev) <= clip else prev[:clip - len(dots)].rstrip() + dots
+                you_asked = text["you_asked"].format(shown=shown)
                 attempt = _corrected_attempt(prev, messages, prev_i)
                 # What kind of miss it was decides the repair (2026-10-30;
                 # live baseline: 3/9 recovered, 0/3 blocked said why, and
@@ -2181,9 +2237,8 @@ class Brain:
                     # An action that already happened. The complaint may be
                     # about the wording or the meaning; redoing it is never
                     # the fix. Say what was done and ask -- no model call.
-                    what = "; ".join(str(c.get("result", ""))[:120] for c in done)
-                    answer = (f'You asked: "{shown}". That part is already done ({what}), and I haven\'t '
-                              "done it again. What did you want instead?")
+                    what = "; ".join(str(c.get("result", ""))[:limits["result_preview_chars"]] for c in done)
+                    answer = you_asked + text["already_done"].format(what=what)
                     messages.append({"role": "assistant", "content": answer})
                     return answer, messages
                 seeded, checked = [], []
@@ -2236,7 +2291,7 @@ class Brain:
                             break
                     if not seeded or _no_evidence(seeded[-1]["content"]):
                         messages.extend(seeded)
-                        answer = f'You asked: "{shown}". ' + _blocked_reply(terms or "that", checked)
+                        answer = you_asked + _blocked_reply(terms or CONFIG["lookup"]["fallback_terms"], checked)
                         messages.append({"role": "assistant", "content": answer})
                         return answer, messages
                 # 2026-10-30: the retry got the same input as the miss, so it
@@ -2258,10 +2313,8 @@ class Brain:
                         reread += [{"role": "assistant", "content": "",
                                     "tool_calls": [{"function": {"name": c["name"], "arguments": c["arguments"]}}]},
                                    {"role": "tool", "content": str(c.get("result", ""))}]
-                    reread.append({"role": "system", "content":
-                                   f'He said your answer "{wrong_reply[:200]}" was not what he asked. Use the '
-                                   "results above. If more than one thing in them could be what he means, ask "
-                                   "which one in one short question. Don't repeat that answer."})
+                    reread.append({"role": "system", "content": CONFIG["nudges"]["rejected_answer"].format(
+                        wrong=wrong_reply[:limits["rejected_reply_chars"]])})
                 self._retrying = True
                 try:
                     retry, retry_msgs = self.respond([dict(m) for m in messages[:prev_i + 1]] + seeded + reread,
@@ -2273,7 +2326,7 @@ class Brain:
                 if seeded and _SAYS_NOTHING.search(retry or ""):
                     # Checked against the evidence: she found it, so "I don't
                     # have anything" is wrong. Quote the source instead.
-                    retry = "Here's what your notes say: " + seeded[-1]["content"][:400].strip()
+                    retry = CONFIG["notes"]["say"] + seeded[-1]["content"][:limits["notes_quote_chars"]].strip()
                 # Keep the repair's tool calls in this turn. They used to be
                 # dropped, so the stored repair looked like a bare claim
                 # ("claimed an action with no tool call") and his "thats it"
@@ -2284,16 +2337,48 @@ class Brain:
                 if wrong_reply and " ".join(retry.lower().split()) == " ".join(wrong_reply.lower().split()):
                     # Checked against the miss: the same answer again is
                     # not a repair, and saying it twice isn't honest.
-                    retry = ("I got the same answer again, so I haven't fixed it: " + retry +
-                             " Tell me what you meant and I'll do that instead.")
-                answer = f'You asked: "{shown}". {retry}'.strip()
+                    retry = text["same_answer"].format(retry=retry)
+                elif wrong_reply and retry.strip():
+                    # A different answer to the same request means the first
+                    # one was wrong: own it before correcting it. "omg youre
+                    # so dumb" after "15% of 240 is 24" got "36." with no
+                    # acknowledgement 6/6 (2026-11-04). Wording: text.corrected.
+                    retry = text["corrected"].format(retry=retry.strip())
+                answer = (you_asked + retry).strip()
                 messages.append({"role": "assistant", "content": answer})
                 return answer, messages
+        if _VERIFY_CLAIM.match(latest_user.strip()) and not getattr(self, "_retrying", False):
+            # "did you open it?" after "Opening it now." is a yes/no about
+            # her last action, and the answer is the evidence -- what ran
+            # for it and what it returned -- not the model's memory of its
+            # own words (2026-11-04: read_file / list_directory and "the file
+            # isn't there", 2/2). Certain when something ran; when nothing
+            # did, only after a promise or claim of hers. Otherwise the
+            # model. cues.verify_claim_pattern / promise_pattern; text.verified_*.
+            prev_i = _last_real_request(messages)
+            if prev_i is not None:
+                prev = (messages[prev_i].get("content") or "").strip()
+                said = next((m.get("content") or "" for m in reversed(messages[prev_i + 1:-1])
+                             if m.get("role") == "assistant"), "")
+                attempt = _corrected_attempt(prev, messages, prev_i)
+                acted = [c for c in attempt if c["name"] in brain_rules.MUTATING_TOOLS]
+                done = [c for c in acted if not _confirms_nothing(c.get("result", ""))]
+                clip = limits["result_preview_chars"]
+                answer = None
+                if done:
+                    answer = text["verified_done"].format(what="; ".join(_own_words(str(c.get("result", "")))[:clip] for c in done))
+                elif acted:
+                    answer = text["verified_failed"].format(what="; ".join(_own_words(str(c.get("result", "")))[:clip] for c in acted))
+                elif not attempt and (_CLAIMS_DONE.search(said) or _PROMISE.search(said)):
+                    answer = text["verified_nothing"]
+                if answer:
+                    messages.append({"role": "assistant", "content": answer})
+                    return answer, messages
         import planner
         if _PLAN_YES.fullmatch(latest_user.strip()) and planner.pending():
             last_said = next((m.get("content") or "" for m in reversed(messages[:-1])
                               if m.get("role") == "assistant"), "")
-            if "to your tasks?" in last_said:
+            if CONFIG["cues"]["planner_offer_marker"] in last_said:
                 answer = planner.accept()
                 messages.append({"role": "assistant", "content": answer})
                 return answer, messages
@@ -2310,9 +2395,9 @@ class Brain:
             last_said = next((m.get("content") or "" for m in reversed(messages[:-1])
                               if m.get("role") == "assistant"), "")
             if _BRIEFING.search(prev_user) or _BRIEFING.search(last_said):
-                latest_user = "give me the briefing"
+                latest_user = CONFIG["cues"]["carry_briefing"]
             elif _PLAN_STUDY.search(prev_user) or _PLAN_STUDY.search(last_said):
-                latest_user = "plan my study modules"
+                latest_user = CONFIG["cues"]["carry_study_plan"]
         import invest
         # Her previous reply goes with it: a pending instrument choice answers
         # only the question she has just asked, so an early reply above
@@ -2333,7 +2418,16 @@ class Brain:
         brief_module = study_brief.match_module(latest_user)
         last_said = next((m.get("content") or "" for m in reversed(messages[:-1])
                           if m.get("role") == "assistant"), "")
-        if (_STUDY_BRIEF.search(latest_user)
+        # "where's my EM coursework brief?" is a file to find, not a brief
+        # to write: the word "brief" sent it into the study-brief job 6/6
+        # (2026-11-04). A file lookup (the router's files group, a file
+        # thing, a find/open word -- the same test the file fast paths use)
+        # goes to the model and its file tools instead.
+        own_groups = tool_router._groups_in(latest_user)
+        file_lookup_now = ("files" in own_groups and bool(_FILE_THING.search(latest_user))
+                           and bool(_OPEN_DOCUMENT_REQUEST.search(latest_user) or _FILE_LOOKUP.search(latest_user)))
+        if not file_lookup_now and (
+                _STUDY_BRIEF.search(latest_user)
                 or (brief_module and _PLAN_STUDY.search(latest_user))
                 or (brief_module and last_said.startswith(study_brief.WHICH_MODULE))):
             # One module, done as a job: notes read, brief written into his
@@ -2364,15 +2458,14 @@ class Brain:
             answer = delegate.start(latest_user.strip(), context)
             messages.append({"role": "assistant", "content": answer})
             return answer, messages
-        if latest_user.strip().lower() in ("/good", "/bad"):
-            answer = ("Thanks — that tells me the last answer was helpful." if latest_user.strip().lower() == "/good"
-                      else "Got it — the last answer was wrong. Tell me what should happen instead.")
+        if latest_user.strip().lower() in _FEEDBACK_COMMANDS:
+            answer = _FEEDBACK_COMMANDS[latest_user.strip().lower()]
             messages.append({"role": "assistant", "content": answer})
             return answer, messages
-        if tool_router.feedback_only(latest_user) and re.search(r"\bdone\b", latest_user, re.I):
+        if tool_router.feedback_only(latest_user) and _DONE_WORD.search(latest_user):
             # A complaint about 'Done' isn't permission for another action.
             # Don't turn it into an invented task, fact, path or promise.
-            answer = "I shouldn't have said 'Done' without verifying it. The last action is unverified."
+            answer = text["done_complaint"]
             messages.append({"role": "assistant", "content": answer})
             return answer, messages
         import multistep
@@ -2446,7 +2539,14 @@ class Brain:
                 if name == "search_vault":
                     import instincts
                     if instincts.wants_vault_overview(latest_user):
-                        args = {**args, "query": "current projects"}
+                        args = {**args, "query": CONFIG["cues"]["vault_overview_query"]}
+                    elif _vault_query(latest_user):
+                        # His projects and internships have a known query
+                        # (cues.vault_queries). "what am I working on right
+                        # now?" -> search_vault('working on right now') hit an
+                        # unrelated note and she answered from her own folder
+                        # name (2026-11-04, 4/6). Use the known query.
+                        args = {**args, "query": _vault_query(latest_user)}
                 if name == "add_task" and args.get("due") and not _due_said(str(args["due"]), intent_text):
                     args = {**args, "due": ""}  # see _due_said
                 result = str(_run_tool(name, args, confirm, used_once))
@@ -2508,8 +2608,8 @@ class Brain:
             # at default temperature, 4/4 clean and on-topic at 0.2, no
             # loss of personality on casual chat).
             response = ollama.chat(
-                model=MODEL, messages=full_messages, tools=round_tools, keep_alive=-1,
-                options={"temperature": 0.2, "num_ctx": NUM_CTX},
+                model=MODEL, messages=full_messages, tools=round_tools, keep_alive=CONFIG["chat"]["keep_alive"],
+                options=_chat_options(),
             )
             msg = _get(response, "message")
             tool_calls = _get(msg, "tool_calls") or []
@@ -2564,8 +2664,8 @@ class Brain:
                         model=MODEL,
                         messages=([full_messages[0]] + _style_examples()
                                   + [{"role": "user", "content": latest_user}]),
-                        keep_alive=-1,
-                        options={"temperature": 0.2, "num_ctx": NUM_CTX},
+                        keep_alive=CONFIG["chat"]["keep_alive"],
+                        options=_chat_options(),
                     )
                     retry_text = _strip_role_prefix(
                         (_get(_get(retry, "message"), "content", "") or "").strip())
@@ -2577,9 +2677,10 @@ class Brain:
                     # is never persisted. Keep the retry if it's usable.
                     retry = ollama.chat(
                         model=MODEL,
-                        messages=full_messages + [{"role": "system", "content": _PLAIN_REPLY_NUDGE}],
-                        keep_alive=-1,
-                        options={"temperature": 0.2, "num_ctx": NUM_CTX},
+                        messages=full_messages + [{"role": "system",
+                                                   "content": CONFIG["reply_nets"]["plain_reply_nudge"]}],
+                        keep_alive=CONFIG["chat"]["keep_alive"],
+                        options=_chat_options(),
                     )
                     # The retry, ending on a system note, comes back as
                     # "assistant\n\nNo worries." -- 3/3 traced 2026-10-21.
@@ -2601,12 +2702,14 @@ class Brain:
                         # nudge in this call only -- never in `messages`, so
                         # the false claim and the nudge are never persisted.
                         honesty_nudged = True
+                        honesty = CONFIG["honesty"]
                         if not turn_results:
-                            nudge = _NO_TOOL_CLAIM_NUDGE
+                            nudge = honesty["no_tool_claim_nudge"]
                         elif wrong_tool and not unconfirmed:
-                            nudge = _WRONG_TOOL_CLAIM_NUDGE.format(ran=", ".join(sorted(successful_tools)))
+                            nudge = honesty["wrong_tool_claim_nudge"].format(ran=", ".join(sorted(successful_tools)))
                         else:
-                            nudge = _UNCONFIRMED_CLAIM_NUDGE.format(results="; ".join(r[:120] for r in turn_results))
+                            nudge = honesty["unconfirmed_claim_nudge"].format(
+                                results="; ".join(r[:limits["result_preview_chars"]] for r in turn_results))
                         full_messages.append({"role": "system", "content": nudge})
                         continue
                     if turn_results and all(_confirms_nothing(r) for r in turn_results):
@@ -2625,7 +2728,7 @@ class Brain:
                     # test_pet_chat on 2026-10-29. What was actually opened
                     # is in the tool result, so say that instead.
                     if file_request and "read_file" not in successful_tools:
-                        said_paths = re.findall(r"(?:[A-Za-z]:[\\/]|\\\\)[^\r\n]+", final_text)
+                        said_paths = _ANY_PATH.findall(final_text)
                         if any(not _known_document_path(p.strip().rstrip('"\'.,;`'), messages, tool_outputs)
                                for p in said_paths):
                             lookup = tool_outputs.get("find_files", "")
@@ -2633,22 +2736,22 @@ class Brain:
                                 final_text = tool_outputs["open_application"]
                             else:
                                 final_text = (lookup if lookup.startswith(("Found ", "No files matching")) else
-                                              "I don't have verified file-search results for that request yet.")
+                                              text["no_verified_results"])
                     if file_request and _FILE_ABSENCE.search(final_text):
                         lookup = tool_outputs.get("find_files", "")
                         if lookup.startswith("Found "):
                             final_text = lookup
                         elif lookup.startswith("No files matching"):
-                            final_text = lookup + " That only covers the folders searched."
+                            final_text = lookup + text["only_searched_folders"]
                         else:
-                            final_text = "I couldn't complete the file lookup, so I can't tell whether it's there."
+                            final_text = text["lookup_incomplete"]
                     lookup = tool_outputs.get("find_files", "")
                     if (file_request and lookup.startswith("Found ")
                             and not successful_tools & {"read_file", "open_application"}):
-                        paths = re.findall(r"(?:[A-Za-z]:[\\/]|\\\\)[^\r\n]+", lookup)
+                        paths = _ANY_PATH.findall(lookup)
                         said = final_text.replace("/", "\\").lower()
                         if paths and not any(p.replace("/", "\\").lower() in said for p in paths):
-                            final_text += "\n\nMatching files:\n" + "\n".join(paths[:3])
+                            final_text += text["matching_files"] + "\n".join(paths[:text["matching_files_shown"]])
                     skills_result = tool_outputs.get("list_skills", "")
                     # Only when he asked about skills. Without this check, on
                     # 2026-10-29 "plan my internship applications" -> she
@@ -2666,7 +2769,7 @@ class Brain:
                                 _CLAIMS_DONE.search(final_text)
                                 or _claim_without_its_tool(final_text, successful_tools)
                                 or final_text in (FAILED_REPLY, UNCONFIRMED_REPLY)):
-                            final_text = res.split(" Tell him")[0].split(" Start one")[0].strip()
+                            final_text = _own_words(res)
                     # ...and when it did happen, the reply has to say so. The
                     # eval (2026-11-03, 3 rounds) had pause_study_session run
                     # and the reply be "You've got 25 minutes left in this
@@ -2676,16 +2779,30 @@ class Brain:
                     # (reply_must_mention); the tool's own sentence stands in
                     # when it doesn't -- alone for a change, in front of her
                     # reply for a plain status.
+                    # ...and when the tool ran but did nothing ("No study
+                    # session was running, so nothing was stopped"), the
+                    # reply has to say that too: "session over" with nothing
+                    # running got "See you next time, Chuen." 6/6 on
+                    # 2026-11-04 -- no claim for the honesty net to catch,
+                    # just the truth left unsaid. nothing_must_mention is the
+                    # policy's pattern for that; the tool's own words stand in.
                     for name, res in tool_outputs.items():
-                        rule = tool_policy.tool(name).get("reply_must_mention")
-                        if not (rule and res and name in successful_tools):
+                        meta = tool_policy.tool(name)
+                        if not res:
                             continue
-                        if not re.search(rule, final_text, re.IGNORECASE):
-                            own = tool_policy.tool(name).get("fallback_reply") or res.split(" Tell him")[0].strip()
-                            if tool_policy.side_effect(name) == "read" and final_text.strip():
-                                final_text = f"{own} {final_text.strip()}"
-                            else:
-                                final_text = own
+                        if name in successful_tools:
+                            rule, own = meta.get("reply_must_mention"), meta.get("fallback_reply") or _own_words(res, 1)
+                        elif _confirms_nothing(res):
+                            rule, own = meta.get("nothing_must_mention"), _own_words(res)
+                        else:
+                            continue
+                        if not rule or re.search(rule, final_text, re.IGNORECASE):
+                            continue
+                        if (tool_policy.side_effect(name) == "read" and final_text.strip()
+                                and name in successful_tools and not meta.get("must_mention_replaces")):
+                            final_text = f"{own} {final_text.strip()}"
+                        else:
+                            final_text = own
                     task_result = tool_outputs.get("list_tasks", "")
                     if ("list_tasks" in successful_tools
                             and not successful_tools & {"add_task", "complete_task", "remove_task"}
@@ -2702,9 +2819,14 @@ class Brain:
                         # invented the date. The store's words are then put
                         # as a sentence, not echoed ("Added: ..." went to him
                         # verbatim on 2026-11-03).
+                        # ...and, when the store resolved a deadline, says
+                        # WHEN: "I've added the robotics meeting to your
+                        # reminders" dropped the 5pm he gave (2026-11-04).
+                        says_when = name != "add_task" or "-- due" not in result or bool(_DUE_WORDS.search(final_text.lower()))
                         if (name in successful_tools and result.startswith(("Added:", "Done:", "Marked done:", "Removed:"))
                                 and not (_has_task_content(final_text, "- " + confirmed.partition(":")[2])
                                          and (name != "add_task" or _dates_agree(final_text, result, intent_text))
+                                         and says_when
                                          and not _talks_about_tools(final_text)
                                          and not final_text.strip().startswith(("Added:", "Marked done:", "Removed:")))):
                             final_text = _task_sentence(name, confirmed if name != "add_task" else result)
@@ -2716,15 +2838,15 @@ class Brain:
                     if (vault_result.startswith("From your notes")
                             and _VAULT_ACCESS_DENIAL.search(final_text)):
                         excerpt = vault_result.partition("\n\n")[2]
-                        final_text = "I can search your vault. Here's what I found:\n\n" + excerpt[:900]
-                    if vault_result.startswith("From your notes") and re.search(r"\bdue\b|\bdeadline\b", latest_user, re.I):
+                        final_text = CONFIG["notes"]["found"] + excerpt[:limits["vault_excerpt_chars"]]
+                    if vault_result.startswith("From your notes") and _ASKS_DUE.search(latest_user):
                         # Preserve an unambiguous due-year from the retrieved
                         # evidence, not the note's unrelated update date.
                         years = set(re.findall(
                             r"\bdue\s+(?:(?:mon|tue|wed|thu|fri|sat|sun)\w*\s+)?"
                             r"\d{1,2}\s+[A-Za-z]{3,9}\s+(20\d{2})\b", vault_result, re.I))
                         if len(years) == 1 and not years & set(re.findall(r"\b20\d{2}\b", final_text)):
-                            final_text += " Your notes specify " + next(iter(years)) + "."
+                            final_text += CONFIG["notes"]["specify_year"].format(year=next(iter(years)))
                     if "get_brain_location" in successful_tools:
                         # Current settings are inspectable facts, not a
                         # persona for the model to invent or paraphrase away.
@@ -2783,7 +2905,7 @@ class Brain:
         # Only reachable if the final round still produced nothing usable.
         # Say so plainly rather than returning an empty string, which the
         # popup would render as a blank bubble.
-        give_up = "I got stuck working that one out -- could you rephrase it?"
+        give_up = CONFIG["text"]["gave_up"]
         # If a search already came back, that is a real answer: show it
         # rather than asking him to rephrase a request that was fine. On
         # 2026-10-29 "pull up my passport" ran out of rounds 3/3 in the

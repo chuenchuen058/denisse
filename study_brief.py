@@ -273,12 +273,36 @@ def module_tasks(module: str, code: str) -> list:
             if any(k in t["text"].lower() for k in keys)]
 
 
+def _module_code(module: str) -> str:
+    """The configured code for a module, '' if none."""
+    return next((m.get("code", "") for m in CONFIG["modules"] if m["name"].lower() == module.lower()), "")
+
+
+def _module_dir(module: str, code: str = "") -> str:
+    """The module's folder in the vault (paths.module_dirs), found by its
+    code or its name's words -- for a module with no coursework note to
+    anchor on. '' when nothing matches."""
+    want_code = (code or _module_code(module)).lower()
+    want_words = [w for w in _words(module) if w not in set(_M["connectors"])]
+    for path in glob.glob(os.path.join(VAULT, *_PATHS["module_dirs"])):
+        if not os.path.isdir(path):
+            continue
+        folder = _words(os.path.basename(path))
+        if (want_code and want_code in folder) or (want_words and all(w in folder for w in want_words)):
+            return path
+    return ""
+
+
 # -- the schedule ----------------------------------------------------------
 
-def schedule(work: list, today: dt.date, due: dt.date) -> list:
+def schedule(work: list, today: dt.date, due: dt.date | None) -> list:
     """Spread the work from today to `work_ends_days_before` the deadline,
     weighted by marks (unweighted items count as `default_weight`), and keep
-    the last days for assembling and submitting. Returns [(date, text)]."""
+    the last days for assembling and submitting. Returns [(date, text)].
+    With no deadline the work is listed in order, undated: [(None, text)]
+    -- a date nobody gave is not spread, and nothing is submitted."""
+    if due is None:
+        return [(None, w["text"]) for w in work]
     default = _S["default_weight"]
     last = max(today, due - dt.timedelta(days=_S["work_ends_days_before"]))
     span = (last - today).days
@@ -421,19 +445,27 @@ def _brief_text(job: dict, today: dt.date, shape: dict | None = None) -> str:
     shape = shape or {}
     short = "short" in shape
     d, cw, weeks = job["done"]["deadline"], job["done"]["coursework"], job["done"]["weeks"]
-    due = dt.date.fromisoformat(d["due"])
+    due = dt.date.fromisoformat(d["due"]) if d.get("due") else None
     mod = job["module"]
-    cw_link = os.path.relpath(d["path"], VAULT).replace(os.sep, "/")
     todo = [i for i in cw["items"] if not i["done"]]
     total = len(cw["items"])
     by_week = {w["week"]: w for w in weeks}
-    lines = [line.format(today=today, module=mod, due=due, left=len(todo), total=total)
+    due_text = _B["due_text"].format(due=due) if due else _B["due_unknown_text"]
+    lines = [line.format(today=today, module=mod, due_text=due_text, left=len(todo), total=total)
              for line in _B["front"]]
-    lines += [_B["due"].format(due=due, when=planner._when(due, today))
-              + (_B["weight"].format(weight=d["weight"]) if d["weight"] else ""),
-              _B["source"].format(link=cw_link, today=today)]
+    if due:
+        cw_link = os.path.relpath(d["path"], VAULT).replace(os.sep, "/")
+        lines += [_B["due"].format(due=due, when=planner._when(due, today))
+                  + (_B["weight"].format(weight=d["weight"]) if d["weight"] else ""),
+                  _B["source"].format(link=cw_link, today=today)]
+    else:
+        # No dated coursework: say so in the brief, never a guessed date.
+        lines += [_B["due_unknown"].format(module=mod), _B["source_undated"].format(today=today)]
     lines += _B["where_heading"]
     lines.append(_B["ticked"].format(ticked=total - len(todo), total=total))
+    if not due and weeks:
+        lines.append(_B["weeks_found"].format(weeks=_T["list_sep"].join(
+            _B["week_found"].format(note=w["note"], week=w["week"], status=w["status"]) for w in weeks)))
     if d["brief_unread"]:
         lines.append(_B["brief_unread"])
     gaps = [w for w in weeks if not w["written"]]
@@ -474,9 +506,14 @@ def _brief_text(job: dict, today: dt.date, shape: dict | None = None) -> str:
         elif listed:
             note += _n(_B["missing_listed"], len(listed), weeks=_weeks_phrase(listed))
         lines += [note, ""]
+    if not job["done"]["plan"]:
+        lines.append(_B["nothing_planned"])
     for when, text in job["done"]["plan"]:
-        lines.append(_B["plan_row"].format(when=dt.date.fromisoformat(when), text=text))
-    if "pace" in shape:
+        if when:
+            lines.append(_B["plan_row"].format(when=dt.date.fromisoformat(when), text=text))
+        else:
+            lines.append(_B["plan_row_undated"].format(text=text))
+    if "pace" in shape and due:
         per, plan = shape["pace"]["per_session"], job["done"]["plan"]
         lines += _B["sessions_heading"]
         lines += [_n(_B["sessions"], per, minutes=shape["pace"]["minutes"], per=per), ""]
@@ -506,14 +543,15 @@ def verify(path: str, job: dict, today: dt.date) -> list:
     except OSError as exc:
         return [say["unreadable"].format(error=exc)]
     problems = []
-    due = dt.date.fromisoformat(job["done"]["deadline"]["due"])
-    if _T["verify_due"].format(due=due) not in text:
+    d = job["done"]["deadline"]
+    due = dt.date.fromisoformat(d["due"]) if d.get("due") else None
+    if due and _T["verify_due"].format(due=due) not in text:
         problems.append(say["no_due"])
     for i in job["done"]["coursework"]["items"]:
         if not i["done"] and i["text"] not in text:
             problems.append(say["missing_item"].format(item=i["text"][:_L["missing_item_chars"]]))
     for when, _ in job["done"]["plan"]:
-        if not today <= dt.date.fromisoformat(when) <= due:
+        if due and when and not today <= dt.date.fromisoformat(when) <= due:
             problems.append(say["plan_date"].format(when=when))
     names = {os.path.splitext(os.path.basename(p))[0].lower()
              for p in glob.glob(os.path.join(VAULT, "**", "*" + _PATHS["note_ext"]), recursive=True)}
@@ -585,17 +623,29 @@ def run(text: str, now: dt.datetime | None = None) -> str:
         def find_deadline():
             hits = [d for d in planner.coursework_deadlines(VAULT)
                     if d["module"] == module and d["due"] >= today]
-            if not hits:
-                raise LookupError(_T["no_deadline"].format(module=module))
-            d = hits[0]
-            return {**d, "due": d["due"].isoformat()}
+            if hits:
+                d = hits[0]
+                return {**d, "due": d["due"].isoformat()}
+            # No dated coursework (2026-11-04: "prep me for electromagnetism"
+            # failed 6/6 on this). The brief is still worth having -- the
+            # week notes, what's written up -- with the date said unknown,
+            # never guessed. The module's folder stands in for the note.
+            folder = _module_dir(module)
+            if not folder:
+                raise LookupError(_T["no_notes"].format(module=module))
+            return {"module": module, "code": _module_code(module), "due": None, "weight": "",
+                    "brief_unread": False, "path": "", "folder": folder}
 
         d = step("deadline", find_deadline)
-        due = dt.date.fromisoformat(d["due"])
-        cw = step("coursework", lambda: read_coursework(d["path"]))
-        module_dir = os.path.dirname(d["path"])
-        if os.path.basename(module_dir).lower() == _PATHS["coursework_dir"]:
-            module_dir = os.path.dirname(module_dir)
+        due = dt.date.fromisoformat(d["due"]) if d["due"] else None
+        cw = step("coursework", lambda: read_coursework(d["path"]) if d["path"]
+                  else {"items": [], "feeds": [], "has_questions": False})
+        if d["path"]:
+            module_dir = os.path.dirname(d["path"])
+            if os.path.basename(module_dir).lower() == _PATHS["coursework_dir"]:
+                module_dir = os.path.dirname(module_dir)
+        else:
+            module_dir = d["folder"]
         weeks = step("weeks", lambda: read_weeks(module_dir))
         step("tasks", lambda: [{"text": t["text"], "due": str(t.get("due") or "")}
                                for t in module_tasks(module, d.get("code", ""))])
@@ -621,7 +671,8 @@ def run(text: str, now: dt.datetime | None = None) -> str:
             if not cw["has_questions"]:
                 # No question table to say which week each part needs: write
                 # up every gap among the weeks the note says feed it, first.
-                for w in cw["feeds"]:
+                # No coursework note at all: every week not written up.
+                for w in (cw["feeds"] if d["path"] else sorted(by_week)):
                     write_up(w)
             for i in cw["items"]:
                 if i["done"] or skip.match(i["text"]):
@@ -631,7 +682,7 @@ def run(text: str, now: dt.datetime | None = None) -> str:
                 label = (_T["question_step"].format(text=i["text"], topic=i["topic"], marks=i["marks"])
                          if i.get("marks") else i["text"])
                 work.append({"text": label, "weight": i.get("marks", _S["default_weight"])})
-            return [(when.isoformat(), t) for when, t in schedule(work, today, due)]
+            return [(when.isoformat() if when else None, t) for when, t in schedule(work, today, due)]
 
         job["done"].setdefault("plan", None)
         if job["done"]["plan"] is None:
@@ -675,7 +726,7 @@ def run(text: str, now: dt.datetime | None = None) -> str:
             job["done"]["verify"] = True
 
         steps = [{"text": t if module.lower() in t.lower() else _T["task_prefix"].format(module=module, text=t),
-                  "due": _S["task_due"].format(when=dt.date.fromisoformat(w))}
+                  "due": _S["task_due"].format(when=dt.date.fromisoformat(w)) if w else ""}
                  for w, t in job["done"]["plan"]]
         existing = {t["text"].lower() for t in tasks.list_tasks()}
         steps = [s for s in steps if s["text"].lower() not in existing]
@@ -687,13 +738,21 @@ def run(text: str, now: dt.datetime | None = None) -> str:
         return _T["could_not_finish"].format(module=module, error=exc)
 
     todo = [i for i in cw["items"] if not i["done"]]
-    first = job["done"]["plan"][0]
+    plan = job["done"]["plan"]
     rel = os.path.relpath(path, VAULT)
     gaps = [w["week"] for w in weeks if not w["written"]]
     reply = _T["reply"]
-    say = [reply["where"].format(module=module, path=rel),
-           reply["due"].format(due=due, when=planner._when(due, today), left=len(todo), total=len(cw["items"])),
-           reply["first"].format(when=dt.date.fromisoformat(first[0]), text=_lower_first(first[1]))]
+    say = [reply["where"].format(module=module, path=rel)]
+    if due:
+        say.append(reply["due"].format(due=due, when=planner._when(due, today), left=len(todo), total=len(cw["items"])))
+    else:
+        say.append(reply["due_unknown"].format(module=module))
+    if not plan:
+        say.append(reply["nothing_planned"])
+    elif plan[0][0]:
+        say.append(reply["first"].format(when=dt.date.fromisoformat(plan[0][0]), text=_lower_first(plan[0][1])))
+    else:
+        say.append(reply["first_undated"].format(text=_lower_first(plan[0][1])))
     if gaps:
         say.append(_n(reply["gaps"], len(gaps), weeks=_weeks_phrase(gaps)))
     if job.get("resumed"):

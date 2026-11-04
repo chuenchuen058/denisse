@@ -73,6 +73,11 @@ class Detector(unittest.TestCase):
                      ""]:
             self.assertFalse(multistep.is_multistep(text), text)
 
+    def test_a_reply_preference_is_never_a_plan(self):
+        # Two verb phrases, one instruction about how she replies (2026-11-04).
+        self.assertFalse(multistep.is_multistep("stop reading out file paths, just ask me if i want them"))
+        self.assertFalse(multistep.is_multistep("from now on keep it short and call me boss"))
+
     def test_no_existing_eval_prompt_is_planned(self):
         from eval.cases import CASES
         planned = [c["id"] for c in CASES if multistep.is_multistep(c["prompt"])

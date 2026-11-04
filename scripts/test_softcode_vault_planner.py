@@ -113,6 +113,18 @@ class VaultSearchData(_Config):
         vault_search.CONFIG["state_note"] = "Nope/STATE.md"
         self.assertIn("Nope/STATE.md", vault_search.search_vault("my vault"))
 
+    def test_overview_without_a_state_note_falls_back_to_the_notes(self):
+        # 2026-11-04: "what am I working on" with no STATE.md was a dead end,
+        # and the model answered from its own folder name. The notes still
+        # hold his projects; the fallback query is data.
+        vault_search.CONFIG["state_note"] = "Nope/STATE.md"
+        vault_search.CONFIG["overview_fallback_query"] = "optics"
+        out = vault_search.search_vault("what am i working on")
+        self.assertIn("Nope/STATE.md", out)
+        self.assertIn("Notes/Optics.md", out)
+        vault_search.CONFIG["overview_fallback_query"] = "zzqqx"
+        self.assertNotIn("Notes/Optics.md", vault_search.search_vault("what am i working on"))
+
 
 class PlannerData(_Config):
     module = planner
