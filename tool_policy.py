@@ -168,6 +168,42 @@ def _inside(folder: str, p: str) -> bool:
         return True
 
 
+def _own_file_name(folder: str, p: str, names=()) -> bool:
+    """Whether `p` names one of Denisse's own files, wherever the path puts
+    it: a file that exists at the top of her program folder (by name), or a
+    file whose stem is one of the check's `names` ('settings', 'config' --
+    her settings file by whatever extension the model invents)."""
+    try:
+        name = ntpath.basename(p.strip().strip('"').replace("/", "\\")).lower()
+        if not name:
+            return False
+        stem = name.rsplit(".", 1)[0]
+        if stem in {n.lower() for n in names}:
+            return True
+        return any(name == f.lower() and os.path.isfile(os.path.join(folder, f))
+                   for f in os.listdir(folder))
+    except OSError:
+        return False
+
+
+def _only_a_time(text: str) -> bool:
+    try:
+        import time_parse
+        return time_parse.only_a_time(text)
+    except Exception:
+        return False
+
+
+def _time_question(text: str) -> str:
+    if not (text or "").strip():
+        return ""
+    try:
+        import time_parse
+        return time_parse.parse(text).question or ""
+    except Exception:
+        return ""
+
+
 def _arg(args: dict, which) -> str:
     names = which if isinstance(which, list) else [which]
     for n in names:
@@ -195,6 +231,25 @@ def refuse(name: str, args: dict, *, verified_path=None, known_skill=None,
         elif kind == "not_inside_program_folder":
             if _inside(program_folder, value):
                 return refusal
+        elif kind == "not_own_file_name":
+            # "edit your own settings file" -> write_file to an invented
+            # settings path outside her folder (2026-11-04, 6/6). Her own
+            # files are known by name, wherever the path says they are.
+            if value and _own_file_name(program_folder, value, chk.get("names", ())):
+                return refusal
+        elif kind == "task_has_subject":
+            # "remind me thursday" -> add_task('Thursday', 'thursday'): a
+            # task that is nothing but its time has no subject to remind
+            # him of. time_parse decides what is a time; no word list here.
+            if _only_a_time(value):
+                return refusal
+        elif kind == "unambiguous_time":
+            # time_parse already knows when a phrase needs asking about
+            # ("Thursday" said on a Thursday morning); surface its question
+            # instead of letting the store guess next week.
+            question = _time_question(value)
+            if question:
+                return refusal.replace("{detail}", question)
         elif kind == "verified_document_path":
             # Only a document-looking argument needs verifying: "Spotify"
             # is an app and goes straight through.

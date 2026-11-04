@@ -573,6 +573,21 @@ def parse(text: str, now_: datetime | None = None) -> Parsed:
     return Parsed(when=when, has_time=has_time, leftover=left)
 
 
+def only_a_time(text: str) -> bool:
+    """Whether `text` says WHEN and nothing else: 'Thursday', 'tomorrow at
+    5', 'tonight'. A part of day on its own ('lunch') is not counted -- it
+    can be the thing itself. For the task policy: a reminder whose text is
+    only its time has no subject (2026-11-04, "remind me thursday")."""
+    s = _clean(text)
+    if not s:
+        return False
+    if _SPAN_LEAD.match(s) or _SPAN_TAIL.search(s):
+        return parse_duration(s) is not None
+    b, left = _extract(s)
+    pinned = b.day_word is not None or b.weekday is not None or b.dom is not None or b.hour is not None
+    return pinned and not left.strip()
+
+
 def _suffix(n: int) -> str:
     if 10 <= n % 100 <= 20:
         return "th"

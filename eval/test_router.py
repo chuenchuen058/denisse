@@ -79,6 +79,18 @@ CASES = [
     ("look_not_inherited",
      [user("explain this"), bot("..."), user("what's the weather in London?")],
      set(), {"look_at_this"}),
+    # 2026-11-04, Chuen's test questions: a follow-up after a pause is about
+    # the pause; "the robotics one" after a reminder is that reminder; his
+    # calendar has a tool that says nothing is connected; "session over"
+    # with nothing running still needs the stop tool, not the clock alone.
+    ("carry_on_after_pause",
+     [user("pause the study timer"), bot("Paused -- 18 minutes left."), user("ok carry on")],
+     {"resume_study_session"}, {"get_news", "find_files"}),
+    ("cancel_the_one",
+     [user("remind me robotics meeting at 5"), bot("Okay."), user("cancel the robotics one")],
+     {"remove_task", "complete_task"}, set()),
+    ("calendar", [user("what's on my calendar tomorrow?")], {"check_calendar"}, {"find_files"}),
+    ("session_over", [user("session over")], {"stop_study_session"}, set()),
 ]
 
 # Every model-eval case that needs a tool gets a routing check for free, so
