@@ -1,0 +1,132 @@
+{
+  "_about": "The shipped defaults for learning.json: the documented fallback for any bad or missing value there. Keep the two equal (scripts/test_learning_config.py checks). Every pattern is a case-insensitive regex fragment.",
+  "learned_file": "memory/learned.json",
+  "tool_failure": {
+    "_about": "A tool result meaning the call did not do what was asked. Tools report failure in prose, and a bare 'error' anywhere would also match a news headline, so starts_with is matched at the start of the result and contains anywhere in it.",
+    "starts_with": [
+      "error\\b",
+      "failed\\b",
+      "could ?n[o']t\\b",
+      "unable to\\b",
+      "no skill named\\b",
+      "unknown tool\\b",
+      "the system cannot find\\b",
+      "no files matching\\b",
+      "no single open task matched\\b",
+      "don'?t know a location\\b"
+    ],
+    "contains": [
+      "doesn't see an active device",
+      "\\bnot found\\b",
+      "\\bno such file\\b",
+      "\\bpermission denied\\b",
+      "is not recognized as an internal or external command"
+    ]
+  },
+  "admits_failure": {
+    "_about": "Whole words in a reply that own up to a failure. If the tools failed and the reply says one of these, she handled it honestly and the turn isn't held against her.",
+    "words": [
+      "couldn'?t",
+      "could not",
+      "can'?t",
+      "cannot",
+      "unable",
+      "sorry",
+      "didn'?t work",
+      "doesn'?t",
+      "isn'?t",
+      "wasn'?t",
+      "failed",
+      "no skill",
+      "not (?:able|available|found|open|running)"
+    ]
+  },
+  "correction": {
+    "_about": "His next message telling her the last reply was wrong. Matched at the start, after any number of lead_ins (each optionally followed by , ! or .): 'no' inside a sentence ('no rush') is not a correction. Widened on 2026-10-30 to how he actually says it; every complaint brain.py reruns (_COMPLAINT) must also count here (scripts/test_feedback.py checks).",
+    "lead_ins": [
+      "bro",
+      "okay",
+      "ok",
+      "no",
+      "um+",
+      "but"
+    ],
+    "phrases": [
+      "/bad\\b",
+      "no\\b(?!\\s+(?:worries|problem|rush|thanks))",
+      "nope\\b",
+      "wrong\\b",
+      "not that\\b",
+      "that'?s (?:not|wrong)\\b",
+      "i meant\\b",
+      "i said\\b",
+      "not what i\\b",
+      "you didn'?t\\b",
+      "that didn'?t\\b",
+      "it didn'?t\\b",
+      "still (?:not|wrong)\\b",
+      "you (?:clearly |still )?(?:did not|didn'?t|do not|don'?t) (?:understand|get|listen|answer)\\b",
+      "do you (?:even )?understand(?: me| what i (?:said|say|mean|meant|asked))?\\s*\\?*\\s*$",
+      "what did i (?:just )?(?:say|ask)\\b",
+      "you'?re not listening\\b",
+      "you are not listening\\b",
+      "(?:you'?re|you are) still talk\\w*",
+      "(?:that'?s|it'?s|its|this is) (?:way )?too long\\b",
+      "(?:what|huh)\\s*\\?*\\s*$",
+      "is there a problem\\s*\\?*\\s*$"
+    ]
+  },
+  "praise": {
+    "_about": "Approval of the reply, not agreement to her question: 'yes please' and a bare 'okay' answer an offer and stay unknown. Matched at the start, after at most one lead_in (optionally followed by , ! or .).",
+    "lead_ins": [
+      "okay",
+      "ok",
+      "yes",
+      "yeah",
+      "oh"
+    ],
+    "phrases": [
+      "/good",
+      "thanks",
+      "thank you",
+      "thx",
+      "ty\\b",
+      "cheers",
+      "perfect",
+      "great",
+      "nice",
+      "awesome",
+      "good job",
+      "well done",
+      "that work(?:s|ed)",
+      "it work(?:s|ed)",
+      "that'?s right",
+      "exactly\\b",
+      "correct\\b",
+      "spot on",
+      "(?:that'?s|thats|that|this is|it'?s|its) (?:good|great|perfect|better|correct|it|right|what i (?:wanted|meant|asked))\\b",
+      "good(?:\\s+one)?\\s*[.!]*\\s*$",
+      "love it",
+      "nice one"
+    ]
+  },
+  "claims_done": {
+    "_about": "A reply saying something was DONE. brain.py uses the same pattern live, to send her back before a false 'done' reaches him; here it labels the ones that got through. Any fragment matching anywhere counts.",
+    "patterns": [
+      "^\\s*(?:done|all done|all set|sorted|ok(?:ay)?[,.]?\\s+done)\\b\\s*(?:[.!,:]|$)",
+      "\\b(?:has|have) been (?:started|stopped|set|turned (?:on|off)|completed|opened|closed|cancell?ed|created|saved|added|removed|paused|played|scheduled)\\b",
+      "\\bi(?:'ve| have)?\\s+(?:just\\s+)?(?:started|stopped|set|turned|opened|closed|cancell?ed|created|saved|added|removed|paused|scheduled)\\b",
+      "\\b(?:has|is now)\\s+(?:started|stopped|running)\\b",
+      "\\b(?:timer|pomodoro|spotify|music)\\s+is\\s+(?:running|paused|playing|off|on)\\b",
+      "\\b(?:timer|session|pomodoro|study\\s+mode|music|spotify|song)\\b[^.!?\\n]{0,30}?\\b(?:paused|stopped|started|resumed|cancell?ed|ended)\\b",
+      "\\b(?:file|document|cv|resume)\\b.{0,40}\\bis\\s+(?:now\\s+)?open\\b",
+      "\\bsuccessfully\\b"
+    ]
+  },
+  "report": {
+    "_about": "The nightly eval report's section: how many failing prompts it lists (the command line lists cli_limit), and how much of each prompt it quotes.",
+    "limit": 5,
+    "cli_limit": 20,
+    "prompt_chars": 80
+  }
+}
