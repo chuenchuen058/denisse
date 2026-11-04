@@ -15,8 +15,9 @@ The open question is process memory, like the one Brain per process
 brain passes her previous reply, which must be that exact question. Any
 other message closes it, it expires, and it is taken once.
 
-Softcoded (Rule 0, 2026-11-03): the word lists and limits are in
-dialogue_rules.json ("clarify"). His answer is read by its words, not
+Softcoded (Rule 0, 2026-11-03; second pass 2026-11-04): the word lists,
+limits and every sentence she says here are in dialogue_rules.json
+("clarify"). His answer is read by its words, not
 matched against fixed sentences: a short reply made only of agreeing
 words and courtesy filler is a yes ("yeah thats it thanks"), of refusing
 words and filler a no ("nah neither of them"), and a short reply with a
@@ -42,6 +43,9 @@ _FILLER = frozenset(_R["reply_filler"])
 _OTHER = frozenset(_R["other_words"])
 _SELECT = frozenset(_R["selection_words"])
 _ORDINAL = dict(_R["ordinals"])
+_NAMED = _R["max_options_named"]
+_QUOTED_LABEL = re.compile(r"\s*(?:note\s+)?['\"]([^'\"]{2,%d})['\"]" % _R["quoted_label_chars"], re.I)
+_COLON_LABEL = re.compile(r"\s*([^:]{2,%d}?):\s" % _R["colon_label_chars"])
 
 _lock = threading.Lock()
 _pending = None
@@ -99,7 +103,7 @@ def _segments(result):
     items, title = [], ""
     for raw in (result or "").splitlines():
         line = raw.strip()
-        if not line or line.startswith("From your notes"):
+        if not line or line.startswith(tuple(_R["skip_line_starts"])):
             continue
         if not raw[:1].isspace() and line.lower().endswith(".md"):
             title = os.path.splitext(os.path.basename(line.replace("\\", "/")))[0]
@@ -115,14 +119,14 @@ def _segments(result):
 
 def _label(title, text, titles, subject=()):
     """A short name for an item, copied from the evidence -- never its date."""
-    m = re.match(r"\s*(?:note\s+)?['\"]([^'\"]{2,60})['\"]", text, re.I)
+    m = _QUOTED_LABEL.match(text)
     if m:
         return m.group(1)
-    m = re.match(r"\s*([^:]{2,40}?):\s", text)
+    m = _COLON_LABEL.match(text)
     if m and not re.search(r"\d", m.group(1)):
         return m.group(1).replace("_", " ").strip()
     words = []
-    for w in text.rstrip(".!?").split()[:6]:
+    for w in text.rstrip(".!?").split()[:_R["label_max_words"]]:
         if re.search(r"\d", w) or w.lower() in _R["label_stops"]:
             break
         words.append(w.rstrip(",;"))
@@ -139,7 +143,7 @@ def _speak(label):
     first = label.split()[0]
     if len(first) > 1 and first[0].isupper() and first[1:].islower():
         label = label[0].lower() + label[1:]
-    return "the " + label
+    return _R["article"] + label
 
 
 def candidates(reads, terms):
@@ -150,7 +154,7 @@ def candidates(reads, terms):
         for title, text in _segments(str(c.get("result", ""))):
             items.append({"title": title, "text": text, "tool": c["name"], "arguments": c.get("arguments") or {}})
     titles = [i["title"] for i in items if i["title"]]
-    subject = [t for t in (terms or "").split() if len(t) > 2]
+    subject = [t for t in (terms or "").split() if len(t) >= _R["min_subject_chars"]]
     for i in items:
         i["label"] = _label(i["title"], i["text"], titles, subject)
     relevant = [i for i in items if any(t in (i["label"] + " " + i["text"]).lower().replace("_", " ")
@@ -194,7 +198,7 @@ def evidence(option):
 
 def quote(option):
     """The fallback answer: the evidence itself, nothing added."""
-    return f"Here's what I found for {spoken(option)}: {evidence(option)}"
+    return _R["quote"].format(name=spoken(option), evidence=evidence(option))
 
 
 def supported(reply, option, seen):
@@ -211,21 +215,21 @@ def supported(reply, option, seen):
 
 
 def question(options):
-    names = [_speak(o["label"]) for o in options[:4]]
+    names = [_speak(o["label"]) for o in options[:_NAMED]]
     if len(names) == 1:
-        return f"Do you mean {names[0]}?"
-    return "Which one do you mean: " + ", ".join(names[:-1]) + f" or {names[-1]}?"
+        return _R["ask_one"].format(name=names[0])
+    return _R["ask_many"].format(names=", ".join(names[:-1]), last=names[-1])
 
 
 def missing(terms, seen):
     """Nothing else in the evidence: say what was found and what's needed."""
-    names = [_speak(o["label"]) for o in seen[:4]]
+    names = [_speak(o["label"]) for o in seen[:_NAMED]]
     if len(names) == 1:
-        found = f"The only {terms or 'match'} I found is {names[0]}, and that isn't the one you mean."
+        found = _R["missing_one"].format(terms=terms or _R["missing_one_terms"], name=names[0])
     else:
-        found = (f"For {terms or 'that'} I found only " + ", ".join(names[:-1]) + f" and {names[-1]}, "
-                 "and none of those is the one you mean.")
-    return found + " I haven't found another, and I won't guess -- what is it called, or where did you note it?"
+        found = _R["missing_many"].format(terms=terms or _R["missing_many_terms"],
+                                          names=", ".join(names[:-1]), last=names[-1])
+    return found + _R["missing_tail"]
 
 
 def offer(request, asked, options, seen, terms):

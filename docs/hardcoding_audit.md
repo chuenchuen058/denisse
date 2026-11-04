@@ -6,9 +6,9 @@ Candidates are intentionally conservative: regexes include parsers, text compari
 Static coverage is not proof of exhaustiveness: comments/docstrings, non-Python files, excluded fixtures/private state/dependencies, dynamically constructed/imported values and interprocedural user-text flow are not analysed. Local aliases and comprehension/loop iterables are followed conservatively without execution-order analysis; results can include unrelated possible bindings.
 Values are complete decoded literal representations; f-string fragments and concatenated pieces are reported at their AST source location. Multiple kinds at one location are intentional. No value truncation is applied. Numeric strings used as defaults are included. Booleans and None are excluded.
 
-Scanned **140** Python files; **7875** candidates; **0** scan errors.
+Scanned **140** Python files; **7867** candidates; **0** scan errors.
 
-Source and policy SHA-256: `6a212089516056275a0c57a5c2fc0680f0993dd0ef9538b1df6daeb4f1e52bb4`.
+Source and policy SHA-256: `6d5aeb29151c6c18d6db9468164c8584f6c37b56c90ffcf86baec92c59b7ae5b`.
 
 ## Coverage and regeneration
 
@@ -62,14 +62,14 @@ Traversal policy (from the JSON configuration):
 
 | Kind | Count | Suggested home |
 | --- | ---: | --- |
-| regex candidate | 522 | data file |
-| text match / keyword candidate | 3645 | data file |
+| regex candidate | 525 | data file |
+| text match / keyword candidate | 3644 | data file |
 | absolute path | 67 | runtime lookup |
-| user / vault name | 129 | runtime lookup |
+| user / vault name | 128 | runtime lookup |
 | model name | 215 | config.json |
 | URL | 12 | config.json |
-| time / duration / threshold / limit | 684 | config.json |
-| numeric literal (review) | 2601 | config.json |
+| time / duration / threshold / limit | 683 | config.json |
+| numeric literal (review) | 2593 | config.json |
 
 ## Files in review order
 
@@ -77,10 +77,10 @@ Traversal policy (from the JSON configuration):
 | --- | --- | ---: |
 | <code>brain.py</code> | 1: Conversation, intent routing and visible study behaviour | 1116 |
 | <code>tray.py</code> | 1: Conversation, intent routing and visible study behaviour | 242 |
-| <code>multistep.py</code> | 1: Conversation, intent routing and visible study behaviour | 145 |
+| <code>multistep.py</code> | 1: Conversation, intent routing and visible study behaviour | 136 |
 | <code>instincts.py</code> | 1: Conversation, intent routing and visible study behaviour | 101 |
 | <code>study_mode.py</code> | 1: Conversation, intent routing and visible study behaviour | 94 |
-| <code>clarify.py</code> | 1: Conversation, intent routing and visible study behaviour | 57 |
+| <code>clarify.py</code> | 1: Conversation, intent routing and visible study behaviour | 58 |
 | <code>learning.py</code> | 1: Conversation, intent routing and visible study behaviour | 52 |
 | <code>tool_router.py</code> | 1: Conversation, intent routing and visible study behaviour | 24 |
 | <code>planner.py</code> | 1: Conversation, intent routing and visible study behaviour | 22 |
@@ -1594,151 +1594,142 @@ Priority 1: Conversation, intent routing and visible study behaviour.
 
 | Line | Kind | Value | Suggested home |
 | ---: | --- | --- | --- |
-| 68 | regex candidate | <code>&#x27;multistep&#x27;</code> | data file |
-| 68 | text match / keyword candidate | <code>&#x27;multistep&#x27;</code> | data file |
-| 72 | text match / keyword candidate | <code>&#x27;file_chars&#x27;</code> | data file |
-| 83 | regex candidate | <code>&#x27;^(?:(?:&#x27;</code> | data file |
-| 83 | regex candidate | <code>&#x27;lead_words&#x27;</code> | data file |
-| 83 | regex candidate | <code>&#x27;)[\\s,]+)+&#x27;</code> | data file |
-| 87 | regex candidate | <code>&#x27;connectors&#x27;</code> | data file |
-| 88 | regex candidate | <code>&#x27;\\s*(?:[,;]\\s*(?:(?:&#x27;</code> | data file |
-| 88 | regex candidate | <code>&#x27;)\\s+)*&#124;\\.\\s+&#124;\\b(?:&#x27;</code> | data file |
-| 88 | regex candidate | <code>&#x27;)\\b\\s*)&#x27;</code> | data file |
-| 94 | text match / keyword candidate | <code>&#x27;object_markers&#x27;</code> | data file |
-| 95 | text match / keyword candidate | <code>&#x27;not_verbs&#x27;</code> | data file |
-| 107 | numeric literal (review) | <code>0</code> | config.json |
-| 109 | numeric literal (review) | <code>0</code> | config.json |
-| 109 | numeric literal (review) | <code>1</code> | config.json |
-| 109 | numeric literal (review) | <code>0</code> | config.json |
-| 113 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 114 | time / duration / threshold / limit | <code>200</code> | config.json |
-| 123 | user / vault name | <code>&#x27;Chuen asked for several things at once. Write the plan: one step for each thing he asked for, in his order, 2 to 5 steps. Each step must make sense on its own: keep his words, and replace words like &quot;it&quot; or &quot;them&quot; with what they refer to. Only what he asked for. Don\&#x27;t answer anything. Reply with JSON only: {&quot;steps&quot;: [&quot;...&quot;, &quot;...&quot;]}&#x27;</code> | runtime lookup |
-| 129 | text match / keyword candidate | <code>&#x27;stop_words&#x27;</code> | data file |
-| 133 | text match / keyword candidate | <code>&#x27;false&#x27;</code> | data file |
-| 133 | text match / keyword candidate | <code>&#x27;off&#x27;</code> | data file |
-| 133 | text match / keyword candidate | <code>&#x27;no&#x27;</code> | data file |
-| 137 | text match / keyword candidate | <code>&#x27;false&#x27;</code> | data file |
-| 137 | text match / keyword candidate | <code>&#x27;off&#x27;</code> | data file |
-| 137 | text match / keyword candidate | <code>&#x27;no&#x27;</code> | data file |
-| 148 | regex candidate | <code>&quot;[a-z&#x27;]+&quot;</code> | data file |
-| 167 | numeric literal (review) | <code>2</code> | config.json |
-| 174 | regex candidate | <code>&#x27;[a-z]{4,}&#x27;</code> | data file |
-| 174 | text match / keyword candidate | <code>&#x27;[a-z]{4,}&#x27;</code> | data file |
-| 182 | numeric literal (review) | <code>1e-09</code> | config.json |
-| 193 | text match / keyword candidate | <code>&#x27;steps&#x27;</code> | data file |
-| 194 | numeric literal (review) | <code>2</code> | config.json |
-| 196 | numeric literal (review) | <code>200</code> | config.json |
-| 214 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 216 | time / duration / threshold / limit | <code>-1</code> | config.json |
-| 217 | time / duration / threshold / limit | <code>0</code> | config.json |
-| 217 | numeric literal (review) | <code>256</code> | config.json |
-| 225 | numeric literal (review) | <code>2</code> | config.json |
-| 226 | numeric literal (review) | <code>200</code> | config.json |
-| 235 | text match / keyword candidate | <code>&#x27;role&#x27;</code> | data file |
-| 235 | text match / keyword candidate | <code>&#x27;assistant&#x27;</code> | data file |
-| 237 | text match / keyword candidate | <code>&#x27;role&#x27;</code> | data file |
-| 237 | text match / keyword candidate | <code>&#x27;tool&#x27;</code> | data file |
-| 238 | numeric literal (review) | <code>0</code> | config.json |
-| 244 | text match / keyword candidate | <code>&quot;Refused: this exact &#x27;&quot;</code> | data file |
-| 254 | text match / keyword candidate | <code>&#x27;User declined&#x27;</code> | data file |
-| 255 | text match / keyword candidate | <code>&#x27;Refused&#x27;</code> | data file |
-| 265 | numeric literal (review) | <code>-1</code> | config.json |
-| 266 | numeric literal (review) | <code>-1</code> | config.json |
-| 267 | numeric literal (review) | <code>-1</code> | config.json |
-| 272 | regex candidate | <code>&#x27;\\s*\\b(?:&#x27;</code> | data file |
-| 272 | regex candidate | <code>&#x27;\\b&#x27;</code> | data file |
-| 272 | numeric literal (review) | <code>-1</code> | config.json |
-| 272 | regex candidate | <code>&#x27;&#x27;</code> | data file |
-| 273 | model name | <code>&#x27;model_instruction_starts&#x27;</code> | config.json |
-| 273 | regex candidate | <code>&#x27;model_instruction_starts&#x27;</code> | data file |
-| 274 | regex candidate | <code>&#x27;).*$&#x27;</code> | data file |
-| 282 | text match / keyword candidate | <code>&#x27;User declined&#x27;</code> | data file |
-| 286 | regex candidate | <code>&quot;^Error running &#x27;[^&#x27;]+&#x27;:\\s*&#124;^Error:\\s*&#124;^Refused:\\s*&quot;</code> | data file |
-| 290 | numeric literal (review) | <code>200</code> | config.json |
-| 297 | numeric literal (review) | <code>-1</code> | config.json |
-| 335 | text match / keyword candidate | <code>&#x27;text_extensions&#x27;</code> | data file |
-| 338 | absolute path | <code>&#x27;^\\s*((?:[A-Za-z]:[\\\\/]&#124;\\\\\\\\)[^\\r\\n\\&quot;&lt;&gt;&#124;?*]+?)\\s*$&#x27;</code> | runtime lookup |
-| 338 | regex candidate | <code>&#x27;^\\s*((?:[A-Za-z]:[\\\\/]&#124;\\\\\\\\)[^\\r\\n\\&quot;&lt;&gt;&#124;?*]+?)\\s*$&#x27;</code> | data file |
-| 339 | absolute path | <code>&#x27;(?:[A-Za-z]:[\\\\/]&#124;\\\\\\\\)[^\\r\\n\\&quot;&lt;&gt;&#124;?*]+?\\.[A-Za-z0-9]{1,5}(?=$&#124;[\\s\\&quot;),;])&#x27;</code> | runtime lookup |
-| 339 | regex candidate | <code>&#x27;(?:[A-Za-z]:[\\\\/]&#124;\\\\\\\\)[^\\r\\n\\&quot;&lt;&gt;&#124;?*]+?\\.[A-Za-z0-9]{1,5}(?=$&#124;[\\s\\&quot;),;])&#x27;</code> | data file |
-| 342 | regex candidate | <code>&#x27;(?:^\\s*&#124;\\()([^\\n()\\&quot;]+?\\.md)(?=\\s*$&#124;\\))&#x27;</code> | data file |
-| 345 | regex candidate | <code>&#x27;\\b(?:&#x27;</code> | data file |
-| 345 | regex candidate | <code>&#x27;refers_back&#x27;</code> | data file |
-| 345 | regex candidate | <code>&#x27;)\\b&#x27;</code> | data file |
-| 353 | text match / keyword candidate | <code>&#x27;result&#x27;</code> | data file |
-| 353 | text match / keyword candidate | <code>&#x27;name&#x27;</code> | data file |
-| 353 | text match / keyword candidate | <code>&#x27;read_file&#x27;</code> | data file |
-| 360 | text match / keyword candidate | <code>&#x27;name&#x27;</code> | data file |
-| 360 | text match / keyword candidate | <code>&#x27;search_vault&#x27;</code> | data file |
-| 363 | regex candidate | <code>&#x27;^[A-Za-z]:&#124;^\\\\\\\\&#x27;</code> | data file |
-| 365 | regex candidate | <code>&#x27;[\\\\/]&#x27;</code> | data file |
-| 373 | regex candidate | <code>&quot;[a-z&#x27;]+&quot;</code> | data file |
-| 374 | numeric literal (review) | <code>0</code> | config.json |
-| 384 | text match / keyword candidate | <code>&#x27;read_file&#x27;</code> | data file |
-| 384 | text match / keyword candidate | <code>&#x27;path&#x27;</code> | data file |
-| 384 | text match / keyword candidate | <code>&#x27;max_chars&#x27;</code> | data file |
-| 385 | text match / keyword candidate | <code>&#x27;Error&#x27;</code> | data file |
-| 385 | text match / keyword candidate | <code>&#x27;(empty file)&#x27;</code> | data file |
-| 386 | numeric literal (review) | <code>120</code> | config.json |
-| 403 | regex candidate | <code>&#x27;\\&quot;([^\\&quot;]{2,60})\\&quot;&#124;\\b(\\d+(?:[.:]\\d+)?)\\b&#124;\\b(&#x27;</code> | data file |
-| 404 | regex candidate | <code>&#x27;ambiguous_month_names&#x27;</code> | data file |
-| 404 | text match / keyword candidate | <code>&#x27;ambiguous_month_names&#x27;</code> | data file |
-| 404 | regex candidate | <code>&#x27;)\\b&#x27;</code> | data file |
-| 417 | regex candidate | <code>&#x27;\\&quot;[^\\&quot;]*\\&quot;&#x27;</code> | data file |
-| 418 | regex candidate | <code>&quot;\\b[A-Za-z][\\w&#x27;-]*&quot;</code> | data file |
-| 419 | numeric literal (review) | <code>0</code> | config.json |
-| 423 | numeric literal (review) | <code>0</code> | config.json |
-| 423 | numeric literal (review) | <code>0</code> | config.json |
-| 423 | text match / keyword candidate | <code>&#x27;I&#x27;</code> | data file |
-| 440 | numeric literal (review) | <code>3</code> | config.json |
-| 441 | regex candidate | <code>&#x27;(?&lt;![\\w.])&#x27;</code> | data file |
-| 441 | regex candidate | <code>&#x27;(?![\\w])&#x27;</code> | data file |
-| 447 | regex candidate | <code>&#x27;(?&lt;=[.!?])\\s+&#124;\\n+&#x27;</code> | data file |
-| 447 | text match / keyword candidate | <code>&#x27;(?&lt;=[.!?])\\s+&#124;\\n+&#x27;</code> | data file |
-| 449 | text match / keyword candidate | <code>&#x27;the tool failed&#x27;</code> | data file |
-| 483 | text match / keyword candidate | <code>&#x27;name&#x27;</code> | data file |
-| 483 | text match / keyword candidate | <code>&#x27;list_tasks&#x27;</code> | data file |
-| 484 | text match / keyword candidate | <code>&#x27;Refused&#x27;</code> | data file |
-| 484 | text match / keyword candidate | <code>&#x27;Error&#x27;</code> | data file |
-| 484 | text match / keyword candidate | <code>&#x27;User declined&#x27;</code> | data file |
-| 487 | regex candidate | <code>&#x27;[a-z]{4,}&#x27;</code> | data file |
-| 489 | regex candidate | <code>&#x27;^\\s*-\\s+(.+)$&#x27;</code> | data file |
-| 489 | numeric literal (review) | <code>-1</code> | config.json |
-| 490 | regex candidate | <code>&#x27;^OVERDUE\\s*-\\s*&#x27;</code> | data file |
-| 491 | regex candidate | <code>&#x27;\\s*\\((?:due&#124;overdue)[^)]*\\)\\s*$&#x27;</code> | data file |
-| 494 | regex candidate | <code>&#x27;(?&lt;!^)\\b[A-Z][a-z]{3,}&#x27;</code> | data file |
-| 495 | regex candidate | <code>&#x27;[a-z]{4,}&#x27;</code> | data file |
-| 535 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 536 | numeric literal (review) | <code>2</code> | config.json |
-| 536 | numeric literal (review) | <code>1</code> | config.json |
-| 538 | numeric literal (review) | <code>1</code> | config.json |
-| 541 | numeric literal (review) | <code>1</code> | config.json |
-| 541 | numeric literal (review) | <code>1</code> | config.json |
-| 555 | numeric literal (review) | <code>1</code> | config.json |
-| 555 | numeric literal (review) | <code>2</code> | config.json |
-| 559 | text match / keyword candidate | <code>&#x27;role&#x27;</code> | data file |
-| 559 | text match / keyword candidate | <code>&#x27;user&#x27;</code> | data file |
-| 559 | text match / keyword candidate | <code>&#x27;content&#x27;</code> | data file |
-| 560 | numeric literal (review) | <code>1</code> | config.json |
-| 562 | text match / keyword candidate | <code>&#x27;role&#x27;</code> | data file |
-| 562 | text match / keyword candidate | <code>&#x27;tool&#x27;</code> | data file |
-| 562 | text match / keyword candidate | <code>&#x27;role&#x27;</code> | data file |
-| 562 | text match / keyword candidate | <code>&#x27;assistant&#x27;</code> | data file |
-| 565 | text match / keyword candidate | <code>&#x27;name&#x27;</code> | data file |
-| 574 | numeric literal (review) | <code>200</code> | config.json |
-| 575 | numeric literal (review) | <code>1</code> | config.json |
-| 575 | text match / keyword candidate | <code>&#x27;User declined&#x27;</code> | data file |
-| 590 | text match / keyword candidate | <code>&#x27;name&#x27;</code> | data file |
-| 590 | text match / keyword candidate | <code>&#x27;read_file&#x27;</code> | data file |
-| 590 | text match / keyword candidate | <code>&#x27;result&#x27;</code> | data file |
-| 591 | text match / keyword candidate | <code>&#x27;Error&#x27;</code> | data file |
-| 594 | numeric literal (review) | <code>-1</code> | config.json |
-| 594 | text match / keyword candidate | <code>&#x27;path&#x27;</code> | data file |
-| 594 | text match / keyword candidate | <code>&#x27;the file&#x27;</code> | data file |
-| 594 | numeric literal (review) | <code>1</code> | config.json |
+| 69 | regex candidate | <code>&#x27;multistep&#x27;</code> | data file |
+| 69 | text match / keyword candidate | <code>&#x27;multistep&#x27;</code> | data file |
+| 73 | text match / keyword candidate | <code>&#x27;file_chars&#x27;</code> | data file |
+| 75 | text match / keyword candidate | <code>&#x27;error_chars&#x27;</code> | data file |
+| 76 | regex candidate | <code>&#x27;[a-z]{%d,}&#x27;</code> | data file |
+| 76 | text match / keyword candidate | <code>&#x27;[a-z]{%d,}&#x27;</code> | data file |
+| 76 | regex candidate | <code>&#x27;min_word_chars&#x27;</code> | data file |
+| 76 | text match / keyword candidate | <code>&#x27;min_word_chars&#x27;</code> | data file |
+| 87 | regex candidate | <code>&#x27;^(?:(?:&#x27;</code> | data file |
+| 87 | regex candidate | <code>&#x27;lead_words&#x27;</code> | data file |
+| 87 | regex candidate | <code>&#x27;)[\\s,]+)+&#x27;</code> | data file |
+| 91 | regex candidate | <code>&#x27;connectors&#x27;</code> | data file |
+| 92 | regex candidate | <code>&#x27;\\s*(?:[,;]\\s*(?:(?:&#x27;</code> | data file |
+| 92 | regex candidate | <code>&#x27;)\\s+)*&#124;\\.\\s+&#124;\\b(?:&#x27;</code> | data file |
+| 92 | regex candidate | <code>&#x27;)\\b\\s*)&#x27;</code> | data file |
+| 98 | text match / keyword candidate | <code>&#x27;object_markers&#x27;</code> | data file |
+| 99 | text match / keyword candidate | <code>&#x27;not_verbs&#x27;</code> | data file |
+| 111 | numeric literal (review) | <code>0</code> | config.json |
+| 113 | numeric literal (review) | <code>0</code> | config.json |
+| 113 | numeric literal (review) | <code>1</code> | config.json |
+| 113 | numeric literal (review) | <code>0</code> | config.json |
+| 117 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 128 | text match / keyword candidate | <code>&#x27;stop_words&#x27;</code> | data file |
+| 132 | text match / keyword candidate | <code>&#x27;switch_off_values&#x27;</code> | data file |
+| 151 | regex candidate | <code>&quot;[a-z&#x27;]+&quot;</code> | data file |
+| 170 | numeric literal (review) | <code>2</code> | config.json |
+| 185 | numeric literal (review) | <code>1e-09</code> | config.json |
+| 196 | text match / keyword candidate | <code>&#x27;steps&#x27;</code> | data file |
+| 197 | numeric literal (review) | <code>2</code> | config.json |
+| 217 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 219 | time / duration / threshold / limit | <code>-1</code> | config.json |
+| 220 | time / duration / threshold / limit | <code>0</code> | config.json |
+| 228 | numeric literal (review) | <code>2</code> | config.json |
+| 238 | text match / keyword candidate | <code>&#x27;role&#x27;</code> | data file |
+| 238 | text match / keyword candidate | <code>&#x27;assistant&#x27;</code> | data file |
+| 240 | text match / keyword candidate | <code>&#x27;role&#x27;</code> | data file |
+| 240 | text match / keyword candidate | <code>&#x27;tool&#x27;</code> | data file |
+| 241 | numeric literal (review) | <code>0</code> | config.json |
+| 247 | text match / keyword candidate | <code>&quot;Refused: this exact &#x27;&quot;</code> | data file |
+| 257 | text match / keyword candidate | <code>&#x27;User declined&#x27;</code> | data file |
+| 258 | text match / keyword candidate | <code>&#x27;Refused&#x27;</code> | data file |
+| 268 | numeric literal (review) | <code>-1</code> | config.json |
+| 269 | numeric literal (review) | <code>-1</code> | config.json |
+| 270 | numeric literal (review) | <code>-1</code> | config.json |
+| 275 | regex candidate | <code>&#x27;\\s*\\b(?:&#x27;</code> | data file |
+| 275 | regex candidate | <code>&#x27;\\b&#x27;</code> | data file |
+| 275 | numeric literal (review) | <code>-1</code> | config.json |
+| 275 | regex candidate | <code>&#x27;&#x27;</code> | data file |
+| 276 | model name | <code>&#x27;model_instruction_starts&#x27;</code> | config.json |
+| 276 | regex candidate | <code>&#x27;model_instruction_starts&#x27;</code> | data file |
+| 277 | regex candidate | <code>&#x27;).*$&#x27;</code> | data file |
+| 285 | text match / keyword candidate | <code>&#x27;User declined&#x27;</code> | data file |
+| 289 | regex candidate | <code>&quot;^Error running &#x27;[^&#x27;]+&#x27;:\\s*&#124;^Error:\\s*&#124;^Refused:\\s*&quot;</code> | data file |
+| 300 | numeric literal (review) | <code>-1</code> | config.json |
+| 336 | text match / keyword candidate | <code>&#x27;text_extensions&#x27;</code> | data file |
+| 339 | absolute path | <code>&#x27;^\\s*((?:[A-Za-z]:[\\\\/]&#124;\\\\\\\\)[^\\r\\n\\&quot;&lt;&gt;&#124;?*]+?)\\s*$&#x27;</code> | runtime lookup |
+| 339 | regex candidate | <code>&#x27;^\\s*((?:[A-Za-z]:[\\\\/]&#124;\\\\\\\\)[^\\r\\n\\&quot;&lt;&gt;&#124;?*]+?)\\s*$&#x27;</code> | data file |
+| 340 | absolute path | <code>&#x27;(?:[A-Za-z]:[\\\\/]&#124;\\\\\\\\)[^\\r\\n\\&quot;&lt;&gt;&#124;?*]+?\\.[A-Za-z0-9]{1,5}(?=$&#124;[\\s\\&quot;),;])&#x27;</code> | runtime lookup |
+| 340 | regex candidate | <code>&#x27;(?:[A-Za-z]:[\\\\/]&#124;\\\\\\\\)[^\\r\\n\\&quot;&lt;&gt;&#124;?*]+?\\.[A-Za-z0-9]{1,5}(?=$&#124;[\\s\\&quot;),;])&#x27;</code> | data file |
+| 343 | regex candidate | <code>&#x27;(?:^\\s*&#124;\\()([^\\n()\\&quot;]+?\\.md)(?=\\s*$&#124;\\))&#x27;</code> | data file |
+| 346 | regex candidate | <code>&#x27;\\b(?:&#x27;</code> | data file |
+| 346 | regex candidate | <code>&#x27;refers_back&#x27;</code> | data file |
+| 346 | regex candidate | <code>&#x27;)\\b&#x27;</code> | data file |
+| 354 | text match / keyword candidate | <code>&#x27;result&#x27;</code> | data file |
+| 354 | text match / keyword candidate | <code>&#x27;name&#x27;</code> | data file |
+| 354 | text match / keyword candidate | <code>&#x27;read_file&#x27;</code> | data file |
+| 361 | text match / keyword candidate | <code>&#x27;name&#x27;</code> | data file |
+| 361 | text match / keyword candidate | <code>&#x27;search_vault&#x27;</code> | data file |
+| 364 | regex candidate | <code>&#x27;^[A-Za-z]:&#124;^\\\\\\\\&#x27;</code> | data file |
+| 366 | regex candidate | <code>&#x27;[\\\\/]&#x27;</code> | data file |
+| 374 | regex candidate | <code>&quot;[a-z&#x27;]+&quot;</code> | data file |
+| 375 | numeric literal (review) | <code>0</code> | config.json |
+| 385 | text match / keyword candidate | <code>&#x27;read_file&#x27;</code> | data file |
+| 385 | text match / keyword candidate | <code>&#x27;path&#x27;</code> | data file |
+| 385 | text match / keyword candidate | <code>&#x27;max_chars&#x27;</code> | data file |
+| 386 | text match / keyword candidate | <code>&#x27;Error&#x27;</code> | data file |
+| 386 | text match / keyword candidate | <code>&#x27;(empty file)&#x27;</code> | data file |
+| 387 | numeric literal (review) | <code>120</code> | config.json |
+| 402 | regex candidate | <code>&#x27;\\&quot;([^\\&quot;]{2,60})\\&quot;&#124;\\b(\\d+(?:[.:]\\d+)?)\\b&#124;\\b(&#x27;</code> | data file |
+| 403 | regex candidate | <code>&#x27;ambiguous_month_names&#x27;</code> | data file |
+| 403 | text match / keyword candidate | <code>&#x27;ambiguous_month_names&#x27;</code> | data file |
+| 403 | regex candidate | <code>&#x27;)\\b&#x27;</code> | data file |
+| 416 | regex candidate | <code>&#x27;\\&quot;[^\\&quot;]*\\&quot;&#x27;</code> | data file |
+| 417 | regex candidate | <code>&quot;\\b[A-Za-z][\\w&#x27;-]*&quot;</code> | data file |
+| 418 | numeric literal (review) | <code>0</code> | config.json |
+| 422 | numeric literal (review) | <code>0</code> | config.json |
+| 422 | numeric literal (review) | <code>0</code> | config.json |
+| 422 | text match / keyword candidate | <code>&#x27;I&#x27;</code> | data file |
+| 439 | numeric literal (review) | <code>3</code> | config.json |
+| 440 | regex candidate | <code>&#x27;(?&lt;![\\w.])&#x27;</code> | data file |
+| 440 | regex candidate | <code>&#x27;(?![\\w])&#x27;</code> | data file |
+| 446 | regex candidate | <code>&#x27;(?&lt;=[.!?])\\s+&#124;\\n+&#x27;</code> | data file |
+| 446 | text match / keyword candidate | <code>&#x27;(?&lt;=[.!?])\\s+&#124;\\n+&#x27;</code> | data file |
+| 448 | text match / keyword candidate | <code>&#x27;tool_failed&#x27;</code> | data file |
+| 477 | regex candidate | <code>&#x27;(?&lt;!^)\\b[A-Z][a-z]{%d,}&#x27;</code> | data file |
+| 477 | regex candidate | <code>&#x27;min_word_chars&#x27;</code> | data file |
+| 477 | numeric literal (review) | <code>1</code> | config.json |
+| 484 | text match / keyword candidate | <code>&#x27;name&#x27;</code> | data file |
+| 484 | text match / keyword candidate | <code>&#x27;list_tasks&#x27;</code> | data file |
+| 485 | text match / keyword candidate | <code>&#x27;Refused&#x27;</code> | data file |
+| 485 | text match / keyword candidate | <code>&#x27;Error&#x27;</code> | data file |
+| 485 | text match / keyword candidate | <code>&#x27;User declined&#x27;</code> | data file |
+| 490 | regex candidate | <code>&#x27;^\\s*-\\s+(.+)$&#x27;</code> | data file |
+| 490 | numeric literal (review) | <code>-1</code> | config.json |
+| 491 | regex candidate | <code>&#x27;^OVERDUE\\s*-\\s*&#x27;</code> | data file |
+| 492 | regex candidate | <code>&#x27;\\s*\\((?:due&#124;overdue)[^)]*\\)\\s*$&#x27;</code> | data file |
+| 536 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 537 | numeric literal (review) | <code>2</code> | config.json |
+| 537 | numeric literal (review) | <code>1</code> | config.json |
+| 539 | numeric literal (review) | <code>1</code> | config.json |
+| 542 | numeric literal (review) | <code>1</code> | config.json |
+| 542 | numeric literal (review) | <code>1</code> | config.json |
+| 556 | numeric literal (review) | <code>1</code> | config.json |
+| 556 | numeric literal (review) | <code>2</code> | config.json |
+| 560 | text match / keyword candidate | <code>&#x27;role&#x27;</code> | data file |
+| 560 | text match / keyword candidate | <code>&#x27;user&#x27;</code> | data file |
+| 560 | text match / keyword candidate | <code>&#x27;content&#x27;</code> | data file |
+| 561 | numeric literal (review) | <code>1</code> | config.json |
+| 563 | text match / keyword candidate | <code>&#x27;role&#x27;</code> | data file |
+| 563 | text match / keyword candidate | <code>&#x27;tool&#x27;</code> | data file |
+| 563 | text match / keyword candidate | <code>&#x27;role&#x27;</code> | data file |
+| 563 | text match / keyword candidate | <code>&#x27;assistant&#x27;</code> | data file |
+| 566 | text match / keyword candidate | <code>&#x27;name&#x27;</code> | data file |
+| 576 | numeric literal (review) | <code>1</code> | config.json |
+| 576 | text match / keyword candidate | <code>&#x27;User declined&#x27;</code> | data file |
+| 591 | text match / keyword candidate | <code>&#x27;name&#x27;</code> | data file |
+| 591 | text match / keyword candidate | <code>&#x27;read_file&#x27;</code> | data file |
+| 591 | text match / keyword candidate | <code>&#x27;result&#x27;</code> | data file |
+| 592 | text match / keyword candidate | <code>&#x27;Error&#x27;</code> | data file |
 | 595 | numeric literal (review) | <code>-1</code> | config.json |
-| 595 | text match / keyword candidate | <code>&#x27;result&#x27;</code> | data file |
-| 597 | numeric literal (review) | <code>1</code> | config.json |
+| 595 | text match / keyword candidate | <code>&#x27;path&#x27;</code> | data file |
+| 595 | text match / keyword candidate | <code>&#x27;unnamed_file&#x27;</code> | data file |
+| 595 | numeric literal (review) | <code>1</code> | config.json |
+| 596 | numeric literal (review) | <code>-1</code> | config.json |
+| 596 | text match / keyword candidate | <code>&#x27;result&#x27;</code> | data file |
+| 598 | numeric literal (review) | <code>1</code> | config.json |
 
 ## instincts.py
 
@@ -1955,63 +1946,64 @@ Priority 1: Conversation, intent routing and visible study behaviour.
 
 | Line | Kind | Value | Suggested home |
 | ---: | --- | --- | --- |
-| 35 | text match / keyword candidate | <code>&#x27;clarify&#x27;</code> | data file |
-| 38 | text match / keyword candidate | <code>&#x27;stop_words&#x27;</code> | data file |
-| 40 | text match / keyword candidate | <code>&#x27;negate_words&#x27;</code> | data file |
-| 41 | text match / keyword candidate | <code>&#x27;reply_filler&#x27;</code> | data file |
-| 43 | text match / keyword candidate | <code>&#x27;selection_words&#x27;</code> | data file |
-| 51 | regex candidate | <code>&#x27;[a-z0-9]+&#x27;</code> | data file |
-| 92 | numeric literal (review) | <code>0</code> | config.json |
-| 102 | text match / keyword candidate | <code>&#x27;From your notes&#x27;</code> | data file |
-| 104 | numeric literal (review) | <code>1</code> | config.json |
-| 104 | text match / keyword candidate | <code>&#x27;.md&#x27;</code> | data file |
-| 105 | numeric literal (review) | <code>0</code> | config.json |
-| 109 | regex candidate | <code>&#x27;^(?:[-*]&#124;\\d+[.)])\\s+&#x27;</code> | data file |
-| 110 | regex candidate | <code>&#x27;(?&lt;=[.!?])\\s+(?=[A-Z])&#x27;</code> | data file |
-| 118 | regex candidate | <code>&#x27;\\s*(?:note\\s+)?[\&#x27;\\&quot;]([^\&#x27;\\&quot;]{2,60})[\&#x27;\\&quot;]&#x27;</code> | data file |
-| 120 | numeric literal (review) | <code>1</code> | config.json |
-| 121 | regex candidate | <code>&#x27;\\s*([^:]{2,40}?):\\s&#x27;</code> | data file |
-| 122 | regex candidate | <code>&#x27;\\d&#x27;</code> | data file |
-| 122 | numeric literal (review) | <code>1</code> | config.json |
-| 123 | numeric literal (review) | <code>1</code> | config.json |
-| 125 | numeric literal (review) | <code>6</code> | config.json |
+| 36 | regex candidate | <code>&#x27;clarify&#x27;</code> | data file |
+| 36 | text match / keyword candidate | <code>&#x27;clarify&#x27;</code> | data file |
+| 39 | text match / keyword candidate | <code>&#x27;stop_words&#x27;</code> | data file |
+| 41 | text match / keyword candidate | <code>&#x27;negate_words&#x27;</code> | data file |
+| 42 | text match / keyword candidate | <code>&#x27;reply_filler&#x27;</code> | data file |
+| 44 | text match / keyword candidate | <code>&#x27;selection_words&#x27;</code> | data file |
+| 46 | text match / keyword candidate | <code>&#x27;max_options_named&#x27;</code> | data file |
+| 47 | regex candidate | <code>&#x27;\\s*(?:note\\s+)?[\&#x27;\\&quot;]([^\&#x27;\\&quot;]{2,%d})[\&#x27;\\&quot;]&#x27;</code> | data file |
+| 47 | regex candidate | <code>&#x27;quoted_label_chars&#x27;</code> | data file |
+| 48 | regex candidate | <code>&#x27;\\s*([^:]{2,%d}?):\\s&#x27;</code> | data file |
+| 48 | regex candidate | <code>&#x27;colon_label_chars&#x27;</code> | data file |
+| 55 | regex candidate | <code>&#x27;[a-z0-9]+&#x27;</code> | data file |
+| 96 | numeric literal (review) | <code>0</code> | config.json |
+| 106 | text match / keyword candidate | <code>&#x27;skip_line_starts&#x27;</code> | data file |
+| 108 | numeric literal (review) | <code>1</code> | config.json |
+| 108 | text match / keyword candidate | <code>&#x27;.md&#x27;</code> | data file |
+| 109 | numeric literal (review) | <code>0</code> | config.json |
+| 113 | regex candidate | <code>&#x27;^(?:[-*]&#124;\\d+[.)])\\s+&#x27;</code> | data file |
+| 114 | regex candidate | <code>&#x27;(?&lt;=[.!?])\\s+(?=[A-Z])&#x27;</code> | data file |
+| 124 | numeric literal (review) | <code>1</code> | config.json |
 | 126 | regex candidate | <code>&#x27;\\d&#x27;</code> | data file |
-| 126 | text match / keyword candidate | <code>&#x27;label_stops&#x27;</code> | data file |
-| 132 | numeric literal (review) | <code>1</code> | config.json |
-| 134 | numeric literal (review) | <code>3</code> | config.json |
-| 139 | numeric literal (review) | <code>0</code> | config.json |
-| 140 | numeric literal (review) | <code>1</code> | config.json |
-| 140 | numeric literal (review) | <code>0</code> | config.json |
-| 140 | numeric literal (review) | <code>1</code> | config.json |
-| 141 | numeric literal (review) | <code>0</code> | config.json |
-| 141 | numeric literal (review) | <code>1</code> | config.json |
-| 153 | numeric literal (review) | <code>2</code> | config.json |
-| 163 | numeric literal (review) | <code>1</code> | config.json |
-| 169 | numeric literal (review) | <code>1</code> | config.json |
-| 181 | numeric literal (review) | <code>0</code> | config.json |
-| 181 | numeric literal (review) | <code>1</code> | config.json |
-| 208 | numeric literal (review) | <code>1</code> | config.json |
-| 214 | text match / keyword candidate | <code>&#x27;label&#x27;</code> | data file |
-| 214 | numeric literal (review) | <code>4</code> | config.json |
-| 215 | numeric literal (review) | <code>1</code> | config.json |
-| 216 | numeric literal (review) | <code>0</code> | config.json |
-| 217 | numeric literal (review) | <code>-1</code> | config.json |
-| 217 | numeric literal (review) | <code>-1</code> | config.json |
-| 222 | text match / keyword candidate | <code>&#x27;label&#x27;</code> | data file |
-| 222 | numeric literal (review) | <code>4</code> | config.json |
-| 223 | numeric literal (review) | <code>1</code> | config.json |
-| 224 | numeric literal (review) | <code>0</code> | config.json |
-| 226 | numeric literal (review) | <code>-1</code> | config.json |
-| 226 | numeric literal (review) | <code>-1</code> | config.json |
-| 242 | text match / keyword candidate | <code>&#x27;question&#x27;</code> | data file |
-| 261 | text match / keyword candidate | <code>&#x27;options&#x27;</code> | data file |
-| 264 | numeric literal (review) | <code>1</code> | config.json |
-| 268 | text match / keyword candidate | <code>&#x27;seen&#x27;</code> | data file |
-| 269 | numeric literal (review) | <code>1</code> | config.json |
-| 270 | numeric literal (review) | <code>0</code> | config.json |
-| 271 | numeric literal (review) | <code>1</code> | config.json |
-| 278 | numeric literal (review) | <code>0</code> | config.json |
-| 278 | numeric literal (review) | <code>1</code> | config.json |
+| 126 | numeric literal (review) | <code>1</code> | config.json |
+| 127 | numeric literal (review) | <code>1</code> | config.json |
+| 130 | regex candidate | <code>&#x27;\\d&#x27;</code> | data file |
+| 130 | text match / keyword candidate | <code>&#x27;label_stops&#x27;</code> | data file |
+| 136 | numeric literal (review) | <code>1</code> | config.json |
+| 138 | numeric literal (review) | <code>3</code> | config.json |
+| 143 | numeric literal (review) | <code>0</code> | config.json |
+| 144 | numeric literal (review) | <code>1</code> | config.json |
+| 144 | numeric literal (review) | <code>0</code> | config.json |
+| 144 | numeric literal (review) | <code>1</code> | config.json |
+| 145 | numeric literal (review) | <code>0</code> | config.json |
+| 145 | numeric literal (review) | <code>1</code> | config.json |
+| 157 | text match / keyword candidate | <code>&#x27;min_subject_chars&#x27;</code> | data file |
+| 167 | numeric literal (review) | <code>1</code> | config.json |
+| 173 | numeric literal (review) | <code>1</code> | config.json |
+| 185 | numeric literal (review) | <code>0</code> | config.json |
+| 185 | numeric literal (review) | <code>1</code> | config.json |
+| 212 | numeric literal (review) | <code>1</code> | config.json |
+| 218 | text match / keyword candidate | <code>&#x27;label&#x27;</code> | data file |
+| 219 | numeric literal (review) | <code>1</code> | config.json |
+| 220 | numeric literal (review) | <code>0</code> | config.json |
+| 221 | numeric literal (review) | <code>-1</code> | config.json |
+| 221 | numeric literal (review) | <code>-1</code> | config.json |
+| 226 | text match / keyword candidate | <code>&#x27;label&#x27;</code> | data file |
+| 227 | numeric literal (review) | <code>1</code> | config.json |
+| 228 | numeric literal (review) | <code>0</code> | config.json |
+| 231 | numeric literal (review) | <code>-1</code> | config.json |
+| 231 | numeric literal (review) | <code>-1</code> | config.json |
+| 246 | text match / keyword candidate | <code>&#x27;question&#x27;</code> | data file |
+| 265 | text match / keyword candidate | <code>&#x27;options&#x27;</code> | data file |
+| 268 | numeric literal (review) | <code>1</code> | config.json |
+| 272 | text match / keyword candidate | <code>&#x27;seen&#x27;</code> | data file |
+| 273 | numeric literal (review) | <code>1</code> | config.json |
+| 274 | numeric literal (review) | <code>0</code> | config.json |
+| 275 | numeric literal (review) | <code>1</code> | config.json |
+| 282 | numeric literal (review) | <code>0</code> | config.json |
+| 282 | numeric literal (review) | <code>1</code> | config.json |
 
 ## learning.py
 
