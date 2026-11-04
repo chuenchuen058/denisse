@@ -6,11 +6,12 @@ voice_output.synthesize_inworld() tries this first when DENISSE_TTS=kokoro
 (the default once the model files exist), and also falls back to it when
 Inworld is unavailable, before the robotic pyttsx3 voice.
 
-Model files (git-ignored, ~330 MB) live in models/kokoro/:
+Model files (git-ignored, ~330 MB) live in models/kokoro/ by default:
   kokoro-v1.0.onnx, voices-v1.0.bin
 from https://github.com/thewh1teagle/kokoro-onnx/releases (model-files-v1.0).
-Voice: DENISSE_KOKORO_VOICE (default af_heart; any voice in voices-v1.0.bin),
-speed: DENISSE_KOKORO_SPEED (default 1.0).
+Folder, file names, voice, speed, language, device and the warm-up word are
+voice.json's "tts_kokoro" section (AGENTS.md Rule 0); DENISSE_KOKORO_DIR,
+DENISSE_KOKORO_VOICE, DENISSE_KOKORO_SPEED and DENISSE_KOKORO_DEVICE still win.
 """
 from __future__ import annotations
 
@@ -18,12 +19,18 @@ import os
 import tempfile
 import threading
 
+import voice_config
+
+_CFG = voice_config.section("tts_kokoro")
 _ROOT = os.path.dirname(os.path.abspath(__file__))
-MODEL_DIR = os.environ.get("DENISSE_KOKORO_DIR", os.path.join(_ROOT, "models", "kokoro"))
-MODEL_PATH = os.path.join(MODEL_DIR, "kokoro-v1.0.onnx")
-VOICES_PATH = os.path.join(MODEL_DIR, "voices-v1.0.bin")
-VOICE = os.environ.get("DENISSE_KOKORO_VOICE", "af_heart")
-SPEED = float(os.environ.get("DENISSE_KOKORO_SPEED", "1.0"))
+MODEL_DIR = os.environ.get("DENISSE_KOKORO_DIR") or os.path.normpath(os.path.join(_ROOT, _CFG["model_dir"]))
+MODEL_PATH = os.path.join(MODEL_DIR, _CFG["model_file"])
+VOICES_PATH = os.path.join(MODEL_DIR, _CFG["voices_file"])
+VOICE = os.environ.get("DENISSE_KOKORO_VOICE") or _CFG["voice"]
+SPEED = float(os.environ.get("DENISSE_KOKORO_SPEED") or _CFG["speed"])
+LANG = _CFG["lang"]
+WARM_UP_TEXT = _CFG["warm_up_text"]
+UNAVAILABLE_NOTE = _CFG["unavailable_note"]
 
 _kokoro = None
 _lock = threading.Lock()
@@ -40,7 +47,7 @@ def available() -> bool:
     return True
 
 
-DEVICE = os.environ.get("DENISSE_KOKORO_DEVICE", "auto")  # auto | cuda | cpu
+DEVICE = os.environ.get("DENISSE_KOKORO_DEVICE") or _CFG["device"]  # auto | cuda | cpu
 _device = None
 
 
@@ -84,12 +91,19 @@ def preload() -> None:
 def warm_up() -> None:
     """Load the model and speak one throwaway word, so the first real reply
     doesn't pay the GPU's warm-up."""
-    path = synthesize("Ready.")
+    path = synthesize(WARM_UP_TEXT)
     if path:
         try:
             os.remove(path)
         except OSError:
             pass
+
+
+def _note_unavailable(error) -> None:
+    try:
+        print(UNAVAILABLE_NOTE.replace("{error}", str(error)))
+    except Exception:
+        pass
 
 
 def synthesize_samples(text: str):
@@ -98,12 +112,9 @@ def synthesize_samples(text: str):
     if not text or not available():
         return None
     try:
-        return _get().create(text, voice=VOICE, speed=SPEED, lang="en-us")
+        return _get().create(text, voice=VOICE, speed=SPEED, lang=LANG)
     except Exception as e:
-        try:
-            print(f"(Kokoro voice unavailable: {e})")
-        except Exception:
-            pass
+        _note_unavailable(e)
         return None
 
 
@@ -114,15 +125,12 @@ def synthesize(text: str, path: str | None = None) -> str | None:
         return None
     try:
         import soundfile as sf
-        samples, rate = _get().create(text, voice=VOICE, speed=SPEED, lang="en-us")
+        samples, rate = _get().create(text, voice=VOICE, speed=SPEED, lang=LANG)
         if path is None:
             fd, path = tempfile.mkstemp(suffix=".wav")
             os.close(fd)
         sf.write(path, samples, rate)
         return path
     except Exception as e:
-        try:
-            print(f"(Kokoro voice unavailable: {e})")
-        except Exception:
-            pass
+        _note_unavailable(e)
         return None

@@ -20,9 +20,11 @@ unaffected -- see voice_output.py / brain.py).
 Needs a downloaded model folder -- see scripts/download_vosk_model.py.
 Accuracy is a property of the model, not this glue code: if specific
 words/phrases still come out wrong after trying this for a while, the fix
-is a bigger model (swap DENISSE_VOSK_MODEL_PATH to point at
-vosk-model-en-us-0.22 instead of the smaller -lgraph one), not more code
-here.
+is a bigger model (voice.json stt_vosk.model_dir, or
+DENISSE_VOSK_MODEL_PATH, pointing at vosk-model-en-us-0.22 instead of the
+smaller -lgraph one), not more code here. Rates, chunk sizes, the noise
+gate, the name-spotter grammar and the model folder are voice.json's
+"stt_vosk" section (AGENTS.md Rule 0).
 
 Capture note (found after Vosk's accuracy came in noticeably worse than
 the old Google-backed setup, on the same physical microphone): PyAudio's
@@ -50,16 +52,19 @@ import time
 import pyaudio
 import vosk
 
-vosk.SetLogLevel(-1)  # Vosk's C++ layer logs decoder internals to stderr by default
+import voice_config
 
-SAMPLE_RATE = 16000
-# ~0.125s per read -- short enough that partial-result updates feel live,
-# long enough not to risk buffer underruns on a background thread.
-CHUNK_FRAMES = 2000
+vosk.SetLogLevel(-1)  # Vosk's API: -1 = silent (its C++ layer logs decoder internals to stderr by default)
+
+_CFG = voice_config.section("stt_vosk")
+SAMPLE_RATE = _CFG["sample_rate"]
+# ~0.125s per read by default -- short enough that partial-result updates
+# feel live, long enough not to risk buffer underruns on a background thread.
+CHUNK_FRAMES = _CFG["chunk_frames"]
 # Mirrors the old recognize_google(show_all=True) check (see wake_word.py's
 # _listen_for_wake_word history): a mangled "Denisse" is more likely to
 # show up in a secondary alternative than Vosk's single top guess.
-MAX_ALTERNATIVES = 5
+MAX_ALTERNATIVES = _CFG["max_alternatives"]
 
 # Noise gate -- found live: Vosk's decoder doesn't just hallucinate a
 # filler word at the start of real speech (see _GREETING_SUFFIX_RE in
@@ -80,8 +85,14 @@ MAX_ALTERNATIVES = 5
 # margin against those. Real speech measured 700-1900+ RMS, so even 5x a
 # typical floor (~30-150) leaves a wide safety margin before this could
 # ever risk clipping actual speech.
-NOISE_GATE_MULTIPLIER = float(os.environ.get("DENISSE_VOSK_NOISE_GATE_MULTIPLIER", "5.0"))
-NOISE_GATE_MIN_FLOOR = 30  # floor clamp for an unrealistically silent room
+NOISE_GATE_MULTIPLIER = float(os.environ.get("DENISSE_VOSK_NOISE_GATE_MULTIPLIER")
+                              or _CFG["noise_gate_multiplier"])
+NOISE_GATE_MIN_FLOOR = _CFG["noise_gate_min_floor"]  # floor clamp for an unrealistically silent room
+NOISE_FLOOR_WINDOW_S = _CFG["noise_floor_window_s"]
+NOISE_FLOOR_MIN_CHUNKS = _CFG["noise_floor_min_chunks"]
+NOISE_FLOOR_PERCENTILE = _CFG["noise_floor_percentile"]
+DECODE_POLL_S = _CFG["decode_poll_s"]
+STOP_JOIN_S = _CFG["stop_join_s"]
 
 # Dedicated wake-word spotter -- found live: "Denisse" isn't an English
 # dictionary word, so the general (open-vocabulary) recognizer above
@@ -96,12 +107,11 @@ NOISE_GATE_MIN_FLOOR = 30  # floor clamp for an unrealistically silent room
 # spotting. It only ever answers "was her name said" -- the general
 # recognizer's own transcript is still what supplies the actual command
 # text (see wake_word.py's use of the "wake_detected" event below).
-WAKE_GRAMMAR = json.dumps([
-    "denisse", "denise", "hey denisse", "hey denise", "hi denisse", "hi denise", "[unk]",
-])
+# The phrases are data; "[unk]" is Vosk's own grammar token, so code adds it.
+WAKE_GRAMMAR = json.dumps(list(_CFG["wake_grammar"]) + ["[unk]"])
 
 _ROOT = os.path.dirname(os.path.abspath(__file__))
-_DEFAULT_MODEL_PATH = os.path.join(_ROOT, "models", "vosk-model-en-us-0.22-lgraph")
+_DEFAULT_MODEL_PATH = os.path.normpath(os.path.join(_ROOT, _CFG["model_dir"]))
 MODEL_PATH = os.environ.get("DENISSE_VOSK_MODEL_PATH", _DEFAULT_MODEL_PATH)
 # Wake-word listening's *general* recognizer (transcribing the actual
 # command, not just spotting her name -- see StreamingSTT.start(), both
@@ -118,6 +128,21 @@ MODEL_PATH = os.environ.get("DENISSE_VOSK_MODEL_PATH", _DEFAULT_MODEL_PATH)
 # pin this back to something lighter than MODEL_PATH again without
 # affecting one-shot transcription.
 WAKE_MODEL_PATH = os.environ.get("DENISSE_WAKE_MODEL_PATH", MODEL_PATH)
+
+
+def _noise_floor(levels) -> int:
+    """The noise_floor_percentile of recent chunk levels, never below
+    NOISE_GATE_MIN_FLOOR (see StreamingSTT._capture_loop)."""
+    ranked = sorted(levels)
+    low = ranked[max(0, int(len(ranked) * NOISE_FLOOR_PERCENTILE) - 1)]
+    return max(NOISE_GATE_MIN_FLOOR, low)
+
+
+def _listen_limits(timeout, phrase_time_limit) -> tuple[float, float]:
+    """Callers' limits, or voice.json voice_mode's when a caller leaves them unset."""
+    mode = voice_config.section("voice_mode")
+    return (mode["listen_timeout_s"] if timeout is None else timeout,
+            mode["phrase_time_limit_s"] if phrase_time_limit is None else phrase_time_limit)
 
 
 class ModelUnavailable(RuntimeError):
@@ -298,9 +323,8 @@ class StreamingSTT:
         # loud and brief, so it can't drag a low percentile upward the way
         # it could drag a plain average. This self-corrects to whatever
         # the room's actual ambient level is/becomes, automatically.
-        rolling_window_seconds = 12.0
         chunk_seconds = CHUNK_FRAMES / SAMPLE_RATE
-        maxlen = max(8, int(rolling_window_seconds / chunk_seconds))
+        maxlen = max(NOISE_FLOOR_MIN_CHUNKS, int(NOISE_FLOOR_WINDOW_S / chunk_seconds))
         recent_levels: "collections.deque[int]" = collections.deque(maxlen=maxlen)
         noise_floor = NOISE_GATE_MIN_FLOOR  # conservative until the window fills
 
@@ -333,10 +357,8 @@ class StreamingSTT:
             # enough to correct it. The low percentile below does that
             # filtering safely instead.
             recent_levels.append(level)
-            if len(recent_levels) >= 8:
-                sorted_levels = sorted(recent_levels)
-                percentile_20 = sorted_levels[max(0, int(len(sorted_levels) * 0.2) - 1)]
-                noise_floor = max(NOISE_GATE_MIN_FLOOR, percentile_20)
+            if len(recent_levels) >= NOISE_FLOOR_MIN_CHUNKS:
+                noise_floor = _noise_floor(recent_levels)
 
             general_queue.put(data)
             spotter_queue.put(data)
@@ -349,7 +371,7 @@ class StreamingSTT:
         last_partial = ""
         while not self._stop_event.is_set():
             try:
-                data = chunks.get(timeout=0.5)
+                data = chunks.get(timeout=DECODE_POLL_S)
             except queue.Empty:
                 continue
             if data is None:
@@ -373,7 +395,7 @@ class StreamingSTT:
         # WAKE_GRAMMAR), so only its finalized result matters, not partials.
         while not self._stop_event.is_set():
             try:
-                data = chunks.get(timeout=0.5)
+                data = chunks.get(timeout=DECODE_POLL_S)
             except queue.Empty:
                 continue
             if data is None:
@@ -386,7 +408,7 @@ class StreamingSTT:
     def stop(self) -> None:
         self._stop_event.set()
         for t in self._threads:
-            t.join(timeout=2)
+            t.join(timeout=STOP_JOIN_S)
         self._threads = []
         if self._stream is not None:
             try:
@@ -401,7 +423,7 @@ class StreamingSTT:
                 pass
 
 
-def transcribe_once(timeout: float = 8.0, phrase_time_limit: float = 15.0, on_ready=None) -> str:
+def transcribe_once(timeout: float = None, phrase_time_limit: float = None, on_ready=None) -> str:
     """One-shot blocking transcription for push-to-talk callers
     (voice_mode.py): waits up to `timeout` seconds for speech to start,
     then up to `phrase_time_limit` more for it to finish, returning the
@@ -414,7 +436,9 @@ def transcribe_once(timeout: float = 8.0, phrase_time_limit: float = 15.0, on_re
     really being captured, not before. Callers should show any "go ahead
     and talk" message from this callback, not before calling this
     function -- see the module-level note on why "before" can silently
-    eat the first several seconds of real speech."""
+    eat the first several seconds of real speech. Unset timeouts are
+    voice.json's voice_mode.listen_timeout_s / phrase_time_limit_s."""
+    timeout, phrase_time_limit = _listen_limits(timeout, phrase_time_limit)
     stt = StreamingSTT()
     try:
         stt.start()
@@ -435,7 +459,7 @@ def transcribe_once(timeout: float = 8.0, phrase_time_limit: float = 15.0, on_re
             if remaining <= 0:
                 return ""
             try:
-                kind, text, _alts = stt.events.get(timeout=min(remaining, 0.5))
+                kind, text, _alts = stt.events.get(timeout=min(remaining, DECODE_POLL_S))
             except queue.Empty:
                 continue
             if kind == "partial":

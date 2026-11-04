@@ -6,9 +6,9 @@ Candidates are intentionally conservative: regexes include parsers, text compari
 Static coverage is not proof of exhaustiveness: comments/docstrings, non-Python files, excluded fixtures/private state/dependencies, dynamically constructed/imported values and interprocedural user-text flow are not analysed. Local aliases and comprehension/loop iterables are followed conservatively without execution-order analysis; results can include unrelated possible bindings.
 Values are complete decoded literal representations; f-string fragments and concatenated pieces are reported at their AST source location. Multiple kinds at one location are intentional. No value truncation is applied. Numeric strings used as defaults are included. Booleans and None are excluded.
 
-Scanned **139** Python files; **8299** candidates; **0** scan errors.
+Scanned **139** Python files; **8281** candidates; **0** scan errors.
 
-Source and policy SHA-256: `638219456fdbcaa576dd15ad07b2820c331bf5ec545440beee915e901c5dfc96`.
+Source and policy SHA-256: `da9513b6943d36d4bfe23e99006f7229a606479611753ba2d748bb74bc62eb4f`.
 
 ## Coverage and regeneration
 
@@ -63,13 +63,13 @@ Traversal policy (from the JSON configuration):
 | Kind | Count | Suggested home |
 | --- | ---: | --- |
 | regex candidate | 557 | data file |
-| text match / keyword candidate | 3769 | data file |
+| text match / keyword candidate | 3775 | data file |
 | absolute path | 81 | runtime lookup |
-| user / vault name | 165 | runtime lookup |
-| model name | 254 | config.json |
+| user / vault name | 162 | runtime lookup |
+| model name | 252 | config.json |
 | URL | 13 | config.json |
-| time / duration / threshold / limit | 744 | config.json |
-| numeric literal (review) | 2716 | config.json |
+| time / duration / threshold / limit | 729 | config.json |
+| numeric literal (review) | 2712 | config.json |
 
 ## Files in review order
 
@@ -101,25 +101,25 @@ Traversal policy (from the JSON configuration):
 | <code>conversation.py</code> | 2: User-facing tools, voice, UI and runtime services | 54 |
 | <code>desktop_context.py</code> | 2: User-facing tools, voice, UI and runtime services | 54 |
 | <code>wake_word.py</code> | 2: User-facing tools, voice, UI and runtime services | 53 |
-| <code>stt_vosk.py</code> | 2: User-facing tools, voice, UI and runtime services | 50 |
 | <code>mission_control.py</code> | 2: User-facing tools, voice, UI and runtime services | 47 |
 | <code>ui_theme.py</code> | 2: User-facing tools, voice, UI and runtime services | 41 |
+| <code>stt_vosk.py</code> | 2: User-facing tools, voice, UI and runtime services | 34 |
 | <code>tool_policy.py</code> | 2: User-facing tools, voice, UI and runtime services | 34 |
 | <code>reminders_config.py</code> | 2: User-facing tools, voice, UI and runtime services | 31 |
 | <code>reply_preferences.py</code> | 2: User-facing tools, voice, UI and runtime services | 27 |
 | <code>optimize.py</code> | 2: User-facing tools, voice, UI and runtime services | 26 |
 | <code>voice_output.py</code> | 2: User-facing tools, voice, UI and runtime services | 26 |
 | <code>agent_loop.py</code> | 2: User-facing tools, voice, UI and runtime services | 25 |
-| <code>stt_whisper.py</code> | 2: User-facing tools, voice, UI and runtime services | 25 |
 | <code>brain_rules.py</code> | 2: User-facing tools, voice, UI and runtime services | 23 |
 | <code>layered.py</code> | 2: User-facing tools, voice, UI and runtime services | 22 |
 | <code>runtime_status.py</code> | 2: User-facing tools, voice, UI and runtime services | 22 |
+| <code>stt_whisper.py</code> | 2: User-facing tools, voice, UI and runtime services | 21 |
 | <code>voice_mode.py</code> | 2: User-facing tools, voice, UI and runtime services | 19 |
 | <code>timers.py</code> | 2: User-facing tools, voice, UI and runtime services | 18 |
 | <code>agent_tools.py</code> | 2: User-facing tools, voice, UI and runtime services | 15 |
 | <code>housekeeping.py</code> | 2: User-facing tools, voice, UI and runtime services | 13 |
-| <code>tts_kokoro.py</code> | 2: User-facing tools, voice, UI and runtime services | 12 |
 | <code>obsidian_tasks.py</code> | 2: User-facing tools, voice, UI and runtime services | 11 |
+| <code>tts_kokoro.py</code> | 2: User-facing tools, voice, UI and runtime services | 11 |
 | <code>explain_hotkey.py</code> | 2: User-facing tools, voice, UI and runtime services | 10 |
 | <code>runtime_config.py</code> | 2: User-facing tools, voice, UI and runtime services | 10 |
 | <code>news.py</code> | 2: User-facing tools, voice, UI and runtime services | 9 |
@@ -135,7 +135,7 @@ Traversal policy (from the JSON configuration):
 | <code>dialogue_rules.py</code> | 2: User-facing tools, voice, UI and runtime services | 5 |
 | <code>safety.py</code> | 2: User-facing tools, voice, UI and runtime services | 4 |
 | <code>model_config.py</code> | 2: User-facing tools, voice, UI and runtime services | 0 |
-| <code>orchestra/runner.py</code> | 3: Background automation and operator tooling | 413 |
+| <code>orchestra/runner.py</code> | 3: Background automation and operator tooling | 416 |
 | <code>orchestra/soak/harness.py</code> | 3: Background automation and operator tooling | 225 |
 | <code>atrium/snapshot.py</code> | 3: Background automation and operator tooling | 195 |
 | <code>scripts/eval_local_voice.py</code> | 3: Background automation and operator tooling | 167 |
@@ -4137,63 +4137,6 @@ Priority 2: User-facing tools, voice, UI and runtime services.
 | 849 | numeric literal (review) | <code>0</code> | config.json |
 | 852 | text match / keyword candidate | <code>&#x27;__main__&#x27;</code> | data file |
 
-## stt_vosk.py
-
-Priority 2: User-facing tools, voice, UI and runtime services.
-
-| Line | Kind | Value | Suggested home |
-| ---: | --- | --- | --- |
-| 53 | numeric literal (review) | <code>-1</code> | config.json |
-| 55 | time / duration / threshold / limit | <code>16000</code> | config.json |
-| 58 | numeric literal (review) | <code>2000</code> | config.json |
-| 62 | time / duration / threshold / limit | <code>5</code> | config.json |
-| 84 | time / duration / threshold / limit | <code>30</code> | config.json |
-| 100 | user / vault name | <code>&#x27;denisse&#x27;</code> | runtime lookup |
-| 100 | user / vault name | <code>&#x27;hey denisse&#x27;</code> | runtime lookup |
-| 100 | user / vault name | <code>&#x27;hi denisse&#x27;</code> | runtime lookup |
-| 104 | model name | <code>&#x27;models&#x27;</code> | config.json |
-| 104 | text match / keyword candidate | <code>&#x27;models&#x27;</code> | data file |
-| 104 | model name | <code>&#x27;vosk-model-en-us-0.22-lgraph&#x27;</code> | config.json |
-| 104 | text match / keyword candidate | <code>&#x27;vosk-model-en-us-0.22-lgraph&#x27;</code> | data file |
-| 105 | model name | <code>&#x27;DENISSE_VOSK_MODEL_PATH&#x27;</code> | config.json |
-| 105 | text match / keyword candidate | <code>&#x27;DENISSE_VOSK_MODEL_PATH&#x27;</code> | data file |
-| 120 | model name | <code>&#x27;DENISSE_WAKE_MODEL_PATH&#x27;</code> | config.json |
-| 131 | model name | <code>&#x27;vosk.Model&#x27;</code> | config.json |
-| 137 | model name | <code>&#x27;Vosk model not found at &#x27;</code> | config.json |
-| 182 | numeric literal (review) | <code>-1</code> | config.json |
-| 183 | numeric literal (review) | <code>0</code> | config.json |
-| 185 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 189 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 198 | numeric literal (review) | <code>0</code> | config.json |
-| 232 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 275 | numeric literal (review) | <code>2</code> | config.json |
-| 276 | numeric literal (review) | <code>2</code> | config.json |
-| 276 | numeric literal (review) | <code>0.5</code> | config.json |
-| 276 | numeric literal (review) | <code>0.5</code> | config.json |
-| 277 | numeric literal (review) | <code>2</code> | config.json |
-| 283 | time / duration / threshold / limit | <code>2</code> | config.json |
-| 283 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 301 | time / duration / threshold / limit | <code>12.0</code> | config.json |
-| 303 | time / duration / threshold / limit | <code>8</code> | config.json |
-| 319 | numeric literal (review) | <code>2</code> | config.json |
-| 327 | numeric literal (review) | <code>2</code> | config.json |
-| 336 | numeric literal (review) | <code>8</code> | config.json |
-| 338 | time / duration / threshold / limit | <code>0</code> | config.json |
-| 338 | time / duration / threshold / limit | <code>0.2</code> | config.json |
-| 338 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 352 | time / duration / threshold / limit | <code>0.5</code> | config.json |
-| 364 | numeric literal (review) | <code>0</code> | config.json |
-| 366 | text match / keyword candidate | <code>&#x27;partial&#x27;</code> | data file |
-| 376 | time / duration / threshold / limit | <code>0.5</code> | config.json |
-| 383 | text match / keyword candidate | <code>&#x27;[unk]&#x27;</code> | data file |
-| 389 | time / duration / threshold / limit | <code>2</code> | config.json |
-| 404 | time / duration / threshold / limit | <code>8.0</code> | config.json |
-| 404 | time / duration / threshold / limit | <code>15.0</code> | config.json |
-| 435 | numeric literal (review) | <code>0</code> | config.json |
-| 438 | time / duration / threshold / limit | <code>0.5</code> | config.json |
-| 441 | text match / keyword candidate | <code>&#x27;partial&#x27;</code> | data file |
-| 445 | text match / keyword candidate | <code>&#x27;wake_detected&#x27;</code> | data file |
-
 ## mission_control.py
 
 Priority 2: User-facing tools, voice, UI and runtime services.
@@ -4295,6 +4238,47 @@ Priority 2: User-facing tools, voice, UI and runtime services.
 | 208 | numeric literal (review) | <code>1</code> | config.json |
 | 208 | numeric literal (review) | <code>3</code> | config.json |
 | 208 | numeric literal (review) | <code>5</code> | config.json |
+
+## stt_vosk.py
+
+Priority 2: User-facing tools, voice, UI and runtime services.
+
+| Line | Kind | Value | Suggested home |
+| ---: | --- | --- | --- |
+| 57 | numeric literal (review) | <code>-1</code> | config.json |
+| 59 | text match / keyword candidate | <code>&#x27;stt_vosk&#x27;</code> | data file |
+| 60 | text match / keyword candidate | <code>&#x27;sample_rate&#x27;</code> | data file |
+| 94 | text match / keyword candidate | <code>&#x27;decode_poll_s&#x27;</code> | data file |
+| 114 | model name | <code>&#x27;model_dir&#x27;</code> | config.json |
+| 114 | text match / keyword candidate | <code>&#x27;model_dir&#x27;</code> | data file |
+| 115 | model name | <code>&#x27;DENISSE_VOSK_MODEL_PATH&#x27;</code> | config.json |
+| 115 | text match / keyword candidate | <code>&#x27;DENISSE_VOSK_MODEL_PATH&#x27;</code> | data file |
+| 130 | model name | <code>&#x27;DENISSE_WAKE_MODEL_PATH&#x27;</code> | config.json |
+| 137 | time / duration / threshold / limit | <code>0</code> | config.json |
+| 137 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 156 | model name | <code>&#x27;vosk.Model&#x27;</code> | config.json |
+| 162 | model name | <code>&#x27;Vosk model not found at &#x27;</code> | config.json |
+| 207 | numeric literal (review) | <code>-1</code> | config.json |
+| 208 | numeric literal (review) | <code>0</code> | config.json |
+| 210 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 214 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 223 | numeric literal (review) | <code>0</code> | config.json |
+| 257 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 300 | numeric literal (review) | <code>2</code> | config.json |
+| 301 | numeric literal (review) | <code>2</code> | config.json |
+| 301 | numeric literal (review) | <code>0.5</code> | config.json |
+| 301 | numeric literal (review) | <code>0.5</code> | config.json |
+| 302 | numeric literal (review) | <code>2</code> | config.json |
+| 308 | time / duration / threshold / limit | <code>2</code> | config.json |
+| 308 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 343 | numeric literal (review) | <code>2</code> | config.json |
+| 351 | numeric literal (review) | <code>2</code> | config.json |
+| 386 | numeric literal (review) | <code>0</code> | config.json |
+| 388 | text match / keyword candidate | <code>&#x27;partial&#x27;</code> | data file |
+| 405 | text match / keyword candidate | <code>&#x27;[unk]&#x27;</code> | data file |
+| 459 | numeric literal (review) | <code>0</code> | config.json |
+| 465 | text match / keyword candidate | <code>&#x27;partial&#x27;</code> | data file |
+| 469 | text match / keyword candidate | <code>&#x27;wake_detected&#x27;</code> | data file |
 
 ## tool_policy.py
 
@@ -4507,38 +4491,6 @@ Priority 2: User-facing tools, voice, UI and runtime services.
 | 111 | text match / keyword candidate | <code>&#x27;role&#x27;</code> | data file |
 | 111 | text match / keyword candidate | <code>&#x27;user&#x27;</code> | data file |
 
-## stt_whisper.py
-
-Priority 2: User-facing tools, voice, UI and runtime services.
-
-| Line | Kind | Value | Suggested home |
-| ---: | --- | --- | --- |
-| 35 | model name | <code>&#x27;whisper&#x27;</code> | config.json |
-| 36 | text match / keyword candidate | <code>&#x27;DENISSE_WHISPER_DEVICE&#x27;</code> | data file |
-| 36 | text match / keyword candidate | <code>&#x27;auto&#x27;</code> | data file |
-| 37 | numeric literal (review) | <code>1024</code> | config.json |
-| 55 | text match / keyword candidate | <code>&#x27;nt&#x27;</code> | data file |
-| 68 | text match / keyword candidate | <code>&#x27;cuda&#x27;</code> | data file |
-| 73 | numeric literal (review) | <code>2</code> | config.json |
-| 73 | numeric literal (review) | <code>0</code> | config.json |
-| 86 | model name | <code>&#x27;faster-whisper is not installed (pip install faster-whisper)&#x27;</code> | config.json |
-| 87 | text match / keyword candidate | <code>&#x27;auto&#x27;</code> | data file |
-| 95 | model name | <code>&quot;Whisper model &#x27;&quot;</code> | config.json |
-| 115 | time / duration / threshold / limit | <code>5</code> | config.json |
-| 121 | time / duration / threshold / limit | <code>5</code> | config.json |
-| 130 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 147 | time / duration / threshold / limit | <code>2</code> | config.json |
-| 147 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 150 | numeric literal (review) | <code>2</code> | config.json |
-| 153 | text match / keyword candidate | <code>&#x27;timeout&#x27;</code> | data file |
-| 156 | numeric literal (review) | <code>-4</code> | config.json |
-| 159 | text match / keyword candidate | <code>&#x27;end&#x27;</code> | data file |
-| 159 | text match / keyword candidate | <code>&#x27;limit&#x27;</code> | data file |
-| 164 | time / duration / threshold / limit | <code>3</code> | config.json |
-| 173 | time / duration / threshold / limit | <code>8.0</code> | config.json |
-| 173 | time / duration / threshold / limit | <code>15.0</code> | config.json |
-| 182 | numeric literal (review) | <code>32768.0</code> | config.json |
-
 ## brain_rules.py
 
 Priority 2: User-facing tools, voice, UI and runtime services.
@@ -4626,6 +4578,34 @@ Priority 2: User-facing tools, voice, UI and runtime services.
 | 176 | numeric literal (review) | <code>2</code> | config.json |
 | 178 | numeric literal (review) | <code>0</code> | config.json |
 | 178 | numeric literal (review) | <code>1</code> | config.json |
+
+## stt_whisper.py
+
+Priority 2: User-facing tools, voice, UI and runtime services.
+
+| Line | Kind | Value | Suggested home |
+| ---: | --- | --- | --- |
+| 37 | text match / keyword candidate | <code>&#x27;stt_whisper&#x27;</code> | data file |
+| 39 | model name | <code>&#x27;whisper&#x27;</code> | config.json |
+| 40 | text match / keyword candidate | <code>&#x27;DENISSE_WHISPER_DEVICE&#x27;</code> | data file |
+| 40 | text match / keyword candidate | <code>&#x27;device&#x27;</code> | data file |
+| 41 | text match / keyword candidate | <code>&#x27;chunk_frames&#x27;</code> | data file |
+| 63 | text match / keyword candidate | <code>&#x27;nt&#x27;</code> | data file |
+| 76 | text match / keyword candidate | <code>&#x27;cuda&#x27;</code> | data file |
+| 81 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 82 | numeric literal (review) | <code>0</code> | config.json |
+| 95 | model name | <code>&#x27;faster-whisper is not installed (pip install faster-whisper)&#x27;</code> | config.json |
+| 96 | text match / keyword candidate | <code>&#x27;auto&#x27;</code> | data file |
+| 104 | model name | <code>&quot;Whisper model &#x27;&quot;</code> | config.json |
+| 143 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 160 | time / duration / threshold / limit | <code>2</code> | config.json |
+| 160 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 163 | numeric literal (review) | <code>2</code> | config.json |
+| 166 | text match / keyword candidate | <code>&#x27;timeout&#x27;</code> | data file |
+| 172 | text match / keyword candidate | <code>&#x27;end&#x27;</code> | data file |
+| 172 | text match / keyword candidate | <code>&#x27;limit&#x27;</code> | data file |
+| 177 | time / duration / threshold / limit | <code>3</code> | config.json |
+| 197 | numeric literal (review) | <code>32768.0</code> | config.json |
 
 ## voice_mode.py
 
@@ -4720,25 +4700,6 @@ Priority 2: User-facing tools, voice, UI and runtime services.
 | 47 | text match / keyword candidate | <code>&#x27;type&#x27;</code> | data file |
 | 63 | text match / keyword candidate | <code>&#x27;{vault}&#x27;</code> | data file |
 
-## tts_kokoro.py
-
-Priority 2: User-facing tools, voice, UI and runtime services.
-
-| Line | Kind | Value | Suggested home |
-| ---: | --- | --- | --- |
-| 22 | model name | <code>&#x27;DENISSE_KOKORO_DIR&#x27;</code> | config.json |
-| 22 | model name | <code>&#x27;models&#x27;</code> | config.json |
-| 22 | model name | <code>&#x27;kokoro&#x27;</code> | config.json |
-| 23 | model name | <code>&#x27;kokoro-v1.0.onnx&#x27;</code> | config.json |
-| 43 | text match / keyword candidate | <code>&#x27;DENISSE_KOKORO_DEVICE&#x27;</code> | data file |
-| 43 | text match / keyword candidate | <code>&#x27;auto&#x27;</code> | data file |
-| 55 | text match / keyword candidate | <code>&#x27;cpu&#x27;</code> | data file |
-| 60 | text match / keyword candidate | <code>&#x27;CUDAExecutionProvider&#x27;</code> | data file |
-| 63 | numeric literal (review) | <code>0</code> | config.json |
-| 63 | text match / keyword candidate | <code>&#x27;CUDAExecutionProvider&#x27;</code> | data file |
-| 104 | model name | <code>&#x27;(Kokoro voice unavailable: &#x27;</code> | config.json |
-| 125 | model name | <code>&#x27;(Kokoro voice unavailable: &#x27;</code> | config.json |
-
 ## obsidian_tasks.py
 
 Priority 2: User-facing tools, voice, UI and runtime services.
@@ -4756,6 +4717,24 @@ Priority 2: User-facing tools, voice, UI and runtime services.
 | 102 | user / vault name | <code>&#x27;description: &quot;Tasks Chuen completed in &#x27;</code> | runtime lookup |
 | 104 | user / vault name | <code>&#x27;tags: [denisse, tasks, archive]&#x27;</code> | runtime lookup |
 | 109 | numeric literal (review) | <code>1</code> | config.json |
+
+## tts_kokoro.py
+
+Priority 2: User-facing tools, voice, UI and runtime services.
+
+| Line | Kind | Value | Suggested home |
+| ---: | --- | --- | --- |
+| 24 | text match / keyword candidate | <code>&#x27;tts_kokoro&#x27;</code> | data file |
+| 26 | model name | <code>&#x27;DENISSE_KOKORO_DIR&#x27;</code> | config.json |
+| 26 | model name | <code>&#x27;model_dir&#x27;</code> | config.json |
+| 27 | model name | <code>&#x27;model_file&#x27;</code> | config.json |
+| 50 | text match / keyword candidate | <code>&#x27;DENISSE_KOKORO_DEVICE&#x27;</code> | data file |
+| 50 | text match / keyword candidate | <code>&#x27;device&#x27;</code> | data file |
+| 62 | text match / keyword candidate | <code>&#x27;cpu&#x27;</code> | data file |
+| 67 | text match / keyword candidate | <code>&#x27;CUDAExecutionProvider&#x27;</code> | data file |
+| 70 | numeric literal (review) | <code>0</code> | config.json |
+| 70 | text match / keyword candidate | <code>&#x27;CUDAExecutionProvider&#x27;</code> | data file |
+| 104 | text match / keyword candidate | <code>&#x27;{error}&#x27;</code> | data file |
 
 ## explain_hotkey.py
 
@@ -5210,182 +5189,185 @@ Priority 3: Background automation and operator tooling.
 | 1135 | numeric literal (review) | <code>1</code> | config.json |
 | 1156 | model name | <code>&#x27;claude&#x27;</code> | config.json |
 | 1157 | model name | <code>&#x27;claude&#x27;</code> | config.json |
-| 1160 | numeric literal (review) | <code>-300</code> | config.json |
-| 1181 | regex candidate | <code>&#x27;\\A---.*?---\\s*&#x27;</code> | data file |
-| 1182 | text match / keyword candidate | <code>&#x27;$ARGUMENTS&#x27;</code> | data file |
-| 1197 | numeric literal (review) | <code>12</code> | config.json |
-| 1211 | numeric literal (review) | <code>0</code> | config.json |
-| 1223 | text match / keyword candidate | <code>&#x27;pythonw.exe&#x27;</code> | data file |
-| 1226 | time / duration / threshold / limit | <code>10</code> | config.json |
-| 1228 | numeric literal (review) | <code>2</code> | config.json |
-| 1241 | numeric literal (review) | <code>4</code> | config.json |
-| 1242 | numeric literal (review) | <code>8192</code> | config.json |
-| 1244 | numeric literal (review) | <code>1</code> | config.json |
-| 1244 | numeric literal (review) | <code>1</code> | config.json |
-| 1244 | numeric literal (review) | <code>30</code> | config.json |
-| 1273 | numeric literal (review) | <code>6</code> | config.json |
-| 1282 | numeric literal (review) | <code>183</code> | config.json |
-| 1288 | numeric literal (review) | <code>9</code> | config.json |
-| 1303 | numeric literal (review) | <code>0</code> | config.json |
-| 1309 | text match / keyword candidate | <code>&#x27;nt&#x27;</code> | data file |
-| 1342 | time / duration / threshold / limit | <code>0</code> | config.json |
-| 1342 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 1343 | numeric literal (review) | <code>0</code> | config.json |
-| 1353 | time / duration / threshold / limit | <code>0</code> | config.json |
-| 1353 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 1354 | numeric literal (review) | <code>0</code> | config.json |
-| 1358 | text match / keyword candidate | <code>&#x27;nt&#x27;</code> | data file |
-| 1361 | absolute path | <code>&#x27;/PID&#x27;</code> | runtime lookup |
-| 1361 | absolute path | <code>&#x27;/T&#x27;</code> | runtime lookup |
-| 1361 | absolute path | <code>&#x27;/F&#x27;</code> | runtime lookup |
-| 1361 | time / duration / threshold / limit | <code>60</code> | config.json |
-| 1377 | numeric literal (review) | <code>0</code> | config.json |
-| 1378 | numeric literal (review) | <code>0</code> | config.json |
-| 1378 | numeric literal (review) | <code>0</code> | config.json |
-| 1380 | numeric literal (review) | <code>0</code> | config.json |
-| 1381 | numeric literal (review) | <code>0</code> | config.json |
+| 1159 | model name | <code>&#x27;claude&#x27;</code> | config.json |
+| 1161 | model name | <code>&#x27;claude&#x27;</code> | config.json |
+| 1161 | numeric literal (review) | <code>300</code> | config.json |
+| 1164 | numeric literal (review) | <code>-300</code> | config.json |
+| 1185 | regex candidate | <code>&#x27;\\A---.*?---\\s*&#x27;</code> | data file |
+| 1186 | text match / keyword candidate | <code>&#x27;$ARGUMENTS&#x27;</code> | data file |
+| 1201 | numeric literal (review) | <code>12</code> | config.json |
+| 1215 | numeric literal (review) | <code>0</code> | config.json |
+| 1227 | text match / keyword candidate | <code>&#x27;pythonw.exe&#x27;</code> | data file |
+| 1230 | time / duration / threshold / limit | <code>10</code> | config.json |
+| 1232 | numeric literal (review) | <code>2</code> | config.json |
+| 1245 | numeric literal (review) | <code>4</code> | config.json |
+| 1246 | numeric literal (review) | <code>8192</code> | config.json |
+| 1248 | numeric literal (review) | <code>1</code> | config.json |
+| 1248 | numeric literal (review) | <code>1</code> | config.json |
+| 1248 | numeric literal (review) | <code>30</code> | config.json |
+| 1277 | numeric literal (review) | <code>6</code> | config.json |
+| 1286 | numeric literal (review) | <code>183</code> | config.json |
+| 1292 | numeric literal (review) | <code>9</code> | config.json |
+| 1307 | numeric literal (review) | <code>0</code> | config.json |
+| 1313 | text match / keyword candidate | <code>&#x27;nt&#x27;</code> | data file |
+| 1346 | time / duration / threshold / limit | <code>0</code> | config.json |
+| 1346 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 1347 | numeric literal (review) | <code>0</code> | config.json |
+| 1357 | time / duration / threshold / limit | <code>0</code> | config.json |
+| 1357 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 1358 | numeric literal (review) | <code>0</code> | config.json |
+| 1362 | text match / keyword candidate | <code>&#x27;nt&#x27;</code> | data file |
+| 1365 | absolute path | <code>&#x27;/PID&#x27;</code> | runtime lookup |
+| 1365 | absolute path | <code>&#x27;/T&#x27;</code> | runtime lookup |
+| 1365 | absolute path | <code>&#x27;/F&#x27;</code> | runtime lookup |
+| 1365 | time / duration / threshold / limit | <code>60</code> | config.json |
 | 1381 | numeric literal (review) | <code>0</code> | config.json |
 | 1382 | numeric literal (review) | <code>0</code> | config.json |
-| 1395 | model name | <code>&#x27;claude&#x27;</code> | config.json |
-| 1395 | text match / keyword candidate | <code>&#x27;claude&#x27;</code> | data file |
-| 1399 | model name | <code>&#x27;model&#x27;</code> | config.json |
-| 1400 | regex candidate | <code>&#x27;[A-Za-z0-9._-]{2,64}&#x27;</code> | data file |
-| 1406 | model name | <code>&#x27;CLAUDECODE&#x27;</code> | config.json |
-| 1406 | text match / keyword candidate | <code>&#x27;CLAUDECODE&#x27;</code> | data file |
-| 1406 | model name | <code>&#x27;CLAUDE_CODE_&#x27;</code> | config.json |
-| 1406 | text match / keyword candidate | <code>&#x27;CLAUDE_CODE_&#x27;</code> | data file |
-| 1407 | text match / keyword candidate | <code>&#x27;ANTHROPIC_API_KEY&#x27;</code> | data file |
-| 1407 | text match / keyword candidate | <code>&#x27;ANTHROPIC_AUTH_TOKEN&#x27;</code> | data file |
-| 1407 | text match / keyword candidate | <code>&#x27;ANTHROPIC_BASE_URL&#x27;</code> | data file |
-| 1416 | numeric literal (review) | <code>1</code> | config.json |
-| 1433 | time / duration / threshold / limit | <code>30</code> | config.json |
-| 1457 | text match / keyword candidate | <code>&#x27;broken_gate_codes&#x27;</code> | data file |
-| 1459 | numeric literal (review) | <code>0</code> | config.json |
-| 1460 | numeric literal (review) | <code>-3</code> | config.json |
-| 1471 | numeric literal (review) | <code>0</code> | config.json |
-| 1472 | regex candidate | <code>&#x27;RESULT:\\s*(PASS&#124;PARTIAL&#124;FAIL)\\b&#x27;</code> | data file |
-| 1473 | regex candidate | <code>&#x27;^HUMAN:\\s*(.+)$&#x27;</code> | data file |
-| 1474 | regex candidate | <code>&#x27;^PREMISE:\\s*(.+)$&#x27;</code> | data file |
-| 1475 | numeric literal (review) | <code>1</code> | config.json |
-| 1476 | numeric literal (review) | <code>1</code> | config.json |
-| 1478 | numeric literal (review) | <code>1</code> | config.json |
-| 1495 | numeric literal (review) | <code>0</code> | config.json |
-| 1495 | numeric literal (review) | <code>0</code> | config.json |
-| 1496 | numeric literal (review) | <code>0</code> | config.json |
-| 1496 | numeric literal (review) | <code>0</code> | config.json |
-| 1516 | text match / keyword candidate | <code>&#x27;total_cost_usd&#x27;</code> | data file |
-| 1516 | text match / keyword candidate | <code>&#x27;type&#x27;</code> | data file |
-| 1516 | text match / keyword candidate | <code>&#x27;result&#x27;</code> | data file |
-| 1520 | numeric literal (review) | <code>1</code> | config.json |
-| 1527 | text match / keyword candidate | <code>&#x27;tool_name&#x27;</code> | data file |
-| 1529 | numeric literal (review) | <code>0</code> | config.json |
-| 1529 | text match / keyword candidate | <code>&#x27;Bash&#x27;</code> | data file |
-| 1531 | model name | <code>&#x27;modelUsage&#x27;</code> | config.json |
-| 1539 | model name | <code>&#x27;model&#x27;</code> | config.json |
-| 1544 | text match / keyword candidate | <code>&#x27;none&#x27;</code> | data file |
-| 1544 | text match / keyword candidate | <code>&#x27;nothing&#x27;</code> | data file |
-| 1544 | text match / keyword candidate | <code>&#x27;n/a&#x27;</code> | data file |
-| 1550 | numeric literal (review) | <code>20</code> | config.json |
-| 1557 | numeric literal (review) | <code>19</code> | config.json |
-| 1559 | time / duration / threshold / limit | <code>0.05</code> | config.json |
-| 1576 | text match / keyword candidate | <code>&#x27;maintenance&#x27;</code> | data file |
-| 1581 | text match / keyword candidate | <code>&#x27;codex&#x27;</code> | data file |
-| 1582 | time / duration / threshold / limit | <code>60</code> | config.json |
-| 1582 | time / duration / threshold / limit | <code>60</code> | config.json |
-| 1583 | numeric literal (review) | <code>60</code> | config.json |
-| 1585 | numeric literal (review) | <code>1</code> | config.json |
-| 1594 | text match / keyword candidate | <code>&#x27;.md&#x27;</code> | data file |
-| 1600 | text match / keyword candidate | <code>&#x27;TIMEOUT&#x27;</code> | data file |
-| 1601 | text match / keyword candidate | <code>&#x27;result&#x27;</code> | data file |
-| 1601 | text match / keyword candidate | <code>&#x27;TIMEOUT&#x27;</code> | data file |
-| 1601 | text match / keyword candidate | <code>&#x27;human&#x27;</code> | data file |
-| 1601 | text match / keyword candidate | <code>&#x27;none&#x27;</code> | data file |
-| 1601 | text match / keyword candidate | <code>&#x27;premise&#x27;</code> | data file |
-| 1601 | text match / keyword candidate | <code>&#x27;not stated&#x27;</code> | data file |
-| 1601 | text match / keyword candidate | <code>&#x27;note&#x27;</code> | data file |
-| 1601 | text match / keyword candidate | <code>&#x27;killed after &#x27;</code> | data file |
-| 1601 | text match / keyword candidate | <code>&#x27;s&#x27;</code> | data file |
-| 1604 | text match / keyword candidate | <code>&#x27;result&#x27;</code> | data file |
-| 1604 | text match / keyword candidate | <code>&#x27;NO_REPORT&#x27;</code> | data file |
-| 1606 | text match / keyword candidate | <code>&#x27;result&#x27;</code> | data file |
-| 1606 | text match / keyword candidate | <code>&#x27;NO_REPORT&#x27;</code> | data file |
-| 1606 | text match / keyword candidate | <code>&#x27;TIMEOUT&#x27;</code> | data file |
-| 1614 | model name | <code>&#x27;claude&#x27;</code> | config.json |
-| 1614 | text match / keyword candidate | <code>&#x27;claude&#x27;</code> | data file |
-| 1627 | text match / keyword candidate | <code>&#x27;result&#x27;</code> | data file |
-| 1627 | text match / keyword candidate | <code>&#x27;PASS&#x27;</code> | data file |
-| 1645 | user / vault name | <code>&#x27;waiting on Chuen: &#x27;</code> | runtime lookup |
-| 1646 | text match / keyword candidate | <code>&#x27;result&#x27;</code> | data file |
-| 1646 | text match / keyword candidate | <code>&#x27;PARTIAL&#x27;</code> | data file |
-| 1646 | text match / keyword candidate | <code>&#x27;FAIL&#x27;</code> | data file |
-| 1672 | text match / keyword candidate | <code>&#x27;pass&#x27;</code> | data file |
-| 1680 | text match / keyword candidate | <code>&#x27;review_risky&#x27;</code> | data file |
-| 1684 | model name | <code>&#x27;claude&#x27;</code> | config.json |
-| 1688 | text match / keyword candidate | <code>&#x27;verdict&#x27;</code> | data file |
-| 1688 | text match / keyword candidate | <code>&#x27;skipped&#x27;</code> | data file |
-| 1688 | text match / keyword candidate | <code>&#x27;why&#x27;</code> | data file |
-| 1688 | text match / keyword candidate | <code>&#x27;review_risky is off&#x27;</code> | data file |
-| 1688 | text match / keyword candidate | <code>&#x27;review_risky&#x27;</code> | data file |
-| 1689 | text match / keyword candidate | <code>&#x27;not risky&#x27;</code> | data file |
-| 1691 | text match / keyword candidate | <code>&#x27;verdict&#x27;</code> | data file |
-| 1691 | text match / keyword candidate | <code>&#x27;unavailable&#x27;</code> | data file |
-| 1694 | numeric literal (review) | <code>200</code> | config.json |
-| 1697 | text match / keyword candidate | <code>&#x27;verdict&#x27;</code> | data file |
-| 1697 | text match / keyword candidate | <code>&#x27;block&#x27;</code> | data file |
-| 1701 | numeric literal (review) | <code>0</code> | config.json |
-| 1701 | numeric literal (review) | <code>200</code> | config.json |
-| 1732 | text match / keyword candidate | <code>&#x27;parked:&#x27;</code> | data file |
-| 1742 | text match / keyword candidate | <code>&#x27;merged&#x27;</code> | data file |
-| 1742 | text match / keyword candidate | <code>&#x27;no commits&#x27;</code> | data file |
-| 1752 | numeric literal (review) | <code>300</code> | config.json |
-| 1753 | time / duration / threshold / limit | <code>0</code> | config.json |
-| 1753 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 1754 | numeric literal (review) | <code>200</code> | config.json |
-| 1761 | numeric literal (review) | <code>200</code> | config.json |
-| 1767 | text match / keyword candidate | <code>&#x27;ORCHESTRA_AFTERCARE&#x27;</code> | data file |
-| 1767 | text match / keyword candidate | <code>&#x27;ORCHESTRA_REPO&#x27;</code> | data file |
-| 1777 | numeric literal (review) | <code>-1</code> | config.json |
-| 1779 | text match / keyword candidate | <code>&#x27;PASS&#x27;</code> | data file |
-| 1784 | text match / keyword candidate | <code>&#x27;LIMITED&#x27;</code> | data file |
-| 1786 | text match / keyword candidate | <code>&#x27;PASS&#x27;</code> | data file |
-| 1787 | numeric literal (review) | <code>0</code> | config.json |
-| 1787 | numeric literal (review) | <code>1</code> | config.json |
-| 1787 | numeric literal (review) | <code>-1</code> | config.json |
-| 1793 | numeric literal (review) | <code>0</code> | config.json |
-| 1796 | time / duration / threshold / limit | <code>0</code> | config.json |
-| 1796 | text match / keyword candidate | <code>&#x27;PASS&#x27;</code> | data file |
-| 1797 | text match / keyword candidate | <code>&#x27;PASS&#x27;</code> | data file |
-| 1825 | text match / keyword candidate | <code>&#x27;*.lock&#x27;</code> | data file |
-| 1826 | text match / keyword candidate | <code>&#x27;runner&#x27;</code> | data file |
-| 1829 | text match / keyword candidate | <code>&#x27;dead&#x27;</code> | data file |
-| 1832 | text match / keyword candidate | <code>&#x27;runner*.lock&#x27;</code> | data file |
-| 1836 | text match / keyword candidate | <code>&#x27;orphan&#x27;</code> | data file |
-| 1840 | text match / keyword candidate | <code>&#x27;dead&#x27;</code> | data file |
-| 1843 | time / duration / threshold / limit | <code>30</code> | config.json |
-| 1843 | numeric literal (review) | <code>120</code> | config.json |
-| 1866 | text match / keyword candidate | <code>&#x27;lane&#x27;</code> | data file |
-| 1875 | time / duration / threshold / limit | <code>0</code> | config.json |
-| 1877 | time / duration / threshold / limit | <code>0</code> | config.json |
-| 1910 | numeric literal (review) | <code>493</code> | config.json |
-| 1924 | numeric literal (review) | <code>1800</code> | config.json |
-| 1935 | text match / keyword candidate | <code>&#x27; (dispatching)&#x27;</code> | data file |
-| 2039 | time / duration / threshold / limit | <code>0</code> | config.json |
-| 2040 | numeric literal (review) | <code>300</code> | config.json |
-| 2082 | text match / keyword candidate | <code>&#x27;orphan running&#x27;</code> | data file |
-| 2095 | text match / keyword candidate | <code>&#x27;urgent&#x27;</code> | data file |
-| 2095 | text match / keyword candidate | <code>&#x27;maintenance&#x27;</code> | data file |
-| 2101 | numeric literal (review) | <code>1</code> | config.json |
-| 2101 | numeric literal (review) | <code>1</code> | config.json |
-| 2101 | numeric literal (review) | <code>1</code> | config.json |
-| 2102 | numeric literal (review) | <code>1</code> | config.json |
-| 2118 | time / duration / threshold / limit | <code>60</code> | config.json |
-| 2118 | numeric literal (review) | <code>120</code> | config.json |
-| 2137 | numeric literal (review) | <code>1</code> | config.json |
-| 2159 | numeric literal (review) | <code>1</code> | config.json |
-| 2167 | text match / keyword candidate | <code>&#x27;LANE_MISSING&#x27;</code> | data file |
-| 2188 | numeric literal (review) | <code>0</code> | config.json |
-| 2194 | text match / keyword candidate | <code>&#x27;__main__&#x27;</code> | data file |
-| 2195 | numeric literal (review) | <code>0</code> | config.json |
+| 1382 | numeric literal (review) | <code>0</code> | config.json |
+| 1384 | numeric literal (review) | <code>0</code> | config.json |
+| 1385 | numeric literal (review) | <code>0</code> | config.json |
+| 1385 | numeric literal (review) | <code>0</code> | config.json |
+| 1386 | numeric literal (review) | <code>0</code> | config.json |
+| 1399 | model name | <code>&#x27;claude&#x27;</code> | config.json |
+| 1399 | text match / keyword candidate | <code>&#x27;claude&#x27;</code> | data file |
+| 1403 | model name | <code>&#x27;model&#x27;</code> | config.json |
+| 1404 | regex candidate | <code>&#x27;[A-Za-z0-9._-]{2,64}&#x27;</code> | data file |
+| 1410 | model name | <code>&#x27;CLAUDECODE&#x27;</code> | config.json |
+| 1410 | text match / keyword candidate | <code>&#x27;CLAUDECODE&#x27;</code> | data file |
+| 1410 | model name | <code>&#x27;CLAUDE_CODE_&#x27;</code> | config.json |
+| 1410 | text match / keyword candidate | <code>&#x27;CLAUDE_CODE_&#x27;</code> | data file |
+| 1411 | text match / keyword candidate | <code>&#x27;ANTHROPIC_API_KEY&#x27;</code> | data file |
+| 1411 | text match / keyword candidate | <code>&#x27;ANTHROPIC_AUTH_TOKEN&#x27;</code> | data file |
+| 1411 | text match / keyword candidate | <code>&#x27;ANTHROPIC_BASE_URL&#x27;</code> | data file |
+| 1420 | numeric literal (review) | <code>1</code> | config.json |
+| 1437 | time / duration / threshold / limit | <code>30</code> | config.json |
+| 1461 | text match / keyword candidate | <code>&#x27;broken_gate_codes&#x27;</code> | data file |
+| 1463 | numeric literal (review) | <code>0</code> | config.json |
+| 1464 | numeric literal (review) | <code>-3</code> | config.json |
+| 1475 | numeric literal (review) | <code>0</code> | config.json |
+| 1476 | regex candidate | <code>&#x27;RESULT:\\s*(PASS&#124;PARTIAL&#124;FAIL)\\b&#x27;</code> | data file |
+| 1477 | regex candidate | <code>&#x27;^HUMAN:\\s*(.+)$&#x27;</code> | data file |
+| 1478 | regex candidate | <code>&#x27;^PREMISE:\\s*(.+)$&#x27;</code> | data file |
+| 1479 | numeric literal (review) | <code>1</code> | config.json |
+| 1480 | numeric literal (review) | <code>1</code> | config.json |
+| 1482 | numeric literal (review) | <code>1</code> | config.json |
+| 1499 | numeric literal (review) | <code>0</code> | config.json |
+| 1499 | numeric literal (review) | <code>0</code> | config.json |
+| 1500 | numeric literal (review) | <code>0</code> | config.json |
+| 1500 | numeric literal (review) | <code>0</code> | config.json |
+| 1520 | text match / keyword candidate | <code>&#x27;total_cost_usd&#x27;</code> | data file |
+| 1520 | text match / keyword candidate | <code>&#x27;type&#x27;</code> | data file |
+| 1520 | text match / keyword candidate | <code>&#x27;result&#x27;</code> | data file |
+| 1524 | numeric literal (review) | <code>1</code> | config.json |
+| 1531 | text match / keyword candidate | <code>&#x27;tool_name&#x27;</code> | data file |
+| 1533 | numeric literal (review) | <code>0</code> | config.json |
+| 1533 | text match / keyword candidate | <code>&#x27;Bash&#x27;</code> | data file |
+| 1535 | model name | <code>&#x27;modelUsage&#x27;</code> | config.json |
+| 1543 | model name | <code>&#x27;model&#x27;</code> | config.json |
+| 1548 | text match / keyword candidate | <code>&#x27;none&#x27;</code> | data file |
+| 1548 | text match / keyword candidate | <code>&#x27;nothing&#x27;</code> | data file |
+| 1548 | text match / keyword candidate | <code>&#x27;n/a&#x27;</code> | data file |
+| 1554 | numeric literal (review) | <code>20</code> | config.json |
+| 1561 | numeric literal (review) | <code>19</code> | config.json |
+| 1563 | time / duration / threshold / limit | <code>0.05</code> | config.json |
+| 1580 | text match / keyword candidate | <code>&#x27;maintenance&#x27;</code> | data file |
+| 1585 | text match / keyword candidate | <code>&#x27;codex&#x27;</code> | data file |
+| 1586 | time / duration / threshold / limit | <code>60</code> | config.json |
+| 1586 | time / duration / threshold / limit | <code>60</code> | config.json |
+| 1587 | numeric literal (review) | <code>60</code> | config.json |
+| 1589 | numeric literal (review) | <code>1</code> | config.json |
+| 1598 | text match / keyword candidate | <code>&#x27;.md&#x27;</code> | data file |
+| 1604 | text match / keyword candidate | <code>&#x27;TIMEOUT&#x27;</code> | data file |
+| 1605 | text match / keyword candidate | <code>&#x27;result&#x27;</code> | data file |
+| 1605 | text match / keyword candidate | <code>&#x27;TIMEOUT&#x27;</code> | data file |
+| 1605 | text match / keyword candidate | <code>&#x27;human&#x27;</code> | data file |
+| 1605 | text match / keyword candidate | <code>&#x27;none&#x27;</code> | data file |
+| 1605 | text match / keyword candidate | <code>&#x27;premise&#x27;</code> | data file |
+| 1605 | text match / keyword candidate | <code>&#x27;not stated&#x27;</code> | data file |
+| 1605 | text match / keyword candidate | <code>&#x27;note&#x27;</code> | data file |
+| 1605 | text match / keyword candidate | <code>&#x27;killed after &#x27;</code> | data file |
+| 1605 | text match / keyword candidate | <code>&#x27;s&#x27;</code> | data file |
+| 1608 | text match / keyword candidate | <code>&#x27;result&#x27;</code> | data file |
+| 1608 | text match / keyword candidate | <code>&#x27;NO_REPORT&#x27;</code> | data file |
+| 1610 | text match / keyword candidate | <code>&#x27;result&#x27;</code> | data file |
+| 1610 | text match / keyword candidate | <code>&#x27;NO_REPORT&#x27;</code> | data file |
+| 1610 | text match / keyword candidate | <code>&#x27;TIMEOUT&#x27;</code> | data file |
+| 1618 | model name | <code>&#x27;claude&#x27;</code> | config.json |
+| 1618 | text match / keyword candidate | <code>&#x27;claude&#x27;</code> | data file |
+| 1631 | text match / keyword candidate | <code>&#x27;result&#x27;</code> | data file |
+| 1631 | text match / keyword candidate | <code>&#x27;PASS&#x27;</code> | data file |
+| 1649 | user / vault name | <code>&#x27;waiting on Chuen: &#x27;</code> | runtime lookup |
+| 1650 | text match / keyword candidate | <code>&#x27;result&#x27;</code> | data file |
+| 1650 | text match / keyword candidate | <code>&#x27;PARTIAL&#x27;</code> | data file |
+| 1650 | text match / keyword candidate | <code>&#x27;FAIL&#x27;</code> | data file |
+| 1676 | text match / keyword candidate | <code>&#x27;pass&#x27;</code> | data file |
+| 1684 | text match / keyword candidate | <code>&#x27;review_risky&#x27;</code> | data file |
+| 1688 | model name | <code>&#x27;claude&#x27;</code> | config.json |
+| 1692 | text match / keyword candidate | <code>&#x27;verdict&#x27;</code> | data file |
+| 1692 | text match / keyword candidate | <code>&#x27;skipped&#x27;</code> | data file |
+| 1692 | text match / keyword candidate | <code>&#x27;why&#x27;</code> | data file |
+| 1692 | text match / keyword candidate | <code>&#x27;review_risky is off&#x27;</code> | data file |
+| 1692 | text match / keyword candidate | <code>&#x27;review_risky&#x27;</code> | data file |
+| 1693 | text match / keyword candidate | <code>&#x27;not risky&#x27;</code> | data file |
+| 1695 | text match / keyword candidate | <code>&#x27;verdict&#x27;</code> | data file |
+| 1695 | text match / keyword candidate | <code>&#x27;unavailable&#x27;</code> | data file |
+| 1698 | numeric literal (review) | <code>200</code> | config.json |
+| 1701 | text match / keyword candidate | <code>&#x27;verdict&#x27;</code> | data file |
+| 1701 | text match / keyword candidate | <code>&#x27;block&#x27;</code> | data file |
+| 1705 | numeric literal (review) | <code>0</code> | config.json |
+| 1705 | numeric literal (review) | <code>200</code> | config.json |
+| 1736 | text match / keyword candidate | <code>&#x27;parked:&#x27;</code> | data file |
+| 1746 | text match / keyword candidate | <code>&#x27;merged&#x27;</code> | data file |
+| 1746 | text match / keyword candidate | <code>&#x27;no commits&#x27;</code> | data file |
+| 1756 | numeric literal (review) | <code>300</code> | config.json |
+| 1757 | time / duration / threshold / limit | <code>0</code> | config.json |
+| 1757 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 1758 | numeric literal (review) | <code>200</code> | config.json |
+| 1765 | numeric literal (review) | <code>200</code> | config.json |
+| 1771 | text match / keyword candidate | <code>&#x27;ORCHESTRA_AFTERCARE&#x27;</code> | data file |
+| 1771 | text match / keyword candidate | <code>&#x27;ORCHESTRA_REPO&#x27;</code> | data file |
+| 1781 | numeric literal (review) | <code>-1</code> | config.json |
+| 1783 | text match / keyword candidate | <code>&#x27;PASS&#x27;</code> | data file |
+| 1788 | text match / keyword candidate | <code>&#x27;LIMITED&#x27;</code> | data file |
+| 1790 | text match / keyword candidate | <code>&#x27;PASS&#x27;</code> | data file |
+| 1791 | numeric literal (review) | <code>0</code> | config.json |
+| 1791 | numeric literal (review) | <code>1</code> | config.json |
+| 1791 | numeric literal (review) | <code>-1</code> | config.json |
+| 1797 | numeric literal (review) | <code>0</code> | config.json |
+| 1800 | time / duration / threshold / limit | <code>0</code> | config.json |
+| 1800 | text match / keyword candidate | <code>&#x27;PASS&#x27;</code> | data file |
+| 1801 | text match / keyword candidate | <code>&#x27;PASS&#x27;</code> | data file |
+| 1829 | text match / keyword candidate | <code>&#x27;*.lock&#x27;</code> | data file |
+| 1830 | text match / keyword candidate | <code>&#x27;runner&#x27;</code> | data file |
+| 1833 | text match / keyword candidate | <code>&#x27;dead&#x27;</code> | data file |
+| 1836 | text match / keyword candidate | <code>&#x27;runner*.lock&#x27;</code> | data file |
+| 1840 | text match / keyword candidate | <code>&#x27;orphan&#x27;</code> | data file |
+| 1844 | text match / keyword candidate | <code>&#x27;dead&#x27;</code> | data file |
+| 1847 | time / duration / threshold / limit | <code>30</code> | config.json |
+| 1847 | numeric literal (review) | <code>120</code> | config.json |
+| 1870 | text match / keyword candidate | <code>&#x27;lane&#x27;</code> | data file |
+| 1879 | time / duration / threshold / limit | <code>0</code> | config.json |
+| 1881 | time / duration / threshold / limit | <code>0</code> | config.json |
+| 1914 | numeric literal (review) | <code>493</code> | config.json |
+| 1928 | numeric literal (review) | <code>1800</code> | config.json |
+| 1939 | text match / keyword candidate | <code>&#x27; (dispatching)&#x27;</code> | data file |
+| 2043 | time / duration / threshold / limit | <code>0</code> | config.json |
+| 2044 | numeric literal (review) | <code>300</code> | config.json |
+| 2086 | text match / keyword candidate | <code>&#x27;orphan running&#x27;</code> | data file |
+| 2099 | text match / keyword candidate | <code>&#x27;urgent&#x27;</code> | data file |
+| 2099 | text match / keyword candidate | <code>&#x27;maintenance&#x27;</code> | data file |
+| 2105 | numeric literal (review) | <code>1</code> | config.json |
+| 2105 | numeric literal (review) | <code>1</code> | config.json |
+| 2105 | numeric literal (review) | <code>1</code> | config.json |
+| 2106 | numeric literal (review) | <code>1</code> | config.json |
+| 2122 | time / duration / threshold / limit | <code>60</code> | config.json |
+| 2122 | numeric literal (review) | <code>120</code> | config.json |
+| 2141 | numeric literal (review) | <code>1</code> | config.json |
+| 2163 | numeric literal (review) | <code>1</code> | config.json |
+| 2171 | text match / keyword candidate | <code>&#x27;LANE_MISSING&#x27;</code> | data file |
+| 2192 | numeric literal (review) | <code>0</code> | config.json |
+| 2198 | text match / keyword candidate | <code>&#x27;__main__&#x27;</code> | data file |
+| 2199 | numeric literal (review) | <code>0</code> | config.json |
 
 ## orchestra/soak/harness.py
 
