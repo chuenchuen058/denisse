@@ -119,13 +119,15 @@ def _first_name() -> str:
 _MACHINE_FACTS = (
     f"You are running on {platform.system()} {platform.release()} as user "
     f"'{os.environ.get('USERNAME') or os.environ.get('USER') or 'unknown'}', "
-    # "whose project folder is <denisse-wt\...>" read as HIS project: "what
-    # am I working on?" was answered with the worktree's name (2026-11-04).
-    # Reworded, not expanded: a longer sentence here (two tried) sent the
-    # garbled-input case to get_news 4/6 -- the prompt-budget lesson again.
-    f"whose home folder is {os.path.expanduser('~')} and whose copy of "
-    f"this program (Denisse's own folder, not his project) is "
-    f"{os.path.dirname(os.path.abspath(__file__))}. Write paths "
+    # Leave this sentence alone. "whose project folder is <denisse-wt\...>"
+    # was read as HIS project ("what am I working on?" -> the worktree's
+    # name, 2026-11-04); the fix is the vault search (cues.vault_queries,
+    # vault_search's overview fallback), not wording here: three rewordings
+    # were A/B'd and each moved some other case -- a longer one sent the
+    # garbled-input case to get_news 4/6, a same-length one turned "ha, do
+    # that again" into "No worries." 6/6. The prompt-budget lesson, again.
+    f"whose home folder is {os.path.expanduser('~')} and whose project "
+    f"folder is {os.path.dirname(os.path.abspath(__file__))}. Write paths "
     f"the way this OS does (separator '{os.sep}')"
     + (
         ", e.g. C:\\Users\\Name\\Documents -- never invent a POSIX path "
@@ -313,11 +315,13 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "get_current_time",
-            # One sentence added, not a paragraph: this is in CORE, so every
-            # turn pays for it. A longer version listing the non-time turns
-            # ("never mind", "carry on", a greeting...) cost the garbled case
-            # 2/6 against 6/6 (A/B, 2026-11-04).
-            "description": "Get the current date and time -- this machine's own local time, or, given a timezone, the current time somewhere else instead. Only for a question about the time or date, never for a message that isn't.",
+            # Leave this alone too: it is in CORE, so every turn pays for it.
+            # A paragraph listing the non-time turns ("never mind", "carry
+            # on", a greeting...) cost the garbled case 2/6 against 6/6, and
+            # one added sentence moved "ha, do that again" (A/B, 2026-11-04).
+            # The clock reflex is handled before the model instead
+            # (quick_replies.never_mind) and by routing the right tools.
+            "description": "Get the current date and time -- this machine's own local time, or, given a timezone, the current time somewhere else instead.",
             "parameters": {
                 "type": "object",
                 "properties": {

@@ -11,7 +11,7 @@
     "her reply must say so (match this), else the tool's own sentence is used -- a goodbye over 'no session",
     "was running' hides the truth. check kinds: must_match / must_not_match (pattern on the argument),",
     "not_inside_program_folder, not_own_file_name (a path whose file name is one of her own files, {value}),",
-    "verified_document_path, known_skill, task_has_subject (the text is nothing but a time: 'Thursday'),",
+    "verified_document_path, known_skill, task_has_subject (the text is nothing but a time, 'Thursday', or filler, 'me'),",
     "unambiguous_time (time_parse has a question about the due phrase; {detail} is that question).",
     "groups: a turn is offered core + every group whose cues match the recent user text (tool_router.py).",
     "cues/study_commands: data for the fast paths that run before the model; edit here, not in code."
@@ -215,12 +215,9 @@
             "settings",
             "config",
             "denisse",
-            "denisse_settings",
-            "denisse_config",
             "brain",
-            "brain_rules",
-            "tool_policy",
-            "reply_preferences"
+            "policy",
+            "preferences"
           ],
           "refusal": "Refused: '{value}' is one of your own files (your settings, config or code), and you don't edit those -- they're his to change. Don't try another path. Tell him plainly you don't change your own files and he can edit them himself."
         }
@@ -316,7 +313,7 @@
         {
           "kind": "task_has_subject",
           "argument": "text",
-          "refusal": "Refused: '{value}' is only a time, not a task -- he didn't say what to remind him of. Ask him, in one short question, what the reminder is for (and which day, if that's unclear too). Don't add anything until he answers."
+          "refusal": "Refused: '{value}' says when, not what -- he didn't say what to remind him of. Ask him, in one short question, what the reminder is for (and which day, if that's unclear too). Don't add anything until he answers."
         },
         {
           "kind": "unambiguous_time",

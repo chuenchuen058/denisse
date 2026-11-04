@@ -268,7 +268,9 @@ class ChuenQuestions(unittest.TestCase):
                               reply("What's the reminder for -- and this Thursday or next?")],
                              {"add_task": write})
         write.assert_not_called()
-        self.assertTrue(any(s.startswith("Refused: 'Thursday' is only a time") for s in seen), seen)
+        self.assertTrue(any(s.startswith("Refused: 'Thursday' says when, not what") for s in seen), seen)
+        # Round 3 live: the model then tried add_task('me', 'thursday').
+        self.assertIn("says when, not what", tool_policy.refuse("add_task", {"text": "me", "due": "thursday"}) or "")
         self.assertIn("?", out)
 
     def test_ambiguous_due_surfaces_time_parse_question(self):
@@ -285,7 +287,7 @@ class ChuenQuestions(unittest.TestCase):
     def test_her_own_settings_file_is_refused_by_name_anywhere(self):
         # "edit your own settings file" -> write_file to an invented path outside her folder, 6/6.
         for path in (r"C:\Users\Xichu\settings.json", r"C:\Users\Xichu\Desktop\denisse_settings.txt",
-                     r"C:\Users\Xichu\Documents\config.json"):
+                     r"C:\Users\Xichu\Documents\config.json", r"C:\Users\Xichu\AppData\Roaming\Denisse settings.txt"):
             self.assertIn("your own files", tool_policy.refuse("write_file", {"path": path, "content": "x"}) or "", path)
         self.assertIsNone(tool_policy.refuse("write_file", {"path": r"C:\Users\Xichu\Documents\notes.txt", "content": "x"}))
 

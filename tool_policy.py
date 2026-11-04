@@ -171,14 +171,15 @@ def _inside(folder: str, p: str) -> bool:
 def _own_file_name(folder: str, p: str, names=()) -> bool:
     """Whether `p` names one of Denisse's own files, wherever the path puts
     it: a file that exists at the top of her program folder (by name), or a
-    file whose stem is one of the check's `names` ('settings', 'config' --
-    her settings file by whatever extension the model invents)."""
+    file with one of the check's `names` as a word of its name ('settings',
+    'config', 'denisse' -- "Denisse settings.txt" under AppData was the
+    model's third invention, 2026-11-04)."""
     try:
         name = ntpath.basename(p.strip().strip('"').replace("/", "\\")).lower()
         if not name:
             return False
         stem = name.rsplit(".", 1)[0]
-        if stem in {n.lower() for n in names}:
+        if set(re.findall(r"[a-z0-9]+", stem)) & {n.lower() for n in names}:
             return True
         return any(name == f.lower() and os.path.isfile(os.path.join(folder, f))
                    for f in os.listdir(folder))
