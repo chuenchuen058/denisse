@@ -2362,7 +2362,7 @@ class Brain:
                 clip = limits["result_preview_chars"]
                 answer = None
                 if done:
-                    answer = text["verified_done"].format(what="; ".join(str(c.get("result", ""))[:clip] for c in done))
+                    answer = text["verified_done"].format(what="; ".join(_own_words(str(c.get("result", "")))[:clip] for c in done))
                 elif acted:
                     answer = text["verified_failed"].format(what="; ".join(_own_words(str(c.get("result", "")))[:clip] for c in acted))
                 elif not attempt and (_CLAIMS_DONE.search(said) or _PROMISE.search(said)):
