@@ -27,7 +27,7 @@ import json
 import os
 import re
 
-from . import conf, extract, model, notes, topics
+from . import conf, don, extract, model, notes, topics
 from .conf import CONFIG, Module, Paths
 
 _MATCH = CONFIG["match"]
@@ -41,8 +41,10 @@ _CODE = re.compile(_MATCH["code"])
 # -- state -------------------------------------------------------------------
 
 def load_state(paths: Paths) -> dict:
+    """The ingest state: from the vault's Don area, else (not moved yet)
+    from the old private place."""
     try:
-        with open(paths.state_file(), encoding="utf-8") as f:
+        with open(paths.readable(CONFIG["paths"]["state_file"]), encoding="utf-8") as f:
             state = json.load(f)
     except (OSError, ValueError):
         state = {}
@@ -53,7 +55,7 @@ def load_state(paths: Paths) -> dict:
 
 
 def save_state(paths: Paths, state: dict) -> None:
-    os.makedirs(paths.state, exist_ok=True)
+    os.makedirs(paths.data_dir, exist_ok=True)
     tmp = paths.state_file() + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, ensure_ascii=False)
@@ -222,21 +224,34 @@ def run(paths: Paths, call=None, apply: bool = True, today: dt.date | None = Non
         changed_modules[slug] = module
         save_state(paths, state)  # progress survives a crash on the next week
 
+    touched = list(written)
     if apply:
         for slug, module in changed_modules.items():
             lectures = state["lectures"].get(slug, {})
             topic_map = topics.build(module, lectures, today)
-            say(_SAY["topics"].format(path=topics.save(paths, module, topic_map)))
-            index = notes.render_index(paths.vault, module, lectures, topic_map, today)
+            path = topics.save(paths, module, topic_map)
+            touched.append(path)
+            say(_SAY["topics"].format(path=path))
+        # Don's own notes first, so each index can link the hub on its first run.
+        touched += don.refresh(paths, state, modules, today, say=say)
+        for slug, module in changed_modules.items():
+            lectures = state["lectures"].get(slug, {})
+            topic_map = topics.load(paths, module) or {}
+            extra = [don.hub_link(paths)] if os.path.isfile(don.hub_path(paths)) else []
+            index = notes.render_index(paths.vault, module, lectures, topic_map, today, extra)
             try:
                 path, _kept = notes.write(notes.index_path(module), index, state["written"])
+                touched.append(path)
                 say(_SAY["index"].format(path=path))
             except (OSError, FileExistsError) as exc:
                 say(_SAY["failed"].format(module=module.title, week="index", why=exc))
+        if changed_modules:  # the hub and progress notes can link the new indexes now
+            touched += don.refresh(paths, state, modules, today, say=lambda _s: None)
         save_state(paths, state)
+        touched.append(paths.state_file())
     else:
         say(_SAY["dry_model"])
     say(_SAY["done"].format(notes=len(written), unchanged=len(unchanged), unmatched=len(unmatched),
                             failed=len(failed)))
     return {"notes": written, "unchanged": unchanged, "unmatched": unmatched, "failed": failed,
-            "modules": sorted(changed_modules)}
+            "modules": sorted(changed_modules), "touched": touched if apply else []}
