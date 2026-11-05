@@ -1525,7 +1525,7 @@ CASES = [
     {
         "id": "tutor_weak_signals",
         "group": "tutor:weak",
-        "prompt": "what should I revise for signals?",
+        "prompt": "what am I struggling with in signals?",
         "vault": "fixture",
         "fixtures": {"find_files": _NO_FILES},
         "expect": {"any_tool_of": {"tutor_weak_topics"}, "must_contain": ["convolution"],
