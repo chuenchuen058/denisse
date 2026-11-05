@@ -82,5 +82,11 @@
                     "--disallowedTools", "Edit,Write,MultiEdit,NotebookEdit,Bash(git push:*),Bash(gh:*)"],
 
   "git_timeout_s": 120,
-  "tick_watchdog_extra_s": 900
+  "tick_watchdog_extra_s": 900,
+  "keep_ref_prefix": "refs/keep/",
+  "keep_ref_log": "KEPT {branch}: {count} commit(s) not on master saved as {ref} before {why}; recover with `git branch <name> {ref}`",
+  "merge_only_mark": "Merge-only re-queue:",
+  "merge_only_paragraph": "{mark} the work for this task is already on branch `{branch}` but never reached master. The runner merges that branch onto current master itself and re-runs the gate below (plus the reviewer, if the diff is risky); no new lane runs. If the branch is missing or the merge can't run, the task is parked. Re-queued {when}{note}.",
+  "merge_only_report": "RESULT: PASS\nGATE: re-run by the runner before the merge\nHUMAN: none\nPREMISE: not stated\nDONE:\n- merge-only re-queue: the runner merged the existing branch {branch}; no lane ran\n",
+  "merge_only_park": "merge-only re-queue not merged: {why}. No lane was run; branch {branch} kept if it exists"
 }

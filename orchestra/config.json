@@ -140,5 +140,12 @@
 
   "git_timeout_s": 120,
   "tick_watchdog_extra_s": 900,
-  "_tick_watchdog_extra_s": "The whole tick is killed this long after the longest possible lane timeout. Atrium hung 19 then 29 minutes on one call."
+  "_tick_watchdog_extra_s": "The whole tick is killed this long after the longest possible lane timeout. Atrium hung 19 then 29 minutes on one call.",
+  "keep_ref_prefix": "refs/keep/",
+  "keep_ref_log": "KEPT {branch}: {count} commit(s) not on master saved as {ref} before {why}; recover with `git branch <name> {ref}`",
+  "merge_only_mark": "Merge-only re-queue:",
+  "merge_only_paragraph": "{mark} the work for this task is already on branch `{branch}` but never reached master. The runner merges that branch onto current master itself and re-runs the gate below (plus the reviewer, if the diff is risky); no new lane runs. If the branch is missing or the merge can't run, the task is parked. Re-queued {when}{note}.",
+  "merge_only_report": "RESULT: PASS\nGATE: re-run by the runner before the merge\nHUMAN: none\nPREMISE: not stated\nDONE:\n- merge-only re-queue: the runner merged the existing branch {branch}; no lane ran\n",
+  "merge_only_park": "merge-only re-queue not merged: {why}. No lane was run; branch {branch} kept if it exists",
+  "_keep_ref_prefix": "Before the runner deletes or resets a review/<slug> branch (a fresh worktree, cleanup), any commits it has that aren't on master are saved as <keep_ref_prefix><slug>-<UTC time> and logged with keep_ref_log. Twice in the week of 2 Nov 2026 a branch with reviewed, unmerged commits was deleted (time-tasks-2 came back only via git fsck). merge_only_* : a requeue.py --merge-only task (its body has a line starting with merge_only_mark) is merged by the runner from the existing branch -- gate, reviewer, combined-tree integration -- and never runs a lane; a missing branch or a merge that can't run parks it with merge_only_park."
 }
