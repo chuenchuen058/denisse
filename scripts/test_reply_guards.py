@@ -10,11 +10,21 @@ the skills restore in brain.py.
 """
 import os
 import sys
+import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 import brain  # noqa: E402
+import memory_store  # noqa: E402
+import tasks  # noqa: E402
+
+# The skills restore and file lookups reach the task store and the history:
+# keep both off the real memory folder, which exists in the main checkout.
+_TMP = tempfile.mkdtemp(prefix="denisse-reply-guards-")
+tasks.TASKS_FILE = os.path.join(_TMP, os.path.basename(tasks.TASKS_FILE))
+memory_store.MEMORY_DIR = _TMP
+memory_store.MEMORY_FILE = os.path.join(_TMP, os.path.basename(memory_store.MEMORY_FILE))
 
 results = []
 
