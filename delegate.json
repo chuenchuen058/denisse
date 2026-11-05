@@ -12,6 +12,7 @@
       "args": ["-p", "{prompt}", "--output-format", "text",
                "--append-system-prompt", "{system}",
                "--allowedTools", "{allowed}", "--disallowedTools", "{disallowed}"],
+      "stdin_over_chars": 20000,
       "add_dir_flag": "--add-dir",
       "stdin": false,
       "reads_outfile": false
