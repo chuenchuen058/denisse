@@ -10,6 +10,8 @@ memory/*.json
 memory/*.jsonl
 # study_brief.py's saved progress: his task text and note paths. (2026-10-30)
 memory/jobs/
+# tutor/: what was read from KEATS, which notes she wrote, his topic maps. (2026-11-05)
+memory/tutor/
 !memory/.gitkeep
 memory/.spotify_cache
 
