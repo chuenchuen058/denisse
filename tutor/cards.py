@@ -83,11 +83,36 @@ def _ask(call, system: str, user: str) -> dict:
     raise model.ModelError(_SAY["cards_no_json"])
 
 
-def generate(module: Module, src: sources.Source, calls: dict | None = None, num_ctx: int | None = None) -> list:
-    """The cards for one source note, every kind, each from its engine."""
+def _limit(kind: str, what: str) -> int:
+    return _C["kinds"].get(kind, {}).get(what) or _C[what]
+
+
+def active_kinds() -> list:
+    return [k for k, spec in _C["kinds"].items() if spec["count"] > 0]
+
+
+def style_example(module: Module, src: sources.Source) -> str:
+    """The module's own problem-class sheet, closest to the note's week, as a style example ('' if none)."""
+    import glob
+    from . import extract
+    st = _C["style"]
+    week_dir = os.path.basename(module.week_dir(src.week)) if src.week else "*"
+    for pattern in st["globs"]:
+        for path in sorted(glob.glob(os.path.join(glob.escape(module.folder), pattern.format(week_dir=week_dir)),
+                                     recursive=True)):
+            text, _why = extract.read(path)
+            if text:
+                name = os.path.relpath(path, module.folder).replace(os.sep, "/")
+                return st["text"].format(name=name, style=text[:st["chars"]])
+    return ""
+
+
+def generate(module: Module, src: sources.Source, calls: dict | None = None, num_ctx: int | None = None,
+             only: set | None = None) -> list:
+    """The cards for one source note, every kind (or only those in `only`), each from its engine."""
     by_engine = {}
     for kind, spec in _C["kinds"].items():
-        if spec["count"] > 0:
+        if spec["count"] > 0 and (only is None or kind in only):
             by_engine.setdefault(spec["engine"], []).append(kind)
     text = src.text[:model.chunk_chars(num_ctx)]
     c = don.ctx(module)
@@ -97,13 +122,16 @@ def generate(module: Module, src: sources.Source, calls: dict | None = None, num
         wanted = "\n".join(_C["wanted"].format(kind=k, **_C["kinds"][k]) for k in kinds)
         user = _C["user"].format(week=_C["week"].format(week=src.week) if src.week else "", source=src.stem,
                                  wanted=wanted, schema=_C["schema"], text=text, **c)
+        if any(_C["kinds"][k].get("style") for k in kinds):
+            user += style_example(module, src)
         data = _ask(engine_call(engine, calls), system, user)
         counts = {k: 0 for k in kinds}
         for item in data.get("cards") or []:
             if not isinstance(item, dict):
                 continue
             kind = str(item.get("kind", "")).strip().lower()
-            front, back = _clip(item.get("front"), _C["front_chars"]), _clip(item.get("back"), _C["back_chars"])
+            front = _clip(item.get("front"), _limit(kind, "front_chars"))
+            back = _clip(item.get("back"), _limit(kind, "back_chars"))
             if kind not in counts or not front or not back or counts[kind] >= _C["kinds"][kind]["count"]:
                 continue
             counts[kind] += 1
@@ -199,7 +227,7 @@ def _judge(card: dict, answer, engine: str, text: str, when: str) -> dict:
     if verdict != _K["wrong"]:
         return _verdict(card, engine, _V["unchecked"], reasons["no_verdict"], when)
     reason = _clip(answer.get("reason"), _K["reason_chars"])
-    corrected = _clip(answer.get("corrected"), _C["back_chars"])
+    corrected = _clip(answer.get("corrected"), _limit(card["kind"], "back_chars"))
     if not corrected:
         return _verdict(card, engine, _V["wrong"], reasons["no_fix"].format(reason=reason), when)
     if not backed_by(answer.get("evidence"), text):
@@ -239,6 +267,7 @@ def check(module: Module, src: sources.Source, written: list, before: dict, chec
     system = _K["system"].format(**c)
     for engine, batch in pending.items():
         items = "\n".join(_K["item"].format(n=n, kind=card["kind"], front=card["front"], back=card["back"])
+                          + _C["kinds"].get(card["kind"], {}).get("check_note", "")
                           for n, (_i, card) in enumerate(batch, 1))
         user = _K["user"].format(week=_C["week"].format(week=src.week) if src.week else "", source=src.stem,
                                  items=items, schema=_K["schema"], right=_K["right"], wrong=_K["wrong"],
@@ -329,6 +358,20 @@ def run(paths: Paths, module: Module, calls: dict | None = None, today: dt.date 
             written, entry = [as_written(card) for card in earlier], dict(prev)
             kept.append(src.rel)
             say(_SAY["cards_source"].format(status="unchanged", name=src.stem, n=len(earlier)))
+            # a kind added to tutor.json since: ask the note for just that kind, keep the rest
+            asked = prev.get("kinds_asked") or sorted({card["kind"] for card in earlier})
+            missing = [k for k in active_kinds() if k not in asked]
+            if missing:
+                try:
+                    extra = generate(module, src, calls, num_ctx, only=set(missing))
+                except (model.ModelError, OSError) as exc:
+                    failed.append((src.rel, str(exc)))
+                    say(_SAY["cards_failed"].format(name=src.stem, why=exc))
+                else:
+                    written += extra
+                    entry["kinds_asked"] = sorted(set(asked) | set(missing))
+                    made.append(src.rel)
+                    say(_SAY["cards_source"].format(status="made", name=src.stem, n=len(extra)))
         else:
             try:
                 written = generate(module, src, calls, num_ctx)
@@ -340,7 +383,8 @@ def run(paths: Paths, module: Module, calls: dict | None = None, today: dt.date 
                 # The old cards stand until the note gives new ones (still checked, below).
                 written, entry = [as_written(card) for card in earlier], dict(prev)
             else:
-                entry = {"hash": digest, "kind": src.kind, "week": src.week, "made": today.isoformat()}
+                entry = {"hash": digest, "kind": src.kind, "week": src.week, "made": today.isoformat(),
+                         "kinds_asked": active_kinds()}
                 made.append(src.rel)
                 say(_SAY["cards_source"].format(status="made", name=src.stem, n=len(written)))
         passed, held, counts = check(module, src, written, before, checks, num_ctx=num_ctx)

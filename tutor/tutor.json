@@ -367,7 +367,8 @@
       "method": {"count": 3, "engine": "local", "check": "claude",
                  "describe": "method cards: given a situation, which method to use and why"},
       "problem": {"count": 2, "engine": "local", "check": "claude",
-                  "describe": "short worked problems: a small problem on the front, the worked answer in a few steps on the back"}
+                  "describe": "short worked problems: a small problem on the front, the worked answer in a few steps on the back"},
+      "tutorial": {"count": 2, "engine": "claude", "check": "claude", "front_chars": 1500, "back_chars": 4000, "style": true, "describe": "tutorial problems written like the module's problem-class sheets (STYLE below): a physical set-up with its given quantities and symbols, then numbered parts (i), (ii), (iii) that build up (derive, then calculate, then interpret). Write NEW problems: set-ups and numbers may be new, but every law, equation and method must be one the note uses. The back is a full worked solution laid out like a walkthrough, each label on its own line: 'Set-up:' (axes, assumptions), then '(i)', '(ii)'... each with short working and its key equation in \\\\[ \\\\] on one line, then 'Answer:' with every final result and its units, then 'Check:' with one sanity check (limits, units or direction)", "check_note": " [new problem: its numbers are not in the note. Judge whether the physics, every step and every number in the worked solution are correct, and whether the method is one the note uses.]"}
     },
     "engines": {
       "local": {"via": "ollama"},
@@ -377,7 +378,7 @@
     "user": "Module: {module} ({code}){week}. Source note: {source}.\n\nWrite these cards from the note below:\n{wanted}\n\nEach card: a short front (the question), a back (the answer, at most a few lines), its kind, and the topic it tests (a few words).\n\nReply with JSON of exactly this shape:\n{schema}\n\nRules: only what the note says; leave a kind short rather than guess; no markdown outside the JSON.\n\nNOTE:\n{text}",
     "week": ", Week {week}",
     "wanted": "- {count} {describe} (kind: \"{kind}\")",
-    "schema": "{\"cards\": [{\"kind\": \"recall|method|problem\", \"front\": \"...\", \"back\": \"...\", \"topic\": \"...\"}]}",
+    "schema": "{\"cards\": [{\"kind\": \"recall|method|problem|tutorial\", \"front\": \"...\", \"back\": \"...\", \"topic\": \"...\"}]}",
     "check": {
       "all_with": null,
       "system": "You are {tutor}, checking Anki cards before a university engineering student drills them. A wrong card teaches him a wrong fact, so be strict, as a professional examiner would be. A card is right only if (1) the physics or maths on it is correct, (2) the back actually answers the front, specifically and not vaguely, and (3) it agrees with the source note. Answer with one JSON object and nothing else.",
@@ -399,6 +400,7 @@
         "fix_unsupported": "wrong; the correction offered is not backed by the note: {reason}"
       }
     },
+    "style": {"_help": "Kinds with style: true get the module's own problem-class sheet as a style example. globs are relative to the module folder; {week_dir} is the note's week folder; first readable hit wins.", "globs": ["{week_dir}/Tutorial - Questions.*", "*/Tutorial - Questions.*", "**/*Tutorial*Questions*.*"], "chars": 3000, "text": "\n\nSTYLE: the module's own problem-class sheet ({name}). Match its format, difficulty and wording; write new problems from the NOTE, never copy these:\n{style}"},
     "delegate_task": "{system}\n\n{user}",
     "front_chars": 400,
     "back_chars": 1200,
