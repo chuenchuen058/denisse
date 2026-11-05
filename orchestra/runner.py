@@ -25,6 +25,9 @@ What a tick does with a session's result (after Thomas's review, 31 Oct 2026):
     are re-read every tick and enforced here (orchestra/campaign.py, 2 Nov 2026)
   * once a day (exams_daily_at) a hidden background process gives each agent one canary exam
     (orchestra/exams/daily.py), unless a lane is limited; it takes no lane slot (3 Nov 2026)
+  * a candidate likely to edit a hot file (conflict_hot_files) that a running task is editing
+    is held while another candidate exists, at most conflict_max_holds times; a PASS that
+    can't merge for a conflict gets one <slug>-merge follow-up task (orchestra/conflicts.py)
   * every limit, pattern and lane command lives in orchestra/config.json with its reason;
     orchestra/config_defaults.json holds the fallbacks, used when a key is missing or its
     value has the wrong shape (logged as `config: ...`, never a crashed tick)
@@ -727,10 +730,21 @@ def why_not_runnable(task: Task, state: dict) -> str | None:
     return None
 
 
-def pick(tasks: list[Task], state: dict) -> Task | None:
+def pick(tasks: list[Task], state: dict, dry_run: bool = False) -> Task | None:
     runnable = [t for t in tasks if why_not_runnable(t, state) is None]
     runnable.sort(key=lambda t: (t.priority != "urgent", t.kind == "maintenance", t.slug))
-    return runnable[0] if runnable else None
+    if not runnable:
+        return None
+    try:
+        # conflicts.py: hold a candidate whose predicted files overlap a running task's on a hot
+        # file (conflict_hot_files) while another candidate exists (2 Nov 2026: six PASSes failed
+        # to merge). With nothing running it returns runnable[0] unchanged.
+        import conflicts
+        return conflicts.pick(runnable, state, quiet=dry_run)
+    except Exception as e:  # the predictor must never stop dispatch
+        if not dry_run:
+            log(f"conflicts: {e!r}; picking in plain order")
+        return runnable[0]
 
 
 # ---------------------------------------------------------------- lock + watchdog
@@ -1762,8 +1776,16 @@ def _after_pass(task: Task, state: dict, ts: dict, entry: dict, wt: Path, branch
         progress["stage"] = "archive"
 
     integ: dict = {}
+    touched = set(git("diff", "--name-only", f"HEAD...{branch}", check=False).stdout.split())
     merge = integrate(task, branch, integ, on_merged=push)
     ts["integration"] = entry["integration"] = integ
+    try:
+        # conflicts.py: learn title words -> files from a merge; after a merge conflict (or a red
+        # combined tree where both sides changed the same files) queue one <slug>-merge follow-up.
+        import conflicts
+        merge = conflicts.after_integrate(task, branch, merge, state, touched)
+    except Exception as e:  # recovery must never lose the merge outcome
+        log(f"conflicts: {e!r}")
     log(f"merge {branch}: {merge}")
     if merge.startswith("parked:"):
         ts.pop("merge", None)  # the park reason already says it; STATE NOW would list it twice
@@ -2104,7 +2126,7 @@ def _tick(dry_run: bool = False) -> str:
         for t in tasks:
             print(f"{t.slug}: {why_not_runnable(t, state) or 'runnable'}"
                   f" [{t.priority}/{t.weight}/{t.kind}/{t.lane}, gate commands: {len(t.gate_commands)}]")
-        t = pick(tasks, state)
+        t = pick(tasks, state, dry_run=True)
         print(f"would run: {t.slug if t else 'nothing'}; spend left today ${spend_left(state):.2f}; "
               f"power: {power.describe(power.power_status(), C)}")
         return "dry-run"
