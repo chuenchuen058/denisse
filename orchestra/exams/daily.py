@@ -24,11 +24,11 @@ import uuid
 from pathlib import Path
 
 from . import core
+from .settings import load
 
-DEFAULT_AT = "07:10"
-DEFAULT_AGENTS = ("codex", "copilot", "local")
-CAP_S = 900               # the whole run, every agent together
-LOCK_STALE_S = CAP_S + 600  # a lock older than this is a dead run's leftover
+DEFAULT_AT = load()["daily"]["at"]
+DEFAULT_AGENTS = tuple(load()["daily"]["agents"])
+CAP_S = load()["daily"]["cap_s"]  # public fallback used by runner.py
 CREATE_NO_WINDOW = 0x08000000
 CREATE_NEW_PROCESS_GROUP = 0x00000200
 CREATE_BREAKAWAY_FROM_JOB = 0x01000000
@@ -36,9 +36,10 @@ CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 
 def agents_for(cfg: dict) -> list[str]:
     """exams_agents from config; claude only with exams_include_claude: true."""
-    names = list(cfg.get("exams_agents") or DEFAULT_AGENTS)
+    policy = load()["daily"]
+    names = list(cfg.get("exams_agents") or policy["agents"])
     if not cfg.get("exams_include_claude"):
-        names = [n for n in names if n != "claude"]
+        names = [n for n in names if n not in policy["opt_in_agents"]]
     return names
 
 
@@ -59,7 +60,8 @@ def read_json(path: Path) -> dict:
 
 
 def lock_held(lock: Path, at: dt.datetime) -> bool:
-    """A lock younger than LOCK_STALE_S is a live run (age only: Windows has no safe pid probe)."""
+    """Use the configured cap plus grace period; Windows has no safe pid probe here."""
+    policy = load()["daily"]
     info = read_json(lock)
     if not lock.exists():
         return False
@@ -71,7 +73,7 @@ def lock_held(lock: Path, at: dt.datetime) -> bool:
         except OSError:
             return False
     since = since.replace(tzinfo=None) if since.tzinfo else since
-    return (at - since).total_seconds() < LOCK_STALE_S
+    return (at - since).total_seconds() < policy["cap_s"] + policy["lock_grace_s"]
 
 
 def due(cfg: dict, last_run: Path, lock: Path, at: dt.datetime, limited: list[str]) -> str | None:
@@ -162,7 +164,7 @@ def subprocess_agent(scores: Path, vault: Path | None, include_claude: bool):
         proc = subprocess.Popen(argv, cwd=core.REPO, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL, **kw)
         try:
-            proc.wait(timeout=max(1.0, timeout))
+            proc.wait(timeout=max(load()["daily"]["minimum_wait_s"], timeout))
         except subprocess.TimeoutExpired:
             core._kill_tree(proc)
             raise TimeoutError(f"canary {name} cut at the {timeout:.0f}s left of the cap")
@@ -185,17 +187,18 @@ def summary(scores: dict, agents: list[str], since: dt.datetime) -> dict[str, st
                 continue
             skip = scores.get("skipped", {}).get(n)
             if skip and dt.datetime.fromisoformat(skip["at"]) >= since:
-                out[n] = "skipped: " + skip.get("why", "")[:60]
+                out[n] = "skipped: " + skip.get("why", "")[:load()["daily"]["summary_chars"]]
                 hit = True
         if not hit:
             out[want] = "no result"
     return out
 
 
-def run_all(agents: list[str], run_agent, *, scores_file: Path, cap: float = CAP_S,
+def run_all(agents: list[str], run_agent, *, scores_file: Path, cap: float | None = None,
             clock=time.monotonic, log=None) -> dict:
     """Every agent in turn until the cap runs out. Never raises for one agent's failure."""
     started = core.now().replace(microsecond=0)  # results are stamped to the second
+    cap = load()["daily"]["cap_s"] if cap is None else cap
     end = clock() + cap
     notes: dict[str, str] = {}
     for name in agents:
@@ -206,7 +209,7 @@ def run_all(agents: list[str], run_agent, *, scores_file: Path, cap: float = CAP
         try:
             run_agent(name, left)
         except Exception as e:  # one broken agent never stops the others
-            notes[name] = f"{type(e).__name__}: {e}"[:120]
+            notes[name] = f"{type(e).__name__}: {e}"[:load()["daily"]["error_chars"]]
     res = summary(core.load_scores(scores_file), agents, started)
     for name, why in notes.items():
         if res.get(name) in (None, "no result"):
@@ -226,14 +229,14 @@ def _release(lock: Path, token: str | None) -> None:
 
 def child_main(argv: list[str] | None = None, run_agent=None) -> int:
     ap = argparse.ArgumentParser(prog="python -m orchestra.exams.daily")
-    ap.add_argument("--agents", default=",".join(DEFAULT_AGENTS))
+    ap.add_argument("--agents", default=",".join(load()["daily"]["agents"]))
     ap.add_argument("--scores", required=True)
     ap.add_argument("--lock", required=True)
     ap.add_argument("--token", help="the runner already took the lock with this token")
     ap.add_argument("--last-run")
     ap.add_argument("--log")
     ap.add_argument("--vault")
-    ap.add_argument("--cap", type=float, default=CAP_S)
+    ap.add_argument("--cap", type=float, default=load()["daily"]["cap_s"])
     ap.add_argument("--include-claude", action="store_true")
     a = ap.parse_args(argv)
     lock, scores = Path(a.lock), Path(a.scores)

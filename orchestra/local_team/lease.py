@@ -22,7 +22,9 @@ import sys
 import time
 from pathlib import Path
 
-DEFAULT_TTL_S = 900
+from .settings import load
+
+DEFAULT_TTL_S = load()["defaults"]["gpu_lease_ttl_s"]
 
 
 def main_checkout(repo: Path) -> Path:
@@ -68,14 +70,15 @@ def pid_alive(pid: int) -> bool:
 
 
 class GpuLease:
-    def __init__(self, path: Path, holder: str, ttl_s: int = DEFAULT_TTL_S):
-        self.path, self.holder, self.ttl_s = Path(path), holder, ttl_s
+    def __init__(self, path: Path, holder: str, ttl_s: int | None = None):
+        self.path, self.holder = Path(path), holder
+        self.ttl_s = load()["defaults"]["gpu_lease_ttl_s"] if ttl_s is None else ttl_s
         self.held = False
 
     @classmethod
-    def for_repo(cls, repo: Path, holder: str, ttl_s: int = DEFAULT_TTL_S) -> "GpuLease":
+    def for_repo(cls, repo: Path, holder: str, ttl_s: int | None = None) -> "GpuLease":
         override = os.environ.get("ORCHESTRA_GPU_LEASE")
-        path = Path(override) if override else main_checkout(repo) / ".review" / "gpu.lease"
+        path = Path(override) if override else main_checkout(repo) / load()["lease"]["path"]
         return cls(path, holder, ttl_s)
 
     def info(self) -> dict | None:
@@ -103,7 +106,7 @@ class GpuLease:
 
     def try_acquire(self) -> bool:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        for _ in range(2):
+        for _ in range(load()["lease"]["acquire_attempts"]):
             try:
                 fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             except FileExistsError:
@@ -119,7 +122,8 @@ class GpuLease:
             return True
         return False
 
-    def acquire(self, wait_s: float = 0, poll_s: float = 2) -> bool:
+    def acquire(self, wait_s: float = 0, poll_s: float | None = None) -> bool:
+        poll_s = load()["lease"]["poll_s"] if poll_s is None else poll_s
         deadline = time.monotonic() + wait_s
         while True:
             if self.try_acquire():
@@ -141,7 +145,7 @@ class GpuLease:
                 self.path.unlink()
 
     @contextlib.contextmanager
-    def hold(self, wait_s: float = 0, poll_s: float = 2):
+    def hold(self, wait_s: float = 0, poll_s: float | None = None):
         got = self.acquire(wait_s, poll_s)
         try:
             yield got
