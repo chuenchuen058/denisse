@@ -323,11 +323,28 @@ def schedule(work: list, today: dt.date, due: dt.date | None) -> list:
 # is exactly what it was before the learner model existed. Nothing here
 # writes to the store or infers a belief from what the brief says.
 
-_FORMAT_WORDS = {kind: re.compile(rule["pattern"]) for kind, rule in _LEARN["format_first"].items()}
-_FORMAT_SHAPE = {kind: rule["shape"] for kind, rule in _LEARN["format_first"].items()}
 _DURATION = re.compile(_P["duration"])
-_EXAMPLE_SOURCE = re.compile(_P["example_source"])
-_AREA = _LEARN["areas"]
+
+
+def _format_rules() -> dict:
+    """learner.format_first, read at call time: kind -> its rule. A kind
+    added in the JSON (pattern, shape, optional revise_first, and its brief
+    lines under templates.brief) works with no code change."""
+    return _LEARN["format_first"]
+
+
+def _format_shapes() -> list:
+    """The shapes a format belief can call for, in JSON order; null = none."""
+    return list(dict.fromkeys(r["shape"] for r in _format_rules().values() if r.get("shape")))
+
+
+def _revise_first() -> dict:
+    """shape -> the pattern of revise-from sources it moves to the front."""
+    out = {}
+    for rule in _format_rules().values():
+        if rule.get("shape") and rule.get("revise_first"):
+            out.setdefault(rule["shape"], rule["revise_first"])
+    return out
 
 
 def learner_beliefs() -> list:
@@ -359,7 +376,8 @@ def _per_session(minutes: int) -> int:
 
 def _format_first(claim: str) -> str | None:
     """Which configured format the claim names first, if any."""
-    hits = [(m.start(), kind) for kind, rx in _FORMAT_WORDS.items() for m in [rx.search(claim)] if m]
+    hits = [(m.start(), kind) for kind, rule in _format_rules().items()
+            for m in [re.search(rule["pattern"], claim)] if m]
     return min(hits)[1] if hits else None
 
 
@@ -368,40 +386,42 @@ def learner_shape(beliefs: list) -> dict:
     or diagram before theory), `attention` (shorter sections), `study` (his
     session length = pace: how many plan items one session covers). Other
     areas, and claims no rule recognises, change nothing and aren't listed."""
-    shape = {"example_first": None, "diagram_first": None, "short": None, "pace": None}
+    areas, rules = _LEARN["areas"], _format_rules()
+    shape = dict.fromkeys([*_format_shapes(), "short", "pace"])
     for b in beliefs:
         area, claim = b.get("area"), str(b.get("claim", ""))
-        if area == _AREA["format"]:
-            key = _FORMAT_SHAPE.get(_format_first(claim))
+        if area == areas["format"]:
+            kind = _format_first(claim)
+            key = rules[kind].get("shape") if kind else None
             if key and not shape[key]:
                 shape[key] = b
-        elif area == _AREA["attention"] and claim.strip() and not shape["short"]:
+        elif area == areas["attention"] and claim.strip() and not shape["short"]:
             shape["short"] = b
-        elif area == _AREA["study"]:
+        elif area == areas["study"]:
             mins = _session_minutes(claim)
             if mins:  # the latest stated length wins
                 shape["pace"] = {**b, "minutes": mins, "per_session": _per_session(mins)}
     return {k: v for k, v in shape.items() if v}
 
 
-def _examples_first(revise: str) -> str:
-    """'Wk 4 lecture; Wk 4 tutorial' -> 'Wk 4 tutorial; Wk 4 lecture'."""
+def _sources_first(revise: str, pattern: str) -> str:
+    """'Wk 4 lecture; Wk 4 tutorial' -> 'Wk 4 tutorial; Wk 4 lecture' when
+    the pattern names tutorials: matching sources first, order otherwise kept."""
     sep = _P["revise_sep"]
     parts = [p.strip() for p in revise.split(sep)]
-    return (sep + " ").join([p for p in parts if _EXAMPLE_SOURCE.search(p)]
-                            + [p for p in parts if not _EXAMPLE_SOURCE.search(p)])
+    return (sep + " ").join([p for p in parts if re.search(pattern, p)]
+                            + [p for p in parts if not re.search(pattern, p)])
 
 
 def _shaped_by(shape: dict) -> list:
+    """The footer: one line per adaptation used, in templates.brief.shaped order."""
     def cite(b):
         return _B["cite"].format(id=b["id"], claim=_clip(str(b.get("claim", "")), _LEARN["claim_clip"]))
     lines = list(_B["shaped_heading"])
-    for key in ("example_first", "diagram_first", "short"):
+    for key, line in _B["shaped"].items():
         if key in shape:
-            lines.append(_B["shaped"][key].format(cite=cite(shape[key])))
-    if "pace" in shape:
-        p = shape["pace"]
-        lines.append(_B["shaped"]["pace"].format(per=p["per_session"], minutes=p["minutes"], cite=cite(p)))
+            b = shape[key]
+            lines.append(line.format(cite=cite(b), per=b.get("per_session"), minutes=b.get("minutes")))
     lines.append(_B["shaped_fix"])
     return lines
 
@@ -409,7 +429,8 @@ def _shaped_by(shape: dict) -> list:
 # -- the job ---------------------------------------------------------------
 
 def _job_file(module: str) -> str:
-    slug = re.sub(_P["slug"], "-", module.lower()).strip("-")
+    sep = _PATHS["slug_sep"]
+    slug = re.sub(_P["slug"], sep, module.lower()).strip(sep)
     return os.path.join(JOBS_DIR, _PATHS["job_file"].format(slug=slug))
 
 
@@ -480,15 +501,16 @@ def _brief_text(job: dict, today: dt.date, shape: dict | None = None) -> str:
         lines.append(_B["tasks"].format(count=len(found), preview=_B["task_sep"].join(
             t["text"][:_L["task_preview_chars"]] for t in found[:_L["task_preview"]])))
     lines += _B["left_heading"]
-    for key in ("example_first", "diagram_first"):
+    for key in _format_shapes():
         if key in shape:
-            lines += _B[key]
+            lines += _B.get(key, [])
+    reorder = [rx for key, rx in _revise_first().items() if key in shape]
     if cw["has_questions"]:
         lines += _B["table_head"]
         for i in todo:
             revise = i.get('revise', '')
-            if "example_first" in shape:
-                revise = _examples_first(revise)
+            for rx in reorder:
+                revise = _sources_first(revise, rx)
             lines.append(_B["table_row"].format(text=i["text"], marks=i.get("marks", ""), revise=revise))
     else:
         lines += [_B["list_row"].format(text=i["text"]) for i in todo]
