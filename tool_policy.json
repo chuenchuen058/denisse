@@ -140,6 +140,16 @@
       ],
       "cues": "stud|sesh|session|pomod|p[ao]m[ao]d|timer|\\bbreak\\b|\\brest\\b|focus"
     },
+    "tutor": {
+      "tools": [
+        "tutor_explain",
+        "tutor_quiz",
+        "tutor_weak_topics",
+        "tutor_exam_question",
+        "tutor_mark_answer"
+      ],
+      "cues": "quiz|test me|explain|teach|tutor|\\bweak|struggl|revis|exam|past paper|practi[sc]e|question|\\bmark\\b|my answer|check my|working|understand|don'?t get|lesson|lecture|module|topic|coursework|go over|walk me through|step by step"
+    },
     "preferences": {
       "tools": [
         "reply_preference"
@@ -378,6 +388,33 @@
       "side_effect": "write",
       "reply_must_mention": "\\b(?:noted|got it|will do|okay|ok|sure|alright|from now on)\\b",
       "fallback_reply": "Alright, noted."
+    },
+    "tutor_explain": {
+      "_note": "The study tutor's tools (tutor/chat.py, 2026-11-05). reply_must_mention and fallback_reply are the tutor's name, tutor.json 'name' (tutor/test_teach.py checks the two files agree): a reply that leaves the tutor out gets the tutor introducing itself in front. Reads and model calls; what they record goes to the tutor's own area of the vault. Marking is a write: it closes the open question.",
+      "side_effect": "read",
+      "reply_must_mention": "\\bDon\\b",
+      "fallback_reply": "Don here."
+    },
+    "tutor_quiz": {
+      "side_effect": "read",
+      "reply_must_mention": "\\bDon\\b",
+      "fallback_reply": "Don here."
+    },
+    "tutor_weak_topics": {
+      "side_effect": "read",
+      "reply_must_mention": "\\bDon\\b",
+      "fallback_reply": "Don here."
+    },
+    "tutor_exam_question": {
+      "side_effect": "read",
+      "reply_must_mention": "\\bDon\\b",
+      "fallback_reply": "Don here."
+    },
+    "tutor_mark_answer": {
+      "side_effect": "write",
+      "once_per_turn": true,
+      "reply_must_mention": "\\bDon\\b",
+      "fallback_reply": "Don here."
     }
   }
 }

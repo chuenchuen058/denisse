@@ -254,6 +254,21 @@ def _fixture_vault(which):
     real_cw = planner.coursework_deadlines
     stack.enter_context(patch.object(planner, "coursework_deadlines",
                                      lambda vault=v: real_cw(vault)))
+    # The study tutor's tools (tutor/chat.py, 2026-11-05) read the fixture's
+    # Don area and write lessons and practice back into it -- so a scratch
+    # copy, never the checked-in fixture, and the learner model's store with
+    # it. Claude hand-offs are already off (delegate.DRY_RUN).
+    import shutil
+    from tutor import chat as tutor_chat
+    from tutor.conf import Paths as TutorPaths
+    scratch = Path(tempfile.mkdtemp(prefix="denisse-eval-vault-"))
+    copy = scratch / "vault"
+    shutil.copytree(FIXTURE_VAULT, copy)
+    stack.enter_context(patch.object(tutor_chat, "PATHS", TutorPaths(vault=str(copy), state=str(scratch / "state"))))
+    from learner import core as learner_core
+    stack.enter_context(patch.object(learner_core, "STORE", scratch / "learner" / "model.json"))
+    stack.enter_context(patch.object(learner_core, "NOTE", copy / "Learner-Model.md"))
+    stack.callback(shutil.rmtree, scratch, True)
     return stack
 
 

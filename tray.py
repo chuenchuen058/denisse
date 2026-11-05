@@ -2072,6 +2072,14 @@ def main():
     # worker thread; the clock lives here. Each call is marshalled onto the
     # Tk thread and waited for, so the tool result is what really happened.
     study_mode.set_dispatcher(_on_tk_thread)
+    # When a study block ends, the study tutor (tutor/chat.py) may offer a
+    # short check for the rest; the line goes into the clock's state for the
+    # model, so the offer is made in chat.
+    try:
+        import tools as _tools
+        study_mode.set_round_end(_tools.tutor_round_offer)
+    except Exception:
+        pass  # the clock runs without the tutor
     # Plain countdowns (timers.py) set by her set_timer tool. Its pill also
     # keeps off study mode's pill, so both can run at once.
     global _timer_display

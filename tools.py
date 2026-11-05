@@ -846,6 +846,40 @@ def reply_preference(action: str = "add", text: str = "") -> str:
     return reply_preferences.tool(action, text)
 
 
+# The study tutor (tutor/chat.py, 2026-11-05): looked up when called, so a
+# headless user of tools.py never loads the tutor's config or the vault.
+def tutor_explain(topic: str, module: str = "") -> str:
+    from tutor import chat
+    return chat.explain(topic, module)
+
+
+def tutor_quiz(module: str = "", topic: str = "", count: int = 0) -> str:
+    from tutor import chat
+    return chat.quiz(module, topic, count)
+
+
+def tutor_weak_topics(module: str = "") -> str:
+    from tutor import chat
+    return chat.weak_topics(module)
+
+
+def tutor_exam_question(module: str = "", topic: str = "") -> str:
+    from tutor import chat
+    return chat.exam_question(module, topic)
+
+
+def tutor_mark_answer(answer: str, module: str = "") -> str:
+    from tutor import chat
+    return chat.mark_answer(answer, module)
+
+
+def tutor_round_offer(round_no: int) -> str:
+    """study_mode's end-of-round hook (not a model tool): the tutor's offer
+    of a short check, or '' when it has nothing to quiz from."""
+    from tutor import chat
+    return chat.round_offer(round_no)
+
+
 def check_calendar(day: str = "") -> str:
     """What is on his calendar -- which, today, is nothing she can see.
 
@@ -911,4 +945,10 @@ TOOL_FUNCTIONS = {
     "stop_study_session": stop_study_session,
     "reply_preference": reply_preference,
     "check_calendar": check_calendar,
+    # The study tutor (tutor/chat.py), model-visible since 2026-11-05.
+    "tutor_explain": tutor_explain,
+    "tutor_quiz": tutor_quiz,
+    "tutor_weak_topics": tutor_weak_topics,
+    "tutor_exam_question": tutor_exam_question,
+    "tutor_mark_answer": tutor_mark_answer,
 }
