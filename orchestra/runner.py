@@ -440,8 +440,23 @@ class _FileLock:
 def _merge_into(fresh: dict, state: dict, base: dict) -> dict:
     """Apply what this process changed (state vs base) onto the state another runner saved."""
     for slug, ts in state["tasks"].items():
-        if base["tasks"].get(slug) != ts:
+        bts = base["tasks"].get(slug)
+        if bts == ts:
+            continue
+        fts = fresh["tasks"].get(slug)
+        if fts is None or fts == bts:
             fresh["tasks"][slug] = ts
+            continue
+        # Both processes changed this task since we loaded (one finished the lane, the other
+        # reconciled it, say). Ours wins field by field, but the history entries the other one
+        # appended are kept: losing one left days[] charged for a run history no longer showed.
+        b_hist, ours, theirs = (bts or {}).get("history", []), ts.get("history", []), fts.get("history", [])
+        if len(ours) < len(b_hist) or theirs[:len(b_hist)] != b_hist[:len(theirs)]:
+            fresh["tasks"][slug] = ts  # history was rewritten, not appended to: nothing safe to splice
+            continue
+        extra = [e for e in theirs[len(b_hist):] if e not in ours[len(b_hist):]]
+        new = sorted(ours[len(b_hist):] + extra, key=lambda e: str(e.get("end", "")))
+        fresh["tasks"][slug] = {**ts, "history": ours[:len(b_hist)] + new}
     for k, v in state["done"].items():
         if base["done"].get(k) != v:
             fresh["done"][k] = v
