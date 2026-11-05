@@ -7,8 +7,8 @@ This module turns those words into a time. It is plain code so a wrong
 answer is reproducible and testable (scripts/test_time_parse.py), and so the
 8B model never has to do calendar arithmetic it can't see a clock for.
 
-The timezone, every word list, the day-part times and the ambiguity limits
-are in time_parse.json (Rule 0); the values quoted below are its shipped
+The timezone, every word list, the day-part times, the ambiguity limits and
+every question it asks back ("wording") are in time_parse.json (Rule 0); the values quoted below are its shipped
 defaults. Day-part times can be overridden at runtime by set_part_source()
 -- the hook for what the learner model knows about Chuen. `now()` is the
 one clock; tests and the eval pin it with `fixed_clock(...)`.
@@ -59,9 +59,13 @@ from zoneinfo import ZoneInfo
 
 # Every word list, default time, the timezone and the ambiguity limits live
 # in time_parse.json beside this file (Rule 0); this module only says how
-# they fit together. Loaded once, at import.
-with open(os.path.splitext(os.path.abspath(__file__))[0] + ".json", encoding="utf-8") as _f:
+# they fit together. Loaded once, at import. DENISSE_TIME_PARSE points at
+# another data file (tests, A/Bs).
+CONFIG_FILE = (os.environ.get("DENISSE_TIME_PARSE")
+               or os.path.splitext(os.path.abspath(__file__))[0] + ".json")
+with open(CONFIG_FILE, encoding="utf-8") as _f:
     CONFIG = json.load(_f)
+_SAY = CONFIG["wording"]
 
 
 def _hhmm(s: str) -> time:
@@ -178,7 +182,9 @@ _SPAN_LEAD = re.compile(r"^(?:" + _alt(CONFIG["span_lead_words"]) + r")\s+")
 _SPAN_TAIL = re.compile(r"\b(?:" + _alt(CONFIG["span_tail_words"]) + r")$")
 _NUM = r"(?:\d+(?:\.\d+)?|" + _alt(_NUMBER_WORDS) + r")"
 _UNIT_RE = r"(?:" + _alt(_UNIT) + r")"
-_DUR_PART = re.compile(r"(" + _NUM + r")\s*(" + _UNIT_RE + r")\b(\s+and\s+a\s+half)?")
+_HALF_MORE = r"\s+".join(re.escape(w) for w in CONFIG["half_more_suffix"].split())
+_DUR_PART = re.compile(r"(" + _NUM + r")\s*(" + _UNIT_RE + r")\b(\s+" + _HALF_MORE + r")?")
+_DUR_JOINERS = {""} | set(CONFIG["duration_joiners"])
 
 
 def _num(word: str) -> float:
@@ -206,7 +212,7 @@ def parse_duration(text: str) -> timedelta | None:
     total, pos = 0.0, 0
     for part in _DUR_PART.finditer(s):
         gap = s[pos:part.start()].strip(" ,")
-        if gap not in ("", "and"):
+        if gap not in _DUR_JOINERS:
             return None
         secs = _UNIT[part.group(2)]
         total += _num(part.group(1)) * secs + (secs / 2 if part.group(3) else 0)
@@ -243,10 +249,22 @@ _MONTH_RE = r"(" + "|".join(
 _WD_RE = r"(" + _alt(WEEKDAYS) + "|" + _alt(_WD_ALT) + r")"
 _WD_NEXT = set(CONFIG["next_weekday_modifiers"])
 _WD_MODS = _WD_NEXT | set(CONFIG["this_weekday_modifiers"])
+_NEXT, _THIS = "next", "this"  # internal tags for which list matched, not words he says
 _PART_RE = r"\b(" + _alt(set(PART_DEFAULTS) - _TODAY_PARTS | set(_PART_ALIASES)) + r")\b"
 _TODAY_PART_RE = r"\b(" + _alt(_TODAY_PARTS) + r")\b" if _TODAY_PARTS else None
 _NAMED_TIMES = {w: _hhmm(t) for w, t in CONFIG["named_times"].items()}
 _BEFORE_RE = r"^(?:" + _alt(CONFIG["before_words"]) + r")\b"
+_CLOCK_LEAD = _alt(CONFIG["clock_lead_words"])
+_MIN_REL = dict(CONFIG["minute_relations"])
+_MIN_UNIT = _alt(CONFIG["minute_unit_words"])
+_HALF_HOUR = dict(CONFIG["half_hour_words"])
+_PART_LEAD = _alt(CONFIG["part_lead_words"])
+# am / pm, each with the ways it is written ("p.m."). The canonical names
+# are the keys; _MER_TOKEN maps every spelling back to one.
+_MER_TOKEN = {w: mer for mer, ws in CONFIG["meridiems"].items() for w in [mer, *ws]}
+_MER_RE = r"(" + _alt(_MER_TOKEN) + r")"
+_AM, _PM = list(CONFIG["meridiems"])
+_STRIP = re.compile(r"\b(?:" + _alt(CONFIG["strip_words"]) + r")\b")
 
 
 def _month(word: str) -> int:
@@ -273,7 +291,7 @@ def _clean(text: str) -> str:
     s = s.replace("’", "'").replace(",", " ").replace("!", " ").replace("?", " ")
     for pattern, right in _MISSPELT:
         s = pattern.sub(right, s)
-    s = re.sub(r"\bo'?clock\b", " ", s)
+    s = _STRIP.sub(" ", s)
     s = re.sub(r"\s*\.\s*$", "", s)
     return re.sub(r"\s+", " ", s).strip()
 
@@ -326,7 +344,7 @@ def _extract(s: str) -> tuple[_Bits, str]:
         w = m.group(2)
         b.weekday = WEEKDAYS.index(w) if w in WEEKDAYS else _WD_ALT[w]
         mod = m.group(1) or ""
-        b.wd_mod = "next" if mod in _WD_NEXT else ("this" if mod else None)
+        b.wd_mod = _NEXT if mod in _WD_NEXT else (_THIS if mod else None)
 
     # ---- explicit dates
     m, s = _take(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b", s)
@@ -345,7 +363,7 @@ def _extract(s: str) -> tuple[_Bits, str]:
             b.dom, b.month = int(m.group(1)), _month(m.group(2))
             b.year = int(m.group(3)) if m.group(3) else None
     if b.dom is None:
-        m, s = _take(r"\b" + _MONTH_RE + r"\s+(?:the\s+)?" + _ORD + r"\b(?:\s+(\d{4}))?(?!\s*(?:am|pm|:))", s)
+        m, s = _take(r"\b" + _MONTH_RE + r"\s+(?:the\s+)?" + _ORD + r"\b(?:\s+(\d{4}))?(?!\s*(?:" + _alt(CONFIG["meridiems"]) + r"|:))", s)
         if m:
             b.month, b.dom = _month(m.group(1)), int(m.group(2))
             b.year = int(m.group(3)) if m.group(3) else None
@@ -359,37 +377,37 @@ def _extract(s: str) -> tuple[_Bits, str]:
         m, s = _take(_PART_RE, s)
         if m:
             b.part = _PART_ALIASES.get(m.group(1), m.group(1))
-            s = re.sub(r"\bin the\s*$|\bin the\b(?=\s*$)", " ", s)
+            s = re.sub(r"\b(?:" + _PART_LEAD + r")\s*$|\b(?:" + _PART_LEAD + r")\b(?=\s*$)", " ", s)
 
     # ---- clock time
     m, s = _take(r"\b(" + _alt(_NAMED_TIMES) + r")\b", s)
     if m:
         t = _NAMED_TIMES[m.group(1)]
         b.hour, b.minute = t.hour, t.minute
-        b.meridiem = "am" if t.hour < 12 else "pm"
+        b.meridiem = _AM if t.hour < 12 else _PM
     if b.hour is None:
-        m, s = _take(r"\b" + _MINS_TOKEN + r"\s+(?:minutes\s+)?(past|after|to)\s+" + _HOUR_TOKEN
-                     + r"\b(?:\s*(am|pm|a\.m\.|p\.m\.))?", s)
+        m, s = _take(r"\b" + _MINS_TOKEN + r"\s+(?:(?:" + _MIN_UNIT + r")\s+)?(" + _alt(_MIN_REL)
+                     + r")\s+" + _HOUR_TOKEN + r"\b(?:\s*" + _MER_RE + r")?", s)
         if m:
             mins = _MINS_VAL.get(m.group(1)) or int(m.group(1))
             hour = _hour_val(m.group(3))
-            if m.group(2) == "to":
+            if _MIN_REL[m.group(2)] < 0:  # "quarter to four"
                 hour, mins = (hour - 1) or 12, 60 - mins
             b.hour, b.minute = hour, mins
-            b.meridiem = (m.group(4) or "").replace(".", "") or None
+            b.meridiem = _MER_TOKEN.get(m.group(4))
     if b.hour is None:
-        m, s = _take(r"\b(\d{1,2})[:.h](\d{2})\s*(am|pm|a\.m\.|p\.m\.)?(?=\s|$)", s)
+        m, s = _take(r"\b(\d{1,2})[:.h](\d{2})\s*" + _MER_RE + r"?(?=\s|$)", s)
         if m:
             b.hour, b.minute = int(m.group(1)), int(m.group(2))
-            b.meridiem = (m.group(3) or "").replace(".", "") or None
+            b.meridiem = _MER_TOKEN.get(m.group(3))
             b.explicit_24h = b.meridiem is None and (b.hour >= 13 or m.group(1).startswith("0")
                                                      or b.hour == 0)
     if b.hour is None:
-        m, s = _take(r"\b(\d{1,2})\s*(am|pm|a\.m\.|p\.m\.)(?=\s|$)", s)
+        m, s = _take(r"\b(\d{1,2})\s*" + _MER_RE + r"(?=\s|$)", s)
         if m:
-            b.hour, b.meridiem = int(m.group(1)), m.group(2).replace(".", "")
+            b.hour, b.meridiem = int(m.group(1)), _MER_TOKEN[m.group(2)]
     if b.hour is None:
-        m, s = _take(r"\b(?:at|for|by|around|about)\s+" + _HOUR_TOKEN + r"\b(?!\s*(?:st|nd|rd|th))", s)
+        m, s = _take(r"\b(?:" + _CLOCK_LEAD + r")\s+" + _HOUR_TOKEN + r"\b(?!\s*(?:st|nd|rd|th))", s)
         if m:
             b.hour = _hour_val(m.group(1))
             if b.hour >= 13:
@@ -400,9 +418,9 @@ def _extract(s: str) -> tuple[_Bits, str]:
             b.hour = _hour_val(m.group(1))
     if b.hour is None:
         # "half four" -- British for 16:30
-        m, s = _take(r"\bhalf\s+" + _HOUR_TOKEN + r"\b", s)
+        m, s = _take(r"\b(" + _alt(_HALF_HOUR) + r")\s+" + _HOUR_TOKEN + r"\b", s)
         if m:
-            b.hour, b.minute = _hour_val(m.group(1)), 30
+            b.hour, b.minute = _hour_val(m.group(2)), _HALF_HOUR[m.group(1)]
 
     left = " ".join(w for w in s.split() if w not in _FILLER)
     return b, left
@@ -417,13 +435,13 @@ def _hour24(b: _Bits) -> tuple[int, str | None]:
     h, mer = b.hour, b.meridiem
     if b.explicit_24h:
         return h, None
-    if mer == "am":
+    if mer == _AM:
         if b.part in _PM_PARTS:
-            return h, f"'{b.part}' and 'am' don't agree -- which did you mean?"
+            return h, _SAY["part_disagrees"].format(part=b.part, meridiem=mer)
         return (0 if h == 12 else h), None
-    if mer == "pm":
+    if mer == _PM:
         if b.part in _AM_PARTS:
-            return h, f"'{b.part}' and 'pm' don't agree -- which did you mean?"
+            return h, _SAY["part_disagrees"].format(part=b.part, meridiem=mer)
         return (h if h == 12 else h + 12), None
     if b.part in _AM_PARTS:
         return (0 if h == 12 else h), None
@@ -509,9 +527,8 @@ def parse(text: str, now_: datetime | None = None) -> Parsed:
                     return Parsed(leftover=left)
                 day = cand
                 if day == today and _wall(day, clock) > ref:
-                    nxt = "next month"
-                    return ask(f"Today is the {b.dom}{_suffix(b.dom)} -- do you mean today "
-                               f"({_fmt_time(clock)}) or the {b.dom}{_suffix(b.dom)} {nxt}?")
+                    return ask(_SAY["day_of_month_is_today"].format(
+                        nth=f"{b.dom}{_suffix(b.dom)}", time=_fmt_time(clock)))
                 if day == today:
                     day = None  # passed today: the next one
                     month, year = (1, year + 1) if month == 12 else (month + 1, year)
@@ -528,21 +545,22 @@ def parse(text: str, now_: datetime | None = None) -> Parsed:
         except ValueError:
             return Parsed(leftover=left)
         if b.weekday is not None and day.weekday() != b.weekday:
-            return ask(f"The {day.day}{_suffix(day.day)} of {day:%B} is a "
-                       f"{WEEKDAYS[day.weekday()].title()}, not a {WEEKDAYS[b.weekday].title()} "
-                       "-- which did you mean?")
+            return ask(_SAY["weekday_does_not_match_date"].format(
+                nth=f"{day.day}{_suffix(day.day)}", month=f"{day:%B}",
+                actual=WEEKDAYS[day.weekday()].title(), said=WEEKDAYS[b.weekday].title()))
         if b.before and not has_time:
             day -= timedelta(days=1)
     elif b.weekday is not None:
         ahead = (b.weekday - today.weekday()) % 7
         name = WEEKDAYS[b.weekday].title()
-        if b.wd_mod == "next" and ahead == 0:
+        if b.wd_mod == _NEXT and ahead == 0:
             ahead = 7
         elif b.wd_mod is None and ahead == 0:
             if _wall(today, clock) > ref:
-                when_s = _fmt_time(clock) if has_time else "end of day"
-                return ask(f"It's {name} today -- do you mean today ({when_s}) or "
-                           f"next {name}, {describe(_wall(today + timedelta(days=7), clock), ref)}?")
+                when_s = _fmt_time(clock) if has_time else _SAY["no_time_given"]
+                return ask(_SAY["weekday_is_today"].format(
+                    weekday=name, when=when_s,
+                    next=describe(_wall(today + timedelta(days=7), clock), ref)))
             ahead = 7
         day = today + timedelta(days=ahead)
     elif b.day_word is not None:
@@ -550,8 +568,8 @@ def parse(text: str, now_: datetime | None = None) -> Parsed:
             day = today
         else:
             if ref.hour < _SMALL_HOURS_END:
-                return ask(f"It's after midnight -- by '{b.day_word}' do you mean later "
-                           f"today ({describe(_wall(today, clock), ref)}) or the day after?")
+                return ask(_SAY["after_midnight"].format(
+                    day_word=b.day_word, today=describe(_wall(today, clock), ref)))
             day = today + timedelta(days=b.day_offset)
     else:
         # A time with no day: the next time it comes round.
@@ -569,7 +587,7 @@ def parse(text: str, now_: datetime | None = None) -> Parsed:
     if when <= ref:
         # "today at 9" at 10:00, "this Tuesday at 9" on Tuesday at 10:00, a
         # dated day already gone: never quietly set a reminder in the past.
-        return ask(f"{describe(when, ref)} has already passed -- when should it be?")
+        return ask(_SAY["already_passed"].format(when=describe(when, ref)))
     return Parsed(when=when, has_time=has_time, leftover=left)
 
 

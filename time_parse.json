@@ -80,6 +80,27 @@
                     "ago", "end", "eod", "weekend", "fortnight", "midday", "noon",
                     "am", "pm", "past", "next", "last"],
 
+  "clock_lead_words": ["at", "for", "by", "around", "about"],
+  "minute_relations": {"past": 1, "after": 1, "to": -1},
+  "minute_unit_words": ["minutes"],
+  "half_hour_words": {"half": 30},
+  "half_more_suffix": "and a half",
+  "duration_joiners": ["and"],
+  "part_lead_words": ["in the"],
+  "meridiems": {"am": ["am", "a.m."], "pm": ["pm", "p.m."]},
+  "strip_words": ["o'clock", "oclock"],
+
+  "wording": {
+    "_comment": "Every sentence parse() says back. Python str.format; keep the {fields} each one already uses.",
+    "part_disagrees": "'{part}' and '{meridiem}' don't agree -- which did you mean?",
+    "day_of_month_is_today": "Today is the {nth} -- do you mean today ({time}) or the {nth} next month?",
+    "weekday_does_not_match_date": "The {nth} of {month} is a {actual}, not a {said} -- which did you mean?",
+    "weekday_is_today": "It's {weekday} today -- do you mean today ({when}) or next {weekday}, {next}?",
+    "no_time_given": "end of day",
+    "after_midnight": "It's after midnight -- by '{day_word}' do you mean later today ({today}) or the day after?",
+    "already_passed": "{when} has already passed -- when should it be?"
+  },
+
   "ambiguity": {
     "_comment": "A bare hour with no am/pm: pm_hours read as pm, others as am (12 is noon). 'tomorrow' said before small_hours_end o'clock is asked about.",
     "bare_hour_pm": [1, 6],
