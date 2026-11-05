@@ -73,8 +73,16 @@ def _pct(x):
     return f"{100 * x:.0f}%"
 
 
+def _link(path: Path, base: Path) -> str:
+    """A link from base to path: relative when they share a drive, else an absolute file URI."""
+    try:
+        return os.path.relpath(path, base).replace(os.sep, "/")
+    except ValueError:  # different drives on Windows
+        return Path(path).resolve().as_uri()
+
+
 def render(data: dict, results_path: Path, doc_path: Path = DOC) -> str:
-    rel = os.path.relpath(results_path, doc_path.parent).replace(os.sep, "/")
+    rel = _link(results_path, doc_path.parent)
     name = results_path.name
 
     def num(value, field):
@@ -232,7 +240,7 @@ def render(data: dict, results_path: Path, doc_path: Path = DOC) -> str:
         L += ["No earlier results file to compare with.", ""]
     else:
         prev = json.loads(prev_path.read_text(encoding="utf-8"))
-        prel = os.path.relpath(prev_path, doc_path.parent).replace(os.sep, "/")
+        prel = _link(prev_path, doc_path.parent)
         pg = (prev.get("git") or {}).get("commit") or "?"
         L += [f"Against [`demo/results/{prev_path.name}`]({prel}) (commit `{pg[:7]}`). "
               "Each cell is then \u2192 now; a dash means that run did not measure it. The "

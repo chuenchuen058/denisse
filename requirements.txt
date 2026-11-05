@@ -41,3 +41,7 @@ dateparser==1.4.3
 msal==1.39.0
 
 requests>=2.31.0
+
+# Study tutor (tutor/extract.py): lecture PDFs, PyMuPDF first, pypdf as fallback
+pymupdf>=1.24
+pypdf>=4.0

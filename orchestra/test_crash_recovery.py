@@ -420,14 +420,17 @@ class CrashRecoveryTest(unittest.TestCase):
         th = threading.Thread(target=reader)
         th.start()
         try:
-            for i in range(300):
+            # at least 300 rewrites, and keep going until the reader has had 50 reads (capped)
+            i = -1
+            while i < 299 or (len(seen) < 50 and i < 20000):
+                i += 1
                 self.R.update_lock(before=[f"f{i}"] * 20, lane_pid=i)
         finally:
             stop.set()
             th.join()
         self.assertGreater(len(seen), 50, "the reader did run alongside the writes")
         self.assertTrue(all(seen), f"{seen.count(False)} of {len(seen)} reads saw no task")
-        self.assertEqual(self.R.read_lock(self.R.LOCK_FILE)["lane_pid"], 299)
+        self.assertEqual(self.R.read_lock(self.R.LOCK_FILE)["lane_pid"], i)
         self.assertEqual(list(self.R.REVIEW.glob("*.tmp")), [], "no temp file left behind")
         self.R.release_lock()
 
