@@ -301,7 +301,13 @@ python -m tutor mark <module> <answer...>   his answer to the open question
 Every result opens with the tutor introducing itself (`chat.intro`,
 `"{tutor} here."`), so the model's reply can carry the name; when the reply
 leaves it out, `tool_policy.json`'s `reply_must_mention` / `fallback_reply`
-put that first sentence in front. Those two policy values are the name too
+put that first sentence in front. For the quiz and the exam question the
+reply is **replaced** by the result instead (`must_mention_replaces`): on the
+first eval run the 8B model worked the problem itself rather than setting it,
+and a reply that isn't in the tutor's voice is a reply that didn't relay the
+question. What Chuen then sees is the questions verbatim -- the model-facing
+instructions in those two results sit after ` Tell him`, the brain's result
+cut marker, so they are cut off. The policy values are the name too
 (`tutor/test_teach.py` checks they agree with `tutor.json`); nothing in
 `tutor/*.py`, `tools.py` or `brain.json` says it.
 
