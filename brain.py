@@ -7,6 +7,7 @@ calls).
 No API key, no internet required after the model is downloaded once.
 """
 
+import copy
 import datetime
 import inspect
 import json
@@ -111,738 +112,55 @@ def _first_name() -> str:
     except Exception:
         return ""
 
-# Without this the model guesses POSIX paths for file tools on a Windows
-# box -- observed calling list_directory("/home/chuen") and read_file(
-# "/home/user/setup.txt") in reply to "what do you think of my setup?".
-# Stated as fact rather than left to inference, and derived at runtime so
-# it can't drift from the machine it's actually running on.
-_MACHINE_FACTS = (
-    f"You are running on {platform.system()} {platform.release()} as user "
-    f"'{os.environ.get('USERNAME') or os.environ.get('USER') or 'unknown'}', "
-    # Leave this sentence alone. "whose project folder is <denisse-wt\...>"
-    # was read as HIS project ("what am I working on?" -> the worktree's
-    # name, 2026-11-04); the fix is the vault search (cues.vault_queries,
-    # vault_search's overview fallback), not wording here: three rewordings
-    # were A/B'd and each moved some other case -- a longer one sent the
-    # garbled-input case to get_news 4/6, a same-length one turned "ha, do
-    # that again" into "No worries." 6/6. The prompt-budget lesson, again.
-    f"whose home folder is {os.path.expanduser('~')} and whose project "
-    f"folder is {os.path.dirname(os.path.abspath(__file__))}. Write paths "
-    f"the way this OS does (separator '{os.sep}')"
-    + (
-        ", e.g. C:\\Users\\Name\\Documents -- never invent a POSIX path "
-        "like /home/... "
-        if os.name == "nt"
-        else ". "
-    )
-    + "If you need a path you weren't given, build it from those, or use "
-    "find_files to locate the real one first. "
-)
+# The system prompt is brain.json prompt, in parts, joined at configure().
+# The machine facts (OS, user, home and program folders, path separator)
+# are derived at runtime so they can't drift from the machine she runs on:
+# without them the model guessed POSIX paths for file tools on a Windows
+# box -- list_directory("/home/chuen"), read_file("/home/user/setup.txt")
+# for "what do you think of my setup?". The wording is as tuned; the A/B
+# record (prompt._about in the data) says why every sentence must stay as
+# it is, and why nothing should be added: the prompt is ~4000 characters
+# that an 8B model spreads its attention over, so a sentence added for one
+# case is paid for by every other. Guidance for one tool belongs in that
+# tool's description, nets under the reply in code (_unleak_json).
+SYSTEM_PROMPT = ""
 
-SYSTEM_PROMPT = (
-    _MACHINE_FACTS +
-    "You are Denisse, a personal AI assistant built from scratch by Chuen "
-    "and running locally on his own computer, in the spirit of Jarvis "
-    "from Iron Man. You know exactly what you are: a local model "
-    f"(currently '{MODEL}', served through Ollama) with a set of tools "
-    "bolted on -- not a cloud service, not sentient, and not cagey about "
-    "your own nature. If asked what model or AI you're built on, answer "
-    "plainly and accurately instead of dodging or guessing. The person "
-    "you're talking to is named Chuen -- that's a known fact, not "
-    "something to ask about or hedge on. Address him by name naturally "
-    "sometimes, not in every reply, the way someone who actually knows "
-    "him would. Personality: polite and easygoing, a little casual -- more "
-    "like a friend hanging around than a formal assistant. Keep things "
-    "light and low-key rather than serious or stiff; it's fine to be warm "
-    "and a bit playful, but don't force jokes or overdo enthusiasm -- no "
-    "gushing, no exclamation-point-per-sentence energy. Personality is "
-    "seasoning, not the meal: stay concise, and never let tone get in the "
-    "way of being clear, honest, or useful. You can hold a conversation "
-    "and, when it genuinely helps, use your tools to check the time, do "
-    "exact math (see calculate -- never compute arithmetic yourself, even "
-    "something that looks trivial), run shell commands, open applications, "
-    "read/write files, find/locate files by name when the user doesn't "
-    "have an exact path, control "
-    "Spotify playback (play/pause/skip/check what's playing) when it's "
-    "set up, and remember/recall facts about the user. Be direct. Only use a tool "
-    "when it's actually needed to answer or act -- don't narrate your "
-    "intentions, just do it and report the result. "
-    # A "RELAYING TOOL RESULTS" paragraph lived here on 2026-09-23, telling
-    # her to name the items in a list and never answer with JSON. It fixed
-    # those, and broke other things: clean eval went 10/10 -> 8/10, with
-    # greetings picking up a spurious recall() call and "what is 17 times
-    # 23?" answering "I called the 'calculate' tool" instead of 391.
-    # A/B'd twice each way -- 8/10 with it, 10/10 without.
-    #
-    # The lesson is about budget, not wording. This prompt is already ~4000
-    # characters and an 8B model spreads its attention across all of it, so
-    # anything added here is paid for by everything already in it. Guidance
-    # that only matters for one tool belongs in that tool's description,
-    # where it is in context; the JSON ban lives in _unleak_json, where it
-    # costs no attention at all. Think hard before adding to this prompt.
-    #
-    # Also tried 2026-10-21, and reverted: pairing the greeting examples
-    # ("'hey, what's up?' to a greeting, 'anytime' to thanks, an opinion to
-    # small talk") and narrowing the garbled clause below to "doesn't make
-    # sense at all". Aim: stop "thanks" -> "doing alright, you?" and "do you
-    # like rainy days?" -> "I didn't catch that". Clean went 25,25 -> 24,24
-    # over two runs each, and greetings started calling list_skills and
-    # read_skill. Small talk still answered "didn't catch that".
-    "IMPORTANT: for a "
-    "greeting, small talk, or a short acknowledgment like 'thanks' or "
-    "'ok', respond the way a person actually would -- 'doing alright, "
-    "you?', 'anytime', 'no worries' -- without calling any tool first "
-    "(not recall, not read_file, not list_directory, not anything). Do "
-    "not describe your reply or explain that no tool is needed -- just "
-    "say the thing a person would say. The same applies to a message that "
-    "doesn't read like a real request at all -- a fragment, a stray word, "
-    "or something that looks garbled (voice input sometimes mishears "
-    "words) -- ask what he meant or say you didn't catch that, instead of "
-    "guessing a tool call for it (e.g. calling get_news with nonsense as "
-    "the 'topic'). Only reach for a tool once the message actually reads "
-    "like a coherent request for something. Every tool call costs real time "
-    "the person is sitting there waiting "
-    "through, so skip it whenever a direct answer is possible. You also have a "
-    "skills library -- specific how-to guides for particular kinds of "
-    "tasks. Call 'list_skills' to see what's available, and 'read_skill' "
-    "to load one BEFORE attempting a task it covers (e.g. organizing "
-    "files, giving a daily briefing, taking notes) -- follow its "
-    "instructions rather than improvising. A tool result is ground truth: "
-    "report exactly what it says, including errors and 'User declined' "
-    "messages. Never invent or guess at a command's output, a file's "
-    "contents, or any other tool result -- if a tool failed or was "
-    "declined, say so plainly instead of describing what it would have "
-    "returned. If a tool call errors because you got the arguments wrong "
-    "(e.g. a function that takes no arguments got one anyway), just call "
-    "it again correctly -- do not present your own guess at what it "
-    "would have said as if it were the real result."
-)
 
-TOOL_DEFINITIONS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "run_shell_command",
-            "description": (
-                "Run a shell command on the local machine and return its output. Never a "
-                "command that deletes, moves, renames or overwrites his files or folders "
-                "('delete my downloads folder', 'clear out my desktop'): you don't do that, "
-                "even when asked, because it can't be undone and nothing brings the files "
-                "back. Don't call this for such a request -- tell him you won't, say why "
-                "(it's permanent), and that he can do it himself or use the Recycle Bin."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {"command": {"type": "string", "description": "The shell command to run."}},
-                "required": ["command"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "open_application",
-            "description": "Open an installed app by name, or open an existing document using its full path. For a file, CV or resume, first use find_files to get the real full path; then pass that path here. Finding or reading a file does not open it on screen.",
-            "parameters": {
-                "type": "object",
-                "properties": {"app_name": {"type": "string", "description": "Name or path of the application to open."}},
-                "required": ["app_name"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_directory",
-            "description": "List files and folders at a given path.",
-            "parameters": {
-                "type": "object",
-                "properties": {"path": {"type": "string", "description": "Directory path to list. Defaults to current directory."}},
-                "required": [],
-            },
-        },
-    },
+def _system_prompt(p: dict) -> str:
+    """brain.json prompt with this machine's facts and the model filled in."""
+    example = p["path_example_windows"] if os.name == "nt" else p["path_example_other"]
+    facts = p["machine_facts"].format(
+        system=platform.system(), release=platform.release(),
+        user=os.environ.get("USERNAME") or os.environ.get("USER") or p["unknown_user"],
+        home=os.path.expanduser("~"), project=os.path.dirname(os.path.abspath(__file__)),
+        sep=os.sep, path_example=example)
+    return facts + p["identity"].format(model=MODEL) + p["conduct"]
 
-    {
-        "type": "function",
-        "function": {
-            "name": "find_files",
-            "description": "Find/locate a file by name when the user doesn't know or give an exact path -- searches recursively through their common folders (Desktop, Documents, Downloads, Pictures, Videos, Music, GitHub, OneDrive) and returns matching full paths, newest first. Use this instead of list_directory when the user is asking you to find or locate something rather than browse a folder they already named.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Filename or part of a filename to search for, e.g. 'invoice' or '*.pdf'."},
-                    "location": {"type": "string", "description": "Optional: narrow the search to one folder, e.g. 'downloads' or 'desktop'. Leave empty to search everywhere."},
-                },
-                "required": ["query"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "read_file",
-            "description": "Read the text contents of a file -- only when he asks what a file says. 'Where is', 'find' and 'open' never need this; a found file's name and folder is the answer to 'where'.",
-            "parameters": {
-                "type": "object",
-                "properties": {"path": {"type": "string", "description": "Path to the file to read."}},
-                "required": ["path"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "write_file",
-            "description": (
-                "Write text content to one of HIS files, overwriting it if it already "
-                "exists. Never your own files: your settings, config, code and memory are "
-                "his to edit, not yours, and a write to any of them is refused -- so if he "
-                "asks you to edit your own settings or config, don't call this at all; tell "
-                "him plainly you don't change your own files and he can edit them himself."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Path to the file to write."},
-                    "content": {"type": "string", "description": "Text content to write."},
-                },
-                "required": ["path", "content"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_current_time",
-            # Leave this alone too: it is in CORE, so every turn pays for it.
-            # A paragraph listing the non-time turns ("never mind", "carry
-            # on", a greeting...) cost the garbled case 2/6 against 6/6, and
-            # one added sentence moved "ha, do that again" (A/B, 2026-11-04).
-            # The clock reflex is handled before the model instead
-            # (quick_replies.never_mind) and by routing the right tools.
-            "description": "Get the current date and time -- this machine's own local time, or, given a timezone, the current time somewhere else instead.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "timezone": {
-                        "type": "string",
-                        "description": "IANA timezone name for elsewhere, e.g. 'Asia/Tokyo', 'Asia/Hong_Kong', 'America/New_York'. Omit for this machine's own local time.",
-                    }
-                },
-                "required": [],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "calculate",
-            "description": "Evaluate a math expression exactly -- always use this for arithmetic instead of computing it yourself, even for something that looks simple, since that's exactly where a mental slip happens. Supports + - * / // % ** parentheses, unary minus, constants pi/e, and sqrt/abs/round/sin/cos/tan/log/log10/log2/exp/floor/ceil/factorial/pow/min/max. Translate a word problem or percentage into a plain expression first, e.g. '15% of 240' -> '240 * 0.15'.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "expression": {"type": "string", "description": "A plain math expression, e.g. '(17 + 3) * 4' or '240 * 0.15' or 'sqrt(144)'."}
-                },
-                "required": ["expression"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_weather",
-            "description": "Get a short current-weather summary for a place.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "location": {"type": "string", "description": "City or place name, e.g. 'Malaysia', 'Tokyo'."}
-                },
-                "required": ["location"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_news",
-            "description": "Get the latest real headlines from CNA (Channel NewsAsia). Use this for any news/current-events question -- never guess or make up headlines. It always returns real headlines, even with no topic given -- an empty topic is normal and valid, not an error, and just means general top headlines. Your reply MUST actually name at least 2-3 of the specific real headlines/topics it returned, in your own words -- a reply like 'I've got the news for you' with no actual content is wrong and useless, exactly as wrong as saying you couldn't find any.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "topic": {"type": "string", "description": "Optional topic/category to filter by, e.g. 'business', 'singapore', 'world'. Leave empty for general top headlines -- do not ask the user for a topic first, just call it."}
-                },
-                "required": [],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "play_song",
-            "description": "Search Spotify for a track and start playing it. Needs Spotify set up (SPOTIFY_CLIENT_ID/SECRET) and the Spotify app already open on this machine -- if the result says no active device, tell the user to open Spotify first (or call open_application('Spotify') yourself, then retry). Not configured at all yet is a normal, expected state to report plainly, not an error to apologize for.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Song name, optionally with artist, e.g. 'Heart Shaker Twice' or 'Blinding Lights The Weeknd'."}
-                },
-                "required": ["query"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "pause_music",
-            "description": "Pause whatever is currently playing on Spotify.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "resume_music",
-            "description": "Resume Spotify playback after a pause.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "skip_song",
-            "description": "Skip to the next track on Spotify.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "previous_song",
-            "description": "Go back to the previous track on Spotify.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "current_track",
-            "description": "Check what's currently playing on Spotify (song, artist, playing/paused) -- call this instead of guessing if asked what's playing.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_voice_settings",
-            "description": "Check what voice is actually speaking your replies out loud right now. You have no built-in knowledge of this -- call this instead of guessing if asked about your own voice.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_brain_location",
-            "description": "Check your actual code/memory paths, editable brain rules and current learning status. Use when asked about your brain, rules or whether you are learning; never guess these settings.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "look_at_this",
-            "description": (
-                "Read what Chuen is pointing at: the text selected in the window he's using "
-                "(or, if nothing is selected, his clipboard), plus that window's title. Use "
-                "for 'explain this', 'rewrite this shorter', 'what does this error mean', "
-                "'translate this' when he hasn't pasted the text himself. Not for files on disk."
-            ),
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_system_status",
-            "description": "Check the laptop's current disk space, memory, and CPU usage.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "clean_temp_files",
-            "description": "Delete old (24h+ untouched) temp files to free disk space. This already runs automatically every hour in the background -- use this to trigger it on demand.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_startup_programs",
-            "description": "List programs configured to launch automatically at login.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "disable_startup_program",
-            "description": "Stop a program from launching at login (reversible with restore_startup_program). See list_startup_programs for valid names.",
-            "parameters": {
-                "type": "object",
-                "properties": {"name": {"type": "string", "description": "Program name as shown by list_startup_programs."}},
-                "required": ["name"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "restore_startup_program",
-            "description": "Undo a previous disable_startup_program call, restoring that program to launch at login again.",
-            "parameters": {
-                "type": "object",
-                "properties": {"name": {"type": "string", "description": "Program name previously disabled."}},
-                "required": ["name"],
-            },
-        },
-    },
 
-    {
-        "type": "function",
-        "function": {
-            "name": "remember",
-            "description": "Save a fact about the user for later recall, e.g. remember('favorite_coffee', 'flat white').",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "key": {"type": "string", "description": "Short identifier for the fact, e.g. 'favorite_coffee'."},
-                    "value": {"type": "string", "description": "The fact to store."},
-                },
-                "required": ["key", "value"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "recall",
-            "description": "Recall a previously remembered fact about the user by its key.",
-            "parameters": {
-                "type": "object",
-                "properties": {"key": {"type": "string", "description": "The identifier used when the fact was saved."}},
-                "required": ["key"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_known_facts",
-            "description": "List every fact currently remembered about the user.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_skills",
-            "description": "List available skills (how-to guides for specific kinds of tasks).",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "read_skill",
-            "description": "Read the full instructions for one skill by name (see list_skills).",
-            "parameters": {
-                "type": "object",
-                "properties": {"name": {"type": "string", "description": "Skill name, e.g. 'organize_files'."}},
-                "required": ["name"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "add_task",
-            "description": (
-                "Add something Chuen has to do, optionally with a deadline. Use this "
-                "whenever he says he needs to do something by a time -- 'remind me to "
-                "email Sunway before Friday' is add_task('email Sunway', 'before Friday'). "
-                "Pass his own words for the deadline; don't work out the date yourself. "
-                "If he gave a time but not what the reminder is FOR ('remind me thursday'), "
-                "don't add anything -- ask him what it's for in one short question. If the "
-                "result says the time is ambiguous, ask him that question instead."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "text": {"type": "string", "description": "What needs doing, e.g. 'email Sunway about the firm visit'."},
-                    "due": {"type": "string", "description": "The deadline, copied from his words -- 'before Friday', 'tomorrow 5pm', 'on the 6th of October 14:00'. If the date is part of the sentence, put it here AS WELL as leaving it in the text. Omit only when he gave no time at all."},
-                },
-                "required": ["text"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_tasks",
-            "description": (
-                "Read out Chuen's open tasks. Use this for ANY question about what he "
-                "has to do or where his tasks are -- 'what's on my plate', 'what do I "
-                "have to do', 'where is the task list', 'show me my tasks', 'anything "
-                "due'. Then tell him what the result actually says: name each task and "
-                "its deadline. Never answer a question about his tasks from memory, and "
-                "never say the list 'is there' without reading it. If he asks WHERE the "
-                "list is, answer by telling him what is on it -- do not state a file "
-                "path or filename; you do not know where it is stored and will get it "
-                "wrong."
-            ),
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "complete_task",
-            "description": (
-                "Mark a task done once Chuen says he's finished it. Describe the task in "
-                "words -- it's matched on those. If more than one matches it refuses "
-                "rather than guessing, so pass enough to be specific."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {"task": {"type": "string", "description": "Words identifying the task, e.g. 'the Sunway email'."}},
-                "required": ["task"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "remove_task",
-            "description": "Delete a task that was added by mistake. For tasks he has actually done, use complete_task instead so the record is kept.",
-            "parameters": {
-                "type": "object",
-                "properties": {"task": {"type": "string", "description": "Words identifying the task to delete."}},
-                "required": ["task"],
-            },
-        },
-    },
-    # Timers (timers.py), added 2026-10-20 after "start timer" was answered
-    # with run_shell_command("start") and "The timer has started." All the
-    # guidance is in these descriptions, not SYSTEM_PROMPT -- see the
-    # prompt-budget comment above -- and tool_router only offers them when
-    # the message is about a timer, so no other turn pays for them.
-    {
-        "type": "function",
-        "function": {
-            "name": "set_timer",
-            "description": (
-                "Start a countdown timer that pings Chuen from the orb when it ends. Use for "
-                "'start a timer', 'set a timer for 10 minutes', 'remind me in 5 minutes to "
-                "check the oven', 'time me for 30 seconds'. This is the ONLY way to start a "
-                "timer -- never use run_shell_command or open_application for one. If he "
-                "didn't say how long, call it with no length and it will tell you to ask him. "
-                "Not for the pomodoro study timer, and not for a deadline days away (add_task)."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "minutes": {"type": "number", "description": "Length in minutes, e.g. 10 or 1.5."},
-                    "seconds": {"type": "number", "description": "Extra seconds, or the whole length for a short timer."},
-                    "label": {"type": "string", "description": "What it's for, in a few words, e.g. 'oven'. Optional."},
-                    "duration": {"type": "string", "description": "Or the length in his own words, e.g. '20 mins', 'an hour and a half' -- used when minutes/seconds aren't given."},
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "cancel_timer",
-            "description": (
-                "Stop a running countdown timer: 'stop the timer', 'cancel the oven timer'. "
-                "Report exactly what it returns -- if it says no timer was running, say that."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {"label": {"type": "string", "description": "Which timer, if he named one. Leave out to stop the running one."}},
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_timers",
-            "description": "How long is left on running timers: 'how long is left on my timer?'.",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    # Study mode (study_mode.py), model-visible since 2026-11-03. The 25/5
-    # pomodoro used to run only when a whole-message phrase matched before
-    # the model, so the model had never heard of it: "is the study session
-    # running?" went to list_directory, "pause sutuy timer" paused Spotify.
-    # Offered by the "study" group (tool_policy.json), whose cues include
-    # "timer" and "session" so a typo'd "sutuy timer" still gets them. The
-    # live state is also one line in the prompt while it runs.
-    {
-        "type": "function",
-        "function": {
-            "name": "study_session_status",
-            "description": (
-                "Whether a study session (the 25-minute study / 5-minute rest pomodoro) is "
-                "running, paused or off, and how long is left. Use for 'is the study session "
-                "running?', 'how long left on my study timer?'. It is not a plain countdown "
-                "timer (list_timers) and not a file or folder."
-            ),
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "start_study_session",
-            "description": (
-                "Start a study session: 25 minutes of study, then a 5-minute rest, round and "
-                "round, with a countdown pill and a message at each switch. For 'start a study "
-                "session', 'pomodoro', 'study timer' -- including misspellings. Not for a plain "
-                "countdown ('10 minute timer' is set_timer)."
-            ),
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "pause_study_session",
-            "description": (
-                "Pause the running study session where it is; the countdown freezes until "
-                "resume_study_session. 'pause the study timer', 'hold the session'. Report "
-                "exactly what it returns -- if it says nothing was running, say that."
-            ),
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "resume_study_session",
-            "description": (
-                "Continue a paused study session from where it was paused: 'resume', 'carry "
-                "on', 'ok go on', 'back to it', 'unpause' while the session is paused. Not "
-                "Spotify (resume_music) and not a new session (start_study_session). Report "
-                "exactly what it returns."
-            ),
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "stop_study_session",
-            "description": (
-                "End the study session for good: 'stop the study session', 'session over', "
-                "'I'm done studying', 'end pomodoro'. Report exactly what it returns -- if "
-                "it says no session was running, say that plainly (no goodbye, no clock)."
-            ),
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    # His calendar: nothing is connected to one, and the model asserted an
-    # empty calendar for "what's on my calendar tomorrow?" (2026-11-04, 2/6).
-    # A tool result is the one thing it treats as ground truth, so the fact
-    # that there is no calendar to read is a tool (tools.check_calendar),
-    # offered by the "calendar" group; its reply_must_mention net is policy.
-    {
-        "type": "function",
-        "function": {
-            "name": "check_calendar",
-            "description": (
-                "What is on Chuen's calendar for a day: 'what's on my calendar tomorrow?', "
-                "'am I free Thursday?', 'any meetings today?'. Call it rather than answering "
-                "from memory -- you have no idea what is on his calendar unless this says. "
-                "If it says no calendar is connected, tell him you can't see his calendar; "
-                "never say it's empty or that he is free. His reminders are list_tasks."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {"day": {"type": "string", "description": "The day he asked about, in his words: 'tomorrow', 'Thursday'. Optional."}},
-            },
-        },
-    },
-    # How he wants her to talk -- a standing instruction, never a task. On
-    # 2026-10-31 "don't show me the file path, ask next time" became the
-    # task "ask for file path next time". See reply_preferences.py.
-    {
-        "type": "function",
-        "function": {
-            "name": "reply_preference",
-            "description": (
-                "Save a standing instruction from Chuen about HOW you should reply from now on "
-                "-- 'don't read out file paths, ask if I want them', 'keep it short', 'say me "
-                "instead of Chuen', 'no need to repeat the whole message'. It is remembered and "
-                "followed in every later reply. This is never a task or reminder (add_task is "
-                "for things HE has to do) and never a file to write. action 'remove' drops one "
-                "he no longer wants; 'list' shows them."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "text": {"type": "string", "description": "The instruction, in his words, e.g. 'don't show the file path, ask first'."},
-                    "action": {"type": "string", "description": "'add' (default), 'remove' or 'list'."},
-                },
-                "required": ["text"],
-            },
-        },
-    },
-]
+# The tools the model is offered: brain.json tools.definitions (name,
+# description, JSON-schema parameters), in that order, wrapped in Ollama's
+# function envelope here. All of a tool's guidance lives in its description,
+# never in the prompt (the budget lesson above); tool_router offers each
+# group only when the message is about it, so no other turn pays for it.
+# What a call may DO is tool_policy.json. A definition with enabled_env is
+# left out while that variable says off -- search_vault's
+# DENISSE_VAULT_SEARCH=0 is the control arm of the vault A/B (the first
+# attempt pasted the vault into the prompt and measured 0/4 clean).
+TOOL_DEFINITIONS: list = []
+_TOOL_NAMES: set = set()   # every tool name with an underscore (tool talk)
+_OFF = ("0", "false", "off", "no")
 
-# Second attempt at letting Denisse see the Obsidian vault. The first one
-# (the disabled block in respond() below) pasted Dev/Memory/ into the system
-# prompt and measured 0/4 clean against 4/4 with it off. This one is a tool
-# she calls, so an unrelated question pays only for this description -- and
-# ALL of its guidance lives here rather than in SYSTEM_PROMPT, for the
-# reason recorded in the prompt-budget comment above.
-#
-# Gated so the A/B can be re-run: DENISSE_VAULT_SEARCH=0 removes the tool
-# entirely, which is the control arm.
-VAULT_SEARCH_DEFINITION = {
-    "type": "function",
-    "function": {
-        "name": "search_vault",
-        "description": (
-            "Search Chuen's own Obsidian notes and quote them. Use this for a question "
-            "about HIS material and HIS history -- his modules, lectures, tutorials and "
-            "deadlines, what was decided about Denisse and why, how his machine is set "
-            "up. For a current-project overview use query 'current projects'. "
-            "For his societies, 'when is the CM coursework due', 'who lectures "
-            "electromagnetism', 'what did we decide about the reminder card', 'what is "
-            "convolution again' all belong here, because his notes have his answer "
-            "rather than a general one. Do NOT use it for general knowledge, for "
-            "anything about the current moment (time, weather, news), or for his task "
-            "list -- list_tasks owns that. Report only what the result actually quotes; "
-            "if it says nothing in the notes matches, say exactly that instead of "
-            "filling the gap from your own guess."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "The subject to look up, in a few words -- 'computational methods coursework deadline', 'reminder card decision'. Keywords, not a sentence.",
-                }
-            },
-            "required": ["query"],
-        },
-    },
-}
 
-if os.environ.get("DENISSE_VAULT_SEARCH", "1").lower() not in ("0", "false", "off", "no"):
-    TOOL_DEFINITIONS.append(VAULT_SEARCH_DEFINITION)
+def _env_on(name: str | None, default: str = "1") -> bool:
+    """An on/off environment switch; no name means on."""
+    return not name or os.environ.get(name, default).lower() not in _OFF
+
+
+def _tool_definitions(c: dict) -> list:
+    return [{"type": "function",
+             "function": {"name": t["name"], "description": t["description"],
+                          "parameters": copy.deepcopy(t["parameters"])}}
+            for t in c["tools"]["definitions"] if _env_on(t.get("enabled_env"))]
 
 
 def _unleak_json(text: str, last_tool_result: str) -> str:
@@ -1117,9 +435,8 @@ def _due_said(due: str, text: str) -> bool:
 # _TOOL_NARRATION only matches a reply made entirely of such talk, so these
 # got through. Any tool's own name in a reply counts too: Chuen never says
 # "current_track", so she has no reason to. Patterns: brain.json
-# reply_nets.tool_talk_patterns / tool_lead_in_pattern.
-_TOOL_NAMES = {d["function"]["name"] for d in TOOL_DEFINITIONS
-               if "_" in d["function"]["name"]}
+# reply_nets.tool_talk_patterns / tool_lead_in_pattern; _TOOL_NAMES is
+# bound by configure() from the tool definitions.
 
 
 def _talks_about_tools(text: str) -> bool:
@@ -1149,7 +466,7 @@ def _talks_about_tools(text: str) -> bool:
 def _style_examples() -> list:
     # Read per call, so the eval can A/B it without a restart.
     default = "1" if brain_rules.load().style_examples else "0"
-    on = os.environ.get("DENISSE_STYLE_EXAMPLES", default).lower() not in ("0", "false", "off", "no")
+    on = _env_on("DENISSE_STYLE_EXAMPLES", default)
     return [dict(m) for m in CONFIG["style_examples"]["messages"]] if on else []
 
 
@@ -1429,6 +746,17 @@ def _permitted_reads() -> set:
     return {d["function"]["name"] for d in TOOL_DEFINITIONS
             if d["function"]["name"] not in brain_rules.MUTATING_TOOLS
             and (d["function"]["name"] != "search_vault" or rules.vault_search)}
+
+
+def _lookup_args(name: str, terms: str) -> dict:
+    """His words as the one argument a lookup tool takes -- search_vault's
+    query, recall's key -- read from the tool's own definition."""
+    for d in TOOL_DEFINITIONS:
+        if d["function"]["name"] == name:
+            params = d["function"].get("parameters") or {}
+            arg = next(iter(params.get("required") or params.get("properties") or ()), None)
+            return {arg: terms} if arg else {}
+    return {}
 
 
 def _blocked_reply(terms: str, checked: list) -> str:
@@ -1815,34 +1143,33 @@ _ONCE_PER_TURN = tool_policy.once_per_turn()
 
 
 def _run_tool(name: str, args: dict, confirm, used: set | None = None) -> str:
+    """Run one tool call. What the model is told when the code stops it is
+    brain.json tool_errors (the opening words are read by multistep.py and
+    learning.json, as its note says)."""
+    err = CONFIG["tool_errors"]
     func = tools.TOOL_FUNCTIONS.get(name)
     if func is None:
-        return f"Error: unknown tool '{name}'"
+        return err["unknown_tool"].format(name=name)
     if used is not None and name in _ONCE_PER_TURN:
         if name in used:
-            return (f"Refused: '{name}' has already run once this turn. "
-                    "Only act on the one thing Chuen actually named. If he "
-                    "meant something else too, ask him.")
+            return err["already_ran"].format(name=name)
         used.add(name)
     if confirm is not None and not confirm(name, args):
-        return f"User declined to run '{name}'."
+        return err["declined"].format(name=name)
     call_args = _rescue_arg_names(func, args)
     missing = [p for p in _required_params(func) if p not in call_args]
     if missing:
         # Say what to do about it. The raw TypeError told the model the
         # call had failed but not how to fix it, so it gave up and
         # reported the thing as not found instead of calling again.
-        return (f"Error running '{name}': no value was given for the "
-                f"required argument '{missing[0]}'. Call '{name}' again "
-                f"with {missing[0]}=<value>. Do not invent a result.")
+        return err["missing_argument"].format(name=name, missing=missing[0])
     try:
         return func(**call_args)
     except Exception as e:
         # Be explicit that this failed and that nothing may be invented to
         # cover it -- the model's instinct on a tool error is to make
         # something up that looks like a plausible result.
-        return (f"Error running '{name}': {e}. Tell the user this failed. "
-                "Do not invent a result.")
+        return err["failed"].format(name=name, error=e)
 
 
 def _study_context() -> str:
@@ -1912,11 +1239,16 @@ def _built(c: dict) -> dict:
     nets, paths, ev, hon, cues, q, fq, lk = (c["reply_nets"], c["paths"], c["evidence"], c["honesty"],
                                              c["cues"], c["quick_replies"], c["file_query"], c["lookup"])
     name = _first_name()
+    defs = _tool_definitions(c)
     return {
         "NUM_CTX": _env_int("DENISSE_NUM_CTX", c["limits"]["num_ctx"]),
         "MAX_TOOL_ROUNDS": _env_int("DENISSE_MAX_TOOL_ROUNDS", c["limits"]["max_tool_rounds"]),
         "_NAME": name,
         "_SECOND_PERSON": _second_person_rules(name, c["second_person"]),
+        # the prompt and the tools
+        "SYSTEM_PROMPT": _system_prompt(c["prompt"]),
+        "TOOL_DEFINITIONS": defs,
+        "_TOOL_NAMES": {d["function"]["name"] for d in defs if "_" in d["function"]["name"]},
         # reply nets
         "_TOOL_NARRATION": _rx(nets["tool_narration_pattern"]),
         "_TOOL_TALK": _rx(r"\b(?:" + "|".join(nets["tool_talk_patterns"]) + r")\b" if nets["tool_talk_patterns"] else ""),
@@ -1940,6 +1272,8 @@ def _built(c: dict) -> dict:
         # notes and dates
         "_NOTES_HEADER": _rx(c["notes"]["header_pattern"], re.MULTILINE),
         "_ASKS_DUE": _rx(c["notes"]["asks_due_pattern"]),
+        "_DUE_YEAR": _rx(c["notes"]["due_year_pattern"]),
+        "_YEAR": _rx(c["notes"]["year_pattern"], cs),
         "_DUE_WORDS": _rx(r"\d+|\b(?:" + "|".join(c["dates"]["due_words"]) + ")" if c["dates"]["due_words"] else r"\d+"),
         "_DUE_ALIAS": {a["said"]: a["means"] for a in c["dates"]["due_aliases"]},
         "_DUE_ALWAYS": set(c["dates"]["always_allowed"]),
@@ -2023,15 +1357,9 @@ class Brain:
         try:
             local_models = [m.get("model", m.get("name", "")) for m in ollama.list().get("models", [])]
         except Exception as e:
-            raise RuntimeError(
-                f"Can't reach the local Ollama server: {e}. "
-                "Make sure Ollama is installed and running (it should start "
-                "automatically -- check for its icon in the system tray)."
-            )
+            raise RuntimeError(CONFIG["startup"]["ollama_unreachable"].format(error=e))
         if not any(MODEL in m for m in local_models):
-            raise RuntimeError(
-                f"Model '{MODEL}' isn't downloaded yet. Run: ollama pull {MODEL}"
-            )
+            raise RuntimeError(CONFIG["startup"]["model_missing"].format(model=MODEL))
 
     def _ask_which(self, request, terms, reads, wrong_reply, confirm, messages):
         """The question to ask after a rejected read, or None to fall back
@@ -2050,7 +1378,7 @@ class Brain:
             for alt in dict.fromkeys(a for c in reads for a in _RECOVERY_SOURCES.get(c["name"], ())):
                 if alt in tried or alt not in offered or not terms:
                     continue
-                args = {"query": terms} if alt == "search_vault" else {"key": terms}
+                args = _lookup_args(alt, terms)
                 res = str(_run_tool(alt, args, confirm, set()))
                 messages += [{"role": "assistant", "content": "",
                               "tool_calls": [{"function": {"name": alt, "arguments": args}}]},
@@ -2113,7 +1441,7 @@ class Brain:
                 logging.warning("Clarified answer fell back to the evidence: %s", exc)
             return reply if clarify.supported(reply, got, p["seen"]) else clarify.quote(got)
         options = got if kind == "ambiguous" else p["options"]
-        asked = ("That isn't one I found. " if kind == "unsupported" else "") + clarify.question(options)
+        asked = (CONFIG["text"]["not_one_found"] if kind == "unsupported" else "") + clarify.question(options)
         clarify.offer(p["request"], asked, options, p["seen"], p["terms"])
         return asked
 
@@ -2281,7 +1609,7 @@ class Brain:
                     for alt in dict.fromkeys(a for c in attempt for a in _RECOVERY_SOURCES.get(c["name"], ())):
                         if alt in tried or alt not in offered or not terms:
                             continue
-                        args = {"query": terms} if alt == "search_vault" else {"key": terms}
+                        args = _lookup_args(alt, terms)
                         res = str(_run_tool(alt, args, confirm, set()))
                         seeded += [{"role": "assistant", "content": "",
                                     "tool_calls": [{"function": {"name": alt, "arguments": args}}]},
@@ -2515,21 +1843,19 @@ class Brain:
             # whether or not the router had offered it. A tool that changes
             # something runs only when offered -- which keeps complaints
             # (the router filters those) and hallucinated calls from acting.
+            err = CONFIG["tool_errors"]
             if last_round:
-                result = (f"Refused: no more tool calls this turn. Answer him in words from "
-                          "what you already have.")
+                result = err["last_round"]
             elif name not in tools.TOOL_FUNCTIONS:
-                result = f"Refused: there is no tool called '{name}'. Use one of the tools you were given, or answer directly."
+                result = err["no_such_tool"].format(name=name)
             elif name not in offered_names and not tool_policy.allowed_unoffered(name):
-                result = f"Refused: '{name}' isn't available for this request. Answer the user's actual request."
+                result = err["not_offered"].format(name=name)
             elif _call_key(name, args) in (getattr(self, "_step_banned", None) or ()):
-                result = (f"Refused: this exact '{name}' call was already made for this step. Do it a "
-                          "different way, or tell him plainly what you couldn't do.")
+                result = err["step_repeated"].format(name=name)
             elif _call_key(name, args) in getattr(self, "_retry_avoid", ()):
                 # Naming alternatives here was tried live on 2026-10-30: 0/5
                 # found the answer (she offered to search instead), ~2x slower.
-                result = (f"Refused: this exact '{name}' call already failed and he said the answer "
-                          "was wrong. Do something different, or tell him plainly what you can't do.")
+                result = err["retry_repeated"].format(name=name)
             elif (refusal := tool_policy.refuse(
                     name, args, program_folder=_REPO_DIR,
                     verified_path=lambda p: _known_document_path(p, messages, tool_outputs),
@@ -2571,7 +1897,7 @@ class Brain:
                     turn_results.append(vres)
                     if not _no_evidence(vres):
                         successful_tools.add("search_vault")
-                    result += "\n\nFrom his notes:\n" + vres
+                    result += CONFIG["notes"]["appended_to_result"] + vres
                 vq = _vault_query(latest_user)
                 if (name == "recall" and vq and "search_vault" in offered_names
                         and "search_vault" not in tool_outputs):
@@ -2582,7 +1908,7 @@ class Brain:
                     turn_results.append(vres)
                     if not _confirms_nothing(vres):
                         successful_tools.add("search_vault")
-                    result += "\n\nFrom his notes:\n" + vres
+                    result += CONFIG["notes"]["appended_to_result"] + vres
             turn_results.append(result)
             tool_outputs[name] = result
             if not _confirms_nothing(result):
@@ -2842,10 +2168,8 @@ class Brain:
                     if vault_result.startswith("From your notes") and _ASKS_DUE.search(latest_user):
                         # Preserve an unambiguous due-year from the retrieved
                         # evidence, not the note's unrelated update date.
-                        years = set(re.findall(
-                            r"\bdue\s+(?:(?:mon|tue|wed|thu|fri|sat|sun)\w*\s+)?"
-                            r"\d{1,2}\s+[A-Za-z]{3,9}\s+(20\d{2})\b", vault_result, re.I))
-                        if len(years) == 1 and not years & set(re.findall(r"\b20\d{2}\b", final_text)):
+                        years = set(_DUE_YEAR.findall(vault_result))
+                        if len(years) == 1 and not years & set(_YEAR.findall(final_text)):
                             final_text += CONFIG["notes"]["specify_year"].format(year=next(iter(years)))
                     if "get_brain_location" in successful_tools:
                         # Current settings are inspectable facts, not a
