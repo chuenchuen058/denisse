@@ -10,6 +10,19 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import brain  # noqa: E402
 import multistep  # noqa: E402
+import time_parse  # noqa: E402
+
+
+# The fixtures say "Thursday". On a Thursday time_parse rightly asks "today or next Thursday?", so the
+# add_task step never ran and 3 tests failed every Thursday (5 Nov 2026: seven Orchestra tasks parked on it).
+# Pin the clock to a Monday so the tests don't depend on what day they run.
+def setUpModule():
+    from datetime import datetime
+    time_parse.set_clock(datetime(2026, 11, 2, 9, 0))
+
+
+def tearDownModule():
+    time_parse.set_clock(None)
 
 SIGNALS = "find my signals coursework, make a revision list from it and remind me on Thursday"
 LECTURES = "move this week's lecture PDFs into the right module folders and tell me what's missing"
