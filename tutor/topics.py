@@ -1,4 +1,4 @@
-"""The per-module topic map: memory/tutor/topics-<slug>.json.
+"""The per-module topic map: topics-<slug>.json in the Don area of the vault.
 
     {"module": ..., "code": ..., "updated": ...,
      "topics": [{"name": ..., "lectures": [weeks], "prerequisites": [...],
@@ -84,7 +84,7 @@ def save(paths: Paths, module: Module, topic_map: dict) -> str:
 
 def load(paths: Paths, module: Module) -> dict | None:
     try:
-        with open(paths.topics_file(module.slug), encoding="utf-8") as f:
+        with open(paths.readable(CONFIG["paths"]["topics_file"].format(slug=module.slug)), encoding="utf-8") as f:
             return json.load(f)
     except (OSError, ValueError):
         return None

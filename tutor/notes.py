@@ -18,7 +18,7 @@ import datetime as dt
 import hashlib
 import os
 
-from .conf import CONFIG, Module
+from .conf import CONFIG, Module, tutor_name
 
 _N = CONFIG["note"]
 _P = CONFIG["paths"]
@@ -71,12 +71,12 @@ def render(vault: str, module: Module, week: int, result: dict, sources: list,
     """The whole note. `sources` are full paths of the files it was read from."""
     name = name or _N["name"].format(slug=module.slug, week=week)
     ctx = {"module": module.title, "code": module.code, "week": week, "slug": module.slug,
-           "today": today.isoformat(), "name": name}
+           "today": today.isoformat(), "name": name, "tutor": tutor_name()}
     lines = [line.format(**ctx) for line in _N["front"]]
     links = _links(vault, module, week)
     if links:
         lines.append(_N["links_line"].format(links=links))
-    lines += _N["generated_callout"]
+    lines += [line.format(**ctx) for line in _N["generated_callout"]]
     lines += [_N["sources_heading"], ""]
     for src in sources:
         base = os.path.basename(src)
@@ -142,13 +142,16 @@ def _rename(text: str) -> str:
     return "\n".join(lines) + sep + rest
 
 
-def render_index(vault: str, module: Module, lectures: dict, topic_map: dict, today: dt.date) -> str:
+def render_index(vault: str, module: Module, lectures: dict, topic_map: dict, today: dt.date,
+                 extra_links: list | None = None) -> str:
     """The module's tutor index: a link per tutor note and the topic map.
-    `lectures` is state.lectures[slug]: week -> {note, copy, ...}."""
+    `lectures` is state.lectures[slug]: week -> {note, copy, ...};
+    `extra_links` (the tutor's own notes) go beside the module hub link."""
     ctx = {"module": module.title, "code": module.code, "slug": module.slug, "today": today.isoformat(),
-           "name": _N["index_name"].format(slug=module.slug)}
+           "name": _N["index_name"].format(slug=module.slug), "tutor": tutor_name()}
     hub = _N["hub_link"].format(module=module.title) if os.path.isfile(
         os.path.join(module.folder, _P["hub_note"].format(module=module.title))) else ""
+    hub = _N["link_sep"].join([x for x in [hub] + list(extra_links or []) if x])
     lines = [line.format(hub_link=hub, **ctx) for line in _N["index_front"]]
     weeks = sorted(int(w) for w, rec in lectures.items() if rec.get("note"))
     for w in weeks:
@@ -156,7 +159,7 @@ def render_index(vault: str, module: Module, lectures: dict, topic_map: dict, to
         copy = ""
         if rec.get("copy"):
             stem = os.path.splitext(os.path.basename(rec["copy"]))[0]
-            copy = _N["index_week_copy"].format(copy=stem)
+            copy = _N["index_week_copy"].format(copy=stem, tutor=tutor_name())
         lines.append(_N["index_week"].format(module=module.title, week=w, copy=copy))
     if not weeks:
         lines.append(_N["index_none"])

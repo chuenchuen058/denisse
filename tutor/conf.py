@@ -26,6 +26,7 @@ with open(os.path.join(HERE, "tutor.json"), encoding="utf-8-sig") as _config_fil
 
 _P = CONFIG["paths"]
 _M = CONFIG["modules"]
+_D = CONFIG["don"]
 _CODE = re.compile(_M["code"])
 _SUFFIX = re.compile(_M["suffix"])
 _SLUG = re.compile(_M["slug"])
@@ -42,11 +43,35 @@ class Paths:
     def modules_dir(self) -> str:
         return os.path.join(self.vault, *_P["modules"])
 
+    # Don's memory lives in the vault (Chuen, 5 Nov 2026): don_dir is its
+    # area, data_dir the JSON sidecars. `state` is the old private place
+    # (memory/tutor/), read while a sidecar hasn't been moved yet.
+    @property
+    def don_dir(self) -> str:
+        return os.path.join(self.vault, *_D["folder"])
+
+    @property
+    def data_dir(self) -> str:
+        return os.path.join(self.don_dir, _D["data"])
+
+    def data(self, name: str) -> str:
+        return os.path.join(self.data_dir, name)
+
+    def legacy(self, name: str) -> str:
+        return os.path.join(self.state, name)
+
+    def readable(self, name: str) -> str:
+        """Where to read sidecar `name` from: the vault copy, else the old
+        place while it is still only there."""
+        new = self.data(name)
+        old = self.legacy(name)
+        return old if not os.path.exists(new) and os.path.exists(old) else new
+
     def state_file(self) -> str:
-        return os.path.join(self.state, _P["state_file"])
+        return self.data(_P["state_file"])
 
     def topics_file(self, slug: str) -> str:
-        return os.path.join(self.state, _P["topics_file"].format(slug=slug))
+        return self.data(_P["topics_file"].format(slug=slug))
 
 
 @dataclasses.dataclass
@@ -148,3 +173,12 @@ def num_ctx() -> int:
     for key in _P["context_key"]:
         node = node[key]
     return int(node)
+
+
+def tutor_name() -> str:
+    """What the tutor is called (tutor.json "name")."""
+    return CONFIG["name"]
+
+
+def tutor_slug() -> str:
+    return slug(tutor_name())
