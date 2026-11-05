@@ -31,6 +31,14 @@ class Bare(unittest.TestCase):
         s = r"\nabla^2\phi = \frac{\partial^2\phi}{\partial x^2} + \frac{\partial^2\phi}{\partial y^2}"
         self.assertEqual(mathfmt.normalise(s, "anki"), wrapped(A, "inline", s))
 
+    def test_spaces_inside_braces_stay_in_one_piece(self):
+        s = (r"\nabla\cdot\mathbf{F} = \frac{\partial F_x}{\partial x} + \frac{\partial F_y}{\partial y}"
+             r" + \frac{\partial F_z}{\partial z}")
+        self.assertEqual(mathfmt.normalise(s, "anki"), wrapped(A, "inline", s))
+        s2 = r"Curl: \left(\frac{\partial F_z}{\partial y} - \frac{\partial F_y}{\partial z},\ \ldots\right) here"
+        out = mathfmt.normalise(s2, "anki")
+        self.assertEqual(out.count(A["inline"][0]), 1, out)
+
     def test_prose_is_left_alone(self):
         s = "The electric field is a vector field that exerts a force on charges."
         self.assertEqual(mathfmt.normalise(s, "anki"), s)

@@ -20,9 +20,22 @@ _OPERAND = re.compile(_M["bare"]["operand"])
 _TRAIL = _M["bare"]["trailing"]
 
 
+def _depth(s: str) -> int:
+    """Open braces left unclosed in s (escaped \\{ \\} don't count)."""
+    s = s.replace("\\{", "").replace("\\}", "")
+    return s.count("{") - s.count("}")
+
+
 def _bare(text: str) -> list:
     """(start, end) spans of undelimited maths in plain text."""
-    tokens = [(m.start(), m.end(), m.group()) for m in re.finditer(r"\S+", text)]
+    tokens = []
+    for m in re.finditer(r"\S+", text):
+        # a space inside braces ("{\partial x}") belongs to the same piece of maths: join until they balance
+        if tokens and _depth(tokens[-1][2]) > 0:
+            s, _, _ = tokens.pop()
+            tokens.append((s, m.end(), text[s:m.end()]))
+        else:
+            tokens.append((m.start(), m.end(), m.group()))
     spans, i = [], 0
     while i < len(tokens):
         if not _BARE_SIGN.search(tokens[i][2]):
