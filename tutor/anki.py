@@ -229,7 +229,7 @@ def run(paths: Paths, modules: list | None = None, client=None, today: dt.date |
     the cards and read the stats back. Returns {tsv, synced, stats, reachable, touched}."""
     today = today or dt.date.today()
     modules = conf.modules(paths) if modules is None else modules
-    decks = [(m, cards.all_cards(cards.load(paths, m))) for m in modules]
+    decks = [(m, cards.checked_cards(cards.load(paths, m))) for m in modules]
     decks = [(m, c) for m, c in decks if c]
     if not decks:
         for m in modules:
