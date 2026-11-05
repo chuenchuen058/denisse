@@ -260,6 +260,79 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(tp.MONTHS, cfg["months"])
 
 
+def _load_with(change):
+    """A fresh time_parse module reading a copy of time_parse.json that
+    `change(cfg)` has edited -- via DENISSE_TIME_PARSE, as an A/B would."""
+    import copy
+    import importlib.util
+    import json
+    import os
+    import tempfile
+
+    cfg = copy.deepcopy(tp.CONFIG)
+    change(cfg)
+    path = Path(tempfile.mkdtemp()) / "time_parse.json"
+    path.write_text(json.dumps(cfg), encoding="utf-8")
+    name = "time_parse_variant"
+    spec = importlib.util.spec_from_file_location(name, tp.__file__)
+    mod = importlib.util.module_from_spec(spec)
+    before = os.environ.get("DENISSE_TIME_PARSE")
+    os.environ["DENISSE_TIME_PARSE"] = str(path)
+    sys.modules[name] = mod  # dataclasses look their module up while loading
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        sys.modules.pop(name, None)
+        if before is None:
+            os.environ.pop("DENISSE_TIME_PARSE", None)
+        else:
+            os.environ["DENISSE_TIME_PARSE"] = before
+    return mod
+
+
+class DataChangesBehaviour(unittest.TestCase):
+    """Rule 0, second pass: the words and sentences moved to time_parse.json
+    are really read from there -- editing the data changes the parse."""
+
+    def _when(self, mod, phrase, now=TUE):
+        r = mod.parse(phrase, now)
+        return r.when.strftime("%Y-%m-%d %H:%M") if r.when else None
+
+    def test_wording_comes_from_the_data(self):
+        mod = _load_with(lambda c: c["wording"].update(
+            already_passed="Too late for {when}.",
+            part_disagrees="{part} vs {meridiem}?"))
+        self.assertEqual(mod.parse("today at 9am", TUE).question, "Too late for Tuesday 3 Nov, 09:00.")
+        self.assertEqual(mod.parse("tomorrow morning at 3pm", TUE).question, "morning vs pm?")
+        # The shipped wording is untouched.
+        self.assertIn("has already passed", tp.parse("today at 9am", TUE).question)
+
+    def test_minute_relation_words(self):
+        self.assertIsNone(tp.parse("quarter till four", TUE).when)
+        mod = _load_with(lambda c: c["minute_relations"].update(till=-1))
+        self.assertEqual(self._when(mod, "quarter till four"), "2026-11-03 15:45")
+
+    def test_clock_lead_words(self):
+        mod = _load_with(lambda c: c["clock_lead_words"].append("towards"))
+        self.assertEqual(self._when(mod, "tomorrow towards 4"), "2026-11-04 16:00")
+        self.assertNotEqual(self._when(tp, "tomorrow towards 4"), "2026-11-04 16:00")
+
+    def test_meridiem_spellings(self):
+        self.assertIsNone(tp.parse("tomorrow 3 pee em", TUE).when)
+        mod = _load_with(lambda c: c["meridiems"]["pm"].append("pee em"))
+        self.assertEqual(self._when(mod, "tomorrow 3 pee em"), "2026-11-04 15:00")
+
+    def test_half_hour_and_duration_words(self):
+        mod = _load_with(lambda c: (c["half_hour_words"].update(halb=30),
+                                    c.update(half_more_suffix="and a bit"),
+                                    c["duration_joiners"].append("plus")))
+        self.assertEqual(self._when(mod, "tomorrow at halb four"), "2026-11-04 16:30")
+        self.assertEqual(mod.parse_duration("an hour and a bit"), timedelta(minutes=90))
+        self.assertEqual(mod.parse_duration("an hour plus 10 mins"), timedelta(minutes=70))
+        self.assertIsNone(tp.parse_duration("an hour and a bit"))
+        self.assertIsNone(tp.parse_duration("an hour plus 10 mins"))
+
+
 class PartSourceTest(unittest.TestCase):
     """The hook the learner model will use to say what 'morning' means for
     Chuen. The learner isn't wired; a fake belief stands in for it."""

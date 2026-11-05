@@ -59,6 +59,45 @@ class DeadlineParsing(unittest.TestCase):
             self.assertEqual(_fmt(tasks.parse_due("friday")), "2026-09-25 23:59")
 
 
+class DeadlineWordsFromData(unittest.TestCase):
+    """Rule 0: tasks.time_words and tasks.clock_lead_words in reminders.json
+    decide whether a dateparser deadline keeps its clock time."""
+
+    def setUp(self):
+        import json
+        import os
+        import reminders_config
+
+        self._cfg, self._env = reminders_config, os.environ.get("DENISSE_REMINDERS")
+        data = json.loads(Path(reminders_config.DEFAULT_FILE).read_text(encoding="utf-8"))
+        data["tasks"]["time_words"].append("week")
+        data["tasks"]["clock_lead_words"].append("near")
+        path = Path(tempfile.mkdtemp()) / "reminders.json"
+        path.write_text(json.dumps(data), encoding="utf-8")
+        os.environ["DENISSE_REMINDERS"] = str(path)
+        reminders_config.reload()
+
+    def tearDown(self):
+        import os
+
+        if self._env is None:
+            os.environ.pop("DENISSE_REMINDERS", None)
+        else:
+            os.environ["DENISSE_REMINDERS"] = self._env
+        self._cfg.reload()
+
+    def test_a_time_word_keeps_the_clock(self):
+        # Default data: "next week" (dateparser) is the end of that day.
+        # With "week" listed as a time word, dateparser's clock is kept.
+        self.assertEqual(_fmt(tasks.parse_due("next week", now=NOW)), "2026-09-30 21:00")
+
+    def test_clock_lead_words(self):
+        self.assertTrue(tasks._has_time().search("near 5"))
+        self.tearDown()
+        self.assertFalse(tasks._has_time().search("near 5"))
+        self.assertEqual(_fmt(tasks.parse_due("next week", now=NOW)), "2026-09-30 23:59")
+
+
 class TaskStore(unittest.TestCase):
     def setUp(self):
         self._file, self._mirror = tasks.TASKS_FILE, tasks._mirror_to_vault

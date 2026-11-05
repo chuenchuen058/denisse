@@ -21,6 +21,11 @@
     "day_before_words": ["before"],
     "weekday_qualifiers": ["this", "next", "coming"],
     "inferred_date_words": ["today", "tomorrow", "tonight"],
+    "_time_words_doc": "A due phrase (after dateparser) with any of these words, an am/pm hour, a clock time or '<clock_lead_word> <hour>' keeps its time; without one it means the end of that day.",
+    "time_words": ["noon", "midday", "midnight", "morning", "afternoon", "evening", "tonight", "night",
+                   "lunch", "now", "hour", "hours", "hr", "hrs", "minute", "minutes", "min", "mins",
+                   "second", "seconds", "sec", "secs"],
+    "clock_lead_words": ["at"],
     "match": {
       "_doc": "Fuzzy matching of 'mark the sunway email done' to a task: words shorter than min_word_length and ignore_words carry no identifying weight.",
       "min_word_length": 3,

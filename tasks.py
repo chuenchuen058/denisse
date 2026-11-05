@@ -45,6 +45,14 @@ def _lead():
     return re.compile(r"^\s*(?:" + _words("deadline_lead_words") + r")\s+", re.I)
 
 
+def _meridiems() -> str:
+    """am|pm -- the canonical names in time_parse.json "meridiems", so both
+    parsers read the same words."""
+    import time_parse
+
+    return "|".join(re.escape(m) for m in time_parse.CONFIG["meridiems"])
+
+
 def _end_of_day():
     """(hour, minute) a day with no time means -- time_parse.json's
     end_of_day, so both parsers agree."""
@@ -97,7 +105,8 @@ def parse_due(text: str, now: datetime | None = None) -> datetime | None:
     # None for several of these, so weekday names are resolved directly.
     m = re.match(
         r"^(?:" + _words("weekday_qualifiers") + r")?\s*(" + "|".join(_WEEKDAYS) + r")"
-        r"(?:\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?)?\s*$",
+        r"(?:\s+(?:(?:" + _words("clock_lead_words") + r")\s+)?(\d{1,2})(?::(\d{2}))?\s*("
+        + _meridiems() + r")?)?\s*$",
         cleaned, re.I,
     )
     if m:
@@ -105,10 +114,11 @@ def parse_due(text: str, now: datetime | None = None) -> datetime | None:
         if m.group(2):
             hour = int(m.group(2))
             minute = int(m.group(3) or 0)
+            am, pm = _meridiems().split("|")
             ampm = (m.group(4) or "").lower()
-            if ampm == "pm" and hour < 12:
+            if ampm == pm and hour < 12:
                 hour += 12
-            elif ampm == "am" and hour == 12:
+            elif ampm == am and hour == 12:
                 hour = 0
         return _next_weekday(m.group(1).lower(), hour, minute, now)
 
@@ -121,7 +131,7 @@ def parse_due(text: str, now: datetime | None = None) -> datetime | None:
         )
     except Exception:
         return None
-    if when is None or _HAS_TIME.search(cleaned):
+    if when is None or _has_time().search(cleaned):
         return when
     # A day with no time is the end of that day, like a bare "friday" above.
     # dateparser keeps the clock instead: "tomorrow" said at 00:03 became a
@@ -134,12 +144,15 @@ def parse_due(text: str, now: datetime | None = None) -> datetime | None:
     return when
 
 
-# Anything that says when in the day, or a span measured from now.
-_HAS_TIME = re.compile(
-    r"\d{1,2}\s*(?:am|pm)\b|\d{1,2}[:.h]\d{2}\b|\b(?:noon|midday|midnight|morning|afternoon"
-    r"|evening|tonight|night|lunch|now|hours?|hrs?|minutes?|mins?|seconds?|secs?)\b"
-    r"|^\s*\d{1,2}\s*$|\bat\s+\d{1,2}\b",
-    re.IGNORECASE)
+def _has_time():
+    """Anything that says when in the day, or a span measured from now: an
+    am/pm hour, a clock time, a bare hour, '<clock_lead_word> <hour>', or
+    one of tasks.time_words."""
+    return re.compile(
+        r"\d{1,2}\s*(?:" + _meridiems() + r")\b|\d{1,2}[:.h]\d{2}\b"
+        r"|\b(?:" + _words("time_words") + r")\b"
+        r"|^\s*\d{1,2}\s*$|\b(?:" + _words("clock_lead_words") + r")\s+\d{1,2}\b",
+        re.IGNORECASE)
 
 
 def due_from_text(text: str, now: datetime | None = None) -> datetime | None:
