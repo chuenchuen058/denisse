@@ -26,6 +26,14 @@ def _cfg():
     return runtime_config.get("standing_instructions")
 
 
+def _say(key, /, **fields):
+    return runtime_config.wording("standing_instructions", key, **fields)
+
+
+def _repo_path(key):
+    return ROOT.joinpath(*_cfg()["files"][key].replace("\\", "/").split("/"))
+
+
 def defaults():
     """A fresh tray's settings: off, with the jobs from runtime settings
     (runtime.defaults.json; config.json settings.runtime overrides). Jobs
@@ -90,7 +98,7 @@ def validate(data):
             or type(data["enabled"]) is not bool
             or not isinstance(data["project_dir"], str) or not data["project_dir"].strip()
             or not isinstance(data["jobs"], list) or not 1 <= len(data["jobs"]) <= len(JOBS)):
-        raise ValueError("Invalid standing-instruction settings")
+        raise ValueError(_say("invalid_settings"))
     limits = _cfg()
     least = limits["min_every_seconds"]
     seen = set()
@@ -101,16 +109,16 @@ def validate(data):
                 or type(job["every_seconds"]) is not int
                 or not least.get(job["id"], least["other"]) <= job["every_seconds"] <= limits["max_every_seconds"]
                 or not isinstance(job["goal"], str) or not 1 <= len(job["goal"].strip()) <= limits["max_goal_chars"]):
-            raise ValueError("Invalid or duplicate standing instruction")
+            raise ValueError(_say("invalid_job"))
         seen.add(job["id"])
     return data
 
 
 class Engine:
     def __init__(self, config=None, state=None, reports=None, model=None):
-        self.config = Path(config or ROOT / "memory" / "standing_instructions.json")
-        self.state = Path(state or ROOT / "memory" / "agent_state.json")
-        self.reports = Path(reports or ROOT / "logs" / "agent_runs")
+        self.config = Path(config or _repo_path("config"))
+        self.state = Path(state or _repo_path("state"))
+        self.reports = Path(reports or _repo_path("reports"))
         self.model = model if model is not None else agent_loop.LocalModel()
         self.stop = threading.Event()
         self.error = ""
@@ -119,7 +127,7 @@ class Engine:
         if not self.config.exists():
             return defaults()
         if self.config.stat().st_size > _cfg()["max_file_bytes"]:
-            raise ValueError("Standing instructions are too large")
+            raise ValueError(_say("too_large"))
         return validate(json.loads(self.config.read_text(encoding="utf-8-sig")))
 
     def status(self):
@@ -136,20 +144,20 @@ class Engine:
                 or type(value.get("last_started")) not in (int, float)
                 or not math.isfinite(value["last_started"]) or value["last_started"] < 0
                 for key, value in state.items())):
-            raise ValueError("Invalid agent state; inspect before resetting")
+            raise ValueError(_say("invalid_state"))
         return state
 
     def set_enabled(self, enabled, job_id=None):
         with file_lock(self.reports / "locks" / "config.lock") as held:
             if not held:
-                raise RuntimeError("Instructions are being edited; try again")
+                raise RuntimeError(_say("busy"))
             config = self.settings()
             if job_id is None:
                 config["enabled"] = bool(enabled)
             else:
                 job = next((j for j in config["jobs"] if j["id"] == job_id), None)
                 if job is None:
-                    raise ValueError("Unknown instruction")
+                    raise ValueError(_say("unknown_job"))
                 job["enabled"] = bool(enabled)
             atomic_json(self.config, config)
 
@@ -165,7 +173,7 @@ class Engine:
 
     def run_job(self, job_id, *, now=None):
         if job_id not in JOBS:
-            raise ValueError("Unknown instruction")
+            raise ValueError(_say("unknown_job"))
         with file_lock(self.reports / "locks" / (job_id + ".lock")) as held:
             if not held:
                 return None
@@ -198,7 +206,7 @@ class Engine:
                     if not active():
                         return None
                     evidence = agent_tools.organize_downloads()
-                    result = {"status": "completed", "steps": [{"tool": "organize_downloads", "note": "Existing type rules"}],
+                    result = {"status": "completed", "steps": [{"tool": "organize_downloads", "note": _say("downloads_note")}],
                               "evidence": {"organize_downloads": evidence}, "suggestion": "", "focus_ids": [], "error": ""}
                 else:
                     name = "task_snapshot" if job_id == "task_review" else "project_snapshot"
@@ -217,7 +225,7 @@ class Engine:
                         record["digest"] = digest
                     return True
                 if self._state_update(finish) is None:
-                    raise RuntimeError("Could not save run outcome")
+                    raise RuntimeError(_say("save_failed"))
                 if job_id != "downloads" or result["changed"]:
                     atomic_json(self.reports / (job_id + "-latest.json"), result)
                 self.error = ""
@@ -225,7 +233,7 @@ class Engine:
             except Exception as exc:
                 self.error = f"{type(exc).__name__}: {exc}"
                 result = {"job_id": job_id, "status": "failed", "error": self.error,
-                          "changed": False, "brief": f"{job_id}: {self.error}"}
+                          "changed": False, "brief": _say("failed_brief", job_id=job_id, error=self.error)}
                 if claimed:
                     def fail(state):
                         state[job_id].update(status="failed", error=self.error, brief=result["brief"])
