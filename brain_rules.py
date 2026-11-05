@@ -8,18 +8,21 @@ Two files, two jobs:
   valid settings and are visible through status(), rather than crashing the
   tray or granting new powers. ``load()`` / ``status()``.
 * brain.json (in the repo) -- what brain.py says, matches and limits
-  outside the system prompt and tool descriptions (AGENTS.md Rule 0):
-  reply nets, the requests answered before the model, her fixed wording,
-  thresholds. Checked by json_config.py against brain.defaults.json; a bad
-  or missing value falls back with one warning. ``data()`` reads it;
-  brain.configure() rebinds brain's module values from it.
+  (AGENTS.md Rule 0): the system prompt and tool descriptions, reply nets,
+  the requests answered before the model, her fixed wording, thresholds;
+  and this module's own data -- the settings file's path, limits, defaults
+  and ranges (``settings``) and the fact-saving request pattern
+  (``memory``). Checked by json_config.py against brain.defaults.json; a
+  bad or missing value falls back with one warning. ``data()`` reads it;
+  brain.configure() rebinds brain's module values from it;
+  ``_cached_data()`` here re-reads it when the file changes.
 """
 import json
 import logging
 import os
 import re
 import threading
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import json_config
@@ -90,17 +93,39 @@ def data(path=None) -> dict:
     return json_config.load("brain", path, DATA_DEFAULTS_FILE, extra=_check_data)
 
 
+_data_cache = {"key": None, "data": None}
+
+
+def _cached_data() -> dict:
+    """data() for this module's own values, re-read when the file (or
+    $DENISSE_BRAIN_DATA) changes rather than on every settings read."""
+    path = os.environ.get(DATA_ENV_VAR) or DATA_FILE
+    try:
+        key = (str(path), os.stat(path).st_mtime_ns)
+    except OSError:
+        key = (str(path), None)
+    with _lock:
+        if _data_cache["key"] != key or key[1] is None:
+            _data_cache.update(key=key, data=data(path))
+        return _data_cache["data"]
+
+
+def _default(key: str):
+    return field(default_factory=lambda: _cached_data()["settings"]["defaults"][key])
+
+
 @dataclass(frozen=True)
 class Rules:
-    recent_turns: int = 6
-    style_examples: bool = True
-    save_facts: str = "explicit"
-    vault_search: bool = True
-    vault_max_notes: int = 3
-    vault_max_chars: int = 1200
-    context_max_age_days: int = 14
-    self_learning: bool = True
-    learning_confirmations: int = 2
+    """His settings; the defaults are brain.json settings.defaults."""
+    recent_turns: int = _default("recent_turns")
+    style_examples: bool = _default("style_examples")
+    save_facts: str = _default("save_facts")
+    vault_search: bool = _default("vault_search")
+    vault_max_notes: int = _default("vault_max_notes")
+    vault_max_chars: int = _default("vault_max_chars")
+    context_max_age_days: int = _default("context_max_age_days")
+    self_learning: bool = _default("self_learning")
+    learning_confirmations: int = _default("learning_confirmations")
 
 
 _lock = threading.RLock()
@@ -110,7 +135,7 @@ _errors = {}
 
 def rules_path():
     return Path(os.environ.get("DENISSE_RULES_FILE") or
-                Path(__file__).parent / "memory" / "brain_rules.json")
+                Path(__file__).parent / _cached_data()["settings"]["file"])
 
 
 def validate(data):
@@ -124,13 +149,13 @@ def validate(data):
         if type(value) is not type(defaults[key]):
             raise ValueError(f"{key} must be {type(defaults[key]).__name__}")
     values = {**defaults, **data}
-    for key, lo, hi in (("recent_turns", 1, 10), ("vault_max_notes", 1, 5),
-                        ("vault_max_chars", 400, 2000), ("context_max_age_days", 1, 90),
-                        ("learning_confirmations", 2, 10)):
+    settings = _cached_data()["settings"]
+    for key, (lo, hi) in settings["ranges"].items():
         if not lo <= values[key] <= hi:
             raise ValueError(f"{key} must be between {lo} and {hi}")
-    if values["save_facts"] not in ("explicit", "conversation"):
-        raise ValueError("save_facts must be explicit or conversation")
+    allowed = settings["save_facts_values"]
+    if values["save_facts"] not in allowed:
+        raise ValueError("save_facts must be " + " or ".join(allowed))
     return Rules(**values)
 
 
@@ -139,9 +164,10 @@ def load():
     key = str(path.resolve())
     with _lock:
         try:
+            limit = _cached_data()["settings"]["max_file_bytes"]
             with path.open(encoding="utf-8-sig") as f:
-                content = f.read(8193)
-            if len(content) > 8192:
+                content = f.read(limit + 1)
+            if len(content) > limit:
                 raise ValueError("rules file is too large")
             rules = validate(json.loads(content))
             _valid[key] = rules
@@ -167,10 +193,7 @@ def status():
 
 
 def explicit_memory_request(text):
-    """An instruction to retain a fact, not a question asking for recall."""
-    import re
-    return bool(re.match(
-        r"^\s*(?:(?:please|hey denisse)[,\s]+|(?:can|could|would|will) you\s+)?"
-        r"(?:remember\b(?!\s+(?:what|when|where|who|how)\b)|"
-        r"(?:save|store)\b.{0,40}\b(?:fact|memory|preference)\b|keep in mind\b)",
-        text or "", re.I))
+    """An instruction to retain a fact, not a question asking for recall:
+    brain.json memory.explicit_request_pattern (empty never matches)."""
+    pattern = _cached_data()["memory"]["explicit_request_pattern"]
+    return bool(pattern) and bool(re.match(pattern, text or "", re.I))
