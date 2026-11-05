@@ -30,7 +30,7 @@ if REPO not in sys.path:
 
 from tutor import anki, cards, conf, don, sources  # noqa: E402
 from tutor import __main__ as cli  # noqa: E402
-from tutor.test_tutor import HERE, MODULES, SS, Fixture  # noqa: E402
+from tutor.test_tutor import EM, HERE, MODULES, SS, Fixture  # noqa: E402
 
 CFG = conf.CONFIG
 
@@ -55,6 +55,42 @@ def fake_cards(log, tag="local"):
         out.append({"kind": "essay", "front": "not a kind", "back": "x"})
         return json.dumps({"cards": out})
     return call
+
+
+def _items(user):
+    """The cards a check prompt lists: [(n, kind, front, back)]."""
+    return [(int(n), k, f, b) for n, k, f, b in
+            re.findall(r"\[(\d+)\] \((\w+)\) Front: (.*)\n    Back: (.*)", user.split("NOTE:\n", 1)[0])]
+
+
+def fake_check(log, tag="local", judge=None):
+    """A checker. `judge(kind, front, back, note) -> dict` decides; default:
+    every card right."""
+    def call(system, user):
+        log.append((tag, user))
+        note = user.split("NOTE:\n", 1)[1]
+        out = []
+        for n, kind, front, back in _items(user):
+            verdict = judge(kind, front, back, note) if judge else {"verdict": CFG["cards"]["check"]["right"],
+                                                                   "reason": "fine"}
+            out.append({"n": n, **verdict})
+        return json.dumps({"checks": out})
+    return call
+
+
+def passing_checks(log=None):
+    log = [] if log is None else log
+    return {"local": fake_check(log), "claude": fake_check(log, "claude")}
+
+
+def refuse_real_engines(test):
+    """Any engine a test did not fake fails at once: never Ollama, never the claude CLI."""
+    def refuse(*a, **k):
+        raise cards.model.ModelError("real engine refused in tests")
+    for target in (unittest.mock.patch.object(cards.model, "ollama_call", refuse),
+                   unittest.mock.patch.dict("sys.modules", {"delegate": unittest.mock.MagicMock(run=refuse)})):
+        target.start()
+        test.addCleanup(target.stop)
 
 
 class FakeAnki:
@@ -191,14 +227,16 @@ class DonFixture(Fixture):
             NOTE=pathlib.Path(self.vault, "Atlas", "Concepts", "Learning", "Learner-Model.md"))
         patcher.start()
         self.addCleanup(patcher.stop)
+        refuse_real_engines(self)
 
     def out(self, s):
         self.say.write(s + "\n")
 
-    def make_cards(self, log=None, calls=None):
+    def make_cards(self, log=None, calls=None, checks=None, module=None):
         log = [] if log is None else log
         calls = calls or {"local": fake_cards(log), "claude": fake_cards(log, "claude")}
-        return cards.run(self.paths, self.ss_module, calls=calls, today=self.today, say=self.out), log
+        return cards.run(self.paths, module or self.ss_module, calls=calls, today=self.today, say=self.out,
+                         checks=checks or passing_checks()), log
 
 
 # -- tests -------------------------------------------------------------------------
@@ -303,7 +341,7 @@ class CardTests(DonFixture):
         with open(path, "a", encoding="utf-8") as f:
             f.write("\nmore\n")
         out2 = cards.run(self.paths, self.ss_module, calls={"local": lambda s, u: "no"}, today=self.today,
-                         say=self.out)
+                         say=self.out, checks=passing_checks())
         self.assertEqual(len(out2["failed"]), 1)
         self.assertEqual(len(out2["cards"]), before)
 
@@ -312,6 +350,194 @@ class CardTests(DonFixture):
             self.assertEqual(anki.deck_name(self.ss_module), "Tess::Signals and Systems")
             self.assertEqual(os.path.basename(don.hub_path(self.paths)), "Tess.md")
             self.assertTrue(cards.card_id(self.ss_module, "x.md", "recall", 1).startswith("tess-"))
+
+
+EM_NOTE = ("---\nname: my-em\ndescription: mine\nupdated: 2026-11-04\ntags: [module]\n---\n"
+           "# Magnetostatics\n\nGauss's law for magnetism: the flux of B through any closed surface is zero, "
+           "∮B·dA = 0, because there are no magnetic monopoles. Ampère's law: ∮B·dl = μ0 I_enc around a closed "
+           "loop. The magnetic flux density B is measured in tesla; it is the force per unit current per unit "
+           "length on a wire at right angles to the field, F = B I L.\n")
+
+# The three cards the first real run (5 Nov 2026) wrote wrong, and one right one.
+BAD_FLUX = {"kind": "method", "front": "How do you find the magnetic flux density?", "back": "∮B·dA = μ0 I / L",
+            "topic": "Ampère's law"}
+BAD_FIELD = {"kind": "problem", "front": "What is the electric field at the point charge?",
+             "back": "E = k q1 q2 / (r^2 r)", "topic": "Coulomb"}
+BAD_VAGUE = {"kind": "recall", "front": "What is magnetic flux density?",
+             "back": "magnetic flux density is a measure of the magnetic field strength", "topic": "B field"}
+GOOD = {"kind": "recall", "front": "What does Gauss's law for magnetism say?", "back": "∮B·dA = 0: no monopoles",
+        "topic": "Gauss's law"}
+
+
+def em_writer(log, deck=(BAD_FLUX, BAD_FIELD, BAD_VAGUE, GOOD)):
+    def call(system, user):
+        log.append(("writer", user))
+        return json.dumps({"cards": list(deck)})
+    return call
+
+
+def examiner(kind, front, back, note):
+    """What a strict checker says about the cards above."""
+    R, W = CFG["cards"]["check"]["right"], CFG["cards"]["check"]["wrong"]
+    if "μ0 I / L" in back:  # the note does give the right answer: corrected
+        return {"verdict": W, "reason": "∮B·dA is Gauss's law for magnetism and is zero; Ampère is ∮B·dl",
+                "corrected": "Ampère's law ∮B·dl = μ0 I_enc (and ∮B·dA = 0)",
+                "evidence": "Ampère's law: ∮B·dl = μ0 I_enc around a closed loop."}
+    if "q1 q2" in back:  # a correction the note does not back: held
+        return {"verdict": W, "reason": "that is a garbled force, not a field",
+                "corrected": "E = k q / r^2", "evidence": "The field of a point charge falls off as one over r squared."}
+    if "a measure of" in back:  # wrong, nothing to correct it with: held
+        return {"verdict": W, "reason": "too vague to be right: no definition, no unit", "corrected": "",
+                "evidence": ""}
+    return {"verdict": R, "reason": "matches the note"}
+
+
+class CheckTests(DonFixture):
+    def setUp(self):
+        super().setUp()
+        self.em = next(m for m in conf.modules(self.paths) if m.code == "5CCYB010")
+        self.note(os.path.join(MODULES, EM, "My EM notes.md"), EM_NOTE)
+        self.em_rel = "/".join([*MODULES.split(os.sep), EM, "My EM notes.md"])
+
+    def em_cards(self, writer_log=None, check_log=None, judge=examiner, deck=None):
+        writer_log = [] if writer_log is None else writer_log
+        check_log = [] if check_log is None else check_log
+        writer = em_writer(writer_log, deck) if deck else em_writer(writer_log)
+        out, _ = self.make_cards(calls={"local": writer, "claude": writer}, module=self.em,
+                                 checks={"local": fake_check(check_log, "local", judge),
+                                         "claude": fake_check(check_log, "claude", judge)})
+        return out
+
+    def test_the_three_bad_cards_are_caught(self):
+        check_log = []
+        out = self.em_cards(check_log=check_log)
+        backs = {c["front"]: c["back"] for c in out["cards"]}
+        # Ampère: corrected from the note.
+        self.assertEqual(backs[BAD_FLUX["front"]], "Ampère's law ∮B·dl = μ0 I_enc (and ∮B·dA = 0)")
+        # The right card goes through.
+        self.assertEqual(backs[GOOD["front"]], GOOD["back"])
+        # The garbled field and the vague one: held back, not in the deck.
+        self.assertNotIn(BAD_FIELD["front"], backs)
+        self.assertNotIn(BAD_VAGUE["front"], backs)
+        held = {c["front"]: c for c in out["held"]}
+        self.assertEqual(set(held), {BAD_FIELD["front"], BAD_VAGUE["front"]})
+        self.assertIn("not backed by the note", held[BAD_FIELD["front"]]["check"]["reason"])
+        self.assertIn("too vague", held[BAD_VAGUE["front"]]["check"]["reason"])
+        # Who checked what: recall locally, method and problem by Claude.
+        by = {}
+        for tag, user in check_log:
+            by.setdefault(tag, set()).update(k for _n, k, _f, _b in _items(user))
+        self.assertEqual(by, {"local": {"recall"}, "claude": {"method", "problem"}})
+        # The sidecar: checked_by, verdict, when, per card.
+        deck = json.loads(self.read(self.paths.data(CFG["don"]["card_file"].format(slug=self.em.slug))))
+        src = deck["sources"][self.em_rel]
+        V = CFG["cards"]["check"]["verdicts"]
+        verdicts = {c["front"]: (c["check"]["by"], c["check"]["verdict"]) for c in src["cards"] + src["held"]}
+        self.assertEqual(verdicts, {BAD_FLUX["front"]: ("claude", V["fixed"]),
+                                    BAD_FIELD["front"]: ("claude", V["wrong"]),
+                                    BAD_VAGUE["front"]: ("local", V["wrong"]),
+                                    GOOD["front"]: ("local", V["right"])})
+        self.assertTrue(all(c["check"]["when"] for c in src["cards"] + src["held"]))
+        fixed = next(c for c in src["cards"] if c["front"] == BAD_FLUX["front"])
+        self.assertEqual(fixed["written_back"], BAD_FLUX["back"])
+        # The note lists them under Held back, with the reason.
+        note = self.read(don.cards_path(self.paths, self.em))
+        self.assertIn(CFG["don"]["cards_held_heading"], note)
+        held_part = note.split(CFG["don"]["cards_held_heading"], 1)[1]
+        self.assertIn(BAD_FIELD["front"], held_part)
+        self.assertIn("too vague", held_part)
+        self.assertNotIn(BAD_FLUX["front"], held_part)
+        code, report = self.contract()
+        self.assertEqual(code, 0, report)
+        # Only checked cards reach Anki: the TSV has neither bad answer.
+        sync = anki.run(self.paths, [self.em], client=anki.Connect(url=closed_port_url(), timeout=2),
+                        today=self.today, say=self.out)
+        tsv = self.read(sync["tsv"][0])
+        for bad in (BAD_FLUX, BAD_FIELD, BAD_VAGUE):
+            self.assertNotIn(bad["back"].replace("<", "&lt;"), tsv)
+            self.assertNotIn(bad["back"], tsv)
+        self.assertIn("μ0 I_enc", tsv)
+        self.assertEqual(len([r for r in tsv.splitlines() if not r.startswith("#")]), 2)
+
+    def test_rerun_checks_only_new_or_changed_cards(self):
+        self.em_cards()
+        # Unchanged note: nothing written, nothing checked.
+        writer_log, check_log = [], []
+        out = self.em_cards(writer_log, check_log)
+        self.assertEqual((writer_log, check_log), ([], []))
+        self.assertEqual(len(out["cards"]), 2)
+        self.assertEqual(len(out["held"]), 2)
+        # The note changes and the writer rewrites one card: only that card is checked again,
+        # and the same wrong card written again keeps its correction without a new check.
+        with open(os.path.join(self.vault, MODULES, EM, "My EM notes.md"), "a", encoding="utf-8") as f:
+            f.write("\nThe unit of B is the tesla, T = N/(A m).\n")
+        new_good = {**GOOD, "back": "∮B·dA = 0 over any closed surface"}
+        writer_log, check_log = [], []
+        out = self.em_cards(writer_log, check_log, deck=(BAD_FLUX, BAD_FIELD, BAD_VAGUE, new_good))
+        self.assertEqual(len(writer_log), 1)
+        self.assertEqual([_items(u) for _t, u in check_log],
+                         [[(1, "recall", new_good["front"], new_good["back"])]])
+        backs = {c["front"]: c["back"] for c in out["cards"]}
+        self.assertIn("μ0 I_enc", backs[BAD_FLUX["front"]])
+        self.assertEqual(len(out["held"]), 2)
+
+    def test_switch_sends_every_kind_to_claude(self):
+        check_log = []
+        with unittest.mock.patch.dict(CFG["cards"]["check"], {"all_with": "claude"}):
+            self.em_cards(check_log=check_log)
+        self.assertEqual({t for t, _u in check_log}, {"claude"})
+        self.assertEqual({k for _t, u in check_log for _n, k, _f, _b in _items(u)}, {"recall", "method", "problem"})
+        # Switching back: the recall cards' checker changed, so they are checked again (locally), the rest not.
+        check_log = []
+        self.em_cards(check_log=check_log)
+        self.assertEqual({t for t, _u in check_log}, {"local"})
+
+    def test_checker_down_holds_cards_and_retries_next_run(self):
+        def down(system, user):
+            raise cards.model.ModelError("claude CLI not found")
+        writer = em_writer([])
+        out, _ = self.make_cards(calls={"local": writer}, module=self.em,
+                                 checks={"local": fake_check([], "local", examiner), "claude": down})
+        self.assertEqual({c["kind"] for c in out["cards"]}, {"recall"})  # only the locally checked one passed
+        unchecked = [c for c in out["held"] if c["check"]["verdict"] == CFG["cards"]["check"]["verdicts"]["unchecked"]]
+        self.assertEqual({c["kind"] for c in unchecked}, {"method", "problem"})
+        self.assertIn("claude CLI not found", unchecked[0]["check"]["reason"])
+        # Claude back: the same unchanged note, only the unchecked cards are checked.
+        check_log = []
+        out = self.em_cards(check_log=check_log)
+        self.assertEqual({t for t, _u in check_log}, {"claude"})
+        self.assertIn(BAD_FLUX["front"], {c["front"] for c in out["cards"]})
+
+    def test_cards_from_before_the_check_are_checked_before_anki(self):
+        self.em_cards()
+        path = self.paths.data(CFG["don"]["card_file"].format(slug=self.em.slug))
+        deck = json.loads(self.read(path))
+        src = deck["sources"][self.em_rel]
+        src["cards"] = [cards.as_written(c) for c in src["cards"] + src["held"]]  # the 16:10 sidecar: no checks
+        src["held"] = []
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(deck, f)
+        self.assertEqual(cards.checked_cards(deck), [])  # anki-sync would send none of them
+        writer_log, check_log = [], []
+        out = self.em_cards(writer_log, check_log)
+        self.assertEqual(writer_log, [])
+        self.assertTrue(check_log)
+        self.assertEqual(len(out["cards"]), 2)
+        self.assertEqual(len(out["held"]), 2)
+
+    def test_evidence_must_really_be_in_the_note(self):
+        self.assertTrue(cards.backed_by("Ampère's law: ∮B·dl = μ0 I_enc around a closed loop.", EM_NOTE))
+        self.assertFalse(cards.backed_by("The field of a point charge falls off as one over r squared.", EM_NOTE))
+        self.assertFalse(cards.backed_by("loop", EM_NOTE))
+        self.assertFalse(cards.backed_by("", EM_NOTE))
+
+    def test_no_answer_for_a_card_is_not_a_pass(self):
+        def silent(system, user):
+            return json.dumps({"checks": []})
+        out, _ = self.make_cards(calls={"local": em_writer([])}, module=self.em,
+                                 checks={"local": silent, "claude": silent})
+        self.assertEqual(out["cards"], [])
+        self.assertEqual(len(out["held"]), 4)
 
 
 class AnkiTests(DonFixture):
@@ -371,7 +597,8 @@ class AnkiTests(DonFixture):
             for c in data["cards"]:
                 c["back"] = "A better answer"
             return json.dumps(data)
-        cards.run(self.paths, self.ss_module, calls={"local": changed}, today=self.today, say=self.out)
+        cards.run(self.paths, self.ss_module, calls={"local": changed}, today=self.today, say=self.out,
+                  checks=passing_checks())
         out3 = self.sync()
         per_note = sum(k["count"] for k in CFG["cards"]["kinds"].values())
         self.assertEqual(out3["synced"]["signals-and-systems"]["updated"], per_note)
@@ -419,7 +646,7 @@ class AnkiTests(DonFixture):
         log = []
         with unittest.mock.patch("sys.stdout", out):
             rc = cli.main(["cards", "signals", "--vault", self.vault, "--state", self.state],
-                          calls={"local": fake_cards(log)})
+                          calls={"local": fake_cards(log)}, checks=passing_checks())
             self.assertEqual(rc, 0)
             rc = cli.main(["anki-sync", "--vault", self.vault, "--state", self.state], anki_client=self.client)
             self.assertEqual(rc, 0)
@@ -476,7 +703,7 @@ class GitTests(DonFixture):
         out = io.StringIO()
         with unittest.mock.patch("sys.stdout", out):
             rc = cli.main(["cards", "signals", "--vault", self.vault, "--state", self.state],
-                          calls={"local": fake_cards([])})
+                          calls={"local": fake_cards([])}, checks=passing_checks())
         self.assertEqual(rc, 0)
         self.assertIn("vault commit", out.getvalue())
         msg = self.git("log", "-1", "--format=%s")

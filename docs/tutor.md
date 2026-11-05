@@ -233,6 +233,42 @@ path), `week` and `engine`. The id is a hash of (module, source note, kind,
 position), so a regenerated note updates its cards in Anki instead of adding
 new ones. A question that two notes both produce is sent once.
 
+### The check (`cards.check`)
+
+Added 5 Nov 2026 after the first real run on Electromagnetism wrote wrong
+answers, e.g. `∮B·dA = μ0 I / L` for the flux density and a garbled force
+as "the field at a point charge". Chuen drills these cards, so a wrong one
+teaches him a wrong fact. Every new or changed card is now checked against
+its source note before it can reach Anki. The check asks three things: is
+the physics or maths right, does the back actually answer the front, and
+does it agree with the note.
+
+- **Who checks**: each kind has a `check` engine. Recall cards go to `local`;
+  method and problem cards go to `claude`, through `delegate.run`, his plan,
+  never an API key. Set `cards.check.all_with` to `"claude"` to send every
+  kind to Claude. Cards are checked in one batch per note and engine
+  (`check.system` / `check.user` / `check.item` / `check.schema`).
+- **Verdicts** (`check.verdicts`):
+  - `right`: kept as written.
+  - `fixed`: the checker said wrong, gave a corrected back, and quoted the
+    note sentence behind it. The quote has to really be in the note: at
+    least `evidence_min_words` words, with `evidence_min_overlap` of them
+    found in the note in order. The corrected back replaces the old one,
+    which is kept as `written_back`.
+  - `wrong`: no correction, or one the note doesn't back. The card is held
+    back.
+  - `unchecked`: the checker didn't answer or gave no verdict for the card.
+    The card is held back too, and checked again on the next run.
+- **Held-back cards** go in the sidecar's `held` list and under a
+  `## Held back` heading in the cards note, with the reason. They never go to
+  the TSV or AnkiConnect: `anki-sync` sends `cards.checked_cards(deck)`, so
+  a sidecar card with no passing check (including any written before the
+  check existed) is never sent.
+- **Per card**, `check` records `by`, `verdict`, `when`, `reason` and `key`
+  (a hash of the card as written). On a re-run a card is checked again only
+  if it is new or changed, if its checker engine changed, or if it was
+  `unchecked`. An unchanged note makes no call at all.
+
 ### Anki (`tutor/anki.py`)
 
 - **TSV** (`anki.tsv.enabled`): `<Don area>/Anki/Don - <module>.tsv`, with
@@ -272,6 +308,14 @@ It checks:
 - which notes count as sources;
 - card kinds, ids and dedupe, the `claude` switch, and that `claude` goes
   through `delegate.run`;
+- the check, with fake checkers (any engine a test doesn't fake raises, so
+  Ollama and the claude CLI are never reached). It covers: the three bad
+  cards from the first real run caught (one corrected from the note, two
+  held back and kept out of the TSV); recall checked locally and
+  method/problem by Claude; the `all_with` switch; a re-run checking only
+  new or changed cards; a checker that's down (cards held, then checked
+  next run); pre-check sidecar cards checked before Anki; and evidence
+  that isn't in the note being refused;
 - the TSV-only fallback, which records nothing;
 - add, then unchanged, then update, with no duplicates;
 - weak topics in the sidecar, the progress note and the learner model, and

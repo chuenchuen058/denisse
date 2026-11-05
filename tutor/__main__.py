@@ -37,7 +37,7 @@ def _module(paths, text):
     return module
 
 
-def main(argv=None, anki_client=None, calls=None, learner_core=None) -> int:
+def main(argv=None, anki_client=None, calls=None, learner_core=None, checks=None) -> int:
     ap = argparse.ArgumentParser(prog="python -m tutor", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -81,7 +81,7 @@ def main(argv=None, anki_client=None, calls=None, learner_core=None) -> int:
         module = _module(paths, a.module)
         if module is None:
             return 1
-        out = cards.run(paths, module, calls=calls)
+        out = cards.run(paths, module, calls=calls, checks=checks)
         don.commit(paths, out["touched"], "cards", module)
         return 1 if out["failed"] and not out["cards"] else 0
     modules = None

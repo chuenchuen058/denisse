@@ -13,6 +13,19 @@ Every card keeps the vault path of the note it came from, its module, week
 and topic, and a stable id built from (module, source, kind, position), so
 a re-sync to Anki updates a card instead of adding it twice.
 
+Every card is then checked before it can reach Anki (tutor.json
+cards.check): the physics or maths right, the back answering the front,
+agreeing with the source note. Each kind names its checker (`check`;
+default: recall by the local model, method and problem by Claude through
+delegate.py); `check.all_with` sends every kind to one engine. A wrong card
+is corrected when the checker gives a corrected back and quotes the note
+sentence that backs it (the quote must really be in the note); otherwise it
+is held back: kept in the sidecar's `held` list and under "Held back" in the
+cards note with the reason, never sent to Anki. Every card records its
+check (by, verdict, when, reason, and the key of the card as written), so a
+re-run checks only cards that are new or changed, whose checker changed, or
+that could not be checked last time.
+
 The cards live in the Don area: a JSON sidecar (cards-<slug>.json) and a
 readable note listing each card under a link to its source.
 """
@@ -27,6 +40,9 @@ from . import don, ingest, model, sources
 from .conf import CONFIG, Module, Paths
 
 _C = CONFIG["cards"]
+_K = _C["check"]
+_V = _K["verdicts"]
+_PASS = (_V["right"], _V["fixed"])
 _D = CONFIG["don"]
 _SAY = CONFIG["say"]
 
@@ -127,6 +143,128 @@ def all_cards(deck: dict) -> list:
     return out
 
 
+def checked_cards(deck: dict) -> list:
+    """all_cards, only those whose check passed: what may go to Anki."""
+    return [card for card in all_cards(deck) if (card.get("check") or {}).get("verdict") in _PASS]
+
+
+# -- the check ---------------------------------------------------------------------
+
+def check_engine(kind: str) -> str:
+    return _K["all_with"] or _C["kinds"][kind]["check"]
+
+
+def as_written(card: dict) -> dict:
+    """The card as its writer gave it: any correction and check undone."""
+    out = {k: v for k, v in card.items() if k not in ("check", "written_back")}
+    if "written_back" in card:
+        out["back"] = card["written_back"]
+    return out
+
+
+def check_key(card: dict) -> str:
+    """Identifies the card as written, so an unchanged card is not re-checked."""
+    w = as_written(card)
+    return _hash(_K["key"].format(kind=w["kind"], front=w["front"], back=w["back"]))
+
+
+def _words(text) -> list:
+    return re.findall(_K["word"], str(text or "").lower())
+
+
+def backed_by(evidence, text: str) -> bool:
+    """The checker's quote is really in the note: at least
+    evidence_min_words words, and that share of them found in the note in
+    the same order."""
+    quote = _words(evidence)
+    if len(quote) < _K["evidence_min_words"]:
+        return False
+    import difflib
+    blocks = difflib.SequenceMatcher(None, quote, _words(text), autojunk=False).get_matching_blocks()
+    return sum(b.size for b in blocks) >= _K["evidence_min_overlap"] * len(quote)
+
+
+def _verdict(card: dict, engine: str, verdict: str, reason, when: str) -> dict:
+    card["check"] = {"by": engine, "verdict": verdict, "when": when,
+                     "reason": _clip(reason, _K["reason_chars"]), "key": check_key(card)}
+    return card
+
+
+def _judge(card: dict, answer, engine: str, text: str, when: str) -> dict:
+    """One card, one answer from the checker -> the card with its check."""
+    reasons = _K["reasons"]
+    verdict = str((answer or {}).get("verdict", "")).strip().lower() if isinstance(answer, dict) else ""
+    if verdict == _K["right"]:
+        return _verdict(card, engine, _V["right"], answer.get("reason"), when)
+    if verdict != _K["wrong"]:
+        return _verdict(card, engine, _V["unchecked"], reasons["no_verdict"], when)
+    reason = _clip(answer.get("reason"), _K["reason_chars"])
+    corrected = _clip(answer.get("corrected"), _C["back_chars"])
+    if not corrected:
+        return _verdict(card, engine, _V["wrong"], reasons["no_fix"].format(reason=reason), when)
+    if not backed_by(answer.get("evidence"), text):
+        return _verdict(card, engine, _V["wrong"], reasons["fix_unsupported"].format(reason=reason), when)
+    card["written_back"] = card["back"]
+    card["back"] = corrected
+    return _verdict(card, engine, _V["fixed"], reason, when)
+
+
+def _ask_checks(call, system: str, user: str) -> list:
+    for attempt in range(1 + CONFIG["model"]["json_retries"]):
+        data = model.parse(call(system, user if attempt == 0 else user + CONFIG["prompt"]["retry"]))
+        if data is not None and isinstance(data.get("checks"), list):
+            return data["checks"]
+    raise model.ModelError(_SAY["cards_no_json"])
+
+
+def check(module: Module, src: sources.Source, written: list, before: dict, checks: dict | None = None,
+          when: str | None = None, num_ctx: int | None = None) -> tuple:
+    """Check `written` (cards as their writer gave them) against `src`.
+    `before`: check key -> the card as it stood after an earlier check,
+    reused when the same checker would check it again. `checks` (tests)
+    overrides checker engines by name. Returns (passed, held, counts)."""
+    when = when or dt.datetime.now().isoformat(timespec="seconds")
+    text = src.text[:model.chunk_chars(num_ctx)]
+    c = don.ctx(module)
+    done, pending = [], {}
+    for i, card in enumerate(written):
+        engine = check_engine(card["kind"])
+        old = before.get(check_key(card))
+        chk = (old or {}).get("check") or {}
+        if chk.get("by") == engine and chk.get("verdict") != _V["unchecked"]:
+            done.append((i, {**card, **{k: old[k] for k in ("back", "written_back", "check") if k in old}}))
+        else:
+            pending.setdefault(engine, []).append((i, as_written(card)))
+    reused = len(done)
+    system = _K["system"].format(**c)
+    for engine, batch in pending.items():
+        items = "\n".join(_K["item"].format(n=n, kind=card["kind"], front=card["front"], back=card["back"])
+                          for n, (_i, card) in enumerate(batch, 1))
+        user = _K["user"].format(week=_C["week"].format(week=src.week) if src.week else "", source=src.stem,
+                                 items=items, schema=_K["schema"], right=_K["right"], wrong=_K["wrong"],
+                                 text=text, **c)
+        try:
+            replies = _ask_checks(engine_call(engine, checks), system, user)
+        except (model.ModelError, OSError) as exc:
+            why = _K["reasons"]["unreachable"].format(engine=engine, why=exc)
+            done += [(i, _verdict(card, engine, _V["unchecked"], why, when)) for i, card in batch]
+            continue
+        answers = {}
+        for item in replies:
+            try:
+                answers.setdefault(int(item.get("n")), item)
+            except (AttributeError, TypeError, ValueError):
+                continue
+        done += [(i, _judge(card, answers.get(n), engine, text, when)) for n, (i, card) in enumerate(batch, 1)]
+    done.sort(key=lambda pair: pair[0])
+    passed = [card for _i, card in done if card["check"]["verdict"] in _PASS]
+    held = [card for _i, card in done if card["check"]["verdict"] not in _PASS]
+    counts = {"reused": reused, "held": len(held),
+              "right": sum(1 for card in passed if card["check"]["verdict"] == _V["right"]),
+              "fixed": sum(1 for card in passed if card["check"]["verdict"] == _V["fixed"])}
+    return passed, held, counts
+
+
 def render_note(paths: Paths, module: Module, deck: dict, today: dt.date) -> str:
     c = don.ctx(module, today=today.isoformat(), name=_D["cards_name"].format(**don.ctx(module)),
                 deck=CONFIG["anki"]["deck"].format(**don.ctx(module)))
@@ -141,46 +279,70 @@ def render_note(paths: Paths, module: Module, deck: dict, today: dt.date) -> str
         link = CONFIG["sources"]["source_link"].format(rel=os.path.splitext(rel)[0], stem=stem)
         lines += [_D["cards_source_heading"].format(link=link), ""]
         for card in src["cards"]:
+            chk = card.get("check") or {}
+            mark = _D["cards_fixed_mark"] if chk.get("verdict") == _V["fixed"] else _D["cards_checked_mark"]
             lines.append(_D["cards_card"].format(
                 kind=card["kind"], front=" ".join(card["front"].split()), back=" ".join(card["back"].split()),
-                topic=_D["cards_topic"].format(topic=card["topic"]) if card.get("topic") else ""))
+                topic=_D["cards_topic"].format(topic=card["topic"]) if card.get("topic") else "")
+                + (mark.format(by=chk["by"]) if chk.get("by") else ""))
         lines.append("")
     if not any_:
         lines.append(_D["cards_none"])
+    held = [(rel, card) for rel, src in deck["sources"].items() for card in src.get("held", [])]
+    if held:
+        lines += ["", _D["cards_held_heading"], "", _D["cards_held_intro"], ""]
+        for rel, card in held:
+            chk = card.get("check") or {}
+            stem = os.path.splitext(rel.split("/")[-1])[0]
+            link = CONFIG["sources"]["source_link"].format(rel=os.path.splitext(rel)[0], stem=stem)
+            lines.append(_D["cards_held_card"].format(
+                kind=card["kind"], front=" ".join(card["front"].split()), back=" ".join(card["back"].split()),
+                reason=chk.get("reason", ""), by=chk.get("by", ""), when=chk.get("when", ""), link=link))
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
 def run(paths: Paths, module: Module, calls: dict | None = None, today: dt.date | None = None,
-        say=print, num_ctx: int | None = None) -> dict:
-    """Cards for every source note of `module` that changed since last time.
-    Returns {cards, made, kept, failed, touched}."""
+        say=print, num_ctx: int | None = None, checks: dict | None = None) -> dict:
+    """Cards for every source note of `module` that changed since last time,
+    each checked before it is kept (`checks`, tests: checker engines by name).
+    Returns {cards, made, kept, failed, held, touched}; `cards` is only the
+    checked ones, what anki-sync sends."""
     today = today or dt.date.today()
     deck = load(paths, module)
     found = sources.collect(paths, module)
     say(_SAY["sources"].format(module=module.title, n=len(found),
                                own=sum(1 for s in found if s.kind == CONFIG["sources"]["own"])))
-    made, kept, failed = [], [], []
+    made, kept, failed, held_all = [], [], [], []
     fresh = {}
     for src in found:
         digest = _hash(src.text)
         prev = deck["sources"].get(src.rel)
+        earlier = (prev or {}).get("cards", []) + (prev or {}).get("held", [])
+        before = {check_key(card): card for card in earlier}
         if prev and prev.get("hash") == digest:
-            fresh[src.rel] = prev
+            written, entry = [as_written(card) for card in earlier], dict(prev)
             kept.append(src.rel)
-            say(_SAY["cards_source"].format(status="unchanged", name=src.stem, n=len(prev.get("cards", []))))
-            continue
-        try:
-            new = generate(module, src, calls, num_ctx)
-        except (model.ModelError, OSError) as exc:
-            failed.append((src.rel, str(exc)))
-            say(_SAY["cards_failed"].format(name=src.stem, why=exc))
-            if prev:
-                fresh[src.rel] = prev  # the old cards stand until the note gives new ones
-            continue
-        fresh[src.rel] = {"hash": digest, "kind": src.kind, "week": src.week, "cards": new,
-                          "made": today.isoformat()}
-        made.append(src.rel)
-        say(_SAY["cards_source"].format(status="made", name=src.stem, n=len(new)))
+            say(_SAY["cards_source"].format(status="unchanged", name=src.stem, n=len(earlier)))
+        else:
+            try:
+                written = generate(module, src, calls, num_ctx)
+            except (model.ModelError, OSError) as exc:
+                failed.append((src.rel, str(exc)))
+                say(_SAY["cards_failed"].format(name=src.stem, why=exc))
+                if not prev:
+                    continue
+                # The old cards stand until the note gives new ones (still checked, below).
+                written, entry = [as_written(card) for card in earlier], dict(prev)
+            else:
+                entry = {"hash": digest, "kind": src.kind, "week": src.week, "made": today.isoformat()}
+                made.append(src.rel)
+                say(_SAY["cards_source"].format(status="made", name=src.stem, n=len(written)))
+        passed, held, counts = check(module, src, written, before, checks, num_ctx=num_ctx)
+        if counts["reused"] < len(written):
+            say(_SAY["cards_checked"].format(name=src.stem, **counts))
+        entry["cards"], entry["held"] = passed, held
+        fresh[src.rel] = entry
+        held_all += held
     deck["sources"] = fresh
     deck["updated"] = today.isoformat()
     touched = [don.save_json(paths, sidecar(module), deck)]
@@ -192,8 +354,8 @@ def run(paths: Paths, module: Module, calls: dict | None = None, today: dt.date 
     touched += don.refresh(paths, state, today=today, say=say)
     ingest.save_state(paths, state)
     touched.append(paths.state_file())
-    cards = all_cards(deck)
+    cards = checked_cards(deck)
     say(_SAY["cards_done"].format(module=module.title, n=len(cards), sources=len(fresh), made=len(made),
-                                  kept=len(kept), failed=len(failed)))
-    return {"cards": cards, "made": made, "kept": kept, "failed": failed, "touched": touched}
+                                  kept=len(kept), failed=len(failed), held=len(held_all)))
+    return {"cards": cards, "made": made, "kept": kept, "failed": failed, "held": held_all, "touched": touched}
 
