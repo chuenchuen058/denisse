@@ -346,6 +346,88 @@ class IntegrationTest(unittest.TestCase):
         self.assertIn("changed lines", risk_of({"big.txt": "x\n" * 401}))
         self.assertIsNone(risk_of({"big.txt": "x\n" * 400}))
 
+    # --- unmerged branches are never lost
+
+    def keep_refs(self, slug):
+        out = self.git("for-each-ref", "--format=%(refname) %(objectname)", f"{self.R.C['keep_ref_prefix']}{slug}-*")
+        return dict(l.split() for l in out.splitlines())
+
+    def runner_log(self):
+        p = self.R.REVIEW / "runner.log"
+        return p.read_text(encoding="utf-8") if p.exists() else ""
+
+    def test_unmerged_branch_survives_fresh_worktree_under_keep_ref(self):
+        task, wt, branch = self.worked("kept", {"done.txt": "reviewed work"})
+        tip = self.git("rev-parse", branch)
+        self.assertEqual(self.keep_refs("kept"), {}, "a branch made from master has nothing to keep")
+        self.R.fresh_worktree(task)  # what a lane re-run (or the old merge-only fall-through) does
+        self.assertEqual(self.git("rev-parse", branch), self.head(), "the branch itself is fresh again")
+        kept = self.keep_refs("kept")
+        self.assertEqual(list(kept.values()), [tip], "the unmerged commit is kept under the keep prefix")
+        ref = next(iter(kept))
+        self.assertIn(ref, self.runner_log())
+        self.assertEqual(self.git("show", f"{ref}:done.txt"), "reviewed work")
+        self.R.fresh_worktree(task)  # again: nothing new to keep, the first ref stays
+        self.assertEqual(self.keep_refs("kept"), kept)
+
+    def test_unmerged_branch_survives_cleanup_delete(self):
+        task, wt, branch = self.worked("gone", {"done.txt": "x"})
+        tip = self.git("rev-parse", branch)
+        self.R.remove_worktree(wt, branch, delete_branch=True)
+        self.assertEqual(list(self.keep_refs("gone").values()), [tip])
+
+    def merge_only_task(self, slug):
+        import requeue
+        Q = importlib.reload(requeue)
+        p = self.R.QUEUE / f"{slug}.md"
+        text = TASK.format(slug=slug, gate=GATE, written=dt.datetime.now().strftime("%Y-%m-%dT%H:%M"))
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(Q.merge_only_text(text, f"review/{slug}", "now", None), encoding="utf-8")
+        return p
+
+    def test_merge_only_with_missing_branch_parks_and_runs_no_lane(self):
+        self.merge_only_task("lost")
+        before = self.head()
+        self.assertEqual(self.run_tick({"done.txt": "a fresh lane's work"}), "MERGE-ONLY-PARKED")
+        self.assertFalse((self.R.REPORTS / "lost.lane.log").exists(), "no lane ran")
+        self.assertNotEqual(subprocess.run(["git", "rev-parse", "--verify", "--quiet", "review/lost"],
+                                           cwd=self.repo, capture_output=True).returncode, 0,
+                            "no fresh branch was made")
+        self.assertEqual(self.head(), before)
+        self.assertTrue((self.R.PARKED / "lost.md").exists())
+        why = (self.R.PARKED / "lost.why.txt").read_text(encoding="utf-8")
+        self.assertIn("review/lost", why)
+        self.assertIn("does not exist", why)
+        self.assertEqual(self.state()["tasks"]["lost"]["last_result"], "MERGE_ONLY_PARKED")
+
+    def test_merge_only_merges_the_existing_branch_without_a_lane(self):
+        task, wt, branch = self.worked("mo", {"done.txt": "reviewed work"})
+        tip = self.git("rev-parse", branch)
+        self.R.remove_worktree(wt, branch, delete_branch=False)  # parked: worktree gone, branch kept
+        (self.R.REPORTS / "mo.md").unlink()
+        self.merge_only_task("mo")
+        self.assertEqual(self.run_tick({"done.txt": "a fresh lane's work"}), "PASS")
+        self.assertFalse((self.R.REPORTS / "mo.lane.log").exists(), "no lane ran")
+        self.assertEqual((self.repo / "done.txt").read_text(), "reviewed work", "the branch's own work merged")
+        self.assertEqual(self.git("rev-parse", "HEAD^2"), tip)
+        self.assertEqual(self.state()["tasks"]["mo"]["merge"], "merged")
+        self.assertEqual(self.keep_refs("mo"), {}, "merged, so nothing needed keeping")
+
+    def test_merge_only_conflict_parks_and_keeps_the_branch(self):
+        task, wt, branch = self.worked("clash", {"lib.py": 'def greet():\n    return "hi"  # branch\n'})
+        tip = self.git("rev-parse", branch)
+        (self.repo / "lib.py").write_text('def greet():\n    return "hi"  # master\n')
+        self.git("commit", "-qam", "master moved")
+        before = self.head()
+        (self.R.REPORTS / "clash.md").unlink()
+        self.merge_only_task("clash")
+        self.assertEqual(self.run_tick({}), "INTEGRATION-REJECTED")
+        self.assertFalse((self.R.REPORTS / "clash.lane.log").exists(), "no lane ran")
+        self.assertEqual(self.head(), before)
+        self.assertEqual(self.git("rev-parse", branch), tip, "branch untouched")
+        self.assertTrue((self.R.PARKED / "clash.md").exists())
+        self.assertIn("merge conflict", (self.R.PARKED / "clash.why.txt").read_text(encoding="utf-8"))
+
     def test_parse_verdict(self):
         P = self.R.parse_verdict
         self.assertEqual(P(json.dumps({"type": "result", "result": "VERDICT: ok\n- fine"}))[0], "ok")
