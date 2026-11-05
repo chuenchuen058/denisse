@@ -43,10 +43,48 @@ control arm for re-running the A/B in eval/run_eval.py.
 
 import os
 import re
+from pathlib import Path
 
 import brain_rules
 import instincts
+import json_config
 import tool_policy
+
+# The router's own words (the machine's generic names, below) are in
+# tool_router.json, checked against tool_router.defaults.json; configure()
+# reloads it.
+CONFIG_ENV_VAR = "DENISSE_TOOL_ROUTER_CONFIG"
+CONFIG_FILE = Path(__file__).with_name("tool_router.json")
+DEFAULTS_FILE = Path(__file__).with_name("tool_router.defaults.json")
+_NEVER = re.compile(r"(?!)")
+
+
+def _device_rx(words):
+    return re.compile(r"\b(?:%s)\b" % "|".join(words), re.I) if words else _NEVER
+
+
+def _extra_checks(data: dict, defaults: dict, checker) -> dict:
+    try:
+        if any(not w for w in data["generic_device_words"]):
+            raise re.error("an empty word")
+        _device_rx(data["generic_device_words"])
+    except re.error as e:
+        data["generic_device_words"] = checker.bad("tool_router.generic_device_words",
+                                                   f"has a bad pattern ({e})", defaults["generic_device_words"])
+    return data
+
+
+def configure(path=None) -> dict:
+    """(Re)load tool_router.json (or ``path``, or $DENISSE_TOOL_ROUTER_CONFIG)."""
+    global CONFIG, _DEVICE
+    path = path or os.environ.get(CONFIG_ENV_VAR) or CONFIG_FILE
+    CONFIG = json_config.load("tool_router", path, DEFAULTS_FILE, extra=_extra_checks)
+    _DEVICE = _device_rx(CONFIG["generic_device_words"])
+    return CONFIG
+
+
+CONFIG: dict = {}
+configure()
 
 CORE = tool_policy.core()
 
@@ -200,7 +238,7 @@ def request_context(messages: list) -> tuple[str, list]:
         routed_text = text
         if continuation and found == ["system"]:
             # "it's in my laptop, try again" still refers to the file.
-            specific = re.sub(r"\b(?:laptop|computer|pc)\b", "", text, flags=re.I)
+            specific = _DEVICE.sub("", text)
             found = _groups_in(specific)
             routed_text = specific
         if found:

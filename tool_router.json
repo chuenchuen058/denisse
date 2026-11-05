@@ -1,0 +1,5 @@
+{
+  "_about": "tool_router.py's own words (AGENTS.md Rule 0). Checked against tool_router.defaults.json, which holds the same values and is the fallback for anything bad or missing here. The groups, their cues and the core set are NOT here: they are tool_policy.json.",
+  "generic_device_words": ["laptop", "computer", "pc"],
+  "_generic_device_words": "Whole words (case-insensitive regex fragments) naming the machine itself. In a follow-up that only matched the 'system' group, they are dropped and the message routed again, so \"it's in my laptop, try again\" still reaches the file tools rather than the startup-program ones."
+}

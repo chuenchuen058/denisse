@@ -1,0 +1,86 @@
+{
+  "_about": "The shipped defaults for study_mode.json: the documented fallback for any bad or missing value there. Keep the two equal (scripts/test_study_mode_config.py checks). What turns the timer on and off is NOT here: that is tool_policy.json study_commands.",
+  "timings": {
+    "_about": "Minutes per phase, how often the clock checks its wall-clock deadline (also how fast the badge follows a dragged orb), and how long a phase alert stays up before tidying itself away.",
+    "study_min": 25,
+    "rest_min": 5,
+    "check_ms": 250,
+    "bubble_ms": 90000
+  },
+  "sizes": {
+    "_about": "Logical pixels (scaled by the screen's DPI). badge_tuck is how far inside the orb window its ring's outer edge sits; badge_gap the clear space between pill and ring; screen_margin where the badge sits with no orb.",
+    "bubble_w": 260,
+    "bubble_pad": 12,
+    "badge_w": 96,
+    "badge_h": 24,
+    "badge_gap": 4,
+    "badge_tuck": 5,
+    "badge_outline": 1.5,
+    "screen_margin": 12
+  },
+  "fonts": {
+    "_about": "Point sizes in the bubble and the badge.",
+    "title": 11,
+    "body": 9,
+    "footer": 8,
+    "clock": 7,
+    "badge": 9
+  },
+  "time_format": "%H:%M",
+  "command_strip": "^(?:please\\s+)|(?:\\s+please)$",
+  "_command_strip": "Politeness removed from a whole-message command before tool_policy.json study_commands is tried (a regex; matched lower-cased).",
+  "phases": {
+    "_about": "Everything said about one phase. alert_* is the bubble when the phase starts ({n} = its minutes); status_* the bubble when the badge is clicked ({left} = minutes left); footer the round line ({round}, {time} = when this phase ends); badge the countdown pill's word; menu the tray menu's word; block/doing/next feed the sentences in 'wording'.",
+    "study": {
+      "alert_title": "Study time, Chuen.",
+      "alert_line": "{n} minutes, starting now. Back to it.",
+      "status_title": "Studying.",
+      "status_line": "{left} min left of this study block.",
+      "footer": "Round {round} · rest at {time}",
+      "badge": "Study",
+      "menu": "Studying",
+      "block": "study block",
+      "doing": "studying",
+      "next": "rest"
+    },
+    "rest": {
+      "alert_title": "Rest time.",
+      "alert_line": "Nice work -- take {n} minutes. Stand up, drink some water.",
+      "status_title": "On a break.",
+      "status_line": "{left} min left of this rest.",
+      "footer": "Round {round} · study at {time}",
+      "badge": "Rest",
+      "menu": "Resting",
+      "block": "rest break",
+      "doing": "on a break",
+      "next": "the next study block"
+    }
+  },
+  "wording": {
+    "_about": "The bubble's links, the badge and tray-menu lines, and every sentence the model's study tools return. Tool results say only what actually happened: 'nothing was paused' when nothing ran is read by brain._confirms_nothing as no action taken, so keep that sense if you reword them.",
+    "dismiss": "Dismiss",
+    "stop_link": "Stop study mode",
+    "paused_badge": "Paused",
+    "paused_menu": "Paused",
+    "badge": "{label}  {m}:{s:02d}",
+    "menu_status": "{word} · {left} min left",
+    "off": "No study session is running.",
+    "paused_state": "Study session paused: {left} min left of the {block}, round {round}. Resume to continue.",
+    "running_state": "Study session running: {doing}, {left} min left of this {block}, round {round}; {next} at {time}.",
+    "no_clock": "Study mode isn't available in this process (no tray running), so nothing happened. Tell him plainly.",
+    "no_clock_status": "No study session is running (study mode isn't set up in this process).",
+    "already_running": "Already running -- {state}",
+    "started": "Study session started: {study_min} minutes of study, then a {rest_min}-minute rest; rest at {time}.",
+    "not_running_pause": "No study session is running, so nothing was paused.",
+    "already_paused": "It's already paused -- {state}",
+    "paused": "Study session paused with {left} min left of the current block.",
+    "not_running_resume": "No study session is running, so nothing was resumed. Start one if he wants one.",
+    "not_paused": "It wasn't paused -- {state}",
+    "resumed": "Study session resumed: {left} min left, next switch at {time}.",
+    "not_running_stop": "No study session was running, so nothing was stopped.",
+    "stopped": "Study session stopped after {rounds} {round_word}.",
+    "round_one": "round",
+    "round_many": "rounds",
+    "context": "Right now: {state}"
+  }
+}

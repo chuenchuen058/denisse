@@ -34,31 +34,83 @@ fire a stale alert hours late as if nothing happened -- it notices the
 deadline passed and moves on with a fresh phase from now.
 """
 
+import os
 import re
 import tkinter as tk
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from PIL import Image, ImageColor, ImageDraw, ImageTk
 
+import json_config
 import tool_policy
 from floating_orb import _flatten
 
 from reminder_card import ACCENT, FAINT, FILL, GOOD, MUTED, TEXT, TRANSPARENT_KEY, ReminderCard, _work_area
 
-STUDY_MIN = 25
-REST_MIN = 5
-CHECK_MS = 250  # also how quickly the badge catches up when the orb is dragged
-BUBBLE_MS = 90_000  # the alert tidies itself away after 90s -- it's a ping, not a to-do
-BUBBLE_W = 260
+# Timings, sizes, fonts and every word it shows or tells the model live in
+# study_mode.json (AGENTS.md Rule 0), checked by json_config.py against
+# study_mode.defaults.json; configure() reloads it. The defaults are 25
+# minutes of study, 5 of rest, a 250ms deadline check (also how quickly the
+# badge catches up when the orb is dragged) and a 90s alert -- it's a ping,
+# not a to-do.
+CONFIG_ENV_VAR = "DENISSE_STUDY_MODE_CONFIG"
+CONFIG_FILE = Path(__file__).with_name("study_mode.json")
+DEFAULTS_FILE = Path(__file__).with_name("study_mode.defaults.json")
 
-STUDY_LINES = (
-    "Study time, Chuen.",
-    "{n} minutes, starting now. Back to it.",
-)
-REST_LINES = (
-    "Rest time.",
-    "Nice work -- take {n} minutes. Stand up, drink some water.",
-)
+CONFIG: dict = {}
+
+
+def _extra_checks(data: dict, defaults: dict, checker) -> dict:
+    try:
+        re.compile(data["command_strip"])
+    except re.error as e:
+        data["command_strip"] = checker.bad("study_mode.command_strip", f"has a bad pattern ({e})",
+                                            defaults["command_strip"])
+    try:
+        datetime(2000, 1, 1).strftime(data["time_format"])
+    except (ValueError, TypeError) as e:
+        data["time_format"] = checker.bad("study_mode.time_format", f"isn't a time format ({e})",
+                                          defaults["time_format"])
+    return data
+
+
+def configure(path=None) -> dict:
+    """(Re)load study_mode.json (or ``path``, or $DENISSE_STUDY_MODE_CONFIG)
+    and rebind the module values from it. A running StudyMode picks the new
+    timings up at its next phase."""
+    global CONFIG, STUDY_MIN, REST_MIN, CHECK_MS, BUBBLE_MS, BUBBLE_W, _STRIP
+    global BADGE_W, BADGE_H, BADGE_GAP, BADGE_TUCK
+    path = path or os.environ.get(CONFIG_ENV_VAR) or CONFIG_FILE
+    CONFIG = json_config.load("study_mode", path, DEFAULTS_FILE, extra=_extra_checks)
+    t, s = CONFIG["timings"], CONFIG["sizes"]
+    STUDY_MIN, REST_MIN = t["study_min"], t["rest_min"]
+    CHECK_MS, BUBBLE_MS = t["check_ms"], t["bubble_ms"]
+    BUBBLE_W = s["bubble_w"]
+    BADGE_W, BADGE_H = s["badge_w"], s["badge_h"]
+    BADGE_GAP, BADGE_TUCK = s["badge_gap"], s["badge_tuck"]
+    _STRIP = re.compile(CONFIG["command_strip"])
+    return CONFIG
+
+
+def _w(key: str, **fields) -> str:
+    """One line of study_mode.json "wording", filled in."""
+    return CONFIG["wording"][key].format(**fields)
+
+
+def _ph(phase: str) -> dict:
+    return CONFIG["phases"]["study" if phase == "study" else "rest"]
+
+
+def _clock(when) -> str:
+    return f"{when:{CONFIG['time_format']}}"
+
+
+def _minutes(phase: str) -> int:
+    return STUDY_MIN if phase == "study" else REST_MIN
+
+
+configure()
 
 
 # What turns it on and off, typed or said. Whole-message only, so a question
@@ -134,7 +186,7 @@ def match_command(text: str, active=None):
     else matches the same either way.
     """
     t = " ".join((text or "").lower().replace(",", " ").rstrip(".!?").split())
-    t = re.sub(r"^(?:please\s+)|(?:\s+please)$", "", t)
+    t = _STRIP.sub("", t)
     if _STUDY_OFF.match(t):
         return "stop_study"
     if _STUDY_ON.match(t):
@@ -182,32 +234,31 @@ class StudyBubble(ReminderCard):
             self.body.destroy()
         self.body = tk.Frame(self.canvas, bg=FILL)
         self._img_key = None
-        inner_w = self._px(BUBBLE_W - 12 * 2)
+        inner_w = self._px(BUBBLE_W - CONFIG["sizes"]["bubble_pad"] * 2)
+        fonts = CONFIG["fonts"]
 
-        study = self.phase == "study"
-        title, line = STUDY_LINES if study else REST_LINES
-        mins = STUDY_MIN if study else REST_MIN
+        ph = _ph(self.phase)
+        title, line = ph["alert_title"], ph["alert_line"].format(n=_minutes(self.phase))
         if self.status:
             left = max(0, round((self.ends_at - datetime.now()).total_seconds() / 60))
-            title = "Studying." if study else "On a break."
-            line = f"{left} min left of this {'study block' if study else 'rest'}."
+            title, line = ph["status_title"], ph["status_line"].format(left=left)
         head = tk.Frame(self.body, bg=FILL)
         head.pack(fill="x")
-        tk.Label(head, text=title, bg=FILL, fg=TEXT, font=self._f(11, "bold")).pack(side="left")
-        self._link(head, "Dismiss", self.close, fg=FAINT, hover=MUTED, size=9).pack(side="right", pady=(self._px(3), 0))
+        tk.Label(head, text=title, bg=FILL, fg=TEXT, font=self._f(fonts["title"], "bold")).pack(side="left")
+        self._link(head, _w("dismiss"), self.close, fg=FAINT, hover=MUTED,
+                   size=fonts["body"]).pack(side="right", pady=(self._px(3), 0))
         tk.Label(
-            self.body, text=line.format(n=mins), bg=FILL, fg=MUTED, font=self._f(9),
+            self.body, text=line, bg=FILL, fg=MUTED, font=self._f(fonts["body"]),
             anchor="w", wraplength=inner_w, justify="left",
         ).pack(fill="x")
-        nxt = "rest" if study else "study"
         tk.Label(
-            self.body, text=f"Round {self.round_no} · {nxt} at {self.ends_at:%H:%M}",
-            bg=FILL, fg=ACCENT, font=self._f(8, "bold"), anchor="w",
+            self.body, text=ph["footer"].format(round=self.round_no, time=_clock(self.ends_at)),
+            bg=FILL, fg=ACCENT, font=self._f(fonts["footer"], "bold"), anchor="w",
         ).pack(fill="x", pady=(self._px(4), 0))
         foot = tk.Frame(self.body, bg=FILL)
         foot.pack(fill="x", pady=(self._px(4), 0))
-        self._link(foot, "Stop study mode", self._stop, fg=FAINT, hover=MUTED, size=8).pack(side="left")
-        tk.Label(foot, text=f"{datetime.now():%H:%M}", bg=FILL, fg=FAINT, font=self._f(7)).pack(side="right")
+        self._link(foot, _w("stop_link"), self._stop, fg=FAINT, hover=MUTED, size=fonts["footer"]).pack(side="left")
+        tk.Label(foot, text=_clock(datetime.now()), bg=FILL, fg=FAINT, font=self._f(fonts["clock"])).pack(side="right")
         self._layout(BUBBLE_W, inner_w)
 
     def refresh(self):
@@ -218,9 +269,9 @@ class StudyBubble(ReminderCard):
         self.on_stop()
 
 
-BADGE_W, BADGE_H = 96, 24  # logical px
-BADGE_GAP = 4  # clear space between the pill and the orb's ring
-BADGE_TUCK = 5  # how far inside the orb window its ring's outer edge sits (GLOW_PAD - RING_GAP - stroke)
+# BADGE_W/H, BADGE_GAP (clear space between the pill and the orb's ring) and
+# BADGE_TUCK (how far inside the orb window its ring's outer edge sits:
+# GLOW_PAD - RING_GAP - stroke) are logical px from study_mode.json "sizes".
 
 
 class StudyBadge:
@@ -263,7 +314,8 @@ class StudyBadge:
         self._color = None
         self._img_id = self.canvas.create_image(0, 0, anchor="nw")
         # Centred, not nudged up: there is no bar under it any more.
-        self._text = self.canvas.create_text(self.w // 2, self.h // 2, fill=TEXT, font=(font_family, 9, "bold"))
+        self._text = self.canvas.create_text(self.w // 2, self.h // 2, fill=TEXT,
+                                             font=(font_family, CONFIG["fonts"]["badge"], "bold"))
 
     def _pill(self, color):
         """Rounded pill, supersampled then snapped to the colour key --
@@ -273,7 +325,7 @@ class StudyBadge:
             big = Image.new("RGBA", (self.w * k, self.h * k), (0, 0, 0, 0))
             d = ImageDraw.Draw(big)
             d.rounded_rectangle((0, 0, self.w * k - 1, self.h * k - 1), radius=self.h * k // 2,
-                                fill=FILL, outline=color, width=round(1.5 * self.s * k))
+                                fill=FILL, outline=color, width=round(CONFIG["sizes"]["badge_outline"] * self.s * k))
             small = big.resize((self.w, self.h), Image.LANCZOS)
             # Edge pixels blended onto the outline colour, not black -- a
             # plain convert("RGB") darkened the rim into dark specks on
@@ -291,8 +343,8 @@ class StudyBadge:
                 self._color = color
                 self.canvas.itemconfig(self._img_id, image=self._pill(color))
             m, sec = divmod(int(left + 0.999), 60)
-            label = "Paused" if paused_left is not None else ("Study" if phase == "study" else "Rest")
-            self.canvas.itemconfig(self._text, text=f"{label}  {m}:{sec:02d}")
+            label = _w("paused_badge") if paused_left is not None else _ph(phase)["badge"]
+            self.canvas.itemconfig(self._text, text=_w("badge", label=label, m=m, s=sec))
             self._follow()
         except tk.TclError:
             pass
@@ -304,7 +356,8 @@ class StudyBadge:
             ox, oy, o = None, None, 0
         area = _work_area(self.win.winfo_screenwidth(), self.win.winfo_screenheight())
         if ox is None:
-            x, y = area[2] - self.w - 12, area[3] - self.h - 12
+            margin = CONFIG["sizes"]["screen_margin"]
+            x, y = area[2] - self.w - margin, area[3] - self.h - margin
         else:
             x = ox + o // 2 - self.w // 2
             # Tuck into the orb's glow pad as far as its ring, then leave the
@@ -455,27 +508,24 @@ class StudyMode:
         -- for the tray menu."""
         if not self.active:
             return ""
-        word = "Paused" if self.paused else ("Studying" if self.phase == "study" else "Resting")
-        return f"{word} · {self.minutes_left()} min left"
+        word = _w("paused_menu") if self.paused else _ph(self.phase)["menu"]
+        return _w("menu_status", word=word, left=self.minutes_left())
 
     def describe(self) -> str:
         """The clock's state in a sentence, for the model and its tools."""
         if not self.active:
-            return "No study session is running."
-        left = self.minutes_left()
-        block = "study block" if self.phase == "study" else "rest break"
+            return _w("off")
+        ph = _ph(self.phase)
         if self.paused:
-            return (f"Study session paused: {left} min left of the {block}, round {self.round_no}. "
-                    "Resume to continue.")
-        nxt = "rest" if self.phase == "study" else "the next study block"
-        return (f"Study session running: {'studying' if self.phase == 'study' else 'on a break'}, "
-                f"{left} min left of this {block}, round {self.round_no}; {nxt} at {self.ends_at:%H:%M}.")
+            return _w("paused_state", left=self.minutes_left(), block=ph["block"], round=self.round_no)
+        return _w("running_state", doing=ph["doing"], left=self.minutes_left(), block=ph["block"],
+                  round=self.round_no, next=ph["next"], time=_clock(self.ends_at))
 
     def _enter(self, phase):
         self.phase = phase
         if phase == "study":
             self.round_no += 1
-        self.ends_at = datetime.now() + timedelta(minutes=STUDY_MIN if phase == "study" else REST_MIN)
+        self.ends_at = datetime.now() + timedelta(minutes=_minutes(phase))
         _chime()
         self.show(phase, self.ends_at, self.round_no)
 
@@ -492,7 +542,7 @@ class StudyMode:
 
     def _tick_badge(self):
         if self.badge is not None:
-            total = (STUDY_MIN if self.phase == "study" else REST_MIN) * 60
+            total = _minutes(self.phase) * 60
             self.badge.update(self.phase, self.ends_at, total, paused_left=self.paused_left)
 
 
@@ -501,67 +551,62 @@ class StudyMode:
 # more: "nothing was paused" when nothing was running is the honest result,
 # and brain._confirms_nothing reads it as no action taken.
 
-NO_CLOCK = ("Study mode isn't available in this process (no tray running), so nothing "
-            "happened. Tell him plainly.")
-
-
 def session_status() -> str:
     if _CURRENT is None:
-        return "No study session is running (study mode isn't set up in this process)."
+        return _w("no_clock_status")
     return _on_clock(_CURRENT.describe)
 
 
 def start_session() -> str:
     if _CURRENT is None:
-        return NO_CLOCK
+        return _w("no_clock")
 
     def go():
         if _CURRENT.active:
-            return "Already running -- " + _CURRENT.describe()
+            return _w("already_running", state=_CURRENT.describe())
         _CURRENT.start()
-        return (f"Study session started: {STUDY_MIN} minutes of study, then a {REST_MIN}-minute rest; "
-                f"rest at {_CURRENT.ends_at:%H:%M}.")
+        return _w("started", study_min=STUDY_MIN, rest_min=REST_MIN, time=_clock(_CURRENT.ends_at))
     return _on_clock(go)
 
 
 def pause_session() -> str:
     if _CURRENT is None:
-        return NO_CLOCK
+        return _w("no_clock")
 
     def go():
         if not _CURRENT.active:
-            return "No study session is running, so nothing was paused."
+            return _w("not_running_pause")
         if _CURRENT.paused:
-            return "It's already paused -- " + _CURRENT.describe()
+            return _w("already_paused", state=_CURRENT.describe())
         _CURRENT.pause()
-        return f"Study session paused with {_CURRENT.minutes_left()} min left of the current block."
+        return _w("paused", left=_CURRENT.minutes_left())
     return _on_clock(go)
 
 
 def resume_session() -> str:
     if _CURRENT is None:
-        return NO_CLOCK
+        return _w("no_clock")
 
     def go():
         if not _CURRENT.active:
-            return "No study session is running, so nothing was resumed. Start one if he wants one."
+            return _w("not_running_resume")
         if not _CURRENT.paused:
-            return "It wasn't paused -- " + _CURRENT.describe()
+            return _w("not_paused", state=_CURRENT.describe())
         _CURRENT.resume()
-        return f"Study session resumed: {_CURRENT.minutes_left()} min left, next switch at {_CURRENT.ends_at:%H:%M}."
+        return _w("resumed", left=_CURRENT.minutes_left(), time=_clock(_CURRENT.ends_at))
     return _on_clock(go)
 
 
 def stop_session() -> str:
     if _CURRENT is None:
-        return NO_CLOCK
+        return _w("no_clock")
 
     def go():
         if not _CURRENT.active:
-            return "No study session was running, so nothing was stopped."
+            return _w("not_running_stop")
         rounds = _CURRENT.round_no
         _CURRENT.stop()
-        return f"Study session stopped after {rounds} round{'s' if rounds != 1 else ''}."
+        return _w("stopped", rounds=rounds, round_word=_w("round_one" if rounds == 1 else "round_many"))
     return _on_clock(go)
 
 
@@ -571,6 +616,6 @@ def context_line() -> str:
     if _CURRENT is None or not _CURRENT.active:
         return ""
     try:
-        return "Right now: " + _CURRENT.describe()
+        return _w("context", state=_CURRENT.describe())
     except Exception:
         return ""
