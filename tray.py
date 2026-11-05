@@ -116,6 +116,16 @@ def _extra_checks(data: dict, defaults: dict, checker) -> dict:
             data["colours"][key] = checker.bad(f"tray.colours.{key}", "should be #rrggbb", defaults["colours"][key])
         elif isinstance(value, int) and value > 255:
             data["colours"][key] = checker.bad(f"tray.colours.{key}", "should be 0-255", defaults["colours"][key])
+    look = data["glow"]
+    for key, value in look.items():
+        if key.endswith("_alpha") and not 0 <= value <= 255:
+            look[key] = checker.bad(f"tray.glow.{key}", "should be 0-255", defaults["glow"][key])
+        elif value < 0:
+            look[key] = checker.bad(f"tray.glow.{key}", "should not be negative", defaults["glow"][key])
+    if not 0 <= look["worm_start"] < look["worm_end"] <= 1:
+        for key in ("worm_start", "worm_end"):
+            look[key] = checker.bad(f"tray.glow.{key}", "should be 0 <= worm_start < worm_end <= 1",
+                                    defaults["glow"][key])
     return data
 
 
@@ -290,9 +300,11 @@ def _panel_image(
 
     img = Image.new("RGBA", (w * scale, h * scale), (0, 0, 0, 0))
     if glow:
+        look = CONFIG["glow"]
         glow_layer = Image.new("RGBA", (w * scale, h * scale), (0, 0, 0, 0))
-        ImageDraw.Draw(glow_layer).polygon(pts, outline=(*outline_rgb, 200), width=outline_w * scale * 3)
-        glow_layer = glow_layer.filter(ImageFilter.GaussianBlur(radius=outline_w * scale * 1.5))
+        ImageDraw.Draw(glow_layer).polygon(pts, outline=(*outline_rgb, look["outline_alpha"]),
+                                           width=outline_w * scale * look["width_mult"])
+        glow_layer = glow_layer.filter(ImageFilter.GaussianBlur(radius=outline_w * scale * look["outline_blur"]))
         img = Image.alpha_composite(img, glow_layer)
 
     draw = ImageDraw.Draw(img)
@@ -303,16 +315,19 @@ def _panel_image(
     return ImageTk.PhotoImage(img)
 
 
-def _glow_line_image(w: int, rgb: tuple, thickness: int = 1, glow_pad: int = 3) -> ImageTk.PhotoImage:
+def _glow_line_image(w: int, rgb: tuple, thickness: int = 1, glow_pad: int = None) -> ImageTk.PhotoImage:
     """A thin horizontal glowing line -- stands in for a filled bar as a
     boundary marker (e.g. under the chat popup's header)."""
+    look = CONFIG["glow"]
+    glow_pad = look["line_pad"] if glow_pad is None else glow_pad
     scale = SUPERSAMPLE
     h = thickness + glow_pad * 2
     img = Image.new("RGBA", (w * scale, h * scale), (0, 0, 0, 0))
     cy = h * scale // 2
     glow_layer = Image.new("RGBA", (w * scale, h * scale), (0, 0, 0, 0))
-    ImageDraw.Draw(glow_layer).line([(0, cy), (w * scale, cy)], fill=(*rgb, 200), width=thickness * scale * 3)
-    glow_layer = glow_layer.filter(ImageFilter.GaussianBlur(radius=glow_pad * scale * 0.6))
+    ImageDraw.Draw(glow_layer).line([(0, cy), (w * scale, cy)], fill=(*rgb, look["outline_alpha"]),
+                                    width=thickness * scale * look["width_mult"])
+    glow_layer = glow_layer.filter(ImageFilter.GaussianBlur(radius=glow_pad * scale * look["line_blur"]))
     img = Image.alpha_composite(img, glow_layer)
     ImageDraw.Draw(img).line([(0, cy), (w * scale, cy)], fill=(*rgb, 255), width=thickness * scale)
     img = img.resize((w, h), Image.LANCZOS)
@@ -323,16 +338,18 @@ def _circle_image(d: int, rgb: tuple, glow: bool = False) -> tuple:
     """A filled circle, optionally with a soft blurred glow halo behind it
     (a restrained neon touch -- used for the send button's active state)."""
     scale = SUPERSAMPLE
-    pad = max(3, d // 4) if glow else 0  # modest room for the blur to bleed into -- kept small deliberately, restrained not neon-billboard
+    look = CONFIG["glow"]
+    # modest room for the blur to bleed into -- kept small deliberately, restrained not neon-billboard
+    pad = max(look["disc_pad_min"], int(d * look["disc_pad_frac"])) if glow else 0
     size = d + pad * 2
     img = Image.new("RGBA", (size * scale, size * scale), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     if glow:
         glow_layer = Image.new("RGBA", (size * scale, size * scale), (0, 0, 0, 0))
         ImageDraw.Draw(glow_layer).ellipse(
-            (pad * scale, pad * scale, (pad + d) * scale, (pad + d) * scale), fill=(*rgb, 130)
+            (pad * scale, pad * scale, (pad + d) * scale, (pad + d) * scale), fill=(*rgb, look["disc_alpha"])
         )
-        glow_layer = glow_layer.filter(ImageFilter.GaussianBlur(radius=d * scale * 0.12))
+        glow_layer = glow_layer.filter(ImageFilter.GaussianBlur(radius=d * scale * look["disc_blur"]))
         img = Image.alpha_composite(img, glow_layer)
         draw = ImageDraw.Draw(img)
     draw.ellipse((pad * scale, pad * scale, (pad + d) * scale, (pad + d) * scale), fill=(*rgb, 255))
@@ -348,10 +365,12 @@ def _side_glow_image(w: int, h: int, rgb: tuple) -> ImageTk.PhotoImage:
     img = Image.new("RGBA", (w * scale, h * scale), (0, 0, 0, 0))
     cx = w * scale // 2
     glow_layer = Image.new("RGBA", (w * scale, h * scale), (0, 0, 0, 0))
+    look = CONFIG["glow"]
     ImageDraw.Draw(glow_layer).line(
-        [(cx, h * scale * 0.2), (cx, h * scale * 0.8)], fill=(*rgb, 220), width=w * scale
+        [(cx, h * scale * look["worm_start"]), (cx, h * scale * look["worm_end"])],
+        fill=(*rgb, look["worm_alpha"]), width=w * scale
     )
-    glow_layer = glow_layer.filter(ImageFilter.GaussianBlur(radius=h * scale * 0.1))
+    glow_layer = glow_layer.filter(ImageFilter.GaussianBlur(radius=h * scale * look["worm_blur"]))
     img = Image.alpha_composite(img, glow_layer)
     img = img.resize((w, h), Image.LANCZOS)
     return ImageTk.PhotoImage(img)
@@ -1211,6 +1230,7 @@ class ChatPopup:
 
         area = _work_area(self.win.winfo_screenwidth(), self.win.winfo_screenheight())
         chat, fonts = CONFIG["chat"], CONFIG["fonts"]
+        pad = chat["padding"]
         w = min(_px(CHAT_WIDTH), area[2] - area[0] - _px(chat["screen_margin"]))
         h = min(_px(CHAT_HEIGHT), area[3] - area[1] - _px(chat["screen_margin"]))
         self._window_size = w, h
@@ -1225,7 +1245,7 @@ class ChatPopup:
         header = tk.Frame(self.win, bg=HEADER_BG)
         header.pack(side="top", fill="x")
         name_col = tk.Frame(header, bg=HEADER_BG)
-        name_col.pack(side="left", padx=_px(10), pady=_px(5), fill="x", expand=True)
+        name_col.pack(side="left", padx=_px(pad["header_x"]), pady=_px(pad["header_y"]), fill="x", expand=True)
         tk.Label(
             name_col, text=_text("popup_title"), bg=HEADER_BG, fg=POPUP_TEXT, font=(FONT_FAMILY, fonts["title"], "bold")
         ).pack(anchor="w")
@@ -1243,12 +1263,12 @@ class ChatPopup:
         self._status_label = tk.Label(
             status_sub, text="", bg=HEADER_BG, fg=POPUP_MUTED, font=(FONT_FAMILY, fonts["status"])
         )
-        self._status_label.pack(side="left", padx=(_px(4), 0))
+        self._status_label.pack(side="left", padx=(_px(pad["status_gap"]), 0))
         tk.Button(
             header, text=_text("chat", "close"), command=self.close, bg=HEADER_BG, fg=POPUP_MUTED,
             activebackground=HEADER_BG, activeforeground=POPUP_TEXT, relief="flat", bd=0,
             font=(FONT_FAMILY, fonts["close"]), cursor="hand2",
-        ).pack(side="right", padx=_px(10))
+        ).pack(side="right", padx=_px(pad["close_x"]))
         tk.Button(header, text=_text("chat", "stop_voice"), command=_stop_speaking,
                   bg=HEADER_BG, fg=POPUP_MUTED, activebackground=HEADER_BG,
                   activeforeground=POPUP_TEXT, relief="flat", bd=0,
@@ -1264,7 +1284,8 @@ class ChatPopup:
         # -- bottom-anchored input row, packed BEFORE the chat canvas so it
         # always keeps its space regardless of how tall the message list gets --
         input_row = tk.Frame(self.win, bg=POPUP_BG)
-        input_row.pack(side="bottom", fill="x", padx=_px(8), pady=(_px(3), _px(7)))
+        input_row.pack(side="bottom", fill="x", padx=_px(pad["input_x"]),
+                       pady=(_px(pad["input_top"]), _px(pad["input_bottom"])))
         self.entry = tk.Entry(
             input_row, bg=PANEL_BG, fg=POPUP_TEXT, insertbackground=POPUP_TEXT,
             relief="flat", font=(FONT_FAMILY, fonts["entry"]), state="disabled",
@@ -1277,7 +1298,8 @@ class ChatPopup:
             disabledbackground=PANEL_BG, disabledforeground=POPUP_MUTED,
         )
         self.entry.pack(
-            side="left", fill="x", expand=True, ipady=_px(3), ipadx=_px(8), padx=(0, _px(6))
+            side="left", fill="x", expand=True, ipady=_px(pad["entry_ipad_y"]), ipadx=_px(pad["entry_ipad_x"]),
+            padx=(0, _px(pad["entry_gap"]))
         )
         self.entry.bind("<Return>", self._send)
 
@@ -1305,11 +1327,12 @@ class ChatPopup:
             self.win, text="", bg=POPUP_BG, fg=POPUP_MUTED, font=(FONT_FAMILY, fonts["typing"], "italic"),
             justify="left", wraplength=_px(CHAT_WIDTH - chat["typing_inset"]),
         )
-        self.typing_label.pack(side="bottom", fill="x", padx=_px(14))
+        self.typing_label.pack(side="bottom", fill="x", padx=_px(pad["typing_x"]))
 
         # -- chat area: a Canvas of hand-drawn rounded bubbles, no scrollbar --
         self.canvas = tk.Canvas(self.win, bg=POPUP_BG, highlightthickness=0, bd=0)
-        self.canvas.pack(fill="both", expand=True, padx=_px(6), pady=(_px(4), _px(2)))
+        self.canvas.pack(fill="both", expand=True, padx=_px(pad["canvas_x"]),
+                         pady=(_px(pad["canvas_top"]), _px(pad["canvas_bottom"])))
         self.canvas.bind("<Enter>", lambda e: self.canvas.bind_all("<MouseWheel>", self._on_wheel))
         self.canvas.bind("<Leave>", lambda e: self.canvas.unbind_all("<MouseWheel>"))
         self._font = tkfont.Font(family=FONT_FAMILY, size=fonts["body"])
@@ -1478,7 +1501,7 @@ class ChatPopup:
         for paragraph in text.splitlines() or [""]:
             lines.extend(self._wrap_text(paragraph, self._canvas_w() - _px(chat["bubble_side_room"])))
         line_h = self._font.metrics("linespace")
-        ts = datetime.now().strftime("%H:%M")
+        ts = datetime.now().strftime(_text("chat", "time_format"))
         text_w = max(self._font.measure(l) for l in lines)
         ts_w = self._time_font.measure(ts)
         bw = max(text_w, ts_w) + 2 * pad_x
@@ -1499,7 +1522,7 @@ class ChatPopup:
             round(bw), bh, BUBBLE_CHAMFER,
             fill_rgba=(BUBBLE_OUT_FILL if is_out else BUBBLE_IN_FILL),
             outline_rgb=_hex_to_rgb(BUBBLE_OUT_OUTLINE if is_out else BUBBLE_IN_OUTLINE),
-            outline_w=max(1, _px(1)),
+            outline_w=max(1, _px(chat["bubble_outline"])),
             glow=is_out,
         )
         self._bubble_images.append(bubble_img)  # avoid GC-ing the PhotoImage
@@ -1512,7 +1535,7 @@ class ChatPopup:
             )
             ty += line_h
         self.canvas.create_text(
-            x2 - pad_x, y1 + bh - _px(2), text=ts, anchor="se", fill=fg, font=self._time_font,
+            x2 - pad_x, y1 + bh - _px(chat["time_inset"]), text=ts, anchor="se", fill=fg, font=self._time_font,
         )
 
         self._y = y1 + bh + gap
