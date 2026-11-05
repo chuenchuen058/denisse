@@ -1,0 +1,162 @@
+{
+  "_doc": "Shipped defaults for tools.json -- the limits, folders, word lists and result wording of tools.py (AGENTS.md Rule 0). Edit tools.json, not this file: tools.py falls back to the value here, with a log line, for any key in tools.json that is missing or invalid. Templates are Python str.format strings and may only use the {fields} their default here uses. Kept in tools.py on purpose, because brain.py, brain.json and multistep.py read them back: the 'Error: ' prefix, '(no output)', '(empty file)', find_files' 'Found N match(es)' and 'No files matching' lines, the task tools' 'Added:', 'Marked done:' and 'Removed:' results, and recall's 'I don't have anything remembered' (brain.json evidence.found_nothing_patterns).",
+
+  "files": {
+    "_doc": "Relative to the repo folder.",
+    "facts": "memory/facts.json",
+    "skills": "skills"
+  },
+
+  "shell": {
+    "timeout_seconds": 30,
+    "max_output_chars": 4000,
+    "timed_out": "command timed out after {seconds}s"
+  },
+
+  "open_application": {
+    "_doc": "store_search_timeout_seconds: how long the Start Menu app search may take. not_found points at find_files on purpose: a bare 'couldn't find it' was relayed to Chuen as the file not existing (2026-10-26).",
+    "store_search_timeout_seconds": 15,
+    "opened": "Opened {app_name}",
+    "failed": "Error opening {app_name}: {error}",
+    "not_found": "No application called '{app_name}' (tried a direct launch and a Start Menu search). This only looks at installed apps, not at files. If '{app_name}' is a document, call find_files(query='{app_name}') before telling Chuen anything about whether it exists."
+  },
+
+  "list_directory": {
+    "empty": "(empty directory)"
+  },
+
+  "find_files": {
+    "_doc": "search_folders: folders under the home folder searched when no location is given; each is known by its name in lower case. onedrive_prefix: home-folder entries starting with this (any case) are OneDrive roots whose top-level folders are searched too; one whose name collides with a search folder is filed as '<onedrive_prefix> <name>'. skip_dir_names: folder names (lower case) never descended into. filler_words: words dropped from a natural-language query before every remaining word must appear in the file name -- the model passes his phrasing ('my japan flight pdf'), the file is 'Japan_flight.pdf'.",
+    "search_folders": ["Desktop", "Documents", "Downloads", "Pictures", "Videos", "Music", "GitHub"],
+    "onedrive_prefix": "onedrive",
+    "skip_dir_names": [".git", ".venv", "venv", "__pycache__", "node_modules", ".cache",
+                       "$recycle.bin", "system volume information", ".mcp-auth",
+                       ".claude-server-commander"],
+    "max_files_scanned": 40000,
+    "max_results": 25,
+    "filler_words": ["my", "the", "a", "an", "for", "me", "please", "file", "files",
+                     "find", "locate", "search", "of", "that", "this"],
+    "empty_query": "give me something to search for.",
+    "unknown_location": "Don't know a location called '{location}'. Known folders: {known}.",
+    "no_known_folders": "none found",
+    "no_folders": "couldn't find any of the usual folders to search.",
+    "more": "...and {more} more, narrow the query to see them."
+  },
+
+  "read_file": {
+    "max_chars": 4000
+  },
+
+  "write_file": {
+    "wrote": "Wrote {chars} chars to {path}"
+  },
+
+  "calculate": {
+    "_doc": "round_digits: float results are rounded to this many decimal places, so binary noise (9.9 - 9.11 = 0.7900000000000009) never gets read aloud.",
+    "round_digits": 10,
+    "division_by_zero": "division by zero.",
+    "failed": "couldn't evaluate '{expression}' ({error})."
+  },
+
+  "time": {
+    "_doc": "strftime formats. twelve_hour is said alongside the 24-hour one, leading zero dropped, so the model never converts by hand.",
+    "datetime_format": "%Y-%m-%d %H:%M:%S",
+    "twelve_hour_format": "%I:%M %p",
+    "zone_format": "%Z",
+    "reply": "{datetime}{zone} ({twelve_hour})",
+    "unknown_timezone": "unknown timezone '{timezone}' ({error})"
+  },
+
+  "weather": {
+    "_doc": "url: {location} is URL-quoted, {format} is format below. One clean line, not wttr.in's ANSI-art report.",
+    "url": "https://wttr.in/{location}?format={format}&m",
+    "format": "%l:+%C,+%t+(feels+like+%f),+%h+humidity,+%w+wind",
+    "timeout_seconds": 10,
+    "failed": "couldn't get weather for '{location}' ({error})"
+  },
+
+  "news": {
+    "_doc": "One flowing sentence, not a bulleted list: a bulleted result was much less reliable (the model claimed no news over real headlines).",
+    "count": 6,
+    "failed": "couldn't fetch CNA news ({error})",
+    "none": "No current CNA headlines found{topic}.",
+    "none_topic": " for {topic!r}",
+    "headlines": "Today's CNA headlines: {headlines}.",
+    "separator": "; "
+  },
+
+  "voice": {
+    "no_key": "No Inworld API key is configured, so replies fall back to the local Windows voice (pyttsx3), not a neural voice.",
+    "neural": "Neural voice: '{voice}' via Inworld's '{model}' model. Falls back to the local Windows voice only if that fails."
+  },
+
+  "brain_location": {
+    "_doc": "positive_percent is worked out from instincts.json activation.min_positives_per_negative.",
+    "save_explicit": "only when asked",
+    "save_auto": "when useful facts appear in conversation",
+    "on": "on",
+    "off": "off",
+    "saving": "I save personal facts {save}. I use the last {turns} conversation turns.",
+    "vault": "Vault lookup is {state}, limited to {chars} characters per lookup.",
+    "learning": "Learning is {state}: {confirmed} confirmed lessons, {candidates} candidates. Activation requires {confirmations} accepted fixes and at least {positive_percent}% positive feedback on that lesson.",
+    "learning_limits": "Learning changes tool selection and supported read-only retrieval intent; it cannot grant new action permissions or rewrite code.",
+    "preferences": "Editable preferences: {file}.",
+    "places": "Code: {code}. Conversation and facts: {memory}.",
+    "invalid_settings": "The last settings edit was invalid: {error}. Keeping the last valid settings.",
+    "mirrored": "That memory also gets mirrored (read-only, one-way) into the Obsidian vault at {vault}. The mirror is not my conversation store. Vault notes are searchable on demand when enabled; validated routing lessons are also stored there.",
+    "no_vault": "The Obsidian vault isn't currently reachable, so nothing is mirrored there right now."
+  },
+
+  "clean_temp": {
+    "nothing": "Nothing to clean -- no temp files old enough to remove.",
+    "removed": "Removed {count} temp file(s), freeing {mb:.1f} MB."
+  },
+
+  "facts": {
+    "_doc": "recall() matches a key worded differently from the saved one. spelling: [variant, canonical] pairs folded first. ignore_words carry no meaning in a key. A query word of prefix_length+ letters sharing that prefix with a fact word scores prefix_score (an exact word scores 1); the key counts key_weight times the value. closest_shown: matches listed when there's no single best; known_shown: keys listed when nothing matches.",
+    "spelling": [["favourite", "favorite"], ["colour", "color"], ["organisation", "organization"],
+                 ["programme", "program"], ["centre", "center"]],
+    "ignore_words": ["my", "the", "a", "an", "what", "whats", "is", "are", "do", "does", "i", "use",
+                     "which", "of", "for", "to", "me", "you", "your", "about", "and", "in", "on", "s"],
+    "prefix_length": 5,
+    "prefix_score": 0.6,
+    "key_weight": 2,
+    "closest_shown": 3,
+    "known_shown": 15,
+    "remembered": "Got it, I'll remember that {key} = {value}.",
+    "match": "{key}: {value}",
+    "closest": "Closest matches for '{key}':\n{matches}",
+    "not_found": "I don't have anything remembered for '{key}'. Facts I do have are filed under: {known}."
+  },
+
+  "skills": {
+    "none": "No skills installed yet.",
+    "unknown": "No skill named '{name}'. Use list_skills to see what's available."
+  },
+
+  "tasks": {
+    "_doc": "framing: how add_task trims the model copying his framing into the task text ('remind me there is a robotics meeting' -> 'robotics meeting', 2026-11-03). It trims the model's argument, never his words; each slot is optional except asks, and a phrase's words may be split by any spacing. The deadline window for OVERDUE marks is reminders.json tasks.due_soon_hours.",
+    "framing": {
+      "polite": ["please"],
+      "asks": ["remind", "reminder for", "reminder to", "remember"],
+      "addressee": ["me"],
+      "links": ["that", "to", "about", "of"],
+      "lead_ins": ["there's an", "there's a", "there's", "there is an", "there is a", "there is"]
+    },
+    "ambiguous_due": "Not added yet: \"{due}\" is ambiguous. Ask Chuen: {question} Then call add_task again with the day he means.",
+    "where": "The list is kept in {file}.",
+    "ticked": "(Closed {count} you ticked in Obsidian: {names}.) ",
+    "empty": "Nothing on your list. {where}",
+    "overdue_mark": "OVERDUE - ",
+    "open": "{count} open:\n{lines}\n{where}",
+    "no_match": "No single open task matched \"{task}\" -- either it isn't there or more than one matched. Say the exact task name.",
+    "remove_no_match": "No single open task matched \"{task}\"."
+  },
+
+  "calendar": {
+    "_doc": "What check_calendar says. A tool result is the one thing the model treats as ground truth, so 'no calendar' lives here (2026-11-04: it asserted an empty calendar with none to read).",
+    "any_day": "any day",
+    "not_connected": "No calendar is connected to Denisse, so nothing about his calendar can be seen or checked -- not for {day}, not at all. Tell him plainly you can't see his calendar; don't say it's empty or free. His reminders (list_tasks) are the nearest thing you can read.",
+    "no_reader": "a calendar is configured but no calendar reader is installed. Tell him this failed."
+  }
+}

@@ -6,9 +6,9 @@ Candidates are intentionally conservative: regexes include parsers, text compari
 Static coverage is not proof of exhaustiveness: comments/docstrings, non-Python files, excluded fixtures/private state/dependencies, dynamically constructed/imported values and interprocedural user-text flow are not analysed. Local aliases and comprehension/loop iterables are followed conservatively without execution-order analysis; results can include unrelated possible bindings.
 Values are complete decoded literal representations; f-string fragments and concatenated pieces are reported at their AST source location. Multiple kinds at one location are intentional. No value truncation is applied. Numeric strings used as defaults are included. Booleans and None are excluded.
 
-Scanned **140** Python files; **7833** candidates; **0** scan errors.
+Scanned **140** Python files; **7793** candidates; **0** scan errors.
 
-Source and policy SHA-256: `13b0b9adc6cd19c3ff173e826264f66d64f6380ad611ab5374e51c74cd40992b`.
+Source and policy SHA-256: `d691cbd2eb85c920390e17091b5757ec3a06534c41d3250ef45a0b17f54dc00a`.
 
 ## Coverage and regeneration
 
@@ -62,14 +62,14 @@ Traversal policy (from the JSON configuration):
 
 | Kind | Count | Suggested home |
 | --- | ---: | --- |
-| regex candidate | 525 | data file |
-| text match / keyword candidate | 3662 | data file |
+| regex candidate | 530 | data file |
+| text match / keyword candidate | 3634 | data file |
 | absolute path | 67 | runtime lookup |
-| user / vault name | 128 | runtime lookup |
-| model name | 215 | config.json |
-| URL | 12 | config.json |
-| time / duration / threshold / limit | 673 | config.json |
-| numeric literal (review) | 2551 | config.json |
+| user / vault name | 126 | runtime lookup |
+| model name | 214 | config.json |
+| URL | 11 | config.json |
+| time / duration / threshold / limit | 668 | config.json |
+| numeric literal (review) | 2543 | config.json |
 
 ## Files in review order
 
@@ -85,13 +85,13 @@ Traversal policy (from the JSON configuration):
 | <code>tool_router.py</code> | 1: Conversation, intent routing and visible study behaviour | 24 |
 | <code>planner.py</code> | 1: Conversation, intent routing and visible study behaviour | 22 |
 | <code>speech_control.py</code> | 1: Conversation, intent routing and visible study behaviour | 19 |
-| <code>invest.py</code> | 2: User-facing tools, voice, UI and runtime services | 215 |
+| <code>invest.py</code> | 2: User-facing tools, voice, UI and runtime services | 218 |
 | <code>reminder_card.py</code> | 2: User-facing tools, voice, UI and runtime services | 174 |
 | <code>time_parse.py</code> | 2: User-facing tools, voice, UI and runtime services | 173 |
 | <code>study_brief.py</code> | 2: User-facing tools, voice, UI and runtime services | 167 |
-| <code>tools.py</code> | 2: User-facing tools, voice, UI and runtime services | 123 |
 | <code>floating_orb.py</code> | 2: User-facing tools, voice, UI and runtime services | 104 |
-| <code>standing_instructions.py</code> | 2: User-facing tools, voice, UI and runtime services | 72 |
+| <code>tools.py</code> | 2: User-facing tools, voice, UI and runtime services | 79 |
+| <code>standing_instructions.py</code> | 2: User-facing tools, voice, UI and runtime services | 73 |
 | <code>hotkey.py</code> | 2: User-facing tools, voice, UI and runtime services | 65 |
 | <code>ui_theme.py</code> | 2: User-facing tools, voice, UI and runtime services | 64 |
 | <code>voice_pipeline.py</code> | 2: User-facing tools, voice, UI and runtime services | 61 |
@@ -2156,221 +2156,224 @@ Priority 2: User-facing tools, voice, UI and runtime services.
 
 | Line | Kind | Value | Suggested home |
 | ---: | --- | --- | --- |
-| 55 | user / vault name | <code>&#x27;denisse.invest&#x27;</code> | runtime lookup |
-| 61 | numeric literal (review) | <code>0</code> | config.json |
-| 77 | text match / keyword candidate | <code>&#x27;reuse_hours&#x27;</code> | data file |
-| 78 | regex candidate | <code>&#x27;{sym}&#x27;</code> | data file |
-| 78 | text match / keyword candidate | <code>&#x27;{sym}&#x27;</code> | data file |
-| 82 | numeric literal (review) | <code>0</code> | config.json |
-| 99 | text match / keyword candidate | <code>&#x27;move_sizes&#x27;</code> | data file |
-| 101 | numeric literal (review) | <code>0</code> | config.json |
-| 102 | numeric literal (review) | <code>1</code> | config.json |
-| 109 | numeric literal (review) | <code>0</code> | config.json |
-| 109 | numeric literal (review) | <code>0</code> | config.json |
-| 129 | text match / keyword candidate | <code>&#x27;patterns&#x27;</code> | data file |
-| 144 | text match / keyword candidate | <code>&#x27;symbol&#x27;</code> | data file |
-| 145 | numeric literal (review) | <code>1</code> | config.json |
-| 149 | text match / keyword candidate | <code>&#x27;symbol&#x27;</code> | data file |
-| 150 | text match / keyword candidate | <code>&#x27;chat&#x27;</code> | data file |
-| 150 | text match / keyword candidate | <code>&#x27;patterns&#x27;</code> | data file |
-| 160 | numeric literal (review) | <code>0</code> | config.json |
-| 161 | text match / keyword candidate | <code>&#x27;must be text&#x27;</code> | data file |
-| 199 | regex candidate | <code>&#x27;chat&#x27;</code> | data file |
-| 199 | regex candidate | <code>&#x27;symbol&#x27;</code> | data file |
-| 205 | text match / keyword candidate | <code>&#x27;SYNTHETIC FIXTURE -- not market data&#x27;</code> | data file |
-| 245 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 258 | text match / keyword candidate | <code>&#x27;direction&#x27;</code> | data file |
-| 258 | text match / keyword candidate | <code>&#x27;above&#x27;</code> | data file |
-| 258 | text match / keyword candidate | <code>&#x27;below&#x27;</code> | data file |
-| 259 | numeric literal (review) | <code>0</code> | config.json |
-| 269 | text match / keyword candidate | <code>&#x27;delivered&#x27;</code> | data file |
-| 300 | text match / keyword candidate | <code>&#x27;watchlist.json&#x27;</code> | data file |
-| 306 | numeric literal (review) | <code>2</code> | config.json |
-| 320 | numeric literal (review) | <code>0</code> | config.json |
-| 321 | text match / keyword candidate | <code>&#x27;nt&#x27;</code> | data file |
-| 323 | numeric literal (review) | <code>1</code> | config.json |
-| 335 | numeric literal (review) | <code>0</code> | config.json |
-| 336 | text match / keyword candidate | <code>&#x27;nt&#x27;</code> | data file |
-| 337 | numeric literal (review) | <code>1</code> | config.json |
-| 350 | text match / keyword candidate | <code>&#x27;None&#x27;</code> | data file |
-| 350 | text match / keyword candidate | <code>&#x27;null&#x27;</code> | data file |
-| 362 | numeric literal (review) | <code>0</code> | config.json |
-| 372 | regex candidate | <code>&#x27;\\s*UTC\\s*([+-])\\s*(\\d{1,2})(?::?(\\d{2}))?\\s*&#x27;</code> | data file |
-| 375 | time / duration / threshold / limit | <code>2</code> | config.json |
-| 375 | time / duration / threshold / limit | <code>3</code> | config.json |
-| 375 | time / duration / threshold / limit | <code>0</code> | config.json |
-| 375 | time / duration / threshold / limit | <code>60</code> | config.json |
-| 376 | numeric literal (review) | <code>1</code> | config.json |
-| 409 | text match / keyword candidate | <code>&#x27;apikey&#x27;</code> | data file |
-| 414 | text match / keyword candidate | <code>&#x27;Note&#x27;</code> | data file |
-| 414 | text match / keyword candidate | <code>&#x27;Information&#x27;</code> | data file |
-| 414 | text match / keyword candidate | <code>&#x27;Error Message&#x27;</code> | data file |
-| 441 | time / duration / threshold / limit | <code>0</code> | config.json |
-| 450 | numeric literal (review) | <code>0</code> | config.json |
-| 462 | numeric literal (review) | <code>101.5</code> | config.json |
-| 462 | numeric literal (review) | <code>100.0</code> | config.json |
-| 462 | numeric literal (review) | <code>1.5</code> | config.json |
-| 499 | numeric literal (review) | <code>1</code> | config.json |
-| 506 | numeric literal (review) | <code>0</code> | config.json |
-| 512 | text match / keyword candidate | <code>&#x27;symbol&#x27;</code> | data file |
-| 512 | text match / keyword candidate | <code>&#x27;symbol&#x27;</code> | data file |
-| 512 | text match / keyword candidate | <code>&#x27;instruments&#x27;</code> | data file |
-| 519 | text match / keyword candidate | <code>&#x27;symbol&#x27;</code> | data file |
-| 519 | text match / keyword candidate | <code>&#x27;symbol&#x27;</code> | data file |
-| 519 | text match / keyword candidate | <code>&#x27;instruments&#x27;</code> | data file |
-| 531 | text match / keyword candidate | <code>&#x27;instruments&#x27;</code> | data file |
-| 532 | text match / keyword candidate | <code>&#x27;instruments&#x27;</code> | data file |
-| 544 | text match / keyword candidate | <code>&#x27;above&#x27;</code> | data file |
-| 544 | text match / keyword candidate | <code>&#x27;below&#x27;</code> | data file |
-| 547 | numeric literal (review) | <code>0</code> | config.json |
-| 552 | text match / keyword candidate | <code>&#x27;instruments&#x27;</code> | data file |
-| 558 | text match / keyword candidate | <code>&#x27;direction&#x27;</code> | data file |
-| 558 | text match / keyword candidate | <code>&#x27;level&#x27;</code> | data file |
-| 558 | text match / keyword candidate | <code>&#x27;currency&#x27;</code> | data file |
-| 558 | text match / keyword candidate | <code>&#x27;currency&#x27;</code> | data file |
-| 559 | text match / keyword candidate | <code>&#x27;alerts&#x27;</code> | data file |
-| 584 | text match / keyword candidate | <code>&#x27;symbol&#x27;</code> | data file |
-| 586 | text match / keyword candidate | <code>&#x27;symbol&#x27;</code> | data file |
-| 586 | text match / keyword candidate | <code>&#x27;symbol&#x27;</code> | data file |
-| 587 | text match / keyword candidate | <code>&#x27;currency&#x27;</code> | data file |
-| 587 | text match / keyword candidate | <code>&#x27;currency&#x27;</code> | data file |
-| 587 | text match / keyword candidate | <code>&#x27;source&#x27;</code> | data file |
-| 589 | time / duration / threshold / limit | <code>0</code> | config.json |
-| 593 | text match / keyword candidate | <code>&#x27;retrieved&#x27;</code> | data file |
-| 594 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
-| 594 | text match / keyword candidate | <code>&#x27;unavailable&#x27;</code> | data file |
-| 597 | text match / keyword candidate | <code>&#x27;symbol&#x27;</code> | data file |
-| 600 | text match / keyword candidate | <code>&#x27;retrieved&#x27;</code> | data file |
-| 600 | text match / keyword candidate | <code>&#x27;cached&#x27;</code> | data file |
-| 601 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
-| 601 | text match / keyword candidate | <code>&#x27;cached&#x27;</code> | data file |
-| 606 | text match / keyword candidate | <code>&#x27;seconds&#x27;</code> | data file |
-| 607 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
-| 607 | text match / keyword candidate | <code>&#x27;unavailable&#x27;</code> | data file |
-| 608 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
-| 608 | text match / keyword candidate | <code>&#x27;problem&#x27;</code> | data file |
-| 608 | text match / keyword candidate | <code>&#x27;reused&#x27;</code> | data file |
-| 608 | text match / keyword candidate | <code>&#x27;stale&#x27;</code> | data file |
-| 618 | text match / keyword candidate | <code>&#x27;symbol&#x27;</code> | data file |
-| 618 | text match / keyword candidate | <code>&#x27;symbol&#x27;</code> | data file |
-| 618 | text match / keyword candidate | <code>&#x27;currency&#x27;</code> | data file |
-| 618 | text match / keyword candidate | <code>&#x27;currency&#x27;</code> | data file |
-| 618 | text match / keyword candidate | <code>&#x27;source&#x27;</code> | data file |
-| 619 | text match / keyword candidate | <code>&#x27;source_url&#x27;</code> | data file |
-| 619 | text match / keyword candidate | <code>&#x27;source_url&#x27;</code> | data file |
-| 619 | text match / keyword candidate | <code>&#x27;retrieved&#x27;</code> | data file |
-| 620 | text match / keyword candidate | <code>&#x27;price&#x27;</code> | data file |
-| 620 | text match / keyword candidate | <code>&#x27;price&#x27;</code> | data file |
-| 620 | text match / keyword candidate | <code>&#x27;previous_close&#x27;</code> | data file |
-| 620 | text match / keyword candidate | <code>&#x27;previous_close&#x27;</code> | data file |
-| 621 | text match / keyword candidate | <code>&#x27;change_percent&#x27;</code> | data file |
-| 621 | text match / keyword candidate | <code>&#x27;change_percent&#x27;</code> | data file |
-| 621 | text match / keyword candidate | <code>&#x27;change_percent&#x27;</code> | data file |
-| 622 | text match / keyword candidate | <code>&#x27;market_date&#x27;</code> | data file |
-| 622 | text match / keyword candidate | <code>&#x27;market_date&#x27;</code> | data file |
-| 622 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
-| 623 | text match / keyword candidate | <code>&#x27;unavailable&#x27;</code> | data file |
-| 635 | time / duration / threshold / limit | <code>0</code> | config.json |
-| 652 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
-| 652 | text match / keyword candidate | <code>&#x27;unavailable&#x27;</code> | data file |
-| 666 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
-| 666 | text match / keyword candidate | <code>&#x27;live&#x27;</code> | data file |
-| 666 | text match / keyword candidate | <code>&#x27;delayed&#x27;</code> | data file |
-| 670 | text match / keyword candidate | <code>&#x27;alerts&#x27;</code> | data file |
-| 672 | text match / keyword candidate | <code>&#x27;currency&#x27;</code> | data file |
-| 672 | text match / keyword candidate | <code>&#x27;currency&#x27;</code> | data file |
-| 672 | numeric literal (review) | <code>0</code> | config.json |
-| 675 | text match / keyword candidate | <code>&#x27;direction&#x27;</code> | data file |
-| 675 | text match / keyword candidate | <code>&#x27;above&#x27;</code> | data file |
-| 679 | text match / keyword candidate | <code>&#x27;delivered&#x27;</code> | data file |
-| 693 | text match / keyword candidate | <code>&#x27;delivered&#x27;</code> | data file |
-| 695 | text match / keyword candidate | <code>&#x27;id&#x27;</code> | data file |
-| 697 | numeric literal (review) | <code>1</code> | config.json |
-| 697 | numeric literal (review) | <code>0</code> | config.json |
-| 697 | numeric literal (review) | <code>1</code> | config.json |
-| 697 | numeric literal (review) | <code>1</code> | config.json |
-| 709 | regex candidate | <code>&#x27;brief-[\\d-]+\\.md&#x27;</code> | data file |
-| 720 | text match / keyword candidate | <code>&#x27;[event &#x27;</code> | data file |
-| 720 | text match / keyword candidate | <code>&#x27;id&#x27;</code> | data file |
-| 763 | text match / keyword candidate | <code>&#x27;briefs&#x27;</code> | data file |
-| 777 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
-| 777 | text match / keyword candidate | <code>&#x27;live&#x27;</code> | data file |
-| 777 | text match / keyword candidate | <code>&#x27;delayed&#x27;</code> | data file |
-| 782 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
-| 782 | text match / keyword candidate | <code>&#x27;delayed&#x27;</code> | data file |
-| 794 | text match / keyword candidate | <code>&#x27;source&#x27;</code> | data file |
-| 807 | text match / keyword candidate | <code>&#x27;brief-&#x27;</code> | data file |
-| 807 | text match / keyword candidate | <code>&#x27;%Y%m%d-%H%M%S&#x27;</code> | data file |
-| 807 | numeric literal (review) | <code>1</code> | config.json |
-| 808 | text match / keyword candidate | <code>&#x27;.md&#x27;</code> | data file |
-| 810 | numeric literal (review) | <code>1</code> | config.json |
-| 811 | text match / keyword candidate | <code>&#x27;.md&#x27;</code> | data file |
-| 818 | text match / keyword candidate | <code>&#x27;.pending&#x27;</code> | data file |
-| 818 | numeric literal (review) | <code>-3</code> | config.json |
-| 819 | numeric literal (review) | <code>-3</code> | config.json |
-| 821 | text match / keyword candidate | <code>&#x27;.pending&#x27;</code> | data file |
-| 867 | text match / keyword candidate | <code>&#x27;name&#x27;</code> | data file |
-| 869 | text match / keyword candidate | <code>&#x27;brief&#x27;</code> | data file |
-| 869 | text match / keyword candidate | <code>&#x27;headings&#x27;</code> | data file |
-| 871 | numeric literal (review) | <code>2</code> | config.json |
-| 871 | text match / keyword candidate | <code>&#x27;observations&#x27;</code> | data file |
-| 871 | text match / keyword candidate | <code>&#x27;alerts&#x27;</code> | data file |
-| 871 | text match / keyword candidate | <code>&#x27;interpretation&#x27;</code> | data file |
-| 881 | text match / keyword candidate | <code>&#x27;instruments&#x27;</code> | data file |
-| 884 | text match / keyword candidate | <code>&#x27;alerts&#x27;</code> | data file |
-| 884 | text match / keyword candidate | <code>&#x27;direction&#x27;</code> | data file |
-| 884 | text match / keyword candidate | <code>&#x27;level&#x27;</code> | data file |
-| 885 | text match / keyword candidate | <code>&#x27;alerts&#x27;</code> | data file |
-| 916 | text match / keyword candidate | <code>&#x27;pending.json&#x27;</code> | data file |
-| 923 | time / duration / threshold / limit | <code>0</code> | config.json |
-| 928 | text match / keyword candidate | <code>&#x27;options&#x27;</code> | data file |
-| 929 | numeric literal (review) | <code>1</code> | config.json |
-| 929 | numeric literal (review) | <code>1</code> | config.json |
-| 947 | text match / keyword candidate | <code>&#x27;search&#x27;</code> | data file |
-| 949 | numeric literal (review) | <code>1</code> | config.json |
-| 955 | text match / keyword candidate | <code>&#x27;add&#x27;</code> | data file |
-| 956 | numeric literal (review) | <code>1</code> | config.json |
-| 957 | text match / keyword candidate | <code>&quot;isn&#x27;t one exact instrument&quot;</code> | data file |
-| 959 | numeric literal (review) | <code>1</code> | config.json |
-| 962 | text match / keyword candidate | <code>&#x27; Add the exact symbol you mean. Nothing added.&#x27;</code> | data file |
-| 963 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 973 | text match / keyword candidate | <code>&#x27;remove&#x27;</code> | data file |
-| 974 | numeric literal (review) | <code>1</code> | config.json |
-| 975 | text match / keyword candidate | <code>&#x27;alert&#x27;</code> | data file |
-| 976 | numeric literal (review) | <code>1</code> | config.json |
-| 976 | numeric literal (review) | <code>2</code> | config.json |
-| 976 | numeric literal (review) | <code>3</code> | config.json |
-| 976 | numeric literal (review) | <code>4</code> | config.json |
-| 982 | text match / keyword candidate | <code>&#x27;cancel&#x27;</code> | data file |
-| 983 | numeric literal (review) | <code>1</code> | config.json |
-| 983 | numeric literal (review) | <code>2</code> | config.json |
-| 983 | numeric literal (review) | <code>3</code> | config.json |
-| 984 | text match / keyword candidate | <code>&#x27;alerts&#x27;</code> | data file |
-| 1005 | text match / keyword candidate | <code>&#x27;--fixtures&#x27;</code> | data file |
-| 1008 | text match / keyword candidate | <code>&#x27;--fixtures&#x27;</code> | data file |
-| 1009 | numeric literal (review) | <code>0</code> | config.json |
-| 1009 | text match / keyword candidate | <code>&#x27;list&#x27;</code> | data file |
-| 1011 | text match / keyword candidate | <code>&#x27;search&#x27;</code> | data file |
-| 1011 | numeric literal (review) | <code>1</code> | config.json |
-| 1013 | numeric literal (review) | <code>1</code> | config.json |
-| 1017 | text match / keyword candidate | <code>&#x27;add&#x27;</code> | data file |
-| 1017 | numeric literal (review) | <code>1</code> | config.json |
-| 1018 | numeric literal (review) | <code>1</code> | config.json |
-| 1019 | text match / keyword candidate | <code>&#x27;remove&#x27;</code> | data file |
-| 1019 | numeric literal (review) | <code>1</code> | config.json |
-| 1020 | numeric literal (review) | <code>1</code> | config.json |
-| 1021 | text match / keyword candidate | <code>&#x27;alert&#x27;</code> | data file |
-| 1021 | numeric literal (review) | <code>5</code> | config.json |
-| 1022 | numeric literal (review) | <code>1</code> | config.json |
-| 1022 | numeric literal (review) | <code>2</code> | config.json |
-| 1022 | numeric literal (review) | <code>3</code> | config.json |
-| 1022 | numeric literal (review) | <code>4</code> | config.json |
-| 1023 | text match / keyword candidate | <code>&#x27;brief&#x27;</code> | data file |
-| 1025 | text match / keyword candidate | <code>&#x27;list&#x27;</code> | data file |
-| 1029 | numeric literal (review) | <code>2</code> | config.json |
-| 1030 | numeric literal (review) | <code>0</code> | config.json |
-| 1033 | text match / keyword candidate | <code>&#x27;__main__&#x27;</code> | data file |
-| 1034 | numeric literal (review) | <code>1</code> | config.json |
+| 56 | user / vault name | <code>&#x27;denisse.invest&#x27;</code> | runtime lookup |
+| 62 | numeric literal (review) | <code>0</code> | config.json |
+| 78 | text match / keyword candidate | <code>&#x27;reuse_hours&#x27;</code> | data file |
+| 79 | regex candidate | <code>&#x27;{sym}&#x27;</code> | data file |
+| 79 | text match / keyword candidate | <code>&#x27;{sym}&#x27;</code> | data file |
+| 83 | numeric literal (review) | <code>0</code> | config.json |
+| 98 | text match / keyword candidate | <code>&#x27;search&#x27;</code> | data file |
+| 98 | text match / keyword candidate | <code>&#x27;symbol&#x27;</code> | data file |
+| 98 | text match / keyword candidate | <code>&#x27;name&#x27;</code> | data file |
+| 98 | text match / keyword candidate | <code>&#x27;type&#x27;</code> | data file |
+| 98 | text match / keyword candidate | <code>&#x27;region&#x27;</code> | data file |
+| 98 | text match / keyword candidate | <code>&#x27;currency&#x27;</code> | data file |
+| 98 | text match / keyword candidate | <code>&#x27;timezone&#x27;</code> | data file |
+| 104 | text match / keyword candidate | <code>&#x27;demo_instruments&#x27;</code> | data file |
+| 110 | text match / keyword candidate | <code>&#x27;move_sizes&#x27;</code> | data file |
+| 112 | numeric literal (review) | <code>0</code> | config.json |
+| 113 | numeric literal (review) | <code>1</code> | config.json |
+| 120 | numeric literal (review) | <code>0</code> | config.json |
+| 120 | numeric literal (review) | <code>0</code> | config.json |
+| 140 | text match / keyword candidate | <code>&#x27;patterns&#x27;</code> | data file |
+| 155 | text match / keyword candidate | <code>&#x27;symbol&#x27;</code> | data file |
+| 156 | numeric literal (review) | <code>1</code> | config.json |
+| 160 | text match / keyword candidate | <code>&#x27;symbol&#x27;</code> | data file |
+| 161 | text match / keyword candidate | <code>&#x27;chat&#x27;</code> | data file |
+| 161 | text match / keyword candidate | <code>&#x27;patterns&#x27;</code> | data file |
+| 171 | numeric literal (review) | <code>0</code> | config.json |
+| 172 | text match / keyword candidate | <code>&#x27;must be text&#x27;</code> | data file |
+| 184 | numeric literal (review) | <code>0</code> | config.json |
+| 184 | numeric literal (review) | <code>0</code> | config.json |
+| 252 | regex candidate | <code>&#x27;chat&#x27;</code> | data file |
+| 252 | regex candidate | <code>&#x27;symbol&#x27;</code> | data file |
+| 300 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 313 | text match / keyword candidate | <code>&#x27;direction&#x27;</code> | data file |
+| 313 | text match / keyword candidate | <code>&#x27;above&#x27;</code> | data file |
+| 313 | text match / keyword candidate | <code>&#x27;below&#x27;</code> | data file |
+| 314 | numeric literal (review) | <code>0</code> | config.json |
+| 324 | text match / keyword candidate | <code>&#x27;delivered&#x27;</code> | data file |
+| 354 | text match / keyword candidate | <code>&#x27;watchlist.json&#x27;</code> | data file |
+| 360 | numeric literal (review) | <code>2</code> | config.json |
+| 374 | numeric literal (review) | <code>0</code> | config.json |
+| 375 | text match / keyword candidate | <code>&#x27;nt&#x27;</code> | data file |
+| 377 | numeric literal (review) | <code>1</code> | config.json |
+| 389 | numeric literal (review) | <code>0</code> | config.json |
+| 390 | text match / keyword candidate | <code>&#x27;nt&#x27;</code> | data file |
+| 391 | numeric literal (review) | <code>1</code> | config.json |
+| 404 | text match / keyword candidate | <code>&#x27;None&#x27;</code> | data file |
+| 404 | text match / keyword candidate | <code>&#x27;null&#x27;</code> | data file |
+| 416 | numeric literal (review) | <code>0</code> | config.json |
+| 426 | regex candidate | <code>&#x27;\\s*UTC\\s*([+-])\\s*(\\d{1,2})(?::?(\\d{2}))?\\s*&#x27;</code> | data file |
+| 429 | time / duration / threshold / limit | <code>2</code> | config.json |
+| 429 | time / duration / threshold / limit | <code>3</code> | config.json |
+| 429 | time / duration / threshold / limit | <code>0</code> | config.json |
+| 429 | time / duration / threshold / limit | <code>60</code> | config.json |
+| 430 | numeric literal (review) | <code>1</code> | config.json |
+| 462 | text match / keyword candidate | <code>&#x27;apikey&#x27;</code> | data file |
+| 467 | text match / keyword candidate | <code>&#x27;Note&#x27;</code> | data file |
+| 467 | text match / keyword candidate | <code>&#x27;Information&#x27;</code> | data file |
+| 467 | text match / keyword candidate | <code>&#x27;Error Message&#x27;</code> | data file |
+| 494 | time / duration / threshold / limit | <code>0</code> | config.json |
+| 503 | numeric literal (review) | <code>0</code> | config.json |
+| 517 | text match / keyword candidate | <code>&#x27;search&#x27;</code> | data file |
+| 559 | numeric literal (review) | <code>1</code> | config.json |
+| 567 | numeric literal (review) | <code>0</code> | config.json |
+| 573 | text match / keyword candidate | <code>&#x27;symbol&#x27;</code> | data file |
+| 573 | text match / keyword candidate | <code>&#x27;symbol&#x27;</code> | data file |
+| 573 | text match / keyword candidate | <code>&#x27;instruments&#x27;</code> | data file |
+| 580 | text match / keyword candidate | <code>&#x27;symbol&#x27;</code> | data file |
+| 580 | text match / keyword candidate | <code>&#x27;symbol&#x27;</code> | data file |
+| 580 | text match / keyword candidate | <code>&#x27;instruments&#x27;</code> | data file |
+| 592 | text match / keyword candidate | <code>&#x27;instruments&#x27;</code> | data file |
+| 593 | text match / keyword candidate | <code>&#x27;instruments&#x27;</code> | data file |
+| 605 | text match / keyword candidate | <code>&#x27;above&#x27;</code> | data file |
+| 605 | text match / keyword candidate | <code>&#x27;below&#x27;</code> | data file |
+| 608 | numeric literal (review) | <code>0</code> | config.json |
+| 613 | text match / keyword candidate | <code>&#x27;instruments&#x27;</code> | data file |
+| 619 | text match / keyword candidate | <code>&#x27;direction&#x27;</code> | data file |
+| 619 | text match / keyword candidate | <code>&#x27;level&#x27;</code> | data file |
+| 619 | text match / keyword candidate | <code>&#x27;currency&#x27;</code> | data file |
+| 619 | text match / keyword candidate | <code>&#x27;currency&#x27;</code> | data file |
+| 620 | text match / keyword candidate | <code>&#x27;alerts&#x27;</code> | data file |
+| 645 | text match / keyword candidate | <code>&#x27;symbol&#x27;</code> | data file |
+| 647 | text match / keyword candidate | <code>&#x27;symbol&#x27;</code> | data file |
+| 647 | text match / keyword candidate | <code>&#x27;symbol&#x27;</code> | data file |
+| 648 | text match / keyword candidate | <code>&#x27;currency&#x27;</code> | data file |
+| 648 | text match / keyword candidate | <code>&#x27;currency&#x27;</code> | data file |
+| 648 | text match / keyword candidate | <code>&#x27;source&#x27;</code> | data file |
+| 650 | time / duration / threshold / limit | <code>0</code> | config.json |
+| 654 | text match / keyword candidate | <code>&#x27;retrieved&#x27;</code> | data file |
+| 655 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
+| 655 | text match / keyword candidate | <code>&#x27;unavailable&#x27;</code> | data file |
+| 658 | text match / keyword candidate | <code>&#x27;symbol&#x27;</code> | data file |
+| 661 | text match / keyword candidate | <code>&#x27;retrieved&#x27;</code> | data file |
+| 661 | text match / keyword candidate | <code>&#x27;cached&#x27;</code> | data file |
+| 662 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
+| 662 | text match / keyword candidate | <code>&#x27;cached&#x27;</code> | data file |
+| 667 | text match / keyword candidate | <code>&#x27;seconds&#x27;</code> | data file |
+| 668 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
+| 668 | text match / keyword candidate | <code>&#x27;unavailable&#x27;</code> | data file |
+| 669 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
+| 669 | text match / keyword candidate | <code>&#x27;problem&#x27;</code> | data file |
+| 669 | text match / keyword candidate | <code>&#x27;reused&#x27;</code> | data file |
+| 669 | text match / keyword candidate | <code>&#x27;stale&#x27;</code> | data file |
+| 679 | text match / keyword candidate | <code>&#x27;symbol&#x27;</code> | data file |
+| 679 | text match / keyword candidate | <code>&#x27;symbol&#x27;</code> | data file |
+| 679 | text match / keyword candidate | <code>&#x27;currency&#x27;</code> | data file |
+| 679 | text match / keyword candidate | <code>&#x27;currency&#x27;</code> | data file |
+| 679 | text match / keyword candidate | <code>&#x27;source&#x27;</code> | data file |
+| 680 | text match / keyword candidate | <code>&#x27;source_url&#x27;</code> | data file |
+| 680 | text match / keyword candidate | <code>&#x27;source_url&#x27;</code> | data file |
+| 680 | text match / keyword candidate | <code>&#x27;retrieved&#x27;</code> | data file |
+| 681 | text match / keyword candidate | <code>&#x27;price&#x27;</code> | data file |
+| 681 | text match / keyword candidate | <code>&#x27;price&#x27;</code> | data file |
+| 681 | text match / keyword candidate | <code>&#x27;previous_close&#x27;</code> | data file |
+| 681 | text match / keyword candidate | <code>&#x27;previous_close&#x27;</code> | data file |
+| 682 | text match / keyword candidate | <code>&#x27;change_percent&#x27;</code> | data file |
+| 682 | text match / keyword candidate | <code>&#x27;change_percent&#x27;</code> | data file |
+| 682 | text match / keyword candidate | <code>&#x27;change_percent&#x27;</code> | data file |
+| 683 | text match / keyword candidate | <code>&#x27;market_date&#x27;</code> | data file |
+| 683 | text match / keyword candidate | <code>&#x27;market_date&#x27;</code> | data file |
+| 683 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
+| 684 | text match / keyword candidate | <code>&#x27;unavailable&#x27;</code> | data file |
+| 696 | time / duration / threshold / limit | <code>0</code> | config.json |
+| 713 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
+| 713 | text match / keyword candidate | <code>&#x27;unavailable&#x27;</code> | data file |
+| 727 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
+| 727 | text match / keyword candidate | <code>&#x27;live&#x27;</code> | data file |
+| 727 | text match / keyword candidate | <code>&#x27;delayed&#x27;</code> | data file |
+| 731 | text match / keyword candidate | <code>&#x27;alerts&#x27;</code> | data file |
+| 733 | text match / keyword candidate | <code>&#x27;currency&#x27;</code> | data file |
+| 733 | text match / keyword candidate | <code>&#x27;currency&#x27;</code> | data file |
+| 733 | numeric literal (review) | <code>0</code> | config.json |
+| 736 | text match / keyword candidate | <code>&#x27;direction&#x27;</code> | data file |
+| 736 | text match / keyword candidate | <code>&#x27;above&#x27;</code> | data file |
+| 740 | text match / keyword candidate | <code>&#x27;delivered&#x27;</code> | data file |
+| 754 | text match / keyword candidate | <code>&#x27;delivered&#x27;</code> | data file |
+| 756 | text match / keyword candidate | <code>&#x27;id&#x27;</code> | data file |
+| 758 | numeric literal (review) | <code>1</code> | config.json |
+| 758 | numeric literal (review) | <code>0</code> | config.json |
+| 758 | numeric literal (review) | <code>1</code> | config.json |
+| 758 | numeric literal (review) | <code>1</code> | config.json |
+| 770 | regex candidate | <code>&#x27;brief-[\\d-]+\\.md&#x27;</code> | data file |
+| 781 | text match / keyword candidate | <code>&#x27;id&#x27;</code> | data file |
+| 829 | text match / keyword candidate | <code>&#x27;briefs&#x27;</code> | data file |
+| 843 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
+| 843 | text match / keyword candidate | <code>&#x27;live&#x27;</code> | data file |
+| 843 | text match / keyword candidate | <code>&#x27;delayed&#x27;</code> | data file |
+| 846 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
+| 846 | text match / keyword candidate | <code>&#x27;delayed&#x27;</code> | data file |
+| 858 | text match / keyword candidate | <code>&#x27;source&#x27;</code> | data file |
+| 871 | text match / keyword candidate | <code>&#x27;brief-&#x27;</code> | data file |
+| 871 | text match / keyword candidate | <code>&#x27;%Y%m%d-%H%M%S&#x27;</code> | data file |
+| 871 | numeric literal (review) | <code>1</code> | config.json |
+| 872 | text match / keyword candidate | <code>&#x27;.md&#x27;</code> | data file |
+| 874 | numeric literal (review) | <code>1</code> | config.json |
+| 875 | text match / keyword candidate | <code>&#x27;.md&#x27;</code> | data file |
+| 882 | text match / keyword candidate | <code>&#x27;.pending&#x27;</code> | data file |
+| 882 | numeric literal (review) | <code>-3</code> | config.json |
+| 883 | numeric literal (review) | <code>-3</code> | config.json |
+| 884 | text match / keyword candidate | <code>&#x27;.pending&#x27;</code> | data file |
+| 932 | text match / keyword candidate | <code>&#x27;name&#x27;</code> | data file |
+| 934 | text match / keyword candidate | <code>&#x27;brief&#x27;</code> | data file |
+| 934 | text match / keyword candidate | <code>&#x27;headings&#x27;</code> | data file |
+| 936 | numeric literal (review) | <code>2</code> | config.json |
+| 936 | text match / keyword candidate | <code>&#x27;observations&#x27;</code> | data file |
+| 936 | text match / keyword candidate | <code>&#x27;alerts&#x27;</code> | data file |
+| 936 | text match / keyword candidate | <code>&#x27;interpretation&#x27;</code> | data file |
+| 946 | text match / keyword candidate | <code>&#x27;instruments&#x27;</code> | data file |
+| 949 | text match / keyword candidate | <code>&#x27;alerts&#x27;</code> | data file |
+| 949 | text match / keyword candidate | <code>&#x27;direction&#x27;</code> | data file |
+| 949 | text match / keyword candidate | <code>&#x27;level&#x27;</code> | data file |
+| 950 | text match / keyword candidate | <code>&#x27;alerts&#x27;</code> | data file |
+| 981 | text match / keyword candidate | <code>&#x27;pending.json&#x27;</code> | data file |
+| 988 | time / duration / threshold / limit | <code>0</code> | config.json |
+| 993 | text match / keyword candidate | <code>&#x27;options&#x27;</code> | data file |
+| 994 | numeric literal (review) | <code>1</code> | config.json |
+| 994 | numeric literal (review) | <code>1</code> | config.json |
+| 1012 | text match / keyword candidate | <code>&#x27;search&#x27;</code> | data file |
+| 1014 | numeric literal (review) | <code>1</code> | config.json |
+| 1019 | text match / keyword candidate | <code>&#x27;add&#x27;</code> | data file |
+| 1021 | numeric literal (review) | <code>1</code> | config.json |
+| 1025 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 1034 | text match / keyword candidate | <code>&#x27;remove&#x27;</code> | data file |
+| 1035 | numeric literal (review) | <code>1</code> | config.json |
+| 1036 | text match / keyword candidate | <code>&#x27;alert&#x27;</code> | data file |
+| 1037 | numeric literal (review) | <code>1</code> | config.json |
+| 1037 | numeric literal (review) | <code>2</code> | config.json |
+| 1037 | numeric literal (review) | <code>3</code> | config.json |
+| 1037 | numeric literal (review) | <code>4</code> | config.json |
+| 1042 | text match / keyword candidate | <code>&#x27;cancel&#x27;</code> | data file |
+| 1043 | numeric literal (review) | <code>1</code> | config.json |
+| 1043 | numeric literal (review) | <code>2</code> | config.json |
+| 1043 | numeric literal (review) | <code>3</code> | config.json |
+| 1044 | text match / keyword candidate | <code>&#x27;alerts&#x27;</code> | data file |
+| 1065 | text match / keyword candidate | <code>&#x27;--fixtures&#x27;</code> | data file |
+| 1068 | text match / keyword candidate | <code>&#x27;--fixtures&#x27;</code> | data file |
+| 1069 | numeric literal (review) | <code>0</code> | config.json |
+| 1069 | text match / keyword candidate | <code>&#x27;list&#x27;</code> | data file |
+| 1071 | text match / keyword candidate | <code>&#x27;search&#x27;</code> | data file |
+| 1071 | numeric literal (review) | <code>1</code> | config.json |
+| 1073 | numeric literal (review) | <code>1</code> | config.json |
+| 1078 | text match / keyword candidate | <code>&#x27;add&#x27;</code> | data file |
+| 1078 | numeric literal (review) | <code>1</code> | config.json |
+| 1079 | numeric literal (review) | <code>1</code> | config.json |
+| 1080 | text match / keyword candidate | <code>&#x27;remove&#x27;</code> | data file |
+| 1080 | numeric literal (review) | <code>1</code> | config.json |
+| 1081 | numeric literal (review) | <code>1</code> | config.json |
+| 1082 | text match / keyword candidate | <code>&#x27;alert&#x27;</code> | data file |
+| 1082 | numeric literal (review) | <code>5</code> | config.json |
+| 1083 | numeric literal (review) | <code>1</code> | config.json |
+| 1083 | numeric literal (review) | <code>2</code> | config.json |
+| 1083 | numeric literal (review) | <code>3</code> | config.json |
+| 1083 | numeric literal (review) | <code>4</code> | config.json |
+| 1084 | text match / keyword candidate | <code>&#x27;brief&#x27;</code> | data file |
+| 1086 | text match / keyword candidate | <code>&#x27;list&#x27;</code> | data file |
+| 1090 | numeric literal (review) | <code>2</code> | config.json |
+| 1091 | numeric literal (review) | <code>0</code> | config.json |
+| 1094 | text match / keyword candidate | <code>&#x27;__main__&#x27;</code> | data file |
+| 1095 | numeric literal (review) | <code>1</code> | config.json |
 
 ## reminder_card.py
 
@@ -2907,136 +2910,6 @@ Priority 2: User-facing tools, voice, UI and runtime services.
 | 755 | numeric literal (review) | <code>0</code> | config.json |
 | 755 | numeric literal (review) | <code>1</code> | config.json |
 
-## tools.py
-
-Priority 2: User-facing tools, voice, UI and runtime services.
-
-| Line | Kind | Value | Suggested home |
-| ---: | --- | --- | --- |
-| 47 | time / duration / threshold / limit | <code>30</code> | config.json |
-| 50 | numeric literal (review) | <code>4000</code> | config.json |
-| 72 | time / duration / threshold / limit | <code>15</code> | config.json |
-| 91 | text match / keyword candidate | <code>&#x27;Windows&#x27;</code> | data file |
-| 93 | text match / keyword candidate | <code>&#x27;Darwin&#x27;</code> | data file |
-| 122 | user / vault name | <code>&quot;&#x27;) before telling Chuen anything about whether it exists.&quot;</code> | runtime lookup |
-| 140 | text match / keyword candidate | <code>&#x27;desktop&#x27;</code> | data file |
-| 140 | text match / keyword candidate | <code>&#x27;Desktop&#x27;</code> | data file |
-| 141 | text match / keyword candidate | <code>&#x27;documents&#x27;</code> | data file |
-| 141 | text match / keyword candidate | <code>&#x27;Documents&#x27;</code> | data file |
-| 142 | text match / keyword candidate | <code>&#x27;downloads&#x27;</code> | data file |
-| 142 | text match / keyword candidate | <code>&#x27;Downloads&#x27;</code> | data file |
-| 143 | text match / keyword candidate | <code>&#x27;pictures&#x27;</code> | data file |
-| 143 | text match / keyword candidate | <code>&#x27;Pictures&#x27;</code> | data file |
-| 144 | text match / keyword candidate | <code>&#x27;videos&#x27;</code> | data file |
-| 144 | text match / keyword candidate | <code>&#x27;Videos&#x27;</code> | data file |
-| 145 | text match / keyword candidate | <code>&#x27;music&#x27;</code> | data file |
-| 145 | text match / keyword candidate | <code>&#x27;Music&#x27;</code> | data file |
-| 146 | text match / keyword candidate | <code>&#x27;github&#x27;</code> | data file |
-| 146 | text match / keyword candidate | <code>&#x27;GitHub&#x27;</code> | data file |
-| 162 | text match / keyword candidate | <code>&#x27;onedrive&#x27;</code> | data file |
-| 174 | text match / keyword candidate | <code>&#x27;onedrive &#x27;</code> | data file |
-| 175 | numeric literal (review) | <code>2</code> | config.json |
-| 177 | text match / keyword candidate | <code>&#x27;onedrive &#x27;</code> | data file |
-| 177 | numeric literal (review) | <code>1</code> | config.json |
-| 187 | text match / keyword candidate | <code>&#x27;.git&#x27;</code> | data file |
-| 187 | text match / keyword candidate | <code>&#x27;.venv&#x27;</code> | data file |
-| 187 | text match / keyword candidate | <code>&#x27;venv&#x27;</code> | data file |
-| 187 | text match / keyword candidate | <code>&#x27;__pycache__&#x27;</code> | data file |
-| 187 | text match / keyword candidate | <code>&#x27;node_modules&#x27;</code> | data file |
-| 187 | text match / keyword candidate | <code>&#x27;.cache&#x27;</code> | data file |
-| 188 | text match / keyword candidate | <code>&#x27;$recycle.bin&#x27;</code> | data file |
-| 188 | text match / keyword candidate | <code>&#x27;system volume information&#x27;</code> | data file |
-| 188 | text match / keyword candidate | <code>&#x27;.mcp-auth&#x27;</code> | data file |
-| 189 | model name | <code>&#x27;.claude-server-commander&#x27;</code> | config.json |
-| 189 | text match / keyword candidate | <code>&#x27;.claude-server-commander&#x27;</code> | data file |
-| 191 | time / duration / threshold / limit | <code>40000</code> | config.json |
-| 192 | time / duration / threshold / limit | <code>25</code> | config.json |
-| 222 | text match / keyword candidate | <code>&#x27;onedrive &#x27;</code> | data file |
-| 223 | text match / keyword candidate | <code>&#x27;onedrive &#x27;</code> | data file |
-| 247 | text match / keyword candidate | <code>&#x27;my&#x27;</code> | data file |
-| 247 | text match / keyword candidate | <code>&#x27;the&#x27;</code> | data file |
-| 247 | text match / keyword candidate | <code>&#x27;a&#x27;</code> | data file |
-| 247 | text match / keyword candidate | <code>&#x27;an&#x27;</code> | data file |
-| 247 | text match / keyword candidate | <code>&#x27;for&#x27;</code> | data file |
-| 247 | text match / keyword candidate | <code>&#x27;me&#x27;</code> | data file |
-| 247 | text match / keyword candidate | <code>&#x27;please&#x27;</code> | data file |
-| 247 | text match / keyword candidate | <code>&#x27;file&#x27;</code> | data file |
-| 247 | text match / keyword candidate | <code>&#x27;files&#x27;</code> | data file |
-| 248 | text match / keyword candidate | <code>&#x27;find&#x27;</code> | data file |
-| 248 | text match / keyword candidate | <code>&#x27;locate&#x27;</code> | data file |
-| 248 | text match / keyword candidate | <code>&#x27;search&#x27;</code> | data file |
-| 248 | text match / keyword candidate | <code>&#x27;of&#x27;</code> | data file |
-| 248 | text match / keyword candidate | <code>&#x27;that&#x27;</code> | data file |
-| 248 | text match / keyword candidate | <code>&#x27;this&#x27;</code> | data file |
-| 253 | regex candidate | <code>&#x27;[^a-z0-9]+&#x27;</code> | data file |
-| 258 | numeric literal (review) | <code>0</code> | config.json |
-| 266 | numeric literal (review) | <code>1</code> | config.json |
-| 281 | time / duration / threshold / limit | <code>0</code> | config.json |
-| 300 | time / duration / threshold / limit | <code>4000</code> | config.json |
-| 322 | text match / keyword candidate | <code>&#x27;sqrt&#x27;</code> | data file |
-| 322 | text match / keyword candidate | <code>&#x27;abs&#x27;</code> | data file |
-| 322 | text match / keyword candidate | <code>&#x27;round&#x27;</code> | data file |
-| 323 | text match / keyword candidate | <code>&#x27;sin&#x27;</code> | data file |
-| 323 | text match / keyword candidate | <code>&#x27;cos&#x27;</code> | data file |
-| 323 | text match / keyword candidate | <code>&#x27;tan&#x27;</code> | data file |
-| 324 | text match / keyword candidate | <code>&#x27;log&#x27;</code> | data file |
-| 324 | text match / keyword candidate | <code>&#x27;log10&#x27;</code> | data file |
-| 324 | text match / keyword candidate | <code>&#x27;log2&#x27;</code> | data file |
-| 325 | text match / keyword candidate | <code>&#x27;exp&#x27;</code> | data file |
-| 325 | text match / keyword candidate | <code>&#x27;floor&#x27;</code> | data file |
-| 325 | text match / keyword candidate | <code>&#x27;ceil&#x27;</code> | data file |
-| 326 | text match / keyword candidate | <code>&#x27;factorial&#x27;</code> | data file |
-| 326 | text match / keyword candidate | <code>&#x27;pow&#x27;</code> | data file |
-| 326 | text match / keyword candidate | <code>&#x27;min&#x27;</code> | data file |
-| 326 | text match / keyword candidate | <code>&#x27;max&#x27;</code> | data file |
-| 328 | text match / keyword candidate | <code>&#x27;pi&#x27;</code> | data file |
-| 328 | text match / keyword candidate | <code>&#x27;e&#x27;</code> | data file |
-| 328 | text match / keyword candidate | <code>&#x27;tau&#x27;</code> | data file |
-| 394 | time / duration / threshold / limit | <code>10</code> | config.json |
-| 421 | time / duration / threshold / limit | <code>&#x27;0&#x27;</code> | config.json |
-| 436 | URL | <code>&#x27;https://wttr.in/&#x27;</code> | config.json |
-| 437 | time / duration / threshold / limit | <code>10</code> | config.json |
-| 456 | time / duration / threshold / limit | <code>6</code> | config.json |
-| 494 | text match / keyword candidate | <code>&#x27;false&#x27;</code> | data file |
-| 494 | text match / keyword candidate | <code>&#x27;off&#x27;</code> | data file |
-| 494 | text match / keyword candidate | <code>&#x27;no&#x27;</code> | data file |
-| 495 | text match / keyword candidate | <code>&#x27;explicit&#x27;</code> | data file |
-| 524 | numeric literal (review) | <code>1024</code> | config.json |
-| 524 | numeric literal (review) | <code>2</code> | config.json |
-| 541 | numeric literal (review) | <code>2</code> | config.json |
-| 568 | regex candidate | <code>&#x27;[a-z0-9]+&#x27;</code> | data file |
-| 573 | numeric literal (review) | <code>0.0</code> | config.json |
-| 576 | numeric literal (review) | <code>1.0</code> | config.json |
-| 577 | numeric literal (review) | <code>5</code> | config.json |
-| 577 | numeric literal (review) | <code>5</code> | config.json |
-| 577 | numeric literal (review) | <code>5</code> | config.json |
-| 577 | numeric literal (review) | <code>5</code> | config.json |
-| 578 | numeric literal (review) | <code>0.6</code> | config.json |
-| 596 | numeric literal (review) | <code>2</code> | config.json |
-| 597 | numeric literal (review) | <code>0</code> | config.json |
-| 599 | numeric literal (review) | <code>0</code> | config.json |
-| 601 | numeric literal (review) | <code>1</code> | config.json |
-| 601 | numeric literal (review) | <code>0</code> | config.json |
-| 601 | numeric literal (review) | <code>0</code> | config.json |
-| 601 | numeric literal (review) | <code>1</code> | config.json |
-| 601 | numeric literal (review) | <code>0</code> | config.json |
-| 602 | numeric literal (review) | <code>0</code> | config.json |
-| 605 | numeric literal (review) | <code>3</code> | config.json |
-| 607 | numeric literal (review) | <code>15</code> | config.json |
-| 626 | text match / keyword candidate | <code>&#x27;description:&#x27;</code> | data file |
-| 627 | numeric literal (review) | <code>1</code> | config.json |
-| 627 | numeric literal (review) | <code>1</code> | config.json |
-| 639 | numeric literal (review) | <code>-3</code> | config.json |
-| 639 | text match / keyword candidate | <code>&#x27;.md&#x27;</code> | data file |
-| 660 | regex candidate | <code>&quot;^(?:please\\s+)?(?:remind&#124;reminder\\s+(?:for&#124;to)&#124;remember)\\s+(?:me\\s+)?(?:that\\s+&#124;to\\s+&#124;about\\s+&#124;of\\s+)?(?:there(?:&#x27;s&#124;\\s+is)\\s+(?:a\\s+&#124;an\\s+)?)?&quot;</code> | data file |
-| 679 | user / vault name | <code>&#x27;&quot; is ambiguous. Ask Chuen: &#x27;</code> | runtime lookup |
-| 684 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 715 | numeric literal (review) | <code>48</code> | config.json |
-| 716 | text match / keyword candidate | <code>&#x27;id&#x27;</code> | data file |
-| 719 | text match / keyword candidate | <code>&#x27;id&#x27;</code> | data file |
-| 742 | numeric literal (review) | <code>1</code> | config.json |
-| 799 | user / vault name | <code>&#x27;No calendar is connected to Denisse, so nothing about his calendar can be seen or checked -- not for &#x27;</code> | runtime lookup |
-
 ## floating_orb.py
 
 Priority 2: User-facing tools, voice, UI and runtime services.
@@ -3148,6 +3021,92 @@ Priority 2: User-facing tools, voice, UI and runtime services.
 | 509 | numeric literal (review) | <code>2</code> | config.json |
 | 514 | time / duration / threshold / limit | <code>0</code> | config.json |
 
+## tools.py
+
+Priority 2: User-facing tools, voice, UI and runtime services.
+
+| Line | Kind | Value | Suggested home |
+| ---: | --- | --- | --- |
+| 40 | user / vault name | <code>&#x27;denisse.tools&#x27;</code> | runtime lookup |
+| 149 | text match / keyword candidate | <code>&#x27;Windows&#x27;</code> | data file |
+| 151 | text match / keyword candidate | <code>&#x27;Darwin&#x27;</code> | data file |
+| 193 | text match / keyword candidate | <code>&#x27;find_files&#x27;</code> | data file |
+| 194 | text match / keyword candidate | <code>&#x27;search_folders&#x27;</code> | data file |
+| 223 | numeric literal (review) | <code>2</code> | config.json |
+| 225 | numeric literal (review) | <code>1</code> | config.json |
+| 249 | text match / keyword candidate | <code>&#x27;find_files&#x27;</code> | data file |
+| 285 | text match / keyword candidate | <code>&#x27;filler_words&#x27;</code> | data file |
+| 286 | text match / keyword candidate | <code>&#x27;skip_dir_names&#x27;</code> | data file |
+| 290 | regex candidate | <code>&#x27;[^a-z0-9]+&#x27;</code> | data file |
+| 295 | numeric literal (review) | <code>0</code> | config.json |
+| 303 | numeric literal (review) | <code>1</code> | config.json |
+| 318 | time / duration / threshold / limit | <code>0</code> | config.json |
+| 339 | time / duration / threshold / limit | <code>0</code> | config.json |
+| 342 | numeric literal (review) | <code>0</code> | config.json |
+| 364 | text match / keyword candidate | <code>&#x27;sqrt&#x27;</code> | data file |
+| 364 | text match / keyword candidate | <code>&#x27;abs&#x27;</code> | data file |
+| 364 | text match / keyword candidate | <code>&#x27;round&#x27;</code> | data file |
+| 365 | text match / keyword candidate | <code>&#x27;sin&#x27;</code> | data file |
+| 365 | text match / keyword candidate | <code>&#x27;cos&#x27;</code> | data file |
+| 365 | text match / keyword candidate | <code>&#x27;tan&#x27;</code> | data file |
+| 366 | text match / keyword candidate | <code>&#x27;log&#x27;</code> | data file |
+| 366 | text match / keyword candidate | <code>&#x27;log10&#x27;</code> | data file |
+| 366 | text match / keyword candidate | <code>&#x27;log2&#x27;</code> | data file |
+| 367 | text match / keyword candidate | <code>&#x27;exp&#x27;</code> | data file |
+| 367 | text match / keyword candidate | <code>&#x27;floor&#x27;</code> | data file |
+| 367 | text match / keyword candidate | <code>&#x27;ceil&#x27;</code> | data file |
+| 368 | text match / keyword candidate | <code>&#x27;factorial&#x27;</code> | data file |
+| 368 | text match / keyword candidate | <code>&#x27;pow&#x27;</code> | data file |
+| 368 | text match / keyword candidate | <code>&#x27;min&#x27;</code> | data file |
+| 368 | text match / keyword candidate | <code>&#x27;max&#x27;</code> | data file |
+| 370 | text match / keyword candidate | <code>&#x27;pi&#x27;</code> | data file |
+| 370 | text match / keyword candidate | <code>&#x27;e&#x27;</code> | data file |
+| 370 | text match / keyword candidate | <code>&#x27;tau&#x27;</code> | data file |
+| 464 | time / duration / threshold / limit | <code>&#x27;0&#x27;</code> | config.json |
+| 532 | text match / keyword candidate | <code>&#x27;false&#x27;</code> | data file |
+| 532 | text match / keyword candidate | <code>&#x27;off&#x27;</code> | data file |
+| 532 | text match / keyword candidate | <code>&#x27;no&#x27;</code> | data file |
+| 543 | time / duration / threshold / limit | <code>100</code> | config.json |
+| 543 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 544 | text match / keyword candidate | <code>&#x27;explicit&#x27;</code> | data file |
+| 569 | numeric literal (review) | <code>1024</code> | config.json |
+| 569 | numeric literal (review) | <code>2</code> | config.json |
+| 586 | numeric literal (review) | <code>2</code> | config.json |
+| 607 | text match / keyword candidate | <code>&#x27;facts&#x27;</code> | data file |
+| 608 | numeric literal (review) | <code>0</code> | config.json |
+| 608 | numeric literal (review) | <code>1</code> | config.json |
+| 608 | text match / keyword candidate | <code>&#x27;spelling&#x27;</code> | data file |
+| 608 | numeric literal (review) | <code>2</code> | config.json |
+| 609 | regex candidate | <code>&#x27;[a-z0-9]+&#x27;</code> | data file |
+| 614 | text match / keyword candidate | <code>&#x27;facts&#x27;</code> | data file |
+| 615 | text match / keyword candidate | <code>&#x27;prefix_length&#x27;</code> | data file |
+| 616 | numeric literal (review) | <code>0.0</code> | config.json |
+| 619 | numeric literal (review) | <code>1.0</code> | config.json |
+| 643 | numeric literal (review) | <code>0</code> | config.json |
+| 645 | numeric literal (review) | <code>0</code> | config.json |
+| 647 | numeric literal (review) | <code>1</code> | config.json |
+| 647 | numeric literal (review) | <code>0</code> | config.json |
+| 647 | numeric literal (review) | <code>0</code> | config.json |
+| 647 | numeric literal (review) | <code>1</code> | config.json |
+| 647 | numeric literal (review) | <code>0</code> | config.json |
+| 648 | numeric literal (review) | <code>0</code> | config.json |
+| 671 | text match / keyword candidate | <code>&#x27;description:&#x27;</code> | data file |
+| 672 | numeric literal (review) | <code>1</code> | config.json |
+| 672 | numeric literal (review) | <code>1</code> | config.json |
+| 684 | numeric literal (review) | <code>-3</code> | config.json |
+| 684 | text match / keyword candidate | <code>&#x27;.md&#x27;</code> | data file |
+| 722 | regex candidate | <code>&#x27;^&#x27;</code> | data file |
+| 722 | regex candidate | <code>&#x27;polite&#x27;</code> | data file |
+| 722 | regex candidate | <code>&#x27;asks&#x27;</code> | data file |
+| 722 | regex candidate | <code>&#x27;addressee&#x27;</code> | data file |
+| 723 | regex candidate | <code>&#x27;links&#x27;</code> | data file |
+| 723 | regex candidate | <code>&#x27;lead_ins&#x27;</code> | data file |
+| 745 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 778 | text match / keyword candidate | <code>&#x27;tasks.due_soon_hours&#x27;</code> | data file |
+| 779 | text match / keyword candidate | <code>&#x27;id&#x27;</code> | data file |
+| 782 | text match / keyword candidate | <code>&#x27;id&#x27;</code> | data file |
+| 804 | numeric literal (review) | <code>1</code> | config.json |
+
 ## standing_instructions.py
 
 Priority 2: User-facing tools, voice, UI and runtime services.
@@ -3158,74 +3117,75 @@ Priority 2: User-facing tools, voice, UI and runtime services.
 | 21 | text match / keyword candidate | <code>&#x27;project_review&#x27;</code> | data file |
 | 21 | text match / keyword candidate | <code>&#x27;downloads&#x27;</code> | data file |
 | 22 | user / vault name | <code>&#x27;denisse.standing_instructions&#x27;</code> | runtime lookup |
-| 34 | numeric literal (review) | <code>1</code> | config.json |
-| 46 | text match / keyword candidate | <code>&#x27;.tmp&#x27;</code> | data file |
-| 48 | numeric literal (review) | <code>2</code> | config.json |
-| 60 | numeric literal (review) | <code>0</code> | config.json |
-| 60 | numeric literal (review) | <code>2</code> | config.json |
-| 61 | numeric literal (review) | <code>0</code> | config.json |
-| 64 | numeric literal (review) | <code>0</code> | config.json |
-| 67 | text match / keyword candidate | <code>&#x27;nt&#x27;</code> | data file |
-| 69 | numeric literal (review) | <code>1</code> | config.json |
-| 80 | numeric literal (review) | <code>0</code> | config.json |
-| 81 | text match / keyword candidate | <code>&#x27;nt&#x27;</code> | data file |
-| 82 | numeric literal (review) | <code>1</code> | config.json |
-| 88 | text match / keyword candidate | <code>&#x27;version&#x27;</code> | data file |
-| 88 | text match / keyword candidate | <code>&#x27;enabled&#x27;</code> | data file |
-| 88 | text match / keyword candidate | <code>&#x27;project_dir&#x27;</code> | data file |
-| 88 | text match / keyword candidate | <code>&#x27;jobs&#x27;</code> | data file |
-| 89 | text match / keyword candidate | <code>&#x27;version&#x27;</code> | data file |
-| 89 | numeric literal (review) | <code>1</code> | config.json |
-| 92 | numeric literal (review) | <code>1</code> | config.json |
-| 97 | text match / keyword candidate | <code>&#x27;jobs&#x27;</code> | data file |
-| 98 | text match / keyword candidate | <code>&#x27;id&#x27;</code> | data file |
-| 98 | text match / keyword candidate | <code>&#x27;enabled&#x27;</code> | data file |
-| 98 | text match / keyword candidate | <code>&#x27;every_seconds&#x27;</code> | data file |
-| 98 | text match / keyword candidate | <code>&#x27;goal&#x27;</code> | data file |
-| 99 | text match / keyword candidate | <code>&#x27;id&#x27;</code> | data file |
-| 99 | text match / keyword candidate | <code>&#x27;id&#x27;</code> | data file |
-| 103 | numeric literal (review) | <code>1</code> | config.json |
-| 136 | text match / keyword candidate | <code>&#x27;last_started&#x27;</code> | data file |
-| 137 | numeric literal (review) | <code>0</code> | config.json |
-| 150 | text match / keyword candidate | <code>&#x27;jobs&#x27;</code> | data file |
-| 150 | text match / keyword candidate | <code>&#x27;id&#x27;</code> | data file |
-| 175 | text match / keyword candidate | <code>&#x27;jobs&#x27;</code> | data file |
-| 175 | text match / keyword candidate | <code>&#x27;id&#x27;</code> | data file |
-| 181 | text match / keyword candidate | <code>&#x27;last_started&#x27;</code> | data file |
-| 194 | text match / keyword candidate | <code>&#x27;project_dir&#x27;</code> | data file |
-| 194 | text match / keyword candidate | <code>&#x27;project_dir&#x27;</code> | data file |
-| 195 | text match / keyword candidate | <code>&#x27;jobs&#x27;</code> | data file |
-| 197 | text match / keyword candidate | <code>&#x27;downloads&#x27;</code> | data file |
-| 201 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
-| 201 | text match / keyword candidate | <code>&#x27;completed&#x27;</code> | data file |
-| 201 | text match / keyword candidate | <code>&#x27;steps&#x27;</code> | data file |
-| 201 | text match / keyword candidate | <code>&#x27;tool&#x27;</code> | data file |
-| 201 | text match / keyword candidate | <code>&#x27;organize_downloads&#x27;</code> | data file |
-| 201 | text match / keyword candidate | <code>&#x27;note&#x27;</code> | data file |
-| 201 | text match / keyword candidate | <code>&#x27;Existing type rules&#x27;</code> | data file |
-| 202 | text match / keyword candidate | <code>&#x27;evidence&#x27;</code> | data file |
-| 202 | text match / keyword candidate | <code>&#x27;organize_downloads&#x27;</code> | data file |
-| 202 | text match / keyword candidate | <code>&#x27;suggestion&#x27;</code> | data file |
-| 202 | text match / keyword candidate | <code>&#x27;focus_ids&#x27;</code> | data file |
-| 202 | text match / keyword candidate | <code>&#x27;error&#x27;</code> | data file |
-| 204 | text match / keyword candidate | <code>&#x27;task_snapshot&#x27;</code> | data file |
-| 204 | text match / keyword candidate | <code>&#x27;task_review&#x27;</code> | data file |
-| 204 | text match / keyword candidate | <code>&#x27;project_snapshot&#x27;</code> | data file |
-| 205 | text match / keyword candidate | <code>&#x27;task_review&#x27;</code> | data file |
-| 207 | text match / keyword candidate | <code>&#x27;goal&#x27;</code> | data file |
-| 211 | text match / keyword candidate | <code>&#x27;digest&#x27;</code> | data file |
-| 211 | text match / keyword candidate | <code>&#x27;downloads&#x27;</code> | data file |
-| 216 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
-| 216 | text match / keyword candidate | <code>&#x27;completed&#x27;</code> | data file |
-| 221 | text match / keyword candidate | <code>&#x27;downloads&#x27;</code> | data file |
-| 227 | text match / keyword candidate | <code>&#x27;job_id&#x27;</code> | data file |
-| 227 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
-| 227 | text match / keyword candidate | <code>&#x27;failed&#x27;</code> | data file |
-| 227 | text match / keyword candidate | <code>&#x27;error&#x27;</code> | data file |
-| 228 | text match / keyword candidate | <code>&#x27;changed&#x27;</code> | data file |
-| 228 | text match / keyword candidate | <code>&#x27;brief&#x27;</code> | data file |
-| 248 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
-| 248 | text match / keyword candidate | <code>&#x27;completed&#x27;</code> | data file |
+| 42 | numeric literal (review) | <code>1</code> | config.json |
+| 54 | text match / keyword candidate | <code>&#x27;.tmp&#x27;</code> | data file |
+| 56 | numeric literal (review) | <code>2</code> | config.json |
+| 68 | numeric literal (review) | <code>0</code> | config.json |
+| 68 | numeric literal (review) | <code>2</code> | config.json |
+| 69 | numeric literal (review) | <code>0</code> | config.json |
+| 72 | numeric literal (review) | <code>0</code> | config.json |
+| 75 | text match / keyword candidate | <code>&#x27;nt&#x27;</code> | data file |
+| 77 | numeric literal (review) | <code>1</code> | config.json |
+| 88 | numeric literal (review) | <code>0</code> | config.json |
+| 89 | text match / keyword candidate | <code>&#x27;nt&#x27;</code> | data file |
+| 90 | numeric literal (review) | <code>1</code> | config.json |
+| 96 | text match / keyword candidate | <code>&#x27;version&#x27;</code> | data file |
+| 96 | text match / keyword candidate | <code>&#x27;enabled&#x27;</code> | data file |
+| 96 | text match / keyword candidate | <code>&#x27;project_dir&#x27;</code> | data file |
+| 96 | text match / keyword candidate | <code>&#x27;jobs&#x27;</code> | data file |
+| 97 | text match / keyword candidate | <code>&#x27;version&#x27;</code> | data file |
+| 97 | numeric literal (review) | <code>1</code> | config.json |
+| 100 | numeric literal (review) | <code>1</code> | config.json |
+| 105 | text match / keyword candidate | <code>&#x27;jobs&#x27;</code> | data file |
+| 106 | text match / keyword candidate | <code>&#x27;id&#x27;</code> | data file |
+| 106 | text match / keyword candidate | <code>&#x27;enabled&#x27;</code> | data file |
+| 106 | text match / keyword candidate | <code>&#x27;every_seconds&#x27;</code> | data file |
+| 106 | text match / keyword candidate | <code>&#x27;goal&#x27;</code> | data file |
+| 107 | text match / keyword candidate | <code>&#x27;id&#x27;</code> | data file |
+| 107 | text match / keyword candidate | <code>&#x27;id&#x27;</code> | data file |
+| 111 | numeric literal (review) | <code>1</code> | config.json |
+| 144 | text match / keyword candidate | <code>&#x27;last_started&#x27;</code> | data file |
+| 145 | numeric literal (review) | <code>0</code> | config.json |
+| 158 | text match / keyword candidate | <code>&#x27;jobs&#x27;</code> | data file |
+| 158 | text match / keyword candidate | <code>&#x27;id&#x27;</code> | data file |
+| 183 | text match / keyword candidate | <code>&#x27;jobs&#x27;</code> | data file |
+| 183 | text match / keyword candidate | <code>&#x27;id&#x27;</code> | data file |
+| 189 | text match / keyword candidate | <code>&#x27;last_started&#x27;</code> | data file |
+| 202 | text match / keyword candidate | <code>&#x27;project_dir&#x27;</code> | data file |
+| 202 | text match / keyword candidate | <code>&#x27;project_dir&#x27;</code> | data file |
+| 203 | text match / keyword candidate | <code>&#x27;jobs&#x27;</code> | data file |
+| 205 | text match / keyword candidate | <code>&#x27;downloads&#x27;</code> | data file |
+| 209 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
+| 209 | text match / keyword candidate | <code>&#x27;completed&#x27;</code> | data file |
+| 209 | text match / keyword candidate | <code>&#x27;steps&#x27;</code> | data file |
+| 209 | text match / keyword candidate | <code>&#x27;tool&#x27;</code> | data file |
+| 209 | text match / keyword candidate | <code>&#x27;organize_downloads&#x27;</code> | data file |
+| 209 | text match / keyword candidate | <code>&#x27;note&#x27;</code> | data file |
+| 209 | text match / keyword candidate | <code>&#x27;downloads_note&#x27;</code> | data file |
+| 210 | text match / keyword candidate | <code>&#x27;evidence&#x27;</code> | data file |
+| 210 | text match / keyword candidate | <code>&#x27;organize_downloads&#x27;</code> | data file |
+| 210 | text match / keyword candidate | <code>&#x27;suggestion&#x27;</code> | data file |
+| 210 | text match / keyword candidate | <code>&#x27;focus_ids&#x27;</code> | data file |
+| 210 | text match / keyword candidate | <code>&#x27;error&#x27;</code> | data file |
+| 212 | text match / keyword candidate | <code>&#x27;task_snapshot&#x27;</code> | data file |
+| 212 | text match / keyword candidate | <code>&#x27;task_review&#x27;</code> | data file |
+| 212 | text match / keyword candidate | <code>&#x27;project_snapshot&#x27;</code> | data file |
+| 213 | text match / keyword candidate | <code>&#x27;task_review&#x27;</code> | data file |
+| 215 | text match / keyword candidate | <code>&#x27;goal&#x27;</code> | data file |
+| 219 | text match / keyword candidate | <code>&#x27;digest&#x27;</code> | data file |
+| 219 | text match / keyword candidate | <code>&#x27;downloads&#x27;</code> | data file |
+| 224 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
+| 224 | text match / keyword candidate | <code>&#x27;completed&#x27;</code> | data file |
+| 229 | text match / keyword candidate | <code>&#x27;downloads&#x27;</code> | data file |
+| 235 | text match / keyword candidate | <code>&#x27;job_id&#x27;</code> | data file |
+| 235 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
+| 235 | text match / keyword candidate | <code>&#x27;failed&#x27;</code> | data file |
+| 235 | text match / keyword candidate | <code>&#x27;error&#x27;</code> | data file |
+| 236 | text match / keyword candidate | <code>&#x27;changed&#x27;</code> | data file |
+| 236 | text match / keyword candidate | <code>&#x27;brief&#x27;</code> | data file |
+| 236 | text match / keyword candidate | <code>&#x27;failed_brief&#x27;</code> | data file |
+| 256 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
+| 256 | text match / keyword candidate | <code>&#x27;completed&#x27;</code> | data file |
 
 ## hotkey.py
 
