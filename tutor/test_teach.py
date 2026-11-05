@@ -437,6 +437,29 @@ class RegistrationTests(TeachFixture):
         self.assertTrue(out.startswith(f"{NAME} has five"), out)
 
 
+class ParseTests(unittest.TestCase):
+    """model.parse on what the local model really sent for an exam question
+    (2026-11-05): LaTeX backslashes JSON can't take, and no final brace."""
+
+    def test_latex_backslashes_and_a_missing_brace(self):
+        from tutor import model
+        reply = ('{"title": "Fourier", "question": "Period $T=2\\pi$, $c_k=\\frac{1}{T}\\int_T x(t)e^{-jk\\omega_0 t}dt$. '
+                 '(a) Write the harmonics.", "marks": 20, "mark_scheme": [{"step": "harmonics", "marks": 4}]')
+        data = model.parse(reply)
+        self.assertIsNotNone(data)
+        self.assertEqual(data["marks"], 20)
+        self.assertIn("\\pi", data["question"])
+        self.assertIn("\\frac{1}{T}", data["question"])
+        self.assertEqual(data["mark_scheme"][0]["marks"], 4)
+        latex = model.parse('{"s": "$\\theta \\neq \\beta$, $\\tau$, $\\nabla \\cdot E$\\nThen $\\rho$."}')["s"]
+        self.assertEqual(latex, "$\\theta \\neq \\beta$, $\\tau$, $\\nabla \\cdot E$\nThen $\\rho$.")
+        # Valid escapes and a quote inside a string are left alone; prose around it is still tolerated.
+        self.assertEqual(model.parse('Sure:\n{"a": "line\\nbreak \\"q\\" {x}"} done'), {"a": 'line\nbreak "q" {x}'})
+        self.assertIsNone(model.parse("no json here"))
+        self.assertEqual(model.parse('{"a": [1, 2'), {"a": [1, 2]})  # a reply that stopped early is closed
+        self.assertIsNone(model.parse('{"a": [1, 2'[:-5]))  # ...but not invented: '{"a' has no value to close
+
+
 class CliTests(TeachFixture):
     def test_commands(self):
         self.with_cards()

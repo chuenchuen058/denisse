@@ -7,7 +7,7 @@
     "match: regexes that find a week number or a module code in a folder name, a file name, or the first content_chars of a file's text. Keep capture group 1 as the number. First hit wins, folder before file name before contents.",
     "extract: which extensions are read how. audio is off unless audio.enabled is true (faster_whisper, installed already; no download happens here).",
     "model: config_entry names the entry in config.json 'models' (model_config.py); context comes from brain.json limits.num_ctx, DENISSE_NUM_CTX winning, the same knob the brain uses. chars_per_token and reserve_tokens size the chunks a long lecture is cut into.",
-    "prompt: what the local model is asked, per chunk. {module} {code} {week} {sources} {part} {parts} {text} are filled. It must answer with the JSON shape in prompt.schema; a reply that isn't JSON gets one retry with prompt.retry appended.",
+    "prompt: what the local model is asked, per chunk. {module} {code} {week} {sources} {part} {parts} {text} are filled. It must answer with the JSON shape in prompt.schema; a reply that isn't JSON gets one retry with prompt.retry appended. bad_escape: a backslash in the reply that is the model's LaTeX, not a JSON escape (\\pi, \\frac, \\theta, \\neq: no escape, or a letter escape followed by a lowercase letter) -- doubled before parsing; a closing brace the reply stopped short of is put back (model.parse).",
     "note: the tutor note's name, frontmatter and section templates. {module} {code} {week} {slug} {today} {outcomes_n} ... are filled. The name slug must be unique across the vault (scripts/vault_contract.py), hence the suffix.",
     "limits: caps on what one note holds, so a long lecture gives a usable note, not a dump."
   ],
@@ -94,7 +94,8 @@
     "retry": "\n\nYour last reply was not valid JSON. Reply again with ONLY the JSON object, no prose, no code fences.",
     "json_start": "{",
     "json_end": "}",
-    "fence": "(?s)```(?:json)?\\s*(.*?)```"
+    "fence": "(?s)```(?:json)?\\s*(.*?)```",
+    "bad_escape": "\\\\(?![\"\\\\/]|[bfnrt](?![a-z])|u[0-9a-fA-F]{4})"
   },
   "limits": {
     "outcomes": 12,
