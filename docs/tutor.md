@@ -55,7 +55,7 @@ python -m tutor topics <module>
    lecture** — it is tried again next run.
 5. **Write.** The tutor note goes into the module's `Week N` folder as
    `<Module> Week N tutor.md`; the module's topic map to
-   `memory/tutor/topics-<slug>.json`; and a `<Module> tutor.md` index in the
+   `topics-<slug>.json` in the Don area (part 2); and a `<Module> tutor.md` index in the
    module folder linking every tutor note and listing the topic map.
 
 Files stay in the inbox: the ingest never moves, renames or deletes his
@@ -88,7 +88,7 @@ sources changed; an unchanged week is skipped before any model call.
 
 ### The topic map
 
-`memory/tutor/topics-<slug>.json`:
+`<Don area>/data/topics-<slug>.json`:
 
 ```json
 {"module": "Signals and Systems", "code": "5CCYB020", "updated": "2026-11-05",
@@ -125,11 +125,12 @@ or a limit; `tutor/test_tutor.py` checks the string constants for that.
 | `topics.*` | Word rules for linking topics to coursework. |
 | `say.*` | Every line `ingest` prints. |
 
-State: `memory/tutor/ingest.json` (`files`: hash → where it was placed;
-`lectures`: module → week → signature, note, topics; `written`: note path →
-hash of what she wrote). Private, git-ignored; delete it to re-read
-everything (notes she wrote are then treated as his and copied beside, not
-overwritten — safe, just untidy).
+State: `ingest.json` (`files`: hash → where it was placed; `lectures`:
+module → week → signature, note, topics; `written`: note path → hash of
+what the tutor wrote). Since part 2 it and the topic maps live in the
+vault's Don area (`<Don area>/data/`), not `memory/tutor/` — see below.
+Delete it to re-read everything (notes it wrote are then treated as his and
+copied beside, not overwritten — safe, just untidy).
 
 ## Tests
 
@@ -151,19 +152,143 @@ path as a literal, which is its own Rule 0 job). It never touches the real
 vault, `memory/`, Ollama or the network, and runs under
 `scripts/run_checks.py`'s guard.
 
-## What is not here yet (tasks 2–4)
+# Part 2: Don in the vault, cards and Anki
 
-- **Task 2 — teaching.** Reads the topic map and the tutor notes; asks the
-  learner model (`learner/`) how he learns; explains a topic with the local
-  model, and hands the hard ones to Claude through `delegate.py`. Hook:
-  `topics.load(paths, module)` and the `## Topics` / `## Key methods` sections
-  of each note.
-- **Task 3 — questions to Anki.** Turns each note's `## Check yourself` list
-  and the methods into cards; the Anki export format and deck naming go in
-  `tutor.json`. Hook: the note's check list and `result["check"]` from
-  `model.extract_lecture`.
-- **Task 4 — progress and tutoring.** Tracks what he has reviewed, where he
-  struggles, and marks his answers (Claude via `delegate.py` for marking).
-  State joins `memory/tutor/`; the per-topic `lectures` and `coursework`
-  fields say what to revise before which question. `study_brief.py` can
-  then cite the tutor note for each unwritten week.
+Chuen named the tutor **Don** (5 Nov 2026). The name is `tutor.json`
+`"name"`; nothing in `tutor/*.py` says it (`tutor/test_don.py` checks).
+Decks are `<name>::<module>`, the notes say Don wrote them, and commit
+messages start with the name. (The tutor has no chat tools yet, so no chat
+reply introduces itself; when one is added it takes the name from here.)
+
+```
+python -m tutor cards <module>       cards from every vault note of a module
+python -m tutor anki-sync [module]   TSV per module; with AnkiConnect, add/update + review stats
+```
+
+### Don lives in the vault
+
+Chuen: "Don should also have access to Obsidian, collect the files from there
+and add my progress and memory back into it."
+
+- **Memory moved into the vault.** What the foundation kept under
+  `memory/tutor/` now lives in the Don area (`don.folder`, default
+  `Atlas/Academic/Don/`): JSON sidecars in `data/` (`ingest.json`,
+  `topics-<slug>.json`, `cards-<slug>.json`, `anki-<slug>.json`) and
+  readable notes beside them: `Don.md` (the hub), `Don - <module>
+  progress.md` (material read, cards, the Anki table, weak topics linked to
+  the week's tutor note) and `Don - <module> cards.md` (every card under a
+  link to its source). Every command except `topics` and `ingest --dry`
+  first copies anything still only in `memory/tutor/` into `data/`
+  (`don.migrate`: an existing vault copy is never overwritten, and the old
+  copy is left in place). Until a file has been moved, it is read from the
+  old place (`Paths.readable`).
+- **Sources are the whole vault** (`tutor/sources.py`): every note in the
+  module's folder at any depth (his own notes, Reference, Coursework, Week N,
+  study briefs, the tutor notes), plus any vault note whose frontmatter
+  (`sources.frontmatter_keys`) names the module's code, slug or title, or
+  which links to its hub, title or folder (`sources.link_names`). Skipped:
+  `sources.exclude_dirs` (`.obsidian`, Templates, Archive...), the Don area,
+  the tutor index, `(tutor update)` copies, and notes under
+  `sources.min_chars`. Each card cites its source as a vault link.
+- **Notes follow the contract**: `name`/`description`/`updated` plus `type`,
+  `status`, `tags`, `protection: open`, `generated_by`. They link only to
+  notes that exist, and are never written over a note he edited (the same
+  rule as tutor notes). The module tutor index links the hub, and the hub
+  links each module's progress, cards and index. `scripts/vault_contract.py`
+  passes on the fixture vault. The hub is not listed in
+  `Atlas/Academic/Academic-Index.md`, because that is his note: add the line
+  by hand.
+- **Every vault write is committed** through `scripts/vault_git.commit_owned`:
+  only the files the command wrote, never `.obsidian/` (`git.never_dirs`),
+  with a message from `git.messages`, and nothing when the vault root has no
+  `.git`. His own staged or unstaged changes are left alone.
+- **The learner model** (`learner/`) is fed through its API, never by
+  editing his notes. A weak topic becomes a `measured` belief in
+  `learner.area` (default `struggles`), with the Anki numbers as evidence. A
+  topic that recovers supersedes it (`learner.ok_claim`). The store and
+  `Learner-Model.md` are committed with the rest.
+
+### Cards (`tutor/cards.py`)
+
+For each source note whose text changed since the last run, the model is
+asked (`cards.system` / `cards.user`) for the kinds in `cards.kinds`, with a
+count for each:
+
+- `recall`: definitions and equations;
+- `method`: which method to use, and why;
+- `problem`: short worked problems.
+
+Each kind names an engine:
+
+- `local`: Ollama (`model.config_entry`);
+- `claude`: `delegate.run(..., engines=["claude"])`, his Claude plan through
+  the claude CLI, never an API key.
+
+Every kind is local by default. For the harder problems, set
+`cards.kinds.problem.engine` to `claude`. A reply that isn't JSON gets one
+retry; a note that never gives JSON keeps its old cards.
+
+Each card holds `id`, `kind`, `front`, `back`, `topic`, `source` (its vault
+path), `week` and `engine`. The id is a hash of (module, source note, kind,
+position), so a regenerated note updates its cards in Anki instead of adding
+new ones. A question that two notes both produce is sent once.
+
+### Anki (`tutor/anki.py`)
+
+- **TSV** (`anki.tsv.enabled`): `<Don area>/Anki/Don - <module>.tsv`, with
+  Anki's header lines (`#notetype`, `#deck`, `#guid column:1`, `#tags
+  column`). File > Import puts it in the right deck, and a re-import updates
+  by GUID. The Source column is an `obsidian://open` link.
+- **AnkiConnect** (`anki.connect`, default `http://127.0.0.1:8765`). If it
+  answers `version`:
+  1. The deck and the note type (`Front/Back/Source/Topic/Id`, with
+     templates and CSS from config) are created if missing.
+  2. Notes are found with `"note:<type>" "deck:<deck>"` and matched on the
+     `Id` field. A note is updated when a field differs, and added otherwise
+     (`allowDuplicate: false`).
+  3. `findCards`, `cardsInfo` and `areDue` give per-topic counts: cards,
+     reviewed, reviews, lapses, mean ease and due. A topic is weak when its
+     reviewed cards average `weak.lapse_rate` lapses, or its mean ease is
+     under `weak.ease_below`; `weak.score_*` sets the order.
+  4. The stats go to `anki-<slug>.json` and the progress note, and the weak
+     topics go to the learner model.
+- **No AnkiConnect** (switched off, or not answering): the TSV is written
+  and nothing is recorded, because no stats does not mean no lapses.
+
+`Id` is a fifth field, beside the four the task asked for. AnkiConnect
+search needs it to update a card instead of duplicating it.
+
+### Tests
+
+`tutor/test_don.py` sets up:
+
+- a fixture vault, with notes of his outside the module folder (tagged and
+  linked), an unrelated note and an `.obsidian` file;
+- a fake card writer for each engine;
+- a fake AnkiConnect, served in-process on a free loopback port.
+
+It checks:
+
+- which notes count as sources;
+- card kinds, ids and dedupe, the `claude` switch, and that `claude` goes
+  through `delegate.run`;
+- the TSV-only fallback, which records nothing;
+- add, then unchanged, then update, with no duplicates;
+- weak topics in the sidecar, the progress note and the learner model, and
+  the belief being superseded when the topic recovers;
+- migration from the old place;
+- that the vault commit holds only Don's files;
+- the CLI and the vault contract;
+- that the tutor's name is not in the code.
+
+## Not built yet
+
+- **Teaching.** Reads the topic map and the tutor notes, asks the learner
+  model how he learns, explains a topic with the local model, and hands the
+  hard ones to Claude through `delegate.py`. Hooks: `topics.load(paths,
+  module)`, the `## Topics` / `## Key methods` sections of each note, and
+  `sources.collect` for his own notes.
+- **Progress and tutoring.** Reads `anki-<slug>.json` (`weak`, and `weeks`
+  per topic) to say what to revise before which coursework question, and
+  marks his answers (Claude via `delegate.py`). `study_brief.py` can then
+  cite the tutor note for each unwritten week.
