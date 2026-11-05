@@ -15,7 +15,25 @@
     "max_every_seconds": 86400,
     "max_goal_chars": 600,
     "max_file_bytes": 16384,
-    "poll_seconds": 5
+    "poll_seconds": 5,
+    "_files": "Relative to the repo folder: the saved jobs, the last-run state, and the folder for run reports and locks.",
+    "files": {
+      "config": "memory/standing_instructions.json",
+      "state": "memory/agent_state.json",
+      "reports": "logs/agent_runs"
+    },
+    "_wording": "What the engine says: errors shown in the tray's status, the downloads step's note, and a failed run's brief ({job_id}, {error}).",
+    "wording": {
+      "invalid_settings": "Invalid standing-instruction settings",
+      "invalid_job": "Invalid or duplicate standing instruction",
+      "too_large": "Standing instructions are too large",
+      "invalid_state": "Invalid agent state; inspect before resetting",
+      "busy": "Instructions are being edited; try again",
+      "unknown_job": "Unknown instruction",
+      "save_failed": "Could not save run outcome",
+      "downloads_note": "Existing type rules",
+      "failed_brief": "{job_id}: {error}"
+    }
   },
   "conversation": {
     "_deflection_patterns": "Regexes (case-insensitive) for replies that did nothing for him. Matching turns stay on disk but are left out of replay(). Patterns that don't compile are dropped with a log line.",
