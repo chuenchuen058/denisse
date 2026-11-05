@@ -396,9 +396,10 @@
       "fallback_reply": "Don here."
     },
     "tutor_quiz": {
+      "_note": "must_mention_replaces: a reply that doesn't speak as the tutor is replaced by the result itself, up to its ' Tell him' (brain.json result_cut_markers) -- the questions, verbatim. Eval 2026-11-05: the model worked the exam question itself instead of setting it.",
       "side_effect": "read",
       "reply_must_mention": "\\bDon\\b",
-      "fallback_reply": "Don here."
+      "must_mention_replaces": true
     },
     "tutor_weak_topics": {
       "side_effect": "read",
@@ -408,7 +409,7 @@
     "tutor_exam_question": {
       "side_effect": "read",
       "reply_must_mention": "\\bDon\\b",
-      "fallback_reply": "Don here."
+      "must_mention_replaces": true
     },
     "tutor_mark_answer": {
       "side_effect": "write",

@@ -465,7 +465,7 @@
     "teach (part 3): explaining a topic. The material is the topic map entry, the tutor notes of the weeks it names and his own notes that mention it (sources.py), capped to material_share of the model's chunk. learner_areas are the learner-model areas quoted to the model (how he likes to be taught). engines name cards.engines entries: local = Ollama, hard/fallback = delegate.py (Claude). hard_topics: topic words Chuen marks as hard, always Claude. self_check: what a local answer must have to stand; one that fails goes to the fallback engine in the background (BACKGROUND in chat.py), the local answer given meanwhile.",
     "quiz: the short check from the cards (part 2). questions is the default count, also the end-of-round check study mode offers (study_mode.set_round_end). order: which cards first -- weak and due come from the Anki stats. mark_engine marks his answers against the card backs.",
     "exam: longer problems in the style of the coursework and past papers found in the module folder (paper_globs, relative to it; PDFs and Office files read by extract.py). engine writes the question and a mark scheme; marking_engine marks his answer against it, step by step. The open question and the history live in practice_file.",
-    "chat: every sentence the chat tools (tutor/chat.py, registered in tools.py) return to the model. intro is the first sentence of every result, so a reply that leaves the tutor out still gets it (tool_policy.json reply_must_mention). {tutor} is the name above."
+    "chat: every sentence the chat tools (tutor/chat.py, registered in tools.py) return to the model. intro is the first sentence of every result, so a reply that leaves the tutor out still gets it (tool_policy.json reply_must_mention). In quiz and exam, what follows ' Tell him' is for the model only: brain.json honesty.result_cut_markers cuts it off when the result itself is shown (must_mention_replaces), so he sees the questions and not the instructions. {tutor} is the name above."
   ],
   "teach": {
     "hard_topics": [],
@@ -611,7 +611,7 @@
     "claude_done": "{tutor}: Claude's explanation of {topic} ({module}) is ready and in {note}.\n{summary}\n\n{steps}\n\nCheck question: {question}",
     "claude_failed": "{tutor}: Claude couldn't explain {topic} ({module}): {why}",
     "no_cards": "{intro} No cards for {module} yet, so nothing to quiz from. Make them with: python -m tutor cards {module}",
-    "quiz": "{intro} {n} question(s) on {module}{topic}, weakest topics first. Put them to him (one at a time or together); {tutor} holds the answers. When he answers, call tutor_mark_answer with what he wrote.\n{questions}",
+    "quiz": "{intro} {n} question(s) on {module}{topic}, weakest topics first:\n{questions}\n Tell him to answer here, one at a time or all together; {tutor} holds the answers, so don't answer them yourself. When he answers, call tutor_mark_answer with what he wrote.",
     "quiz_topic": " ({topic})",
     "quiz_question": "{n}. [{topic}] {front}",
     "no_stats": "{intro} No Anki review stats for {module} yet, so nothing is measured as weak. He needs to review the cards in Anki and run: python -m tutor anki-sync",
@@ -620,7 +620,7 @@
     "weak_weeks": "; revise week(s) {weeks}",
     "weak_none": "{intro} Nothing measured as weak in {module}: {cards} card(s), {reviewed} reviewed, no topic lapsing (synced {date}).{learner}",
     "weak_learner": " The learner model also says: {claims}",
-    "exam": "{intro} Exam-style question on {module}{topic}, {marks} marks, in the style of {style}. {tutor} holds the mark scheme; when he answers, call tutor_mark_answer with his whole answer.\n\n{title}\n{question}",
+    "exam": "{intro} Exam-style question on {module}{topic}, {marks} marks, in the style of {style}.\n\n{title}\n{question}\n Tell him to answer here; {tutor} holds the mark scheme, so don't work the problem yourself. When he answers, call tutor_mark_answer with his whole answer.",
     "exam_style": "his {names}",
     "exam_style_none": "the lecture notes (no coursework or past paper in the module folder)",
     "no_open": "{intro} There's no open question for {module} to mark. Give him an exam question or a quiz first.",

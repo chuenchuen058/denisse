@@ -396,7 +396,12 @@ class RegistrationTests(TeachFixture):
             # The reply must carry the tutor's name; the policy's pattern and stand-in must be that name.
             self.assertTrue(re.search(meta["reply_must_mention"], f"{NAME} here."), name)
             self.assertFalse(re.search(meta["reply_must_mention"], "Here are five questions."), name)
-            self.assertEqual(meta["fallback_reply"], CFG["chat"]["intro"].format(tutor=NAME), name)
+            if meta.get("must_mention_replaces"):
+                self.assertNotIn("fallback_reply", meta, name)  # the result itself stands in, not a stub
+            else:
+                self.assertEqual(meta["fallback_reply"], CFG["chat"]["intro"].format(tutor=NAME), name)
+        self.assertTrue(tool_policy.tool("tutor_quiz")["must_mention_replaces"])
+        self.assertTrue(tool_policy.tool("tutor_exam_question")["must_mention_replaces"])
         self.assertEqual(tool_policy.side_effect("tutor_mark_answer"), "write")
         self.assertTrue(tool_policy.allowed_unoffered("tutor_explain"))
         for text in ("quiz me on signals", "explain convolution", "what's weak in EM?", "give me an exam question",
@@ -420,21 +425,32 @@ class RegistrationTests(TeachFixture):
         def call(name, args=None):
             return {"message": {"content": "", "tool_calls": [{"function": {"name": name, "arguments": args or {}}}]}}
 
-        def run_turn(prompt, responses):
+        def run_turn(prompt, responses, functions=None):
             bot = brain.Brain.__new__(brain.Brain)
             it = iter(responses)
             isolated = {name: (lambda **kw: "Refused: isolated tool") for name in brain.tools.TOOL_FUNCTIONS}
             isolated["tutor_quiz"] = brain.tools.tutor_quiz
+            isolated.update(functions or {})
             with unittest.mock.patch.object(brain.ollama, "chat", side_effect=lambda **kw: next(it)), \
                     unittest.mock.patch.dict(brain.tools.TOOL_FUNCTIONS, isolated, clear=True):
                 return bot.respond([{"role": "user", "content": prompt}])[0]
         self.with_cards()
+        # A reply that isn't in the tutor's voice (the eval saw the model answer the questions itself)
+        # is replaced by the questions, verbatim, without the model-facing instructions.
         out = run_turn("quiz me on signals", [call("tutor_quiz", {"module": "signals"}),
                                               {"message": {"content": "Here are five questions for you."}}])
-        self.assertTrue(out.startswith(f"{NAME} here. Here are five questions for you."), out)
+        self.assertTrue(out.startswith(f"{NAME} here. 5 question(s) on Signals and Systems"), out)
+        self.assertIn("5. [", out)
+        self.assertNotIn("tutor_mark_answer", out)
+        self.assertNotIn("Tell him", out)
         out = run_turn("quiz me on signals", [call("tutor_quiz", {"module": "signals"}),
                                               {"message": {"content": f"{NAME} has five questions for you: 1..."}}])
         self.assertTrue(out.startswith(f"{NAME} has five"), out)
+        # An explanation keeps her wording, with the tutor's opening in front when it was left out.
+        out = run_turn("explain the laplace transform", [call("tutor_explain", {"topic": "Laplace transform", "module": "signals"}),
+                                                         {"message": {"content": "Start from the definition in your notes."}}],
+                       {"tutor_explain": brain.tools.tutor_explain})
+        self.assertEqual(out, f"{NAME} here. Start from the definition in your notes.")
 
 
 class ParseTests(unittest.TestCase):
