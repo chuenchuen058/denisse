@@ -20,6 +20,7 @@ os.environ.setdefault("DENISSE_REPLY_PREFERENCES",
 
 import brain  # noqa: E402
 import brain_rules  # noqa: E402
+import memory_store  # noqa: E402
 import planner  # noqa: E402
 import reply_preferences  # noqa: E402
 import tool_policy  # noqa: E402
@@ -27,6 +28,9 @@ import tool_router  # noqa: E402
 
 # "yes please" asks planner.pending(); keep that off the real memory folder.
 planner.PENDING_FILE = os.path.join(tempfile.mkdtemp(prefix="denisse-policy-"), "pending_plan.json")
+# respond() reads the stored history; keep that off the real memory folder too.
+memory_store.MEMORY_DIR = tempfile.mkdtemp(prefix="denisse-policy-")
+memory_store.MEMORY_FILE = os.path.join(memory_store.MEMORY_DIR, os.path.basename(memory_store.MEMORY_FILE))
 
 
 def user(text):

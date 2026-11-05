@@ -6,8 +6,9 @@ garbled wake-word exchanges in it instead of following the system prompt --
 the tray popup answered "hey" with a recall() call and "It seems like I
 don't have any information stored for 'hey'."
 
-Read-only against the real memory/conversation.json (the one write it
-attempts is a mishearing, which is supposed to be refused). Run it after
+Runs against a temp copy of the history (seeded with prose and tool
+traffic), never the real memory/conversation.json; the one write it
+attempts is a mishearing, which is supposed to be refused. Run it after
 touching conversation.py, replay(), or the noise gate:
 
     .venv\\Scripts\\python.exe scripts\\test_conversation.py
@@ -19,6 +20,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 import importlib
+import json
+import os
+import tempfile
+
+import memory_store
+
+# Point the history at a temp folder before anything else imports and reads
+# it: the real file exists in the main checkout and must stay untouched.
+_TMP = tempfile.mkdtemp(prefix="denisse-conversation-")
+memory_store.MEMORY_DIR = _TMP
+memory_store.MEMORY_FILE = os.path.join(_TMP, os.path.basename(memory_store.MEMORY_FILE))
+with open(memory_store.MEMORY_FILE, "w", encoding="utf-8") as _f:
+    json.dump([{"role": "user", "content": "what's on my list?"},
+               {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "list_tasks"}}]},
+               {"role": "tool", "content": "2 open"},
+               {"role": "assistant", "content": "You have two things open."},
+               {"role": "user", "content": "thanks"},
+               {"role": "assistant", "content": "Any time."}], _f)
 
 fails = []
 

@@ -10,14 +10,25 @@ Both were observed live on 2026-09-23 while testing the task tools:
 
 No model calls here; these are pure functions.
 """
+import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 import brain
+import memory_store
+import tasks
+
+# list_tasks reads the task store: keep it (and the history) off the real
+# memory folder, which exists in the main checkout.
+_TMP = tempfile.mkdtemp(prefix="denisse-guards-")
+tasks.TASKS_FILE = os.path.join(_TMP, os.path.basename(tasks.TASKS_FILE))
+memory_store.MEMORY_DIR = _TMP
+memory_store.MEMORY_FILE = os.path.join(_TMP, os.path.basename(memory_store.MEMORY_FILE))
 
 fails = []
 
