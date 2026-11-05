@@ -74,7 +74,8 @@
       "back_online": "Back online.",
       "still_offline": "Offline -- say or type \"{online}\" to resume.",
       "error": "Error: {error}",
-      "ellipsis": "…"
+      "ellipsis": "…",
+      "time_format": "%H:%M"
     },
     "confirm": {
       "title": "Denisse wants to do something",
@@ -120,7 +121,7 @@
   "dashboard_url": "http://127.0.0.1:{port}",
 
   "chat": {
-    "_doc": "The chat flyout. width/height shrink to fit the work area less screen_margin. bubble_side_room / system_side_room: canvas width not used by wrapped text. glow_strip: the 'light worm' running up and down the sides, glow_step px per frame.",
+    "_doc": "The chat flyout. width/height shrink to fit the work area less screen_margin. bubble_side_room / system_side_room: canvas width not used by wrapped text. glow_strip: the 'light worm' running up and down the sides, glow_step px per frame. bubble_outline: outline width. time_inset: the bubble's time stamp, up from its bottom edge. padding: the space around each part of the flyout (header, the status text, the close button, the input row and the entry in it, the typing line, the message canvas).",
     "width": 320,
     "height": 380,
     "screen_margin": 20,
@@ -141,7 +142,42 @@
     "glow_strip_h": 70,
     "glow_step": 4,
     "supersample": 4,
-    "wheel_delta": 120
+    "wheel_delta": 120,
+    "bubble_outline": 1,
+    "time_inset": 2,
+    "padding": {
+      "header_x": 10,
+      "header_y": 5,
+      "status_gap": 4,
+      "close_x": 10,
+      "input_x": 8,
+      "input_top": 3,
+      "input_bottom": 7,
+      "entry_ipad_x": 8,
+      "entry_ipad_y": 3,
+      "entry_gap": 6,
+      "typing_x": 14,
+      "canvas_x": 6,
+      "canvas_top": 4,
+      "canvas_bottom": 2
+    }
+  },
+
+  "glow": {
+    "_doc": "The neon look: how the glows behind bubbles, the header line, the send disc and the side 'light worm' are drawn. *_alpha are 0-255. width_mult: a glow's width as a multiple of the line it sits behind. *_blur: blur radius as a multiple of the outline width (outline_blur), the line's glow room (line_blur) or the shape's size (disc_blur, worm_blur). line_pad: px of glow room above and below the header line. disc_pad_min / disc_pad_frac: room round the send disc for its halo (the larger of a px floor and a fraction of its size). worm_start / worm_end: where the worm's bright core starts and ends, as fractions of its height.",
+    "outline_alpha": 200,
+    "width_mult": 3,
+    "outline_blur": 1.5,
+    "line_pad": 3,
+    "line_blur": 0.6,
+    "disc_alpha": 130,
+    "disc_pad_min": 3,
+    "disc_pad_frac": 0.25,
+    "disc_blur": 0.12,
+    "worm_alpha": 220,
+    "worm_start": 0.2,
+    "worm_end": 0.8,
+    "worm_blur": 0.1
   },
 
   "fonts": {
