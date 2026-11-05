@@ -164,6 +164,49 @@ class DataChangesBehaviour(Base):
         self.assertEqual(tray.CHAT_WIDTH, 400)
         self.assertEqual(tray.THINKING_MAX_MS, 5000)
 
+    def test_layout_glow_and_time_format_from_the_data(self):
+        # Shipped values are the old inline ones.
+        self.assertEqual(tray.CONFIG["glow"]["outline_alpha"], 200)
+        self.assertEqual(tray.CONFIG["chat"]["padding"]["typing_x"], 14)
+        self.assertEqual(tray._text("chat", "time_format"), "%H:%M")
+
+        def edit(d):
+            d["glow"]["disc_pad_min"] = 11
+            d["glow"]["disc_alpha"] = 77
+            d["text"]["chat"]["time_format"] = "%H.%M.%S"
+            d["chat"]["padding"]["header_x"] = 21
+        tray.configure(_write_config(self, edit))
+        self.assertEqual(tray._text("chat", "time_format"), "%H.%M.%S")
+        self.assertEqual(tray.CONFIG["chat"]["padding"]["header_x"], 21)
+        drawn = []
+        real_new = tray.Image.new
+
+        def spy_new(*a, **k):
+            img = real_new(*a, **k)
+            drawn.append(img)
+            return img
+        with patch.object(tray.Image, "new", spy_new), patch.object(tray.ImageTk, "PhotoImage", lambda img: img):
+            img, pad = tray._circle_image(20, (10, 20, 30), glow=True)
+        self.assertEqual(pad, 11)  # max(11, 20 * 0.25)
+        self.assertEqual(img.size, (42, 42))
+        # The glow layer (second image drawn) carries the halo alpha before blurring.
+        halo = drawn[1]
+        self.assertEqual(halo.getchannel("A").getextrema()[1], 77)
+
+    def test_bad_glow_values_fall_back(self):
+        def edit(d):
+            d["glow"]["worm_alpha"] = 300
+            d["glow"]["worm_start"] = 0.9
+            d["glow"]["line_blur"] = -1
+        lines = []
+        with patch.object(tray.json_config.log, "warning", lines.append):
+            cfg = tray.configure(_write_config(self, edit))
+        text = "\n".join(lines)
+        for key in ("worm_alpha", "worm_start", "line_blur"):
+            self.assertIn(key, text)
+        self.assertEqual((cfg["glow"]["worm_alpha"], cfg["glow"]["worm_start"], cfg["glow"]["line_blur"]),
+                         (220, 0.2, 0.6))
+
     def test_bad_values_fall_back_with_a_log_line(self):
         def edit(d):
             d["commands"]["route"]["study"] = "sometimes"
