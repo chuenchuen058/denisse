@@ -10,11 +10,13 @@ to run unattended.
 import ast
 import datetime
 import json
+import logging
 import math
 import os
 import re
 import subprocess
 import platform
+import threading
 
 import news
 import obsidian_sync
@@ -26,12 +28,67 @@ import vault_search
 import brain_rules
 import desktop_context
 
-FACTS_FILE = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "memory", "facts.json"
-)
-SKILLS_DIR = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "skills"
-)
+import json_config
+
+# Limits, folders, word lists and result wording: tools.json, checked
+# against tools.defaults.json (AGENTS.md Rule 0). The strings brain.py,
+# brain.json and multistep.py read back stay here -- see that file's _doc.
+ROOT = os.path.dirname(os.path.abspath(__file__))
+CONFIG_FILE = os.path.join(ROOT, "tools.json")
+DEFAULTS_FILE = os.path.join(ROOT, "tools.defaults.json")
+
+log = logging.getLogger("denisse.tools")
+_lock = threading.Lock()
+_cache = None
+
+
+def config() -> dict:
+    """tools.json, checked; loaded once per process (reload() re-reads)."""
+    global _cache
+    with _lock:
+        if _cache is None:
+            _cache = json_config.load("tools.json", CONFIG_FILE, DEFAULTS_FILE, _extra_checks)
+        return _cache
+
+
+def reload() -> dict:
+    global _cache, _REMIND_ME
+    with _lock:
+        _cache = None
+    _REMIND_ME = None
+    return config()
+
+
+def _extra_checks(data, defaults, checker):
+    framing = data["tasks"]["framing"]
+    if not [p for p in framing["asks"] if p.strip()]:
+        framing["asks"] = checker.bad("tasks.framing.asks", "is empty", defaults["tasks"]["framing"]["asks"])
+    return data
+
+
+def _say(section: str, key: str, /, **fields) -> str:
+    """A tools.json template filled in; one that won't format with these
+    fields (a format spec for the wrong type) logs and uses the default."""
+    template = config()[section][key]
+    try:
+        return template.format(**fields)
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        log.warning("tools.json %s.%s won't format (%s) -- using the default", section, key, exc)
+        with open(DEFAULTS_FILE, encoding="utf-8") as f:
+            return json.load(f)[section][key].format(**fields)
+
+
+def _error(section: str, key: str, /, **fields) -> str:
+    # "Error" starts every failure: multistep.py and learning.json read it.
+    return "Error: " + _say(section, key, **fields)
+
+
+def _repo_path(key: str) -> str:
+    return os.path.join(ROOT, *config()["files"][key].replace("\\", "/").split("/"))
+
+
+FACTS_FILE = _repo_path("facts")
+SKILLS_DIR = _repo_path("skills")
 
 
 def run_shell_command(command: str) -> str:
@@ -44,12 +101,13 @@ def run_shell_command(command: str) -> str:
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=30,
+            timeout=config()["shell"]["timeout_seconds"],
         )
         output = (result.stdout or "") + (result.stderr or "")
-        return output.strip()[:4000] or "(no output)"
+        # "(no output)" is brain.json evidence.empty_results.
+        return output.strip()[:config()["shell"]["max_output_chars"]] or "(no output)"
     except subprocess.TimeoutExpired:
-        return "Error: command timed out after 30s"
+        return _error("shell", "timed_out", seconds=config()["shell"]["timeout_seconds"])
     except Exception as e:
         return f"Error: {e}"
 
@@ -69,7 +127,7 @@ def _open_windows_store_app(app_name: str) -> bool:
         text=True,
         encoding="utf-8",
         errors="replace",
-        timeout=15,
+        timeout=config()["open_application"]["store_search_timeout_seconds"],
     )
     app_id = result.stdout.strip()
     if not app_id:
@@ -94,40 +152,36 @@ def open_application(app_name: str) -> str:
                 subprocess.run(["open", "-a", app_name], check=True)
             else:
                 subprocess.run([app_name], check=True)
-            return f"Opened {app_name}"
+            return _say("open_application", "opened", app_name=app_name)
         except Exception as e:
-            return f"Error opening {app_name}: {e}"
+            return "Error " + _say("open_application", "failed", app_name=app_name, error=e)
 
     # Windows: try a direct launch first (classic .exe apps, or anything
     # with an "App Paths" registry entry).
     try:
         os.startfile(app_name)  # type: ignore[attr-defined]
-        return f"Opened {app_name}"
+        return _say("open_application", "opened", app_name=app_name)
     except OSError:
         pass
 
     # Fall back to a Start Menu app search (handles Store-packaged apps).
     try:
         if _open_windows_store_app(app_name):
-            return f"Opened {app_name}"
+            return _say("open_application", "opened", app_name=app_name)
     except Exception as e:
-        return f"Error opening {app_name}: {e}"
+        return "Error " + _say("open_application", "failed", app_name=app_name, error=e)
 
     # Point at the next step rather than stopping here. A bare "couldn't
     # find it" reads to the model as a settled answer, and it relayed that
     # to Chuen as the file not existing.
-    return (f"No application called '{app_name}' (tried a direct launch and "
-            f"a Start Menu search). This only looks at installed apps, not "
-            f"at files. If '{app_name}' is a document, call "
-            f"find_files(query='{app_name}') before telling Chuen anything "
-            f"about whether it exists.")
+    return _say("open_application", "not_found", app_name=app_name)
 
 
 def list_directory(path: str = ".") -> str:
     """List files and folders at a given path."""
     try:
         entries = os.listdir(path)
-        return "\n".join(entries) if entries else "(empty directory)"
+        return "\n".join(entries) if entries else _say("list_directory", "empty")
     except Exception as e:
         return f"Error: {e}"
 
@@ -136,15 +190,9 @@ def list_directory(path: str = ".") -> str:
 # the places a person actually keeps things, not the whole disk.
 def _default_search_dirs() -> dict:
     home = os.path.expanduser("~")
-    dirs = {
-        "desktop": os.path.join(home, "Desktop"),
-        "documents": os.path.join(home, "Documents"),
-        "downloads": os.path.join(home, "Downloads"),
-        "pictures": os.path.join(home, "Pictures"),
-        "videos": os.path.join(home, "Videos"),
-        "music": os.path.join(home, "Music"),
-        "github": os.path.join(home, "GitHub"),
-    }
+    cfg = config()["find_files"]
+    dirs = {name.lower(): os.path.join(home, name) for name in cfg["search_folders"]}
+    onedrive_prefix = cfg["onedrive_prefix"].lower()
     # OneDrive is where a lot of real work actually lives on this machine
     # (the Obsidian vault included) -- fold in its top-level folders too,
     # if it's there.
@@ -159,7 +207,7 @@ def _default_search_dirs() -> dict:
     # collision registers the OneDrive copy under its own key instead,
     # and both get searched.
     for entry in sorted(os.listdir(home)) if os.path.isdir(home) else []:
-        if entry.lower().startswith("onedrive"):
+        if entry.lower().startswith(onedrive_prefix):
             onedrive = os.path.join(home, entry)
             if os.path.isdir(onedrive):
                 try:
@@ -171,25 +219,14 @@ def _default_search_dirs() -> dict:
                         if os.path.normcase(dirs.get(key, "")) == os.path.normcase(sub_path):
                             continue
                         if key in dirs:
-                            key = f"onedrive {key}"
+                            key = f"{onedrive_prefix} {key}"
                             n = 2
                             while key in dirs:
-                                key, n = f"onedrive {sub.lower()} {n}", n + 1
+                                key, n = f"{onedrive_prefix} {sub.lower()} {n}", n + 1
                         dirs[key] = sub_path
                 except OSError:
                     pass
     return {name: path for name, path in dirs.items() if os.path.isdir(path)}
-
-
-# Directory names to never descend into -- noisy, huge, or not where a
-# person keeps things they'd ask Denisse to find.
-_SKIP_DIR_NAMES = {
-    ".git", ".venv", "venv", "__pycache__", "node_modules", ".cache",
-    "$recycle.bin", "system volume information", ".mcp-auth",
-    ".claude-server-commander",
-}
-_MAX_FILES_SCANNED = 40000
-_MAX_RESULTS = 25
 
 
 def find_files(query: str, location: str = "") -> str:
@@ -209,30 +246,32 @@ def find_files(query: str, location: str = "") -> str:
     """
     import fnmatch
 
+    cfg = config()["find_files"]
     query = (query or "").strip()
     if not query:
-        return "Error: give me something to search for."
+        return _error("find_files", "empty_query")
 
     search_dirs = _default_search_dirs()
+    prefix = cfg["onedrive_prefix"].lower()
     if location:
         loc_key = location.strip().lower()
         # "documents" has to reach "onedrive documents" too, or narrowing
         # the search puts you back in the empty redirected stub.
         named = {k: v for k, v in search_dirs.items()
-                 if k == loc_key or k == f"onedrive {loc_key}"
-                 or k.startswith(f"onedrive {loc_key} ")}
+                 if k == loc_key or k == f"{prefix} {loc_key}"
+                 or k.startswith(f"{prefix} {loc_key} ")}
         if named:
             roots = named
         elif os.path.isdir(location):
             roots = {location: location}
         else:
-            known = ", ".join(sorted(search_dirs)) if search_dirs else "none found"
-            return f"Don't know a location called '{location}'. Known folders: {known}."
+            known = ", ".join(sorted(search_dirs)) if search_dirs else cfg["no_known_folders"]
+            return _say("find_files", "unknown_location", location=location, known=known)
     else:
         roots = search_dirs
 
     if not roots:
-        return "Error: couldn't find any of the usual folders to search."
+        return _error("find_files", "no_folders")
 
     is_pattern = any(ch in query for ch in "*?[")
     query_lower = query.lower()
@@ -243,16 +282,14 @@ def find_files(query: str, location: str = "") -> str:
     # normalize both sides (split on anything that isn't a letter/digit)
     # and require every meaningful query word to show up, in any order,
     # rather than an exact phrase match.
-    _STOPWORDS = {
-        "my", "the", "a", "an", "for", "me", "please", "file", "files",
-        "find", "locate", "search", "of", "that", "this",
-    }
-    import re
+    filler = set(cfg["filler_words"])
+    skip_dirs = {d.lower() for d in cfg["skip_dir_names"]}
+    max_scanned, max_results = cfg["max_files_scanned"], cfg["max_results"]
 
     def _tokens(s: str) -> list:
         return [w for w in re.split(r"[^a-z0-9]+", s.lower()) if w]
 
-    query_tokens = [t for t in _tokens(query) if t not in _STOPWORDS] or _tokens(query)
+    query_tokens = [t for t in _tokens(query) if t not in filler] or _tokens(query)
 
     matches = []
     scanned = 0
@@ -260,11 +297,11 @@ def find_files(query: str, location: str = "") -> str:
         for dirpath, dirnames, filenames in os.walk(root_path):
             dirnames[:] = [
                 d for d in dirnames
-                if not d.startswith(".") and d.lower() not in _SKIP_DIR_NAMES
+                if not d.startswith(".") and d.lower() not in skip_dirs
             ]
             for fname in filenames:
                 scanned += 1
-                if scanned > _MAX_FILES_SCANNED:
+                if scanned > max_scanned:
                     break
                 if is_pattern:
                     name_matches = fnmatch.fnmatch(fname.lower(), query_lower)
@@ -280,25 +317,30 @@ def find_files(query: str, location: str = "") -> str:
                     except OSError:
                         mtime = 0
                     matches.append((mtime, full_path))
-            if scanned > _MAX_FILES_SCANNED:
+            if scanned > max_scanned:
                 break
-        if scanned > _MAX_FILES_SCANNED:
+        if scanned > max_scanned:
             break
 
+    # brain.py and brain.json read these two lines back ("Found 1 match",
+    # "No files matching ... found in"), so they stay fixed here.
     if not matches:
         return f"No files matching '{query}' found in {', '.join(roots)}."
 
     matches.sort(reverse=True)
-    shown = matches[:_MAX_RESULTS]
+    shown = matches[:max_results]
     lines = [f"Found {len(matches)} match(es), showing {len(shown)} (newest first):"]
     lines += [path for _, path in shown]
-    if len(matches) > _MAX_RESULTS:
-        lines.append(f"...and {len(matches) - _MAX_RESULTS} more, narrow the query to see them.")
+    if len(matches) > max_results:
+        lines.append(_say("find_files", "more", more=len(matches) - max_results))
     return "\n".join(lines)
 
 
-def read_file(path: str, max_chars: int = 4000) -> str:
-    """Read a text file's contents (truncated)."""
+def read_file(path: str, max_chars: int = 0) -> str:
+    """Read a text file's contents (truncated to max_chars, else tools.json
+    read_file.max_chars). "(empty file)" is read by multistep.py."""
+    if not isinstance(max_chars, int) or isinstance(max_chars, bool) or max_chars <= 0:
+        max_chars = config()["read_file"]["max_chars"]
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             content = f.read(max_chars)
@@ -313,7 +355,7 @@ def write_file(path: str, content: str) -> str:
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
-        return f"Wrote {len(content)} chars to {path}"
+        return _say("write_file", "wrote", chars=len(content), path=path)
     except Exception as e:
         return f"Error: {e}"
 
@@ -383,15 +425,15 @@ def calculate(expression: str) -> str:
         tree = ast.parse(expression, mode="eval")
         result = _safe_eval(tree.body if hasattr(tree, "body") else tree)
     except ZeroDivisionError:
-        return "Error: division by zero."
+        return _error("calculate", "division_by_zero")
     except Exception as e:
-        return f"Error: couldn't evaluate '{expression}' ({e})."
+        return _error("calculate", "failed", expression=expression, error=e)
     if isinstance(result, float):
         # Binary floating point can't represent most decimals exactly
         # (9.9 - 9.11 comes out 0.7900000000000009), and replies get read
         # aloud verbatim -- round off the representation noise before it
         # ever reaches the model or the user, while keeping real precision.
-        result = round(result, 10)
+        result = round(result, config()["calculate"]["round_digits"])
         if result.is_integer():
             result = int(result)
     return f"{expression} = {result}"
@@ -408,6 +450,7 @@ def get_current_time(timezone: str = "") -> str:
     speaking it naturally (said "7:00 PM" for 19:25, i.e. got both the
     minutes and the wording wrong), so this does the conversion in code
     instead of leaving arithmetic to the model."""
+    fmt = config()["time"]
     if not timezone:
         now = datetime.datetime.now()
         tz_suffix = ""
@@ -415,11 +458,12 @@ def get_current_time(timezone: str = "") -> str:
         try:
             from zoneinfo import ZoneInfo
             now = datetime.datetime.now(ZoneInfo(timezone))
-            tz_suffix = " " + now.strftime("%Z")
+            tz_suffix = " " + now.strftime(fmt["zone_format"])
         except Exception as e:
-            return f"Error: unknown timezone '{timezone}' ({e})"
-    twelve_hour = now.strftime("%I:%M %p").lstrip("0")
-    return f"{now.strftime('%Y-%m-%d %H:%M:%S')}{tz_suffix} ({twelve_hour})"
+            return _error("time", "unknown_timezone", timezone=timezone, error=e)
+    twelve_hour = now.strftime(fmt["twelve_hour_format"]).lstrip("0")
+    return _say("time", "reply", datetime=now.strftime(fmt["datetime_format"]),
+                zone=tz_suffix, twelve_hour=twelve_hour)
 
 
 def get_weather(location: str) -> str:
@@ -431,13 +475,13 @@ def get_weather(location: str) -> str:
     import urllib.parse
     import urllib.request
 
+    cfg = config()["weather"]
     try:
-        fmt = "%l:+%C,+%t+(feels+like+%f),+%h+humidity,+%w+wind"
-        url = f"https://wttr.in/{urllib.parse.quote(location)}?format={fmt}&m"
-        with urllib.request.urlopen(url, timeout=10) as resp:
+        url = _say("weather", "url", location=urllib.parse.quote(location), format=cfg["format"])
+        with urllib.request.urlopen(url, timeout=cfg["timeout_seconds"]) as resp:
             return resp.read().decode("utf-8", errors="replace").strip()
     except Exception as e:
-        return f"Error: couldn't get weather for '{location}' ({e})"
+        return _error("weather", "failed", location=location, error=e)
 
 
 def get_news(topic: str = "") -> str:
@@ -452,13 +496,14 @@ def get_news(topic: str = "") -> str:
     would sometimes claim it found no news, or answer something
     unrelated, despite real headlines being right there in the tool
     result) than plain prose, which every other tool here already uses."""
+    cfg = config()["news"]
     try:
-        headlines = news.fetch_headlines(topic=topic, count=6)
+        headlines = news.fetch_headlines(topic=topic, count=cfg["count"])
     except Exception as e:
-        return f"Error: couldn't fetch CNA news ({e})"
+        return _error("news", "failed", error=e)
     if not headlines:
-        return f"No current CNA headlines found{f' for {topic!r}' if topic else ''}."
-    return "Today's CNA headlines: " + "; ".join(headlines) + "."
+        return _say("news", "none", topic=_say("news", "none_topic", topic=topic) if topic else "")
+    return _say("news", "headlines", headlines=cfg["separator"].join(headlines))
 
 
 def get_voice_settings() -> str:
@@ -468,15 +513,8 @@ def get_voice_settings() -> str:
     import voice_output
 
     if not os.environ.get("INWORLD_API_KEY"):
-        return (
-            "No Inworld API key is configured, so replies fall back to the "
-            "local Windows voice (pyttsx3), not a neural voice."
-        )
-    return (
-        f"Neural voice: '{voice_output.INWORLD_VOICE}' via Inworld's "
-        f"'{voice_output.INWORLD_MODEL}' model. Falls back to the local "
-        "Windows voice only if that fails."
-    )
+        return _say("voice", "no_key")
+    return _say("voice", "neural", voice=voice_output.INWORLD_VOICE, model=voice_output.INWORLD_MODEL)
 
 
 def get_brain_location() -> str:
@@ -488,29 +526,36 @@ def get_brain_location() -> str:
 
     code_dir = os.path.dirname(os.path.abspath(__file__))
     import instincts
-    config = brain_rules.status()
+    rules_status = brain_rules.status()
     rules = brain_rules.load()
     learned = instincts.status()
     vault_on = rules.vault_search and os.environ.get("DENISSE_VAULT_SEARCH", "1").lower() not in ("0", "false", "off", "no")
-    save = "only when asked" if rules.save_facts == "explicit" else "when useful facts appear in conversation"
-    lines = [f"I save personal facts {save}. I use the last {rules.recent_turns} conversation turns.",
-             f"Vault lookup is {'on' if vault_on else 'off'}, limited to {rules.vault_max_chars} characters per lookup.",
-             f"Learning is {'on' if learned['enabled'] else 'off'}: {learned['confirmed_lessons']} confirmed lessons, "
-             f"{learned['candidates']} candidates. Activation requires {rules.learning_confirmations} accepted fixes "
-             "and at least 80% positive feedback on that lesson.",
-             "Learning changes tool selection and supported read-only retrieval intent; it cannot grant new action permissions or rewrite code.",
-             f"Editable preferences: {config['file']}.",
-             f"Code: {code_dir}. Conversation and facts: {os.path.dirname(FACTS_FILE)}."]
-    if config["error"]:
-        lines.append(f"The last settings edit was invalid: {config['error']}. Keeping the last valid settings.")
+    w = config()["brain_location"]
+
+    def say(key, /, **f):
+        return _say("brain_location", key, **f)
+
+    def on_off(flag):
+        return w["on"] if flag else w["off"]
+
+    # A lesson needs this many positives per negative: 4 -> 80% positive.
+    per_negative = instincts.CONFIG["activation"]["min_positives_per_negative"]
+    positive_percent = round(100 * per_negative / (per_negative + 1))
+    save = w["save_explicit"] if rules.save_facts == "explicit" else w["save_auto"]
+    lines = [say("saving", save=save, turns=rules.recent_turns),
+             say("vault", state=on_off(vault_on), chars=rules.vault_max_chars),
+             say("learning", state=on_off(learned["enabled"]), confirmed=learned["confirmed_lessons"],
+                 candidates=learned["candidates"], confirmations=rules.learning_confirmations,
+                 positive_percent=positive_percent),
+             say("learning_limits"),
+             say("preferences", file=rules_status["file"]),
+             say("places", code=code_dir, memory=os.path.dirname(FACTS_FILE))]
+    if rules_status["error"]:
+        lines.append(say("invalid_settings", error=rules_status["error"]))
     if obsidian_sync._vault_available():
-        lines.append(
-            f"That memory also gets mirrored (read-only, one-way) into the "
-            f"Obsidian vault at {obsidian_sync.BRAIN_DIR}. The mirror is not my conversation store. "
-            "Vault notes are searchable on demand when enabled; validated routing lessons are also stored there."
-        )
+        lines.append(say("mirrored", vault=obsidian_sync.BRAIN_DIR))
     else:
-        lines.append("The Obsidian vault isn't currently reachable, so nothing is mirrored there right now.")
+        lines.append(say("no_vault"))
     return "\n".join(lines)
 
 
@@ -520,9 +565,9 @@ def clean_temp_files() -> str:
     hour (see optimize.py) -- this lets it be triggered on demand too."""
     removed = optimize.clean_temp_files()
     if not removed:
-        return "Nothing to clean -- no temp files old enough to remove."
+        return _say("clean_temp", "nothing")
     freed_mb = sum(f["size"] for f in removed) / 1024**2
-    return f"Removed {len(removed)} temp file(s), freeing {freed_mb:.1f} MB."
+    return _say("clean_temp", "removed", count=len(removed), mb=freed_mb)
 
 
 def _load_facts() -> dict:
@@ -547,7 +592,7 @@ def remember(key: str, value: str) -> str:
     facts = _load_facts()
     facts[key] = value
     _save_facts(facts)
-    return f"Got it, I'll remember that {key} = {value}."
+    return _say("facts", "remembered", key=key, value=value)
 
 
 # recall() used to be an exact dict lookup, so the model had to guess the
@@ -556,26 +601,24 @@ def remember(key: str, value: str) -> str:
 # Facts number in the dozens at most, so a lexical match over keys AND
 # values is enough -- no embedding model to download, nothing to keep in
 # sync. Spelling variants are folded first, then each fact is scored on
-# shared words (a shared 5-letter prefix counts, so editor/editing match).
-_SPELLING = {"favourite": "favorite", "colour": "color", "organisation":
-             "organization", "programme": "program", "centre": "center"}
-_RECALL_STOP = {"my", "the", "a", "an", "what", "whats", "is", "are", "do",
-                "does", "i", "use", "which", "of", "for", "to", "me", "you",
-                "your", "about", "and", "in", "on", "s"}
-
-
+# shared words (a shared prefix counts, so editor/editing match). The lists
+# and weights are tools.json "facts".
 def _fact_words(text: str) -> set:
+    cfg = config()["facts"]
+    spelling = {pair[0]: pair[1] for pair in cfg["spelling"] if len(pair) == 2}
     words = re.findall(r"[a-z0-9]+", (text or "").lower())
-    return {_SPELLING.get(w, w) for w in words} - _RECALL_STOP
+    return {spelling.get(w, w) for w in words} - set(cfg["ignore_words"])
 
 
 def _word_overlap(query: set, words: set) -> float:
+    cfg = config()["facts"]
+    n = cfg["prefix_length"]
     score = 0.0
     for q in query:
         if q in words:
             score += 1.0
-        elif len(q) >= 5 and any(w[:5] == q[:5] for w in words if len(w) >= 5):
-            score += 0.6
+        elif len(q) >= n and any(w[:n] == q[:n] for w in words if len(w) >= n):
+            score += cfg["prefix_score"]
     return score
 
 
@@ -585,28 +628,30 @@ def recall(key: str) -> str:
     facts = _load_facts()
     if key in facts:
         return facts[key]
+    # "I don't have anything remembered" is brain.json
+    # evidence.found_nothing_patterns, so it stays here.
     if not facts:
         return "I don't have anything remembered yet."
 
+    cfg = config()["facts"]
     query = _fact_words(key)
     scored = []
     for k, v in facts.items():
         # The key is what the fact is ABOUT, so it counts double; the value
         # still helps ("python" finds favorite_programming_language).
-        s = 2 * _word_overlap(query, _fact_words(k)) + _word_overlap(query, _fact_words(str(v)))
+        s = cfg["key_weight"] * _word_overlap(query, _fact_words(k)) + _word_overlap(query, _fact_words(str(v)))
         if s > 0:
             scored.append((s, k, v))
     scored.sort(key=lambda t: -t[0])
 
     if scored and (len(scored) == 1 or scored[0][0] > scored[1][0]):
         _, k, v = scored[0]
-        return f"{k}: {v}"
+        return _say("facts", "match", key=k, value=v)
     if scored:
-        top = "\n".join(f"{k}: {v}" for _, k, v in scored[:3])
-        return f"Closest matches for '{key}':\n{top}"
-    known = ", ".join(list(facts)[:15])
-    return (f"I don't have anything remembered for '{key}'. "
-            f"Facts I do have are filed under: {known}.")
+        top = "\n".join(_say("facts", "match", key=k, value=v) for _, k, v in scored[:cfg["closest_shown"]])
+        return _say("facts", "closest", key=key, matches=top)
+    known = ", ".join(list(facts)[:cfg["known_shown"]])
+    return _say("facts", "not_found", key=key, known=known)
 
 
 def list_known_facts() -> str:
@@ -614,7 +659,7 @@ def list_known_facts() -> str:
     facts = _load_facts()
     if not facts:
         return "I don't have anything remembered yet."
-    return "\n".join(f"{k}: {v}" for k, v in facts.items())
+    return "\n".join(_say("facts", "match", key=k, value=v) for k, v in facts.items())
 
 
 def _skill_description(path: str) -> str:
@@ -635,10 +680,10 @@ def list_skills() -> str:
     has been taught a procedure for. Read one with read_skill before
     attempting a task it covers."""
     if not os.path.isdir(SKILLS_DIR):
-        return "No skills installed yet."
+        return _say("skills", "none")
     names = sorted(f[:-3] for f in os.listdir(SKILLS_DIR) if f.endswith(".md"))
     if not names:
-        return "No skills installed yet."
+        return _say("skills", "none")
     lines = []
     for name in names:
         desc = _skill_description(os.path.join(SKILLS_DIR, f"{name}.md"))
@@ -651,15 +696,32 @@ def read_skill(name: str) -> str:
     safe_name = os.path.basename(name).removesuffix(".md")
     path = os.path.join(SKILLS_DIR, f"{safe_name}.md")
     if not os.path.isfile(path):
-        return f"No skill named '{name}'. Use list_skills to see what's available."
+        return _say("skills", "unknown", name=name)
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
 
 
-_REMIND_ME = re.compile(
-    r"^(?:please\s+)?(?:remind|reminder\s+(?:for|to)|remember)\s+(?:me\s+)?"
-    r"(?:that\s+|to\s+|about\s+|of\s+)?(?:there(?:'s|\s+is)\s+(?:a\s+|an\s+)?)?",
-    re.IGNORECASE)
+# Built from tools.json tasks.framing: each slot is "one of these phrases,
+# then spacing", optional except asks. Longest phrase first, so "there's an"
+# beats "there's".
+_REMIND_ME = None
+
+
+def _framing_pattern():
+    global _REMIND_ME
+    if _REMIND_ME is None:
+        framing = config()["tasks"]["framing"]
+
+        def slot(name, optional=True):
+            phrases = sorted({p.strip() for p in framing[name] if p.strip()}, key=len, reverse=True)
+            if not phrases:
+                return ""
+            alt = "|".join(r"\s+".join(map(re.escape, p.split())) for p in phrases)
+            return f"(?:(?:{alt})\\s+)" + ("?" if optional else "")
+
+        _REMIND_ME = re.compile("^" + slot("polite") + slot("asks", optional=False) + slot("addressee")
+                                + slot("links") + slot("lead_ins"), re.IGNORECASE)
+    return _REMIND_ME
 
 
 # Registry mapping tool name -> callable, used by brain.py's tool-use loop.
@@ -676,16 +738,16 @@ def add_task(text: str, due: str = "") -> str:
     if due and due.strip():
         parsed = time_parse.parse(due)
         if parsed.question:
-            return (f"Not added yet: \"{due.strip()}\" is ambiguous. Ask Chuen: "
-                    f"{parsed.question} Then call add_task again with the day he means.")
+            return _say("tasks", "ambiguous_due", due=due.strip(), question=parsed.question)
     # The model copies his framing into the task: "remind me there is a
     # robotics meeting" (2026-11-03). The task is the meeting. This trims
     # the model's argument, not his words.
-    text = _REMIND_ME.sub("", (text or "").strip(), count=1).strip() or (text or "").strip()
+    text = _framing_pattern().sub("", (text or "").strip(), count=1).strip() or (text or "").strip()
     t = tasks.add_task(text, due)
     if t["due"]:
         # In words ("Thursday 5 Nov, 15:00"), so a wrong parse is visible.
         when = datetime.datetime.fromisoformat(t["due"])
+        # brain.py _task_sentence parses these three lines back: fixed here.
         return f"Added: {t['text']} -- due {time_parse.describe(when)}."
     if t["due_text"]:
         return (f"Added: {t['text']} -- but I couldn't work out a date from "
@@ -702,23 +764,24 @@ def list_open_tasks() -> str:
     'C:\\Users\\Xichu\\GitHub\\denisse\\tasks.txt' two times out of three
     (2026-09-25). Telling it the real path beats telling it not to guess.
     """
-    where = f"The list is kept in {tasks.TASKS_FILE}."
+    where = _say("tasks", "where", file=tasks.TASKS_FILE)
     # Pick up anything ticked in the Obsidian note before answering, so the
     # two views never disagree in front of him.
     ticked = tasks.pull_vault_ticks()
     open_tasks = tasks.list_tasks()
     if ticked:
         names = ", ".join(t["text"] for t in ticked)
-        where = f"(Closed {len(ticked)} you ticked in Obsidian: {names}.) " + where
+        where = _say("tasks", "ticked", count=len(ticked), names=names) + where
     if not open_tasks:
-        return f"Nothing on your list. {where}"
-    overdue, soon = tasks.due_within(48)
+        return _say("tasks", "empty", where=where)
+    import reminders_config
+    overdue, soon = tasks.due_within(reminders_config.get("tasks.due_soon_hours"))
     over_ids = {t["id"] for t in overdue}
     lines = []
     for t in open_tasks:
-        mark = "OVERDUE - " if t["id"] in over_ids else ""
+        mark = config()["tasks"]["overdue_mark"] if t["id"] in over_ids else ""
         lines.append(f"- {mark}{tasks.describe(t)}")
-    return f"{len(open_tasks)} open:\n" + "\n".join(lines) + f"\n{where}"
+    return _say("tasks", "open", count=len(open_tasks), lines="\n".join(lines), where=where)
 
 
 def complete_task(task: str) -> str:
@@ -733,8 +796,7 @@ def complete_task(task: str) -> str:
     """
     t = tasks.complete_task(task)
     if t is None:
-        return (f"No single open task matched \"{task}\" -- either it isn't "
-                "there or more than one matched. Say the exact task name.")
+        return _say("tasks", "no_match", task=task)
     remaining = len(tasks.list_tasks())
     if not remaining:
         return f"Marked done: {t['text']}. That was the last one."
@@ -747,7 +809,7 @@ def remove_task(task: str) -> str:
     """Delete a task outright -- for things added by mistake."""
     t = tasks.remove_task(task)
     if t is None:
-        return f"No single open task matched \"{task}\"."
+        return _say("tasks", "remove_no_match", task=task)
     return f"Removed: {t['text']}"
 
 
@@ -796,11 +858,8 @@ def check_calendar(day: str = "") -> str:
     When a calendar is wired up, this is where it answers from."""
     import settings
     if not settings.get("calendar"):
-        return ("No calendar is connected to Denisse, so nothing about his calendar can be seen "
-                "or checked -- not for " + (day or "any day") + ", not at all. Tell him plainly "
-                "you can't see his calendar; don't say it's empty or free. His reminders "
-                "(list_tasks) are the nearest thing you can read.")
-    return "Error: a calendar is configured but no calendar reader is installed. Tell him this failed."
+        return _say("calendar", "not_connected", day=day or config()["calendar"]["any_day"])
+    return _error("calendar", "no_reader")
 
 
 TOOL_FUNCTIONS = {
