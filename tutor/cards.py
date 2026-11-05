@@ -282,7 +282,7 @@ def render_note(paths: Paths, module: Module, deck: dict, today: dt.date) -> str
             chk = card.get("check") or {}
             mark = _D["cards_fixed_mark"] if chk.get("verdict") == _V["fixed"] else _D["cards_checked_mark"]
             lines.append(_D["cards_card"].format(
-                kind=card["kind"], front=" ".join(card["front"].split()), back=" ".join(card["back"].split()),
+                kind=card["kind"], front=_shown(card["front"]), back=_shown(card["back"]),
                 topic=_D["cards_topic"].format(topic=card["topic"]) if card.get("topic") else "")
                 + (mark.format(by=chk["by"]) if chk.get("by") else ""))
         lines.append("")
@@ -296,9 +296,15 @@ def render_note(paths: Paths, module: Module, deck: dict, today: dt.date) -> str
             stem = os.path.splitext(rel.split("/")[-1])[0]
             link = CONFIG["sources"]["source_link"].format(rel=os.path.splitext(rel)[0], stem=stem)
             lines.append(_D["cards_held_card"].format(
-                kind=card["kind"], front=" ".join(card["front"].split()), back=" ".join(card["back"].split()),
+                kind=card["kind"], front=_shown(card["front"]), back=_shown(card["back"]),
                 reason=chk.get("reason", ""), by=chk.get("by", ""), when=chk.get("when", ""), link=link))
     return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def _shown(text: str) -> str:
+    """One line of card text with its maths in the delimiters the vault renders."""
+    from . import mathfmt
+    return mathfmt.normalise(" ".join(str(text or "").split()), CONFIG["don"]["math_target"])
 
 
 def run(paths: Paths, module: Module, calls: dict | None = None, today: dt.date | None = None,

@@ -114,6 +114,9 @@ class FakeAnki:
         if action == "createModel":
             self.models[p["modelName"]] = p
             return {}
+        if action in ("updateModelTemplates", "updateModelStyling"):
+            assert p["model"]["name"] in self.models
+            return None
         if action in ("findNotes", "findCards"):
             hits = [nid for nid, n in self.notes.items()
                     if f'"deck:{n["deckName"]}"' in p["query"] and f'"note:{n["modelName"]}"' in p["query"]]

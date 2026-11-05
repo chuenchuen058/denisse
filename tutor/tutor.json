@@ -338,6 +338,7 @@
       ""
     ],
     "cards_source_heading": "## {link}",
+    "math_target": "obsidian",
     "cards_card": "- *{kind}* **{front}** — {back}{topic}",
     "cards_topic": " ({topic})",
     "cards_none": "- No cards yet.",
@@ -406,6 +407,55 @@
     "id_hash_chars": 16,
     "id_key": "{module}|{source}|{kind}|{n}"
   },
+  "math": {
+    "_help": "tutor/mathfmt.py. delimited: [kind, regex with a 'body' group], display kinds first. bare: maths written with no delimiters; a token with 'sign' starts it, 'operator'/'operand' tokens around it join it, 'trailing' punctuation is left outside. targets: the delimiters each place renders.",
+    "delimited": [
+      [
+        "display",
+        "\\$\\$(?P<body>.+?)\\$\\$"
+      ],
+      [
+        "display",
+        "\\\\\\[(?P<body>.+?)\\\\\\]"
+      ],
+      [
+        "inline",
+        "\\\\\\((?P<body>.+?)\\\\\\)"
+      ],
+      [
+        "inline",
+        "(?<![\\\\$])\\$(?!\\$)(?P<body>[^$\\n]+?)(?<!\\\\)\\$"
+      ]
+    ],
+    "bare": {
+      "sign": "\\\\[A-Za-z]+|\\^",
+      "operator": "[=+\\-<>/*]|\\u2248|\\u2192|->|\\\\cdot|\\\\times|\\\\approx",
+      "operand": "[A-Za-z0-9().,']{1,4}",
+      "trailing": ".,;:"
+    },
+    "targets": {
+      "anki": {
+        "inline": [
+          "\\(",
+          "\\)"
+        ],
+        "display": [
+          "\\[",
+          "\\]"
+        ]
+      },
+      "obsidian": {
+        "inline": [
+          "$",
+          "$"
+        ],
+        "display": [
+          "$$",
+          "$$"
+        ]
+      }
+    }
+  },
   "anki": {
     "deck": "{tutor}::{module}",
     "note_type": "{tutor} card",
@@ -413,11 +463,12 @@
     "field_of": {"front": "Front", "back": "Back", "source": "Source", "topic": "Topic", "id": "Id"},
     "source_html": "<a href=\"obsidian://open?vault={vault}&amp;file={file}\">{stem}</a>",
     "tags": ["{tutor_slug}", "{slug}", "{kind}", "week::{week}", "topic::{topic_slug}"],
-    "css": ".card { font-family: sans-serif; font-size: 20px; text-align: left; color: black; background-color: white; } .source, .topic { font-size: 14px; color: #666; }",
+    "css": ".card { font-family: -apple-system, 'Segoe UI', sans-serif; font-size: 20px; line-height: 1.5; text-align: left; color: #1f2328; background-color: #ffffff; padding: 8px 4px; } .nightMode.card, .night_mode .card { color: #e6e6e6; background-color: #2b2b2b; } .q { font-weight: 600; margin-bottom: 12px; } .typed { width: 100%; box-sizing: border-box; font: inherit; font-size: 17px; padding: 8px; margin-top: 8px; border: 1px solid #b0b7c0; border-radius: 6px; background: transparent; color: inherit; } .label { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: #888; margin: 10px 0 4px; } .yours { padding: 8px 10px; border-left: 3px solid #4a90d9; background: rgba(74,144,217,.08); white-space: pre-wrap; } .topic, .source { font-size: 14px; color: #888; margin-top: 10px; } mjx-container[display=true] { margin: .6em 0; }",
+    "math_target": "anki",
     "templates": [
       {"Name": "Card 1",
-       "Front": "{{Front}}",
-       "Back": "{{FrontSide}}<hr id=answer>{{Back}}<div class=topic>{{Topic}}</div><div class=source>{{Source}}</div>"}
+       "Front": "<div class=q>{{Front}}</div><textarea id=don-typed class=typed rows=3 placeholder=\"Type your answer here (optional), then Show Answer. Ctrl+Enter shows it.\"></textarea><script>(function(){var t=document.getElementById('don-typed');if(!t)return;try{sessionStorage.removeItem('don-typed')}catch(e){}t.addEventListener('input',function(){try{sessionStorage.setItem('don-typed',t.value)}catch(e){}});t.addEventListener('keydown',function(e){e.stopPropagation();if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();if(typeof pycmd==='function')pycmd('ans');}});})();</script>",
+       "Back": "<div class=q>{{Front}}</div><div id=don-yours class=yours><div class=label>Your answer</div><div id=don-yours-text></div></div><hr id=answer><div class=label>Answer</div><div class=a>{{Back}}</div><div class=topic>{{Topic}}</div><div class=source>{{Source}}</div><script>(function(){var v='';try{v=sessionStorage.getItem('don-typed')||''}catch(e){}var box=document.getElementById('don-yours'),txt=document.getElementById('don-yours-text');if(!box)return;if(v.trim()){txt.textContent=v}else{box.style.display='none'}})();</script>"}
     ],
     "tsv": {
       "enabled": true,
@@ -437,6 +488,8 @@
         "create_deck": "createDeck",
         "model_names": "modelNames",
         "create_model": "createModel",
+        "update_templates": "updateModelTemplates",
+        "update_styling": "updateModelStyling",
         "find_notes": "findNotes",
         "notes_info": "notesInfo",
         "add_note": "addNote",
