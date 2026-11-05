@@ -4,7 +4,8 @@
     "modules: names, codes and aliases for each module. Modules with a dated Coursework.md in the vault are found at runtime as well (their name and code become keys automatically); entries here only add aliases and fix the order she lists them in.",
     "matching: how a module is recognised. 1) any alias, the full name or the code as whole words; 2) word prefixes in order ('sig and sys', 'comp meth'), each at least min_prefix letters (min_prefix_alone when the name is one word), connectors skipped; 3) a near-miss spelling of an alias ('signls'). The first tier that names exactly one module wins; two modules in one tier = none.",
     "patterns: regexes with inline flags. Keep their capture groups. {heading}, {week} and {n} are filled at runtime (regex-escaped); no other braces are formatted.",
-    "templates: Python format strings. Date fields take strftime specs, e.g. {due:%a %d %b %Y}. Entries with 'one'/'many' are picked by count. verify_due must produce the same text as the due date in brief.due."
+    "templates: Python format strings. Date fields take strftime specs, e.g. {due:%a %d %b %Y}. Entries with 'one'/'many' are picked by count. verify_due must produce the same text as the due date in brief.due.",
+    "learner.format_first: one rule per kind of format belief. pattern = what the claim names (the earliest-named kind wins); shape = the adaptation it calls for, or null for none; revise_first (optional) = a regex for the revise-from sources moved to the front. A new shape needs its intro lines at templates.brief.<shape> and its footer line at templates.brief.shaped.<shape>; the footer lists adaptations in templates.brief.shaped order."
   ],
   "paths": {
     "jobs": ["memory", "jobs"],
@@ -16,7 +17,8 @@
     "written_file": "study_brief-written.json",
     "draft_name": "{today:%Y-%m-%d} {module} study brief.md",
     "note_ext": ".md",
-    "draft_copy_suffix": " (2)"
+    "draft_copy_suffix": " (2)",
+    "slug_sep": "-"
   },
   "steps": ["deadline", "coursework", "weeks", "tasks", "write", "verify", "offer"],
   "job": {
@@ -59,7 +61,6 @@
     "topic_cut": [" — ", ":"],
     "revise_sep": ";",
     "duration": "(?i)(\\d+(?:\\.\\d+)?)\\s*(minutes?|mins?|hours?|hrs?|h)\\b",
-    "example_source": "(?i)\\b(tutorial|example|past paper|problem sheet|worksheet|exercise)",
     "skip_item": "(?i)assemble|submit|read the brief",
     "write_up_task": "write[ -]?up[^|]*\\bweek {week}\\b",
     "planned_write_up": "^Write up Week (\\d+)"
@@ -85,7 +86,8 @@
   "learner": {
     "areas": {"format": "format", "attention": "attention", "study": "study"},
     "format_first": {
-      "example": {"pattern": "(?i)\\bexamples?\\b", "shape": "example_first"},
+      "example": {"pattern": "(?i)\\bexamples?\\b", "shape": "example_first",
+                  "revise_first": "(?i)\\b(tutorial|example|past paper|problem sheet|worksheet|exercise)"},
       "diagram": {"pattern": "(?i)\\b(diagrams?|pictures?|visuals?)\\b", "shape": "diagram_first"},
       "theory": {"pattern": "(?i)\\b(theory|derivations?|proofs?)\\b", "shape": null}
     },

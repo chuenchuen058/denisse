@@ -6,9 +6,9 @@ Candidates are intentionally conservative: regexes include parsers, text compari
 Static coverage is not proof of exhaustiveness: comments/docstrings, non-Python files, excluded fixtures/private state/dependencies, dynamically constructed/imported values and interprocedural user-text flow are not analysed. Local aliases and comprehension/loop iterables are followed conservatively without execution-order analysis; results can include unrelated possible bindings.
 Values are complete decoded literal representations; f-string fragments and concatenated pieces are reported at their AST source location. Multiple kinds at one location are intentional. No value truncation is applied. Numeric strings used as defaults are included. Booleans and None are excluded.
 
-Scanned **140** Python files; **7106** candidates; **0** scan errors.
+Scanned **140** Python files; **7096** candidates; **0** scan errors.
 
-Source and policy SHA-256: `f2f5f2d0e10f9a78cec183dc06263cdc7ef714b10993b0475da008a90fd6901c`.
+Source and policy SHA-256: `9f6a9b1e70e68698a085f85c62ab6fcba6d7a38dd80bb637177282168322497c`.
 
 ## Coverage and regeneration
 
@@ -62,8 +62,8 @@ Traversal policy (from the JSON configuration):
 
 | Kind | Count | Suggested home |
 | --- | ---: | --- |
-| regex candidate | 524 | data file |
-| text match / keyword candidate | 2970 | data file |
+| regex candidate | 523 | data file |
+| text match / keyword candidate | 2961 | data file |
 | absolute path | 66 | runtime lookup |
 | user / vault name | 116 | runtime lookup |
 | model name | 215 | config.json |
@@ -88,7 +88,7 @@ Traversal policy (from the JSON configuration):
 | <code>invest.py</code> | 2: User-facing tools, voice, UI and runtime services | 218 |
 | <code>reminder_card.py</code> | 2: User-facing tools, voice, UI and runtime services | 174 |
 | <code>time_parse.py</code> | 2: User-facing tools, voice, UI and runtime services | 173 |
-| <code>study_brief.py</code> | 2: User-facing tools, voice, UI and runtime services | 167 |
+| <code>study_brief.py</code> | 2: User-facing tools, voice, UI and runtime services | 157 |
 | <code>tools.py</code> | 2: User-facing tools, voice, UI and runtime services | 123 |
 | <code>floating_orb.py</code> | 2: User-facing tools, voice, UI and runtime services | 104 |
 | <code>standing_instructions.py</code> | 2: User-facing tools, voice, UI and runtime services | 72 |
@@ -2101,94 +2101,84 @@ Priority 2: User-facing tools, voice, UI and runtime services.
 | 287 | text match / keyword candidate | <code>&#x27;module_dirs&#x27;</code> | data file |
 | 309 | numeric literal (review) | <code>1</code> | config.json |
 | 310 | numeric literal (review) | <code>0</code> | config.json |
-| 326 | regex candidate | <code>&#x27;pattern&#x27;</code> | data file |
-| 326 | text match / keyword candidate | <code>&#x27;pattern&#x27;</code> | data file |
-| 326 | text match / keyword candidate | <code>&#x27;format_first&#x27;</code> | data file |
-| 328 | regex candidate | <code>&#x27;duration&#x27;</code> | data file |
-| 329 | regex candidate | <code>&#x27;example_source&#x27;</code> | data file |
-| 330 | text match / keyword candidate | <code>&#x27;areas&#x27;</code> | data file |
-| 342 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
-| 342 | text match / keyword candidate | <code>&#x27;current&#x27;</code> | data file |
-| 363 | numeric literal (review) | <code>1</code> | config.json |
-| 373 | text match / keyword candidate | <code>&#x27;area&#x27;</code> | data file |
-| 374 | text match / keyword candidate | <code>&#x27;format&#x27;</code> | data file |
-| 378 | text match / keyword candidate | <code>&#x27;attention&#x27;</code> | data file |
-| 380 | text match / keyword candidate | <code>&#x27;study&#x27;</code> | data file |
-| 399 | text match / keyword candidate | <code>&#x27;example_first&#x27;</code> | data file |
-| 399 | text match / keyword candidate | <code>&#x27;diagram_first&#x27;</code> | data file |
-| 399 | text match / keyword candidate | <code>&#x27;short&#x27;</code> | data file |
-| 402 | text match / keyword candidate | <code>&#x27;pace&#x27;</code> | data file |
-| 412 | regex candidate | <code>&#x27;slug&#x27;</code> | data file |
-| 418 | text match / keyword candidate | <code>&#x27;file&#x27;</code> | data file |
-| 418 | text match / keyword candidate | <code>&#x27;.tmp&#x27;</code> | data file |
-| 420 | numeric literal (review) | <code>2</code> | config.json |
-| 430 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
-| 430 | text match / keyword candidate | <code>&#x27;running&#x27;</code> | data file |
-| 440 | regex candidate | <code>&#x27;planned_write_up&#x27;</code> | data file |
-| 446 | text match / keyword candidate | <code>&#x27;short&#x27;</code> | data file |
-| 447 | text match / keyword candidate | <code>&#x27;done&#x27;</code> | data file |
-| 447 | text match / keyword candidate | <code>&#x27;coursework&#x27;</code> | data file |
-| 447 | text match / keyword candidate | <code>&#x27;done&#x27;</code> | data file |
-| 447 | text match / keyword candidate | <code>&#x27;weeks&#x27;</code> | data file |
-| 450 | text match / keyword candidate | <code>&#x27;items&#x27;</code> | data file |
-| 450 | text match / keyword candidate | <code>&#x27;done&#x27;</code> | data file |
-| 452 | text match / keyword candidate | <code>&#x27;week&#x27;</code> | data file |
-| 483 | text match / keyword candidate | <code>&#x27;example_first&#x27;</code> | data file |
-| 483 | text match / keyword candidate | <code>&#x27;diagram_first&#x27;</code> | data file |
-| 490 | text match / keyword candidate | <code>&#x27;example_first&#x27;</code> | data file |
-| 495 | text match / keyword candidate | <code>&#x27;weeks&#x27;</code> | data file |
-| 498 | text match / keyword candidate | <code>&#x27;written&#x27;</code> | data file |
-| 500 | text match / keyword candidate | <code>&#x27;done&#x27;</code> | data file |
-| 500 | text match / keyword candidate | <code>&#x27;plan&#x27;</code> | data file |
-| 516 | text match / keyword candidate | <code>&#x27;pace&#x27;</code> | data file |
-| 520 | time / duration / threshold / limit | <code>0</code> | config.json |
-| 520 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 522 | time / duration / threshold / limit | <code>-1</code> | config.json |
-| 522 | time / duration / threshold / limit | <code>0</code> | config.json |
-| 535 | regex candidate | <code>&#x27;wikilink&#x27;</code> | data file |
-| 546 | text match / keyword candidate | <code>&#x27;done&#x27;</code> | data file |
-| 546 | text match / keyword candidate | <code>&#x27;deadline&#x27;</code> | data file |
-| 547 | text match / keyword candidate | <code>&#x27;due&#x27;</code> | data file |
-| 547 | text match / keyword candidate | <code>&#x27;due&#x27;</code> | data file |
-| 550 | text match / keyword candidate | <code>&#x27;done&#x27;</code> | data file |
-| 550 | text match / keyword candidate | <code>&#x27;coursework&#x27;</code> | data file |
-| 550 | text match / keyword candidate | <code>&#x27;items&#x27;</code> | data file |
-| 551 | text match / keyword candidate | <code>&#x27;text&#x27;</code> | data file |
-| 556 | numeric literal (review) | <code>0</code> | config.json |
-| 557 | text match / keyword candidate | <code>&#x27;note_ext&#x27;</code> | data file |
-| 594 | numeric literal (review) | <code>2</code> | config.json |
-| 608 | text match / keyword candidate | <code>&#x27;done&#x27;</code> | data file |
-| 620 | time / duration / threshold / limit | <code>1</code> | config.json |
-| 620 | time / duration / threshold / limit | <code>-1</code> | config.json |
-| 625 | text match / keyword candidate | <code>&#x27;module&#x27;</code> | data file |
-| 627 | numeric literal (review) | <code>0</code> | config.json |
-| 639 | regex candidate | <code>&#x27;deadline&#x27;</code> | data file |
-| 639 | text match / keyword candidate | <code>&#x27;deadline&#x27;</code> | data file |
-| 641 | regex candidate | <code>&#x27;coursework&#x27;</code> | data file |
-| 641 | text match / keyword candidate | <code>&#x27;coursework&#x27;</code> | data file |
-| 645 | text match / keyword candidate | <code>&#x27;coursework_dir&#x27;</code> | data file |
-| 649 | regex candidate | <code>&#x27;weeks&#x27;</code> | data file |
-| 649 | text match / keyword candidate | <code>&#x27;weeks&#x27;</code> | data file |
-| 654 | regex candidate | <code>&#x27;week&#x27;</code> | data file |
-| 654 | text match / keyword candidate | <code>&#x27;week&#x27;</code> | data file |
-| 657 | regex candidate | <code>&#x27;skip_item&#x27;</code> | data file |
-| 660 | regex candidate | <code>&#x27;{week}&#x27;</code> | data file |
-| 660 | text match / keyword candidate | <code>&#x27;{week}&#x27;</code> | data file |
-| 675 | regex candidate | <code>&#x27;feeds&#x27;</code> | data file |
-| 675 | text match / keyword candidate | <code>&#x27;feeds&#x27;</code> | data file |
-| 675 | regex candidate | <code>&#x27;path&#x27;</code> | data file |
-| 675 | text match / keyword candidate | <code>&#x27;path&#x27;</code> | data file |
-| 680 | regex candidate | <code>&#x27;weeks&#x27;</code> | data file |
-| 680 | text match / keyword candidate | <code>&#x27;weeks&#x27;</code> | data file |
-| 699 | text match / keyword candidate | <code>&#x27;draft_copy_suffix&#x27;</code> | data file |
-| 752 | numeric literal (review) | <code>0</code> | config.json |
-| 752 | numeric literal (review) | <code>0</code> | config.json |
-| 753 | time / duration / threshold / limit | <code>0</code> | config.json |
-| 753 | time / duration / threshold / limit | <code>0</code> | config.json |
-| 753 | numeric literal (review) | <code>0</code> | config.json |
-| 753 | numeric literal (review) | <code>1</code> | config.json |
-| 755 | numeric literal (review) | <code>0</code> | config.json |
-| 755 | numeric literal (review) | <code>1</code> | config.json |
+| 326 | regex candidate | <code>&#x27;duration&#x27;</code> | data file |
+| 359 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
+| 359 | text match / keyword candidate | <code>&#x27;current&#x27;</code> | data file |
+| 380 | regex candidate | <code>&#x27;pattern&#x27;</code> | data file |
+| 381 | numeric literal (review) | <code>1</code> | config.json |
+| 389 | text match / keyword candidate | <code>&#x27;areas&#x27;</code> | data file |
+| 392 | text match / keyword candidate | <code>&#x27;area&#x27;</code> | data file |
+| 393 | text match / keyword candidate | <code>&#x27;format&#x27;</code> | data file |
+| 398 | text match / keyword candidate | <code>&#x27;attention&#x27;</code> | data file |
+| 400 | text match / keyword candidate | <code>&#x27;study&#x27;</code> | data file |
+| 433 | regex candidate | <code>&#x27;slug&#x27;</code> | data file |
+| 439 | text match / keyword candidate | <code>&#x27;file&#x27;</code> | data file |
+| 439 | text match / keyword candidate | <code>&#x27;.tmp&#x27;</code> | data file |
+| 441 | numeric literal (review) | <code>2</code> | config.json |
+| 451 | text match / keyword candidate | <code>&#x27;status&#x27;</code> | data file |
+| 451 | text match / keyword candidate | <code>&#x27;running&#x27;</code> | data file |
+| 461 | regex candidate | <code>&#x27;planned_write_up&#x27;</code> | data file |
+| 467 | text match / keyword candidate | <code>&#x27;short&#x27;</code> | data file |
+| 468 | text match / keyword candidate | <code>&#x27;done&#x27;</code> | data file |
+| 468 | text match / keyword candidate | <code>&#x27;coursework&#x27;</code> | data file |
+| 468 | text match / keyword candidate | <code>&#x27;done&#x27;</code> | data file |
+| 468 | text match / keyword candidate | <code>&#x27;weeks&#x27;</code> | data file |
+| 471 | text match / keyword candidate | <code>&#x27;items&#x27;</code> | data file |
+| 471 | text match / keyword candidate | <code>&#x27;done&#x27;</code> | data file |
+| 473 | text match / keyword candidate | <code>&#x27;week&#x27;</code> | data file |
+| 517 | text match / keyword candidate | <code>&#x27;weeks&#x27;</code> | data file |
+| 520 | text match / keyword candidate | <code>&#x27;written&#x27;</code> | data file |
+| 522 | text match / keyword candidate | <code>&#x27;done&#x27;</code> | data file |
+| 522 | text match / keyword candidate | <code>&#x27;plan&#x27;</code> | data file |
+| 538 | text match / keyword candidate | <code>&#x27;pace&#x27;</code> | data file |
+| 542 | time / duration / threshold / limit | <code>0</code> | config.json |
+| 542 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 544 | time / duration / threshold / limit | <code>-1</code> | config.json |
+| 544 | time / duration / threshold / limit | <code>0</code> | config.json |
+| 557 | regex candidate | <code>&#x27;wikilink&#x27;</code> | data file |
+| 568 | text match / keyword candidate | <code>&#x27;done&#x27;</code> | data file |
+| 568 | text match / keyword candidate | <code>&#x27;deadline&#x27;</code> | data file |
+| 569 | text match / keyword candidate | <code>&#x27;due&#x27;</code> | data file |
+| 569 | text match / keyword candidate | <code>&#x27;due&#x27;</code> | data file |
+| 572 | text match / keyword candidate | <code>&#x27;done&#x27;</code> | data file |
+| 572 | text match / keyword candidate | <code>&#x27;coursework&#x27;</code> | data file |
+| 572 | text match / keyword candidate | <code>&#x27;items&#x27;</code> | data file |
+| 573 | text match / keyword candidate | <code>&#x27;text&#x27;</code> | data file |
+| 578 | numeric literal (review) | <code>0</code> | config.json |
+| 579 | text match / keyword candidate | <code>&#x27;note_ext&#x27;</code> | data file |
+| 616 | numeric literal (review) | <code>2</code> | config.json |
+| 630 | text match / keyword candidate | <code>&#x27;done&#x27;</code> | data file |
+| 642 | time / duration / threshold / limit | <code>1</code> | config.json |
+| 642 | time / duration / threshold / limit | <code>-1</code> | config.json |
+| 647 | text match / keyword candidate | <code>&#x27;module&#x27;</code> | data file |
+| 649 | numeric literal (review) | <code>0</code> | config.json |
+| 661 | regex candidate | <code>&#x27;deadline&#x27;</code> | data file |
+| 661 | text match / keyword candidate | <code>&#x27;deadline&#x27;</code> | data file |
+| 663 | regex candidate | <code>&#x27;coursework&#x27;</code> | data file |
+| 663 | text match / keyword candidate | <code>&#x27;coursework&#x27;</code> | data file |
+| 667 | text match / keyword candidate | <code>&#x27;coursework_dir&#x27;</code> | data file |
+| 671 | regex candidate | <code>&#x27;weeks&#x27;</code> | data file |
+| 671 | text match / keyword candidate | <code>&#x27;weeks&#x27;</code> | data file |
+| 676 | regex candidate | <code>&#x27;week&#x27;</code> | data file |
+| 676 | text match / keyword candidate | <code>&#x27;week&#x27;</code> | data file |
+| 679 | regex candidate | <code>&#x27;skip_item&#x27;</code> | data file |
+| 682 | regex candidate | <code>&#x27;{week}&#x27;</code> | data file |
+| 682 | text match / keyword candidate | <code>&#x27;{week}&#x27;</code> | data file |
+| 697 | regex candidate | <code>&#x27;feeds&#x27;</code> | data file |
+| 697 | text match / keyword candidate | <code>&#x27;feeds&#x27;</code> | data file |
+| 697 | regex candidate | <code>&#x27;path&#x27;</code> | data file |
+| 697 | text match / keyword candidate | <code>&#x27;path&#x27;</code> | data file |
+| 702 | regex candidate | <code>&#x27;weeks&#x27;</code> | data file |
+| 702 | text match / keyword candidate | <code>&#x27;weeks&#x27;</code> | data file |
+| 721 | text match / keyword candidate | <code>&#x27;draft_copy_suffix&#x27;</code> | data file |
+| 774 | numeric literal (review) | <code>0</code> | config.json |
+| 774 | numeric literal (review) | <code>0</code> | config.json |
+| 775 | time / duration / threshold / limit | <code>0</code> | config.json |
+| 775 | time / duration / threshold / limit | <code>0</code> | config.json |
+| 775 | numeric literal (review) | <code>0</code> | config.json |
+| 775 | numeric literal (review) | <code>1</code> | config.json |
+| 777 | numeric literal (review) | <code>0</code> | config.json |
+| 777 | numeric literal (review) | <code>1</code> | config.json |
 
 ## tools.py
 
