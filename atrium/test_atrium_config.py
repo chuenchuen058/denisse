@@ -181,7 +181,7 @@ class ConfigDrivesAtrium(unittest.TestCase):
             w(self.tmp / "home", ".tool/key", "x")
             self.assertEqual(snap._agents()[0]["status"], "ready")
 
-    def test_hub_folder_comes_from_data_and_keeps_its_ten_tables(self):
+    def test_hub_folder_comes_from_data_and_keeps_its_eleven_tables(self):
         self.cfg["snapshot"]["paths"]["hub"] = "elsewhere"
         snap, review = self._snapshot()
         with mock.patch.object(snap.subprocess, "run", side_effect=OSError("no shell")), \
@@ -190,7 +190,7 @@ class ConfigDrivesAtrium(unittest.TestCase):
         self.assertEqual(out, review / "elsewhere")
         self.assertEqual(sorted(p.stem for p in out.glob("*.json")),
                          sorted(["agents", "tasks", "waiting", "log", "learner", "spend", "running", "usage",
-                                 "outputs", "activity"]))
+                                 "outputs", "activity", "study"]))
 
     # -- hook installer --------------------------------------------------
     def test_hook_events_and_timeout_come_from_data(self):
