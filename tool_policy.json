@@ -149,7 +149,7 @@
         "tutor_mark_answer",
         "tutor_consult"
       ],
-      "cues": "quiz|test me|explain|teach|tutor|\\bweak|struggl|exam|past paper|practi[sc]e|\\bmark\\b|my answer|check my|understand|don'?t get|lesson|lecture|module|topic|coursework|go over|walk me through|step by step|my notes say|does the lecture|prioriti[sz]e|revis"
+      "cues": "quiz|test me|explain|teach|tutor|\\bweak|struggl|exam|past paper|practi[sc]e|\\bmark\\b|my answer|check my|understand|don'?t get|lesson|lecture|module|topic|coursework|go over|walk me through|step by step|my notes say|does the lecture"
     },
     "preferences": {
       "tools": [
