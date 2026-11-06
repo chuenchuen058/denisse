@@ -247,10 +247,13 @@ def render_hub(paths: Paths, modules: list, today: dt.date) -> str:
             lines.append(_D["hub_module"].format(module=module.title, links=CONFIG["note"]["link_sep"].join(links)))
     if not any_:
         lines.append(_D["hub_none"])
-    from . import progress  # part 4: the overview note, linked once it exists
+    from . import consult, progress  # parts 4 and 5: the overview and consults notes, linked once they exist
     study = progress.note_path(paths)
     if os.path.isfile(study):
         lines += [line.format(stem=_stem(study)) for line in _D["hub_study"]]
+    consults = consult.note_path(paths)
+    if os.path.isfile(consults):
+        lines += [line.format(stem=_stem(consults), **c) for line in CONFIG["consult"]["hub_line"]]
     return "\n".join(lines).rstrip("\n") + "\n"
 
 

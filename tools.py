@@ -873,6 +873,13 @@ def tutor_mark_answer(answer: str, module: str = "") -> str:
     return chat.mark_answer(answer, module)
 
 
+def tutor_consult(question: str, module: str = "") -> str:
+    """The tutor's opinion on a study question (part 5): grounded in his
+    notes, with its confidence and sources, said as the tutor's view."""
+    from tutor import chat
+    return chat.consult(question, module)
+
+
 def tutor_round_offer(round_no: int) -> str:
     """study_mode's end-of-round hook (not a model tool): the tutor's offer
     of a short check, or '' when it has nothing to quiz from."""
@@ -951,4 +958,5 @@ TOOL_FUNCTIONS = {
     "tutor_weak_topics": tutor_weak_topics,
     "tutor_exam_question": tutor_exam_question,
     "tutor_mark_answer": tutor_mark_answer,
+    "tutor_consult": tutor_consult,
 }
