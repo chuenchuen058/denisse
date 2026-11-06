@@ -221,5 +221,25 @@
       "sep": " ",
       "question": "\n\n{question}"
     }
+  },
+  "_help_tutor": "tutor: what the study tutor (tutor/progress.py, python -m tutor progress) adds to a brief. Its last run's weak topics (from Anki) become revision steps at the front of the plan (revise_max of them, weight revise_weight), coursework items those topics feed are planned before the others, and the brief lists them with links to the tutor notes to revise from. Weeks not written up get their tutor note cited. No progress run, or nothing weak: the brief is exactly what it was.",
+  "tutor": {
+    "revise_max": 3,
+    "revise_weight": 4,
+    "revise_step": "Revise {topic}{weeks} ({tutor}: it keeps lapsing in Anki)",
+    "revise_weeks": " from Week {weeks}",
+    "weeks_sep": ", ",
+    "heading": [
+      "",
+      "## Weak topics first",
+      ""
+    ],
+    "weak": "- **{topic}**{links}{coursework} -- {tutor} says it keeps lapsing in Anki.",
+    "links": ": revise {links}",
+    "link": "[[{stem}|Week {week}]]",
+    "link_sep": ", ",
+    "coursework": "; needed for {items}",
+    "item_sep": ", ",
+    "tutor_notes": "- {tutor}'s tutor notes for weeks not written up: {links}."
   }
 }
