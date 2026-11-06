@@ -31,7 +31,7 @@
   "lane_slots": {"claude": 1, "codex": 1, "copilot": 1},
   "_lane_slots": "How many tasks of one lane may run at once, normally. A campaign (.review/campaign.json, see orchestra/campaign.py) may raise it until its stop_at; the Max-plan sprint (Claude 3, 2-4 Nov 2026) ended Wed 4 Nov 18:00 London; these are the normal values again.",
 
-  "lane_fallback": {"codex": "claude", "copilot": "claude"},
+  "lane_fallback": {"claude": "codex", "codex": "claude", "copilot": "claude"},
   "_lane_fallback": "While a lane is limited (usage limit seen in its log, see limit_patterns below), its tasks run on this lane instead, unless the task header says Lane-Fixed: yes. The fallback lane's slots still apply. {} turns it off.",
 
   "lane_argv": {

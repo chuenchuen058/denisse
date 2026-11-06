@@ -184,9 +184,11 @@ def check_engine(kind: str) -> str:
 
 def as_written(card: dict) -> dict:
     """The card as its writer gave it: any correction and check undone."""
-    out = {k: v for k, v in card.items() if k not in ("check", "written_back")}
+    out = {k: v for k, v in card.items() if k not in ("check", "written_back", "written_front")}
     if "written_back" in card:
         out["back"] = card["written_back"]
+    if "written_front" in card:
+        out["front"] = card["written_front"]
     return out
 
 
@@ -227,7 +229,13 @@ def _judge(card: dict, answer, engine: str, text: str, when: str) -> dict:
     if verdict != _K["wrong"]:
         return _verdict(card, engine, _V["unchecked"], reasons["no_verdict"], when)
     reason = _clip(answer.get("reason"), _K["reason_chars"])
+    front = _clip(answer.get("corrected_front"), _limit(card["kind"], "front_chars"))
+    if front and front != card["front"]:
+        # a front that was only a name, made a question: no new fact, so no evidence needed
+        card["written_front"], card["front"] = card["front"], front
     corrected = _clip(answer.get("corrected"), _limit(card["kind"], "back_chars"))
+    if front and not corrected and answer.get("front_only"):
+        return _verdict(card, engine, _V["fixed"], reason, when)
     if not corrected:
         return _verdict(card, engine, _V["wrong"], reasons["no_fix"].format(reason=reason), when)
     if not backed_by(answer.get("evidence"), text):
@@ -260,7 +268,8 @@ def check(module: Module, src: sources.Source, written: list, before: dict, chec
         old = before.get(check_key(card))
         chk = (old or {}).get("check") or {}
         if chk.get("by") == engine and chk.get("verdict") != _V["unchecked"]:
-            done.append((i, {**card, **{k: old[k] for k in ("back", "written_back", "check") if k in old}}))
+            done.append((i, {**card, **{k: old[k] for k in ("front", "written_front", "back", "written_back",
+                                                            "check") if k in old}}))
         else:
             pending.setdefault(engine, []).append((i, as_written(card)))
     reused = len(done)

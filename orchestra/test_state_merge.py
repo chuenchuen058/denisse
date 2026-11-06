@@ -42,6 +42,16 @@ class MergeTest(unittest.TestCase):
         out = runner._merge_into(copy.deepcopy(self.base), ours, self.base)
         self.assertEqual(out["tasks"]["t"], ours["tasks"]["t"])
 
+    def test_a_field_only_they_changed_is_kept(self):
+        theirs = copy.deepcopy(self.base)
+        theirs["tasks"]["t"].update(merge="merged", integration={"commit": "abc123"})
+        ours = copy.deepcopy(self.base)
+        ours["tasks"]["t"]["last_result"] = "PASS"
+        out = runner._merge_into(copy.deepcopy(theirs), ours, self.base)
+        t = out["tasks"]["t"]
+        self.assertEqual((t.get("merge"), t.get("integration"), t.get("last_result")),
+                         ("merged", {"commit": "abc123"}, "PASS"))
+
     def test_same_entry_is_not_doubled(self):
         both = self.run_in("2026-11-05T10:05:00", 7, 0.7)
         ours = copy.deepcopy(both)

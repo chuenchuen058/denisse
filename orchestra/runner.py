@@ -450,16 +450,29 @@ def _merge_into(fresh: dict, state: dict, base: dict) -> dict:
         if fts is None or fts == bts:
             fresh["tasks"][slug] = ts
             continue
-        # Both processes changed this task since we loaded (one finished the lane, the other
-        # reconciled it, say). Ours wins field by field, but the history entries the other one
-        # appended are kept: losing one left days[] charged for a run history no longer showed.
-        b_hist, ours, theirs = (bts or {}).get("history", []), ts.get("history", []), fts.get("history", [])
+        # Both processes changed this task since we loaded (one merged it, the other reconciled it,
+        # say). Field by field: a field we changed is ours, a field only they changed stays theirs
+        # (taking our whole dict wiped their merge/integration record: a merge on master with no
+        # gate record, soak 6 Nov). History is spliced: losing an entry left days[] charged for a run
+        # the history no longer showed.
+        bts = bts or {}
+        merged = dict(fts)
+        for k in set(ts) | set(bts):
+            if k == "history":
+                continue
+            if ts.get(k) != bts.get(k):
+                if k in ts:
+                    merged[k] = ts[k]
+                else:
+                    merged.pop(k, None)
+        b_hist, ours, theirs = bts.get("history", []), ts.get("history", []), fts.get("history", [])
         if len(ours) < len(b_hist) or theirs[:len(b_hist)] != b_hist[:len(theirs)]:
-            fresh["tasks"][slug] = ts  # history was rewritten, not appended to: nothing safe to splice
-            continue
-        extra = [e for e in theirs[len(b_hist):] if e not in ours[len(b_hist):]]
-        new = sorted(ours[len(b_hist):] + extra, key=lambda e: str(e.get("end", "")))
-        fresh["tasks"][slug] = {**ts, "history": ours[:len(b_hist)] + new}
+            merged["history"] = ours  # history was rewritten, not appended to: nothing safe to splice
+        else:
+            extra = [e for e in theirs[len(b_hist):] if e not in ours[len(b_hist):]]
+            new = sorted(ours[len(b_hist):] + extra, key=lambda e: str(e.get("end", "")))
+            merged["history"] = ours[:len(b_hist)] + new
+        fresh["tasks"][slug] = merged
     for k, v in state["done"].items():
         if base["done"].get(k) != v:
             fresh["done"][k] = v
@@ -1536,17 +1549,24 @@ def run_gate(task: Task, wt: Path) -> tuple[str, str]:
     cmds = task.gate_commands
     if not cmds:
         return "none", "the ## Gate has no ``` command block the runner can run"
+    # The whole output is kept: a 3-line tail named the summary, never the module that failed
+    # (6 Nov 2026: a merge-only parked twice on "1 fail" with nothing to say which).
+    gate_log = REPORTS / f"{task.slug}.gate.log"
+    gate_log.parent.mkdir(parents=True, exist_ok=True)
+    gate_log.write_text("", encoding="utf-8")
     for cmd in cmds:
         try:
             r = subprocess.run(cmd, cwd=wt, shell=True, capture_output=True, text=True,
                                timeout=C["gate_timeout_s"], encoding="utf-8", errors="replace")
         except subprocess.TimeoutExpired:
             return "broken", f"`{cmd}` timed out after {C['gate_timeout_s']}s"
+        with gate_log.open("a", encoding="utf-8") as f:
+            f.write(f"$ {cmd}\n(exit {r.returncode})\n{r.stdout}{r.stderr}\n")
         if r.returncode in C["broken_gate_codes"]:
             return "broken", f"`{cmd}` exited {r.returncode} (no tests found / command not found)"
         if r.returncode != 0:
             tail = (r.stdout + r.stderr).strip().splitlines()[-3:]
-            return "fail", f"`{cmd}` exited {r.returncode}: {' | '.join(tail)}"
+            return "fail", f"`{cmd}` exited {r.returncode}: {' | '.join(tail)} (full output: {gate_log.name})"
     return "pass", f"{len(cmds)} command(s) exited 0"
 
 
