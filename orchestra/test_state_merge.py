@@ -52,12 +52,26 @@ class MergeTest(unittest.TestCase):
         self.assertEqual((t.get("merge"), t.get("integration"), t.get("last_result")),
                          ("merged", {"commit": "abc123"}, "PASS"))
 
-    def test_same_entry_is_not_doubled(self):
-        both = self.run_in("2026-11-05T10:05:00", 7, 0.7)
-        ours = copy.deepcopy(both)
+    def test_their_new_entry_survives_our_edit_of_an_old_one(self):
+        theirs = self.run_in("2026-11-05T10:05:00", 1, 0.1)
+        ours = copy.deepcopy(self.base)
+        ours["tasks"]["t"]["history"][0]["recovered"] = True
+        out = runner._merge_into(copy.deepcopy(theirs), ours, self.base)
+        hist = out["tasks"]["t"]["history"]
+        self.assertEqual([h["seconds"] for h in hist], [5, 1])
+        self.assertTrue(hist[0].get("recovered"))
+        self.assertEqual(sum(h["seconds"] for h in hist), out["days"]["2026-11-05"]["work_s"])
+
+    def test_the_same_run_collected_twice_shows_twice(self):
+        """Both processes appended an identical entry since base: both charged days[], so history
+        keeps both and the sums agree (dropping one left days 1 s over history on CI, 6 Nov)."""
+        theirs = self.run_in("2026-11-05T10:05:00", 7, 0.7)
+        ours = self.run_in("2026-11-05T10:05:00", 7, 0.7)
         ours["tasks"]["t"]["last_result"] = "PASS"
-        out = runner._merge_into(copy.deepcopy(both), ours, self.base)
-        self.assertEqual(len(out["tasks"]["t"]["history"]), 2)
+        out = runner._merge_into(copy.deepcopy(theirs), ours, self.base)
+        hist = out["tasks"]["t"]["history"]
+        self.assertEqual(len(hist), 3)
+        self.assertEqual(sum(h["seconds"] for h in hist), out["days"]["2026-11-05"]["work_s"])
         self.assertEqual(out["tasks"]["t"]["last_result"], "PASS")
 
 

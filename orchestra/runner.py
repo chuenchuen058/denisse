@@ -378,9 +378,22 @@ def load_queue() -> list[Task]:
 
 # ---------------------------------------------------------------- state
 
+def _io_retry(fn, tries: int = 40, pause: float = 0.05):
+    """fn(), retried while Windows says the file is in use by another tick (PermissionError):
+    os.replace onto a file someone is reading, or reading one mid-replace, fails for a moment
+    (soak 6 Nov 2026: a tick crashed reading state.json). The last error is raised."""
+    for i in range(tries):
+        try:
+            return fn()
+        except PermissionError:
+            if i == tries - 1:
+                raise
+            time.sleep(pause)
+
+
 def load_state() -> dict:
     try:
-        st = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        st = json.loads(_io_retry(lambda: STATE_FILE.read_text(encoding="utf-8")))
     except (FileNotFoundError, json.JSONDecodeError):
         st = {}
     for k in ("tasks", "days", "done", "lanes"):
@@ -467,12 +480,17 @@ def _merge_into(fresh: dict, state: dict, base: dict) -> dict:
                 else:
                     merged.pop(k, None)
         b_hist, ours, theirs = bts.get("history", []), ts.get("history", []), fts.get("history", [])
-        if len(ours) < len(b_hist) or theirs[:len(b_hist)] != b_hist[:len(theirs)]:
-            merged["history"] = ours  # history was rewritten, not appended to: nothing safe to splice
+        if len(ours) < len(b_hist) or len(theirs) < len(b_hist):
+            merged["history"] = ours  # history was cut, not appended to: nothing safe to splice
         else:
-            extra = [e for e in theirs[len(b_hist):] if e not in ours[len(b_hist):]]
-            new = sorted(ours[len(b_hist):] + extra, key=lambda e: str(e.get("end", "")))
-            merged["history"] = ours[:len(b_hist)] + new
+            # Entries that were already there may have been edited (a review or "recovered" added
+            # to the last one): per entry, our edit wins, else theirs. Dropping their whole list
+            # here lost the entry they appended (soak state_sums, 1 s off, 6 Nov).
+            prefix = [o if o != b else t for o, t, b in zip(ours, theirs, b_hist)]
+            # No de-duplication: an entry both of us appended since `base` means both collected the
+            # same run, and both charged days[] for it, so history must show both (state_sums).
+            new = sorted(ours[len(b_hist):] + theirs[len(b_hist):], key=lambda e: str(e.get("end", "")))
+            merged["history"] = prefix + new
         fresh["tasks"][slug] = merged
     for k, v in state["done"].items():
         if base["done"].get(k) != v:
@@ -499,12 +517,12 @@ def save_state(state: dict) -> None:
             out = _merge_into(load_state(), state, _BASE)
             tmp = STATE_FILE.with_suffix(".tmp")
             tmp.write_text(json.dumps(out, indent=2), encoding="utf-8")
-            os.replace(tmp, STATE_FILE)
+            _io_retry(lambda: os.replace(tmp, STATE_FILE))
             _BASE = json.loads(json.dumps(state))
         return
     tmp = STATE_FILE.with_suffix(".tmp")
     tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
-    os.replace(tmp, STATE_FILE)
+    _io_retry(lambda: os.replace(tmp, STATE_FILE))
 
 
 def today_usage(state: dict) -> dict:
