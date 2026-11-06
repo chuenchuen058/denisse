@@ -87,7 +87,35 @@
     "slide_heading": "--- slide {n} ---",
     "page_heading": "--- page {n} ---",
     "source_heading": "===== {name} =====",
-    "min_chars": 40
+    "min_chars": 40,
+    "hash_block_bytes": 1048576,
+    "ocr": {
+      "enabled": true,
+      "engine": "windows",
+      "language": "",
+      "min_text_chars": 20,
+      "dpi": 200,
+      "page_cap": 100,
+      "cache_dir": "ocr",
+      "cache_file": "{digest}-{settings}.json",
+      "cache_version": 1,
+      "page_marker": "[OCR: {engine}, {language}; may contain recognition errors, especially equations]",
+      "note_warning": "> [!warning] OCR source: {name}\n> Pages {pages} were read by OCR and may be noisy, especially equations. Check the original scan.",
+      "incomplete_warning": "> [!warning] Incomplete OCR: {name}\n> Pages {pages} still need OCR (unavailable engine or configured page cap). Native text, where present, was retained.",
+      "windows": {
+        "script": "windows_ocr.ps1",
+        "command": ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "{script}"],
+        "timeout_seconds": 30
+      },
+      "errors": {
+        "language_unavailable": "No installed Windows OCR language matches extract.ocr.language (empty uses the user profile)."
+      },
+      "say": {
+        "unavailable": "OCR unavailable ({engine}): {why}; continuing with native text only; retrying next ingest.",
+        "cache_error": "OCR cache could not be saved: {why}; this run keeps the extracted text.",
+        "capped": "OCR page cap ({cap}) left {n} eligible pages unread; raise extract.ocr.page_cap to include them."
+      }
+    }
   },
   "model": {
     "think": false,

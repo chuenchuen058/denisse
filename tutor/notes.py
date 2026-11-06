@@ -67,7 +67,7 @@ def _links(vault: str, module: Module, week: int | None) -> str:
 
 
 def render(vault: str, module: Module, week: int, result: dict, sources: list,
-           today: dt.date, name: str | None = None) -> str:
+           today: dt.date, name: str | None = None, provenance: dict | None = None) -> str:
     """The whole note. `sources` are full paths of the files it was read from."""
     name = name or _N["name"].format(slug=module.slug, week=week)
     ctx = {"module": module.title, "code": module.code, "week": week, "slug": module.slug,
@@ -84,6 +84,12 @@ def render(vault: str, module: Module, week: int, result: dict, sources: list,
             lines.append(_N["source_link"].format(path=_rel(vault, src), name=base))
         else:
             lines.append(_N["source_plain"].format(name=base))
+        info = (provenance or {}).get(src, {})
+        for key, pages in (("note_warning", info.get("ocr_pages", [])),
+                           ("incomplete_warning", info.get("pending_pages", []) + info.get("capped_pages", []))):
+            if pages:
+                lines += ["", CONFIG["extract"]["ocr"][key].format(
+                    name=base, pages=_N["list_sep"].join(str(n) for n in sorted(pages))), ""]
     lines += ["", _N["outcomes_heading"], ""]
     lines += [_N["outcome"].format(text=t) for t in result["outcomes"]] or [_N["empty"]]
     lines += ["", _N["methods_heading"], ""]
