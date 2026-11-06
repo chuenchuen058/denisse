@@ -1,6 +1,9 @@
 // Agent hub: one MCP server (stdio) that lets the Claude chat hand work to Codex, Copilot
 // and Gemini on Chuen's laptop, and keeps one shared memory for all of them in the
-// Obsidian vault (Atlas format).
+// Obsidian vault (Atlas format). Since 5 Nov 2026 it also asks the study tutor (ask_don,
+// python -m tutor consult): study-category work is put to the tutor first, and the agent
+// that does the work gets the tutor's opinion as a subject expert's -- advisory, never an
+// override (routing data: orchestra/exams/rules.json).
 //
 // Memory rule (same idea as IRIS / Atrium: "one memory for every model"):
 //   * every agent is told to read the vault's hot.md and AI-RULES.md before working
@@ -122,6 +125,29 @@ const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const pythonPath = () => process.env.AGENT_HUB_PYTHON
   || join(REPO, ".venv", process.platform === "win32" ? "Scripts\\python.exe" : "bin/python");
 
+// The study tutor (tutor/, study tutor 5/5; Chuen, 5 Nov 2026: "treat Don like a professional
+// opinion on task"). Its name is tutor.json's, read once; the agent key stays "don" (ask_don).
+const TUTOR_KEY = "don";
+const TUTOR = (() => {
+  try { return String(JSON.parse(readFileSync(join(REPO, "tutor", "tutor.json"), "utf8")).name || TUTOR_KEY); }
+  catch { return TUTOR_KEY; }
+})();
+
+export function renderOpinion(out) {
+  // python -m tutor consult --json prints one JSON object (the last line); anything else is shown as is.
+  let data;
+  for (const line of String(out || "").trim().split(/\r?\n/).reverse()) {
+    const t = line.trim();
+    if (!t.startsWith("{")) continue;
+    try { const d = JSON.parse(t); if (d && typeof d === "object" && "answer" in d) { data = d; break; } } catch {}
+  }
+  if (!data) return String(out || "").trim();
+  const list = (xs, none) => (Array.isArray(xs) && xs.length ? xs.join(" · ") : none);
+  return [`${TUTOR} says (${data.confidence} confidence, answered by ${data.who}${data.module ? `, ${data.module}` : ""}): ${data.answer}`,
+    `Sources: ${list(data.sources, "none")}`, `Caveats: ${list(data.caveats, "none")}`,
+    `(${TUTOR}'s view from Chuen's own notes: weigh it as a subject expert's opinion, advisory, never an override.)`].join("\n");
+}
+
 export function contextPack(lane) {
   // The shared brain: live state from the vault (python -m atrium context), so an agent
   // that can't or won't read the vault still starts from the same facts as everyone else.
@@ -229,7 +255,43 @@ const AGENTS = {
     if (model) args.push("--model", model);
     return run(exe, args, { cwd: wd });
   },
+  async don({ prompt, module }) {
+    // The study tutor's opinion: python -m tutor consult, grounded in the vault, synchronous. No
+    // preamble and no FOR MEMORY protocol: the consult records itself in the vault's Don area.
+    const exe = FAKE ? TUTOR_KEY : pythonPath();
+    if (!FAKE && !existsSync(exe)) return { code: -1, out: `${TUTOR} not available: ${exe} not found.` };
+    const args = ["-m", "tutor", "consult", String(prompt || ""), "--json"];
+    if (module) args.push("--module", String(module));
+    const r = await run(exe, args, { cwd: REPO, env: { PYTHONIOENCODING: "utf-8" } });
+    r.out = renderOpinion(r.out);
+    return r;
+  },
 };
+
+// Study-category work (the exams' routing data, orchestra/exams/rules.json: kind_to_category and
+// title_routes, first match wins -- the same rules lane_for.py applies) goes to the tutor first.
+const RULES = process.env.AGENT_HUB_RULES || join(REPO, "orchestra", "exams", "rules.json");
+let rulesCache;
+function rules() {
+  if (rulesCache === undefined) {
+    try { rulesCache = JSON.parse(readFileSync(RULES, "utf8")).routing || null; } catch { rulesCache = null; }
+  }
+  return rulesCache;
+}
+
+export function categoryOf(task, kind) {
+  const r = rules();
+  if (!r) return null;
+  if (kind) return r.kind_to_category?.[String(kind).toLowerCase().replace(/-/g, "_")] ?? null;
+  const t = String(task || "").toLowerCase();
+  for (const [pat, cat] of r.title_routes || []) {
+    try { if (new RegExp(pat, "i").test(t)) return cat; } catch {}
+  }
+  return null;
+}
+
+export const STUDY = "study";
+export const isStudy = (task, kind) => categoryOf(task, kind) === STUDY;
 
 // Starting rules, by kind of work. Thomas's lesson: route by measured results, not by
 // model names. Every routing is logged with its outcome, so these can be replaced by
@@ -244,6 +306,7 @@ export const ROUTES = {
   github: { agent: "copilot", write: false, why: "issues, PRs, repo questions" },
   shell_help: { agent: "copilot", write: false, why: "commands and quick how-tos" },
   quick_code: { agent: "copilot", write: false, why: "a small snippet or explanation" },
+  study: { agent: "codex", write: false, why: "about Chuen's modules or revision: the study tutor is asked first, then the work is done with that opinion in hand" },
 };
 
 export function chooseRoute(task, kind) {
@@ -260,6 +323,10 @@ export function chooseRoute(task, kind) {
     [/\b(research|find out|look into|options for)\b/, "research"],
   ];
   for (const [re, k] of rules) if (re.test(t)) return { kind: k, ...ROUTES[k], guessed: true };
+  // Study work (data: the exams' title routes) before the quick-snippet default, so a question
+  // about his modules or revision is never mistaken for a code snippet. Whatever the kind, study-
+  // category work is put to the tutor first (routed()).
+  if (isStudy(task)) return { kind: STUDY, ...ROUTES[STUDY], guessed: true };
   return { kind: "quick_code", ...ROUTES.quick_code, guessed: true };
 }
 
@@ -313,7 +380,7 @@ async function dispatch(agent, args, label) {
   const answer = String(r.out || "").trim() || `${agent} returned nothing (exit ${r.code}).`;
   const mem = ok ? memoryLines(answer) : [];
   remember(agent, [
-    `${label || "task"}: ${oneLine(args.prompt, 120)} → ${ok ? "done" : `FAILED (exit ${r.code})`}, ${Math.round((r.ms || 0) / 1000)}s`,
+    `${label || "task"}: ${oneLine(args._logPrompt ?? args.prompt, 120)} → ${ok ? "done" : `FAILED (exit ${r.code})`}, ${Math.round((r.ms || 0) / 1000)}s`,
     ...mem,
   ]);
   return `[${agent}${ok ? "" : `, exit ${r.code}`}]\n${answer}`;
@@ -536,7 +603,11 @@ export const TOOLS = [
     inputSchema: { type: "object", properties: { ...taskProps, ...jobProps }, required: ["prompt"] } },
   { name: "ask_copilot", description: "Hand a task to GitHub Copilot. Best for GitHub questions (issues, PRs), shell commands and quick code snippets." + JOB_NOTE,
     inputSchema: { type: "object", properties: { ...taskProps, ...jobProps }, required: ["prompt"] } },
-  { name: "route_task", description: "Let the hub pick the agent for a task (codex, gemini or copilot) from its kind, run it, and say who did it and why. Use this by default when Chuen asks for work that another agent can do." + JOB_NOTE,
+  { name: "ask_don", description: `Ask ${TUTOR}, Chuen's study tutor, for a professional opinion on anything about his university modules, coursework, revision or learning, before working on it. ${TUTOR} answers only from Chuen's own lecture notes and notes in the vault, and gives confidence (low/medium/high), the notes used and what they don't cover. Weigh it as a subject expert's opinion: informed, advisory, never an override. Runs the local model; a hard topic goes to Claude and takes longer.` + JOB_NOTE,
+    inputSchema: { type: "object", properties: { prompt: { type: "string", description: "The question, in full. The tutor cannot see this chat." },
+      module: { type: "string", description: "The module if known (name, code or short form like 'signals', 'EM'); otherwise the tutor works it out from the question." }, ...jobProps },
+      required: ["prompt"] } },
+  { name: "route_task", description: `Let the hub pick the agent for a task (codex, gemini or copilot) from its kind, run it, and say who did it and why. Study work (his modules, coursework, revision) is put to ${TUTOR} first and the agent gets the tutor's opinion with the task. Use this by default when Chuen asks for work that another agent can do.` + JOB_NOTE,
     inputSchema: { type: "object", properties: { ...taskProps, ...jobProps,
       kind: { type: "string", enum: Object.keys(ROUTES), description: "What sort of work this is. Leave out to let the hub guess from the prompt." } },
       required: ["prompt"] } },
@@ -558,13 +629,25 @@ export const TOOLS = [
     inputSchema: { type: "object", properties: {} } },
 ];
 
-function routed(t, r = pickRoute(t.prompt, t.kind)) {
+const CONSULT_LINE = (opinion) =>
+  `${TUTOR}, Chuen's study tutor, was asked first. ${TUTOR}'s opinion, grounded in Chuen's own lecture notes:\n${opinion}\n` +
+  `Weigh it as a subject expert's opinion: informed, advisory, never an override. Say where you go against it.\n\nTASK:\n\n`;
+
+async function routed(t, r = pickRoute(t.prompt, t.kind)) {
   const label = `routed ${r.kind}${r.guessed ? " (guessed)" : ""}${r.scored ? " (scored)" : ""} → ${r.agent}`;
-  return dispatch(r.agent, { ...t, write: t.write ?? r.write }, label)
-    .then((out) => `### ${r.agent} — ${r.kind}${r.guessed ? " (guessed)" : ""}: ${r.why}\n${out}`);
+  let task = t, head = "";
+  if ((r.kind === STUDY || isStudy(t.prompt, t.kind)) && r.agent !== TUTOR_KEY) {
+    // Study-category work: the tutor first; its opinion goes in front of the agent's prompt and
+    // in the answer. A tutor that can't answer is shown as such and the agent still runs.
+    const opinion = await dispatch(TUTOR_KEY, { prompt: t.prompt, module: t.module }, `consult (${r.kind})`);
+    head = `### ${TUTOR_KEY} — ${STUDY} (consulted first)\n${opinion}\n\n`;
+    task = { ...t, prompt: CONSULT_LINE(opinion) + t.prompt, _logPrompt: t.prompt };  // the log keeps the task as asked
+  }
+  const out = await dispatch(r.agent, { ...task, write: t.write ?? r.write }, label);
+  return `${head}### ${r.agent} — ${r.kind}${r.guessed ? " (guessed)" : ""}: ${r.why}\n${out}`;
 }
 
-const ASK = { ask_codex: "codex", ask_gemini: "gemini", ask_copilot: "copilot" };
+const ASK = { ask_codex: "codex", ask_gemini: "gemini", ask_copilot: "copilot", ask_don: TUTOR_KEY };
 
 export async function callTool(name, a = {}) {
   if (ASK[name]) return asJob(name, ASK[name], a, () => dispatch(ASK[name], a, name));

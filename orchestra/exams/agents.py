@@ -6,6 +6,10 @@
   copilot   node <@github/copilot entry> -p <prompt> -s, as agent_hub/server.mjs calls it
   gemini    node <@google/gemini-cli entry>, as the hub does; IneligibleTierError = skipped
   local:<m> every model Ollama lists at http://127.0.0.1:11434, if it answers
+  don       the study tutor: python -m tutor consult --json (study tutor 5/5). An exam that ships
+            a `vault/` folder is answered from that vault (and a scratch `state/`), so the canary
+            runs on a fixture, never the real vault; otherwise the real one. Only exams naming it
+            (rules.json agents.own_exams_only, bank "agents": ["don"]) are put to it.
 """
 from __future__ import annotations
 
@@ -13,6 +17,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -138,7 +143,50 @@ def local(model: str):
     return ask
 
 
-NAMED = {"codex": codex, "copilot": copilot, "gemini": gemini, "claude": claude}
+def _opinion(text: str) -> dict | None:
+    """The last JSON object line with an "answer" (python -m tutor consult --json)."""
+    for line in reversed((text or "").splitlines()):
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            data = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(data, dict) and "answer" in data:
+            return data
+    return None
+
+
+def don(prompt: str, cwd: Path, timeout: float) -> Reply:
+    policy = load()["agents"]
+    argv = [sys.executable] + [a.replace("{prompt}", prompt) for a in policy["don_command"]]
+    vault = cwd / policy["don_vault_dir"]
+    if vault.is_dir():  # the exam brought its own notes: never the real vault
+        state = cwd / policy["don_state_dir"]
+        argv += [a.replace("{vault}", str(vault)).replace("{state}", str(state)) for a in policy["don_vault_args"]]
+    env = {**_env(), "PYTHONIOENCODING": "utf-8"}
+    from .core import REPO  # run from the repo so `-m tutor` resolves whatever the exam's temp dir is
+    r = run_proc(argv, cwd=REPO, timeout=timeout, env=env)
+    data = _opinion(r.text)
+    if data is None:
+        return r if r.error else Reply(text=r.text, error=policy["don_no_json"])
+    sep = ", "
+    try:  # the tutor's name is its own config's (tutor.json "name"); the agent key stands in without it
+        tutor = json.loads((REPO / policy["don_name_file"]).read_text(encoding="utf-8-sig"))[policy["don_name_key"]]
+    except (OSError, ValueError, KeyError, TypeError):
+        tutor = "don"
+    text = policy["don_answer"].format(
+        tutor=tutor, confidence=data.get("confidence", "?"), who=data.get("who", "?"),
+        sources=sep.join(data.get("sources") or []) or policy["don_none"],
+        caveats=sep.join(data.get("caveats") or []) or policy["don_none"], answer=data.get("answer", ""))
+    if r.error:  # exit 1: the tutor had no grounded answer -- a scored fail with its reason, answered
+        return Reply(text=text, error=policy["don_no_answer"].format(
+            caveats=sep.join(data.get("caveats") or []) or policy["don_none"]))
+    return Reply(text=text)
+
+
+NAMED = {"codex": codex, "copilot": copilot, "gemini": gemini, "claude": claude, "don": don}
 
 
 def available(include_claude: bool = False, only: str | None = None) -> dict:
