@@ -15,6 +15,7 @@ command and mechanism.
 | `python -m orchestra.exams canary [--agent codex]` | Daily health check: one 30-second exam per agent; updates the scores and `<vault>/Dev/Agent-Scores.md` |
 | `python -m orchestra.exams run [--agent X] [--category Y] [--include-claude]` | The full exam bank on every available agent (codex, copilot, gemini, `local:<model>`; claude only with `--include-claude`) |
 | `python -m orchestra.exams best <category>` | The best working agent for `code-edit`, `debug`, `writing`, `study` or `extract` |
+| `python -m orchestra.exams canary --agent don` | The study tutor's own canary (`bank/study-don-1.json`, answered from the fixture vault the exam ships, never the real one). Add `don` to `exams_agents` in `config.json` to put him in the daily run |
 | `python orchestra\campaign.py status\|pause\|resume\|stop\|emergency-stop\|disable-schedule` | Campaign deadline and Chuen's dispatch controls; see below |
 
 | `python -m orchestra.local_team produce` | One producer pass on the local model: librarian, scout, planner, admission (Task Scheduler every 30 min with `install_task.ps1 -Producer`) |
@@ -103,6 +104,29 @@ an agent Not working):
 `powershell -ExecutionPolicy Bypass -File orchestra\install_task.ps1 -Canary`
 registers it at 07:10 alongside the runner. Tests:
 `python -m unittest discover -s orchestra/exams -p "test_*.py"`.
+
+## The study tutor consulted before a lane (`consult.py`, `consult.json`)
+
+Chuen, 5 Nov 2026: "treat Don like a professional opinion on task". A task
+whose header says `Consult: don`, or whose text names `study_brief`,
+`study_mode`, `tutor` or `learner` as a file or folder, has `python -m tutor
+consult --json` run on its prompt in the main checkout before the lane starts.
+The opinion (answer, confidence, sources, caveats, who answered) goes into the
+worktree as `.review/don.md`; the lane prompt gets a paragraph naming it
+("weigh it as a subject expert's view: advisory, never an override; say under
+ODD where you go against it"); the reviewer prompt shows it (`{{DON}}`, marked
+advisory, never a reason to block). A tutor that can't answer, times out or
+isn't installed is one `CONSULT <slug>: ... could not answer` line in
+`runner.log` and the lane runs on the unchanged prompt. The switch
+(`enabled`), the header, the path patterns, the command, the timeout and every
+line of wording are in `consult.json`; `config.json` is untouched.
+`ORCHESTRA_CONSULT_FILE` points tests at another copy. Tests:
+`python -m unittest orchestra.test_consult` and the three `consult` tests in
+`orchestra.test_runner`.
+
+The agent hub does the same for chat work: `ask_don`, and `route_task` /
+`split_tasks` put study-category work (the exams' `rules.json` title routes
+and kinds) to the tutor first, with the opinion in front of the agent's prompt.
 
 ## Reconcile after a killed tick
 
