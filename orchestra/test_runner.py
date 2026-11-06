@@ -25,10 +25,13 @@ import guard  # noqa: E402
 # Fake lane, steered by env vars: FAKE_RESULT (PASS/PARTIAL/FAIL/NONE), FAKE_HUMAN,
 # FAKE_SLEEP, FAKE_COMMIT, FAKE_STRAY (a path to write outside the worktree), FAKE_JUNK,
 # FAKE_LIMIT (print this and exit with no report), FAKE_HOOKLOG (pretend the guard hook fired),
-# FAKE_USAGE (JSON merged into the final result event: usage, modelUsage, session_id).
+# FAKE_USAGE (JSON merged into the final result event: usage, modelUsage, session_id),
+# FAKE_PROMPT_OUT (write the prompt received on stdin to this path).
 FAKE = textwrap.dedent("""
     import os, sys, time, subprocess, pathlib, json
-    sys.stdin.read()
+    _prompt = sys.stdin.read()
+    if os.environ.get("FAKE_PROMPT_OUT"):
+        pathlib.Path(os.environ["FAKE_PROMPT_OUT"]).write_text(_prompt, encoding="utf-8")
     if os.environ.get("FAKE_JUNK_CHECK") and pathlib.Path("junk.txt").exists():
         pathlib.Path(os.environ["FAKE_JUNK_CHECK"]).write_text("dirty worktree reused")
     if os.environ.get("FAKE_JUNK"):
@@ -76,7 +79,7 @@ It works.
 """
 FAKE_ENV = ("FAKE_RESULT", "FAKE_HUMAN", "FAKE_SLEEP", "FAKE_COMMIT", "FAKE_STRAY", "FAKE_JUNK",
             "FAKE_JUNK_CHECK", "FAKE_PREMISE", "FAKE_DENIED", "FAKE_COST", "FAKE_LIMIT", "FAKE_HOOKLOG", "FAKE_USAGE",
-            "ORCHESTRA_LANE_FALLBACK")
+            "FAKE_PROMPT_OUT", "ORCHESTRA_LANE_FALLBACK", "ORCHESTRA_CONSULT_FILE")
 
 
 class RunnerTest(unittest.TestCase):
@@ -342,6 +345,53 @@ class RunnerTest(unittest.TestCase):
         sn = (self.R.REVIEW / "STATE_NOW.md").read_text()
         self.assertIn("refused Bash(npm)", sn)
         self.assertIn("premise was wrong", sn)
+
+    # --- the study tutor consulted before the lane (orchestra/consult.py, advisory)
+
+    def consult_with(self, mode="ok"):
+        """A fake tutor command in a copy of consult.json, and the lane's prompt captured."""
+        import test_consult
+        cfg = json.loads((HERE / "consult.json").read_text(encoding="utf-8"))
+        cfg["command"] = [sys.executable, "-c", test_consult.FAKE_DON, "{question}"]
+        cfg["timeout_s"] = 5
+        f = self.tmp / "consult.json"
+        f.write_text(json.dumps(cfg), encoding="utf-8")
+        os.environ["ORCHESTRA_CONSULT_FILE"] = str(f)
+        os.environ["FAKE_DON"] = mode
+        self.addCleanup(os.environ.pop, "FAKE_DON", None)
+        prompt = self.tmp / "prompt.txt"
+        os.environ["FAKE_PROMPT_OUT"] = str(prompt)
+        return prompt
+
+    def test_consulted_task_gets_the_tutors_note_and_a_prompt_line(self):
+        prompt = self.consult_with()
+        self.add("study", headers="Consult: don\n", extra=" Make tutor/chat.py quiz shorter.")
+        self.assertEqual(self.R.tick(), "PASS")
+        text = prompt.read_text(encoding="utf-8")
+        self.assertTrue(text.startswith(self.R.build_prompt(".review/task.md", ".review/report.md")),
+                        "the normal prompt first, untouched")
+        self.assertIn("`.review/don.md`", text)
+        self.assertIn("never an override", text)
+        log = self.R.LOG_FILE.read_text(encoding="utf-8")
+        self.assertIn("CONSULT study: ", log)
+        self.assertIn("-> high confidence by local", log)
+        self.assertIn(".review/don.md written", log)
+
+    def test_tutor_that_cannot_answer_never_stops_the_task(self):
+        prompt = self.consult_with("crash")
+        self.add("study2", extra=" Edit study_brief.py to read the new sidecar.")
+        self.assertEqual(self.R.tick(), "PASS")
+        self.assertEqual(prompt.read_text(encoding="utf-8"), self.R.build_prompt(".review/task.md", ".review/report.md"))
+        log = self.R.LOG_FILE.read_text(encoding="utf-8")
+        self.assertIn("CONSULT study2: ", log)
+        self.assertIn("could not answer", log)
+
+    def test_plain_task_is_not_consulted(self):
+        prompt = self.consult_with()
+        self.add("plain")
+        self.assertEqual(self.R.tick(), "PASS")
+        self.assertEqual(prompt.read_text(encoding="utf-8"), self.R.build_prompt(".review/task.md", ".review/report.md"))
+        self.assertNotIn("CONSULT", self.R.LOG_FILE.read_text(encoding="utf-8"))
 
     def test_claude_lane_gets_the_guard_settings(self):
         wt = self.tmp / "wt"

@@ -1,0 +1,48 @@
+{
+  "_about": "The study tutor as a specialist the runner consults before a lane starts (Chuen, 5 Nov 2026: 'treat Don like a professional opinion on task'). Orchestra's own data file, read by orchestra/consult.py on every use: orchestra/config.json is pinned by tests and holds limits, this holds the consult. ORCHESTRA_CONSULT_FILE points at another copy for tests. Advisory throughout: a consult that fails, times out or gives low confidence never stops a task and never blocks a merge.",
+
+  "enabled": true,
+  "_enabled": "The switch. false: no task is consulted, nothing else changes.",
+
+  "name": "don",
+  "name_file": "tutor/tutor.json",
+  "name_key": "name",
+  "_name": "The agent key a task header names (Consult: don). The display name is read from name_file[name_key] (tutor.json 'name') so the tutor is named in one place; this key is the fallback.",
+
+  "header": "consult",
+  "_header": "A task whose header line '<header>: <name>' names the tutor is consulted whatever its text says.",
+
+  "path_patterns": [
+    "(^|[\\s`'\"(\\[/\\\\])(study_brief|study_mode|learner|tutor)(\\.py|\\.json|/|\\\\)"
+  ],
+  "_path_patterns": "Case-insensitive regexes against the task file's text: a task that names the study tooling as a file or folder (study_brief.py, study_mode.json, tutor/, learner\\) is consulted too. The bare words are not enough: 'the tutor' in a title is not a file. Edit here, not in code.",
+
+  "python": ".venv/Scripts/python.exe",
+  "command": ["{python}", "-m", "tutor", "consult", "{question}", "--json"],
+  "timeout_s": 420,
+  "_command": "Run in the main checkout. {python} is the repo venv (python above), else the runner's own interpreter; {question} is the rendered question. The last JSON object line of stdout is the opinion (python -m tutor consult --json). Exit 1 = the tutor had no grounded answer: logged, no note written. The timeout covers a hand-off to Claude for a hard topic (delegate.py), which can take minutes.",
+
+  "question_chars": 6000,
+  "question": "Another assistant is about to run this task, which touches Chuen's study tooling or his studies. From his notes: what bears on it, what should it respect or get right, and what should it not assume? Keep to what the notes support.\n\nTask: {title}\n\n{body}",
+
+  "file": ".review/don.md",
+  "note": "# {name}'s opinion on this task (advisory)\n\nAsked by the runner before the lane started ({when}), because: {why}.\nConfidence: **{confidence}**. Answered by: {who}.\n\n{answer}\n\n## Sources\n\n{sources}\n\n## Caveats\n\n{caveats}\n\n## The question put to {name}\n\n{question}\n",
+  "note_source": "- {link}",
+  "note_caveat": "- {text}",
+  "note_none": "- none",
+
+  "prompt_line": "\n\n## {name}'s opinion\n{name}, the study tutor, was asked about this task before you started; the opinion is in `{file}` (confidence: {confidence}). Read it. Weigh it as a subject expert's view: informed by Chuen's own lecture notes, advisory, never an override. Where you go against it, say so in one line under ODD.\n",
+  "reviewer_section": "{text}\n(Advisory: the tutor's view of the subject matter, for context only. It is never a reason to block, and going against it is not a reason to block.)",
+  "reviewer_none": "(none: the tutor was not consulted for this task)",
+
+  "log": "CONSULT {slug}: {name} asked ({why}) -> {confidence} confidence by {who} after {seconds}s; {file} written",
+  "log_failed": "CONSULT {slug}: {name} could not answer ({why}); the lane runs without it",
+  "log_skipped": "CONSULT {slug}: skipped ({why})",
+  "why_header": "task header {header}: {name}",
+  "why_paths": "task text names {match}",
+  "failed_exit": "exit {code}: {tail}",
+  "failed_no_json": "no opinion in the output: {tail}",
+  "failed_timeout": "timed out after {seconds}s",
+  "failed_missing": "{exe} not found",
+  "tail_chars": 200
+}

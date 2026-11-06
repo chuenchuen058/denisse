@@ -1,5 +1,6 @@
-<!-- review_diff_prompt v1 (2026-11-02). The runner fills {{TASK}}, {{REPORT}}, {{DIFF}},
-{{BRANCH}}, {{BASE}}, {{WHY}}. Bump the version line when you change what it asks. -->
+<!-- review_diff_prompt v2 (2026-11-06). The runner fills {{TASK}}, {{REPORT}}, {{DIFF}},
+{{BRANCH}}, {{BASE}}, {{WHY}}, {{DON}} (the study tutor's opinion, orchestra/consult.py; advisory).
+Bump the version line when you change what it asks. -->
 You are a fresh reviewer for one Orchestra task, run unattended. You did not
 write this change and nobody will answer a question. Another session wrote it,
 its own gate passed, and the runner is about to merge it into master of a
@@ -41,6 +42,9 @@ VERDICT: block
 
 ## Session's report
 {{REPORT}}
+
+## The study tutor's opinion on the task
+{{DON}}
 
 ## Diff (master...branch)
 {{DIFF}}
