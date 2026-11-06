@@ -1490,7 +1490,8 @@ def kill_tree(proc: subprocess.Popen) -> None:
     if os.name == "nt":
         if close_job(proc):
             return
-        subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True, timeout=60)
+        subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True,
+                       timeout=C["taskkill_timeout_s"])
     else:
         import signal
         try:
@@ -1569,7 +1570,7 @@ def run_lane(task: Task, wt: Path, report: Path, timeout: int, prov: dict | None
     except subprocess.TimeoutExpired:
         kill_tree(proc)
         try:
-            proc.wait(timeout=30)
+            proc.wait(timeout=C["process_exit_wait_timeout_s"])
         except subprocess.TimeoutExpired:
             pass
         outcome = "TIMEOUT"

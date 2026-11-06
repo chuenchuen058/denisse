@@ -68,6 +68,8 @@
   "daily_spend_cap_usd": 5.0,
   "unknown_cost_per_min_usd": 0.10,
   "done_window_days": 14,
+  "status_by_prompt_days": 14,
+  "status_recent_runs": 5,
   "vault_dir": "~/OneDrive - King's College London/Denisse",
   "auto_push": true,
 
@@ -100,7 +102,14 @@
                           "which", "while", "who", "how", "why", "has", "have", "had", "but", "too", "also", "only",
                           "just", "more", "most", "less", "once", "still", "stop", "keep", "keeps", "merge", "review"],
 
+  "auto_admit_areas": [],
+  "producer_queue_cap": 20,
+  "producer_admit_per_hour": 4,
+  "producer_dedupe_days": 30,
+
   "git_timeout_s": 120,
+  "taskkill_timeout_s": 60,
+  "process_exit_wait_timeout_s": 30,
   "tick_watchdog_extra_s": 900,
   "keep_ref_prefix": "refs/keep/",
   "keep_ref_log": "KEPT {branch}: {count} commit(s) not on master saved as {ref} before {why}; recover with `git branch <name> {ref}`",
