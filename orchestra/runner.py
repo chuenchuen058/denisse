@@ -1522,17 +1522,24 @@ def run_gate(task: Task, wt: Path) -> tuple[str, str]:
     cmds = task.gate_commands
     if not cmds:
         return "none", "the ## Gate has no ``` command block the runner can run"
+    # The whole output is kept: a 3-line tail named the summary, never the module that failed
+    # (6 Nov 2026: a merge-only parked twice on "1 fail" with nothing to say which).
+    gate_log = REPORTS / f"{task.slug}.gate.log"
+    gate_log.parent.mkdir(parents=True, exist_ok=True)
+    gate_log.write_text("", encoding="utf-8")
     for cmd in cmds:
         try:
             r = subprocess.run(cmd, cwd=wt, shell=True, capture_output=True, text=True,
                                timeout=C["gate_timeout_s"], encoding="utf-8", errors="replace")
         except subprocess.TimeoutExpired:
             return "broken", f"`{cmd}` timed out after {C['gate_timeout_s']}s"
+        with gate_log.open("a", encoding="utf-8") as f:
+            f.write(f"$ {cmd}\n(exit {r.returncode})\n{r.stdout}{r.stderr}\n")
         if r.returncode in C["broken_gate_codes"]:
             return "broken", f"`{cmd}` exited {r.returncode} (no tests found / command not found)"
         if r.returncode != 0:
             tail = (r.stdout + r.stderr).strip().splitlines()[-3:]
-            return "fail", f"`{cmd}` exited {r.returncode}: {' | '.join(tail)}"
+            return "fail", f"`{cmd}` exited {r.returncode}: {' | '.join(tail)} (full output: {gate_log.name})"
     return "pass", f"{len(cmds)} command(s) exited 0"
 
 
