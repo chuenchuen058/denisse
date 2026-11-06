@@ -13,6 +13,9 @@
   progress [MODULE]       where he is per module: lectures read vs on KEATS, topics and
                           Anki mastery, weak topics, coursework deadlines, what to study
                           next -- into the vault's study progress note and the hub table
+  consult QUESTION...     the tutor's opinion for another agent (part 5): answer, confidence,
+  [--module M] [--json]   sources, caveats, who answered -- grounded in the vault, recorded in
+                          the Don area. --json prints the structured opinion. Exit 1 = no answer.
 
 Every command takes --vault PATH and --state DIR (the old private state
 folder, read until its files are moved into the vault). Every vault write is
@@ -51,12 +54,16 @@ def main(argv=None, anki_client=None, calls=None, learner_core=None, checks=None
     ap = argparse.ArgumentParser(prog="python -m tutor", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("ingest", "topics", "cards", "anki-sync", "progress") + CHAT_COMMANDS:
+    for name in ("ingest", "topics", "cards", "anki-sync", "progress", "consult") + CHAT_COMMANDS:
         s = sub.add_parser(name)
         s.add_argument("--vault", default=None)
         s.add_argument("--state", default=None)
         if name == "ingest":
             s.add_argument("--dry", action="store_true")
+        elif name == "consult":
+            s.add_argument("question", nargs="+")
+            s.add_argument("--module", default="")
+            s.add_argument("--json", action="store_true")
         elif name in ("anki-sync", "progress"):
             s.add_argument("module", nargs="?", default=None)
         else:
@@ -71,6 +78,19 @@ def main(argv=None, anki_client=None, calls=None, learner_core=None, checks=None
     except (AttributeError, ValueError):
         pass
     paths = _paths(a)
+    if a.cmd == "consult":
+        # The specialist's opinion for another agent: synchronous, recorded in the vault,
+        # never a failure for the caller -- an answer it couldn't give is said in the result.
+        from . import consult
+        result = consult.consult(paths, " ".join(a.question), a.module, calls=calls)
+        if consult.answered(result):
+            try:
+                rec = consult.record(paths, result, say=lambda s: print(s, file=sys.stderr))
+                don.commit(paths, rec["touched"], "consult", say=lambda s: print(s, file=sys.stderr))
+            except Exception as exc:  # noqa: BLE001 -- the opinion stands even when the vault write doesn't
+                print(CONFIG["say"]["not_committed"].format(why=exc), file=sys.stderr)
+        print(json.dumps(result, ensure_ascii=False) if a.json else consult.render(result))
+        return 0 if consult.answered(result) else 1
     if a.cmd in CHAT_COMMANDS:
         # The chat tools, from the command line: the same functions Denisse calls,
         # a Claude job waited for rather than handed to the tray.

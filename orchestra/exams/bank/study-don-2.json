@@ -1,0 +1,21 @@
+{
+  "id": "study-don-2",
+  "category": "study",
+  "agents": ["don"],
+  "timeout_s": 180,
+  "_about": "The study tutor's second study exam (python -m orchestra.exams run --agent don): the Laplace week of the fixture vault. Graded on the facts the note holds.",
+  "prompt": "From the Signals and Systems (5CCYB020) lecture notes: what is the Laplace transform of the unit step, and what must be stated alongside any Laplace transform for it to be unique? Keep to what the notes say, in at most 80 words.",
+  "files": {
+    "vault/Atlas/Academic/SEM 1 Modules/SEM 1 Modules.md": "---\nname: sem-1-modules\ndescription: hub\nupdated: 2026-11-01\ntags: [module]\n---\n- [[Signals and Systems notes]]\n",
+    "vault/Atlas/Academic/SEM 1 Modules/5CCYB020 Signals and Systems/Signals and Systems notes.md": "---\nname: signals-and-systems\ndescription: module hub\nupdated: 2026-11-01\ntags: [module]\n---\n# Signals\n",
+    "vault/Atlas/Academic/SEM 1 Modules/5CCYB020 Signals and Systems/Week 5/Signals and Systems Week 5 tutor.md": "---\nname: signals-and-systems-week-5-tutor\ndescription: \"5CCYB020 Week 5 tutor note: the Laplace transform, extracted from the KEATS material.\"\nmodule_code: 5CCYB020\nmodule: Signals and Systems\nweek: 5\ntags: [module, tutor, generated]\ngenerated_by: denisse-tutor\nupdated: 2026-11-01\n---\n\n# Signals and Systems Week 5 — tutor note\n\n## Learning outcomes\n\n- State the Laplace transform and its region of convergence.\n- Transform the unit step and a decaying exponential.\n\n## Key methods and equations\n\n- **Laplace transform**: $X(s) = \\int_0^{\\infty} x(t) e^{-st} dt$ — to move to the s-domain.\n- **Region of convergence**: every Laplace transform must be stated with its region of convergence (ROC); without it the transform is not unique.\n\n## Worked examples\n\n**1. Transform of the unit step**\n1. Write the integral from 0 to infinity of e^{-st}.\n2. Evaluate it: the unit step transforms to 1/s, with ROC Re(s) > 0.\n\n## Check yourself\n\n- [ ] What is the Laplace transform of a unit step?\n- [ ] Why must the region of convergence be stated?\n\n## Topics\n\n- Laplace transform (assumes: Fourier transform)\n"
+  },
+  "grader": {
+    "type": "writing",
+    "max_words": 160,
+    "facts": [
+      ["1/s"],
+      ["region of convergence", "ROC"]
+    ]
+  }
+}

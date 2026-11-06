@@ -44,6 +44,15 @@ def load_bank(category: str | None = None, bank: Path | None = None) -> list[dic
     return [e for e in exams if category in (None, e["category"])]
 
 
+def applies(exam: dict, agent: str) -> bool:
+    """Whether an agent sits this exam. An exam with "agents" is for those agents only; an agent in
+    rules.json agents.own_exams_only (the study tutor) sits only exams that name it."""
+    only = exam.get("agents")
+    if only:
+        return agent in only
+    return agent not in load()["agents"].get("own_exams_only", [])
+
+
 # ---------------------------------------------------------------- agents' replies
 
 @dataclass
@@ -191,6 +200,7 @@ def run_exam(agent, exam: dict, timeout: float | None = None) -> dict:
     start = time.monotonic()
     try:
         for name, content in exam.get("files", {}).items():
+            (tmp / name).parent.mkdir(parents=True, exist_ok=True)  # a fixture vault is a tree
             (tmp / name).write_text(content, encoding="utf-8")
         try:
             reply = agent(exam["prompt"], tmp, t)
@@ -222,6 +232,8 @@ def run(agents: dict, exams: list[dict], *, scores_file: Path | None = None, tim
     scores = load_scores(path)
     for name, agent in agents.items():
         for exam in exams:
+            if not applies(exam, name):
+                continue
             res = run_exam(agent, exam, timeout)
             if "skipped" in res:
                 log(f"{name:<22} {exam['id']:<14} SKIPPED  {res['skipped']}")

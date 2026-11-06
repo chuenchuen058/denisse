@@ -41,7 +41,7 @@ def good_answer(exam):
     if g["type"] == "numeric":
         return f"Working...\nANSWER: {g['answer']}"
     if g["type"] == "writing":
-        return f"ANSWER:\n{REWRITES[exam['id']]}"
+        return f"ANSWER:\n{REWRITES.get(exam['id']) or ' '.join(f[0] for f in g['facts'])}"
     if g["type"] == "json":
         return "```json\n" + json.dumps(g["answer"]) + "\n```"
     raise AssertionError(g["type"])
@@ -108,7 +108,15 @@ class TestBank(Base):
         self.assertEqual(len(ids), len(set(ids)))
         for e in BANK:
             self.assertIn(e["grader"]["type"], ("test", "exact", "numeric", "writing", "json"), e["id"])
-        self.assertEqual(sum(1 for e in BANK if e.get("canary")), 1)
+        # One canary for the agents at large; the study tutor has its own, which nobody else sits.
+        self.assertEqual(sum(1 for e in BANK if e.get("canary") and core.applies(e, "codex")), 1)
+        don = [e for e in BANK if core.applies(e, "don")]
+        self.assertGreaterEqual(len(don), 2)
+        self.assertEqual(sum(1 for e in don if e.get("canary")), 1)
+        for e in don:
+            self.assertEqual((e["category"], e["agents"]), ("study", ["don"]), e["id"])
+            self.assertTrue(any(k.startswith("vault/") for k in e["files"]), f"{e['id']} ships its own vault")
+        self.assertEqual([e["id"] for e in BANK if e.get("canary")][0], "extract-1", "the first canary stays the general one")
 
     def test_every_exam_passes_its_reference_answer_and_fails_a_wrong_one(self):
         for e in BANK:
@@ -182,8 +190,75 @@ class TestRun(Base):
             self.assertEqual(agents.ollama_models(timeout=1), [])
             found = agents.available()
             with_claude = agents.available(include_claude=True)  # inside the patch: no real Ollama
-        self.assertEqual(sorted(found), ["codex", "copilot", "gemini"])  # claude only on request
+        self.assertEqual(sorted(found), ["codex", "copilot", "don", "gemini"])  # claude only on request
         self.assertIn("claude", with_claude)
+
+    # --- the study tutor as an agent (study tutor 5/5)
+
+    def test_don_only_exams_go_to_don_and_don_sits_nothing_else(self):
+        self.assertTrue(core.applies(BY_ID["study-don-1"], "don"))
+        self.assertFalse(core.applies(BY_ID["study-don-1"], "codex"))
+        self.assertFalse(core.applies(BY_ID["study-1"], "don"))
+        self.assertTrue(core.applies(BY_ID["study-1"], "codex"))
+        scores, lines = self.quiet_run({"codex": good_agent, "don": good_agent}, BANK)
+        self.assertEqual(len(scores["agents"]["don"]["study"]), 2)
+        self.assertEqual(sorted(scores["agents"]["don"]), ["study"])
+        codex_study = [r["exam"] for r in scores["agents"]["codex"]["study"]]
+        self.assertNotIn("study-don-1", codex_study)
+        self.assertEqual(len(codex_study), 3)
+        self.assertEqual(len(lines), 2 + sum(1 for e in BANK if core.applies(e, "codex")))
+
+    def test_exam_files_can_be_a_tree(self):
+        seen = {}
+
+        def agent(prompt, cwd, timeout):
+            seen["vault"] = (cwd / "vault" / "Atlas" / "Academic" / "SEM 1 Modules" / "5CCYB020 Signals and Systems"
+                             / "Week 4" / "Signals and Systems Week 4 tutor.md").read_text(encoding="utf-8")
+            return Reply(text=good_answer(BY_ID["study-don-1"]))
+        self.assertTrue(core.run_exam(agent, BY_ID["study-don-1"])["ok"])
+        self.assertIn("generated_by: denisse-tutor", seen["vault"])
+
+    def test_don_agent_runs_the_consult_cli_on_the_exam_vault(self):
+        cwd = self.tmp / "exam"
+        (cwd / "vault").mkdir(parents=True)
+        opinion = {"answer": "The transform is the integral of x(t) e^{-jwt} dt; Parseval says energy is preserved.",
+                   "confidence": "high", "sources": ["[[A/Week 4 tutor|Week 4 tutor]]"], "caveats": [], "who": "local"}
+        with mock.patch.object(agents, "run_proc", return_value=Reply(text="  consult  note\n" + json.dumps(opinion))) as run:
+            r = agents.don(BY_ID["study-don-1"]["prompt"], cwd, 30)
+        argv = run.call_args.args[0]
+        self.assertEqual(argv[0], sys.executable)
+        self.assertEqual(argv[1:4], ["-m", "tutor", "consult"])
+        self.assertEqual(argv[4], BY_ID["study-don-1"]["prompt"])
+        self.assertIn("--json", argv)
+        self.assertEqual(argv[argv.index("--vault") + 1], str(cwd / "vault"), "the exam's vault, never the real one")
+        self.assertEqual(argv[argv.index("--state") + 1], str(cwd / "state"))
+        self.assertEqual(run.call_args.kwargs["cwd"], core.REPO)
+        self.assertNotIn("ANTHROPIC_API_KEY", run.call_args.kwargs["env"])
+        self.assertFalse(r.error)
+        self.assertIn("ANSWER:\nThe transform is the integral", r.text)
+        self.assertIn("(high confidence, local; sources: [[A/Week 4 tutor|Week 4 tutor]]", r.text)
+        ok, why = core.grade(BY_ID["study-don-1"], r.text, cwd)
+        self.assertTrue(ok, why)
+        # No vault folder in the exam dir: the real vault (no --vault), as a daily run would use.
+        with mock.patch.object(agents, "run_proc", return_value=Reply(text=json.dumps(opinion))) as run:
+            agents.don("q", self.tmp, 30)
+        self.assertNotIn("--vault", run.call_args.args[0])
+        # Exit 1 with an opinion: no grounded answer, a scored fail with the reason, still answered.
+        low = {**opinion, "answer": "Nothing in the vault covers this.", "confidence": "low", "who": "none",
+               "caveats": ["No notes found."]}
+        with mock.patch.object(agents, "run_proc", return_value=Reply(text=json.dumps(low), error="exit 1: ...")):
+            r = agents.don("q", cwd, 30)
+        self.assertIn("no grounded answer: No notes found.", r.error)
+        self.assertIn("ANSWER:\nNothing in the vault", r.text)
+        res = core.run_exam(lambda p, c, t: r, BY_ID["study-don-1"])
+        self.assertFalse(res["ok"])
+        self.assertTrue(res["answered"])
+        # No JSON at all: an error, not an invented answer.
+        with mock.patch.object(agents, "run_proc", return_value=Reply(text="Traceback ...")):
+            r = agents.don("q", cwd, 30)
+        self.assertEqual(r.error, "no opinion in the output")
+        with mock.patch.object(agents, "run_proc", return_value=Reply(error="timed out after 30s")):
+            self.assertIn("timed out", agents.don("q", cwd, 30).error)
 
     def test_refusal_text_marks_an_agent_unavailable(self):
         r = agents._refused(Reply(text="IneligibleTierError: This client is no longer supported", error="exit 1"))
@@ -311,7 +386,8 @@ class TestNoteAndCanary(Base):
             cli.main(["--scores", str(self.scores_file), "--vault", str(self.tmp / "nope"), "run", "--category", "study"])
         s = core.load_scores(self.scores_file)
         self.assertEqual(list(s["agents"]["codex"]), ["study"])
-        self.assertEqual(len(s["agents"]["codex"]["study"]), len(core.load_bank("study")))
+        self.assertEqual(len(s["agents"]["codex"]["study"]),
+                         len([e for e in core.load_bank("study") if core.applies(e, "codex")]))
 
 
 if __name__ == "__main__":

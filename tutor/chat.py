@@ -22,7 +22,7 @@ import logging
 import os
 import threading
 
-from . import conf, don, exam, model, teach
+from . import conf, consult as consult_, don, exam, model, teach
 from .conf import CONFIG, Module, Paths
 
 _C = CONFIG["chat"]
@@ -93,6 +93,15 @@ def _steps(lesson: dict) -> str:
     return "\n".join(_C["explain_step"].format(n=i, text=s) for i, s in enumerate(lesson["steps"], 1))
 
 
+def _says(found: dict, lesson: dict) -> str:
+    """The tutor's confidence in a lesson (part 5): every note the material
+    names covers the topic, so the grade is by note count and the model's
+    own confidence, said so Chuen can tell the tutor's view from Denisse's."""
+    n = len(found.get("links", []))
+    return _C["says"].format(confidence=consult_.grade(1.0 if n else 0.0, n, lesson.get("confident", True)),
+                             n=n, **_ctx())
+
+
 def _commit(paths: Paths, touched: list, what: str, module: Module) -> None:
     try:
         don.commit(paths, touched, what, module, say=_say)
@@ -154,7 +163,8 @@ def explain(topic: str, module: str = "") -> str:
         _commit(paths, rec["touched"], "teach", mod)
         return _C["explain"].format(source=_C["from_local"], summary=out["lesson"]["summary"],
                                     steps=_steps(out["lesson"]), question=out["lesson"]["question"],
-                                    answer=out["lesson"]["answer"], note=_note_link(rec["note"]) or note_name, **c)
+                                    answer=out["lesson"]["answer"], note=_note_link(rec["note"]) or note_name,
+                                    says=_says(found, out["lesson"]), **c)
     # Hard, or the local answer failed its check: Claude, in the background.
     why = _C["why_hard" if out["why"] == "hard" else "why_check"].format(**c)
     if _dry_run():
@@ -171,12 +181,37 @@ def explain(topic: str, module: str = "") -> str:
             rec = teach.record(paths, mod, topic, lesson, engine, found["links"], today, say=_say)
             _commit(paths, rec["touched"], "teach", mod)
             return _C["claude_done"].format(summary=lesson["summary"], steps=_steps(lesson),
-                                            question=lesson["question"], note=_note_link(rec["note"]) or note_name, **c)
+                                            question=lesson["question"], note=_note_link(rec["note"]) or note_name,
+                                            says=_says(found, lesson), **c)
         _hand_off(work)
         reply = _C["escalated"].format(why=why, note=note_name, **c)
         if lesson_local is not None and lesson_local["steps"]:
             reply += _C["escalated_meanwhile"].format(summary=lesson_local["summary"], steps=_steps(lesson_local))
     return reply
+
+
+# -- consult (part 5) -------------------------------------------------------------------
+
+def consult(question: str, module: str = "") -> str:
+    """The tutor's opinion on a study question, as the tutor's: answer with
+    its confidence, the notes it came from and what they don't cover."""
+    paths = _paths()
+    question = " ".join((question or "").split())
+    c = _ctx()
+    if not question:
+        return _C["consult_empty"].format(**c)
+    result = consult_.consult(paths, question, module, calls=CALLS, today=dt.date.today())
+    if consult_.answered(result):
+        try:
+            rec = consult_.record(paths, result, say=_say)
+            _commit(paths, rec["touched"], "consult", None)
+        except Exception as exc:  # noqa: BLE001 -- the opinion stands even when the vault write doesn't
+            _say(_C["not_committed"].format(why=exc))
+    return _C["consult"].format(confidence=result["confidence"], who=consult_.who_label(result["who"]),
+                                answer=result["answer"], sources=_N["list_sep"].join(result["sources"]) or
+                                CONFIG["consult"]["text_no_sources"],
+                                caveats=_N["list_sep"].join(result["caveats"]) or CONFIG["consult"]["text_no_caveats"],
+                                **c)
 
 
 # -- quiz ------------------------------------------------------------------------------

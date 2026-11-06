@@ -146,9 +146,10 @@
         "tutor_quiz",
         "tutor_weak_topics",
         "tutor_exam_question",
-        "tutor_mark_answer"
+        "tutor_mark_answer",
+        "tutor_consult"
       ],
-      "cues": "quiz|test me|explain|teach|tutor|\\bweak|struggl|exam|past paper|practi[sc]e|\\bmark\\b|my answer|check my|understand|don'?t get|lesson|lecture|module|topic|coursework|go over|walk me through|step by step"
+      "cues": "quiz|test me|explain|teach|tutor|\\bweak|struggl|exam|past paper|practi[sc]e|\\bmark\\b|my answer|check my|understand|don'?t get|lesson|lecture|module|topic|coursework|go over|walk me through|step by step|my notes say|does the lecture"
     },
     "preferences": {
       "tools": [
@@ -414,6 +415,12 @@
     "tutor_mark_answer": {
       "side_effect": "write",
       "once_per_turn": true,
+      "reply_must_mention": "\\bDon\\b",
+      "fallback_reply": "Don here."
+    },
+    "tutor_consult": {
+      "_note": "The tutor's opinion for a question (part 5). A reply that leaves the tutor out gets the tutor's opening in front, so Chuen can tell the tutor's view from Denisse's. The record of the consult goes to the tutor's own area of the vault.",
+      "side_effect": "read",
       "reply_must_mention": "\\bDon\\b",
       "fallback_reply": "Don here."
     }

@@ -702,6 +702,27 @@
             "answer"
           ]
         }
+      },
+      {
+        "name": "tutor_consult",
+        "_note": "The study tutor as a specialist (tutor/consult.py, part 5, 2026-11-05): the opinion other agents ask for first. The result says the confidence and the notes it came from; tool_policy.json keeps it in the tutor's name.",
+        "description": "Ask the study tutor for a professional opinion on anything about Chuen's modules, coursework, revision or learning that isn't a lesson, a quiz or an exam question -- 'what do my notes say about the ROC?', 'is Q2 about Laplace or Fourier?', 'what should I prioritise for the coursework?', 'does the lecture cover this?'. The tutor answers only from his lecture notes and his own notes, and the result gives its confidence (low, medium, high), the notes it used and what they don't cover. Relay it as the tutor's view with that confidence, and keep your own view separate; it is advice, not an order. Not for general knowledge outside his modules.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "question": {
+              "type": "string",
+              "description": "The question for the tutor, in full, as he put it."
+            },
+            "module": {
+              "type": "string",
+              "description": "The module, if he named one: its name, code or short form ('signals', 'EM'). Leave empty when he didn't; the tutor works it out from the question."
+            }
+          },
+          "required": [
+            "question"
+          ]
+        }
       }
     ]
   },

@@ -540,3 +540,117 @@ rows, the learner model fed once, the note (his edits outside the block kept,
 inside replaced; a note without markers appended to), that the note is not a
 card source, the vault contract, a one-module run keeping the others, the
 CLI, and the study brief's weak-topic section, plan steps and order.
+
+# Part 5: Don as the specialist every agent consults
+
+Chuen (5 Nov 2026): "integrate it with the other AI models and treat Don like
+a professional opinion on task". Whenever an agent works on something about
+his modules, coursework, revision or learning, it asks Don first and weighs
+the answer the way it would a subject expert's: informed and grounded in his
+own lecture notes, advisory, never an override.
+
+## The consult API (`tutor/consult.py`)
+
+```
+python -m tutor consult "<question>" [--module X] [--json]
+```
+
+One structured opinion, from `consult.consult(paths, question, module)`:
+
+| Field | What it is |
+|---|---|
+| `answer` | What the notes say that bears on the question, from the model. |
+| `confidence` | `low` / `medium` / `high`, from how well the notes cover the question (below). |
+| `sources` | The vault notes the answer was given from, as vault links. Chosen by code and handed to the model; the model never names a source. |
+| `caveats` | What the notes don't cover (the model's), plus anything that went wrong (no notes, a model that wasn't confident, a hand-off that was off or failed). |
+| `who` | The engine that answered: `local` (Ollama) or `claude` (`delegate.run`, his plan, never an API key), or `none`. |
+| `module`, `code`, `notes`, `coverage`, `question`, `date` | The module it answered for, how many notes it used, the coverage, and what was asked. |
+
+**Which notes.** Every source note of the module (`sources.collect`: the
+tutor notes, his own, anything tagged or linked to the module) is scored by
+how many of the question's content words it holds (`topics.stop_words`,
+`match_min_word_chars`); the tutor notes of the weeks whose topic-map entry
+names those words get `consult.week_boost`. The top `max_notes` with at
+least `min_overlap_words` go to the model, tutor notes before his own.
+**Coverage** = question words found in the chosen notes / question words.
+No module named: the question is matched to a module by name or code, else
+every module is tried and the best coverage wins.
+
+**Confidence** (`consult.confidence`): no notes → `low` and no model call
+(the answer says so). Otherwise `high` needs `high_share` coverage and
+`high_min_notes` notes, `medium` needs `medium_share`, else `low`; a model
+that answers `confident: false` drops one level.
+
+**Engines** (`consult.engines`, names from `cards.engines`): the local model
+first; a question on a hard topic (`teach.hard_topics`) goes to Claude at
+once; a local answer that is empty or not confident goes to Claude as well,
+*waited for* (a consult is synchronous: the caller is another agent in the
+middle of a task). With `delegate.DRY_RUN`, or when Claude fails, the local
+answer stands and a caveat says so. When nothing answers, `answer` is empty,
+`who` is `none`, and the CLI exits 1 ("no grounded opinion to act on").
+
+**Recorded in the vault**: `<Don area>/data/consults.json` (last
+`consult.keep`) and `Don - consults.md` (newest first: module, confidence,
+who answered, the answer, caveats, sources as links), linked from the Don
+hub, committed through `vault_git.commit_owned` (`git.messages.consult`),
+never over a note he edited. A consult that gave no opinion is not recorded.
+
+## Who asks
+
+- **Denisse** (`tutor_consult` in `tools.py`, described in `brain.json`,
+  policed by `tool_policy.json`): "what do my notes say about the ROC?",
+  "does the lecture cover this?", "what should I prioritise?". The result
+  reads `Don says (<confidence> confidence, the local model): ...` with the
+  sources and caveats, and the policy keeps the tutor's name in her reply so
+  Chuen can tell Don's view from Denisse's. `tutor_explain` results now
+  carry the same line (`chat.says`: "Don says this with high confidence,
+  from 3 note(s) of his").
+- **The agent hub** (`orchestra/agent_hub/server.mjs`): `ask_don` beside
+  `ask_codex` / `ask_copilot` / `ask_gemini`, calling the consult CLI and
+  rendering the opinion as Don's. `route_task` and `split_tasks` classify
+  the work with the exams' routing data (`orchestra/exams/rules.json`
+  `kind_to_category` and `title_routes`, first match wins, exactly as
+  `lane_for.py`): study-category work is put to Don first, his opinion goes
+  in front of the agent's prompt ("weigh it as a subject expert's opinion:
+  informed, advisory, never an override") and in the answer. A Don that
+  can't answer is shown as such and the agent still runs. A new `study`
+  route kind sits before the quick-snippet default; the hub's own rules
+  (code, review, debug...) still go first.
+- **Orchestra** (`orchestra/consult.py`, data in `orchestra/consult.json`):
+  a task whose header says `Consult: don`, or whose text names
+  `study_brief`, `study_mode`, `tutor` or `learner` as a file or folder, has
+  the consult run on its prompt before the lane starts. The opinion is
+  written into the worktree as `.review/don.md`, the lane prompt gets a
+  paragraph naming it, and the reviewer prompt shows it (`{{DON}}`,
+  `review_diff_prompt.md` v2, marked advisory). A tutor that can't answer,
+  times out or isn't installed is one `CONSULT` line in `runner.log` and the
+  lane runs on the unchanged prompt. Nothing here parks a task or blocks a
+  merge. `enabled`, the patterns, the command, the timeout and every line of
+  wording are in `consult.json`; `orchestra/config.json` is untouched.
+- **Exams** (`orchestra/exams`): a `don` agent runs the consult CLI; an exam
+  that ships a `vault/` folder is answered from it (and a scratch `state/`),
+  so the canary never reads the real vault. `bank/study-don-1.json` (Don's
+  canary) and `study-don-2.json` carry the fixture vault's Week 4 and Week 5
+  tutor notes and are graded on the facts those notes hold. `core.applies`:
+  an exam with `"agents": ["don"]` is Don's alone, and Don sits only those
+  (`rules.json agents.own_exams_only`). `python -m orchestra.exams canary
+  --agent don`; to put him in the daily run, add `don` to `exams_agents` in
+  `orchestra/config.json`.
+
+## Tests
+
+`tutor/test_consult.py` (on the part-3 fixture: a fake engine per prompt, a
+fake delegate): the opinion grounded in the notes with sources and
+confidence, no notes → low and no model call, the module worked out from the
+question or said unknown, hard topics and unconfident local answers going to
+Claude and being waited for, hand-offs off, Claude through `delegate.run`,
+every engine failing giving no answer rather than an invented one, the
+grading table, the vault record (hub link, newest first, his edited note kept,
+the contract), the chat tool and `tutor_explain` saying the confidence, the
+CLI's text, JSON and exit codes. `orchestra/test_consult.py` and three runner
+tests: who is consulted, the note and prompt line, every way the tutor can
+fail leaving the lane untouched. `orchestra/agent_hub/test_hub.mjs`: the
+category data, `ask_don`, study work consulted first with the opinion in
+the agent's prompt, a failing Don never stopping the work.
+`orchestra/exams/test_exams.py`: Don-only exams, the consult argv on the
+exam's vault, exit 1 as a scored fail, a tree of exam files.

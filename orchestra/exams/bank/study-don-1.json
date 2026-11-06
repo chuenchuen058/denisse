@@ -1,0 +1,22 @@
+{
+  "id": "study-don-1",
+  "category": "study",
+  "agents": ["don"],
+  "canary": true,
+  "timeout_s": 180,
+  "_about": "The study tutor's canary (study tutor 5/5): the question is put to python -m tutor consult against the fixture vault shipped in files/ (the same Week 4 content tutor/test_tutor.py builds), never the real vault. Graded on the facts the note holds. Sorted after extract-1 on purpose: test_daily takes the first canary for the other agents.",
+  "prompt": "From the Signals and Systems (5CCYB020) lecture notes: what is the Fourier transform of a signal x(t) as the notes write it, and what does Parseval's theorem say is preserved? Keep to what the notes say, in at most 80 words.",
+  "files": {
+    "vault/Atlas/Academic/SEM 1 Modules/SEM 1 Modules.md": "---\nname: sem-1-modules\ndescription: hub\nupdated: 2026-11-01\ntags: [module]\n---\n- [[Signals and Systems notes]]\n",
+    "vault/Atlas/Academic/SEM 1 Modules/5CCYB020 Signals and Systems/Signals and Systems notes.md": "---\nname: signals-and-systems\ndescription: module hub\nupdated: 2026-11-01\ntags: [module]\n---\n# Signals\n",
+    "vault/Atlas/Academic/SEM 1 Modules/5CCYB020 Signals and Systems/Week 4/Signals and Systems Week 4 tutor.md": "---\nname: signals-and-systems-week-4-tutor\ndescription: \"5CCYB020 Week 4 tutor note: the Fourier transform, extracted from the KEATS material.\"\nmodule_code: 5CCYB020\nmodule: Signals and Systems\nweek: 4\ntags: [module, tutor, generated]\ngenerated_by: denisse-tutor\nupdated: 2026-11-01\n---\n\n# Signals and Systems Week 4 — tutor note\n\n## Learning outcomes\n\n- State the Fourier transform of a signal and use it on a top-hat pulse.\n- Use Parseval's theorem to relate energy in time and frequency.\n\n## Key methods and equations\n\n- **Fourier transform**: $X(\\omega) = \\int_{-\\infty}^{\\infty} x(t) e^{-j\\omega t} dt$ — the transform of a signal x(t) is the integral of x(t) times e^{-jwt} over all time.\n- **Parseval's theorem**: energy is preserved — the energy of the signal in time equals its energy in frequency.\n\n## Worked examples\n\n**1. Transform of a top hat**\n1. Write the integral over the pulse width.\n2. Evaluate it: a sinc, whose zero crossings sit at multiples of 2 pi over the width.\n\n## Check yourself\n\n- [ ] What is the Fourier transform of a top hat?\n- [ ] What does Parseval's theorem preserve?\n\n## Topics\n\n- Fourier transform (assumes: complex numbers)\n"
+  },
+  "grader": {
+    "type": "writing",
+    "max_words": 160,
+    "facts": [
+      ["integral", "\\int", "∫"],
+      ["energy"]
+    ]
+  }
+}

@@ -1,6 +1,8 @@
 // Fake agent CLI for test_hub.mjs (AGENT_HUB_FAKE_CMD): node fake_agent.mjs <exe> ...args.
 // Reads the prompt from args + stdin. Knobs in the prompt: SLEEP=<ms>, TAG=<word>,
-// GRANDCHILD (spawn a long-lived child and print its pid, to test kill-tree), EXIT=<code>.
+// GRANDCHILD (spawn a long-lived child and print its pid, to test kill-tree), EXIT=<code>,
+// ECHO (print 800 chars of the prompt it got, from its first "TASK:" marker when there is one,
+// so a test can see what was put in front of the task).
 import { spawn } from "node:child_process";
 
 const exe = process.argv[2];
@@ -15,6 +17,10 @@ process.stdin.on("end", async () => {
     const g = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore", detached: true });
     g.unref();
     console.log(`grandchild pid ${g.pid}`);
+  }
+  if (/ECHO/.test(input)) {
+    const at = Math.max(0, input.indexOf("TASK:"));
+    console.log(`prompt: ${input.slice(at, at + 800).replace(/\s+/g, " ")}`);
   }
   const steps = 5;
   for (let i = 1; i <= steps; i++) {

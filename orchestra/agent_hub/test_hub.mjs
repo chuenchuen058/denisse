@@ -65,6 +65,80 @@ test("routing picks the agent from the kind, or guesses from the words", () => {
   assert.equal(hub.chooseRoute("hello").guessed, true);
 });
 
+// ---------------------------------------------------------------- the study tutor (ask_don)
+
+const OPINION = JSON.stringify({ question: "q", answer: "State the region of convergence first.", confidence: "high",
+  sources: ["[[A/Week 5 tutor|Week 5 tutor]]"], caveats: ["No two-sided example in the notes."], who: "local",
+  module: "Signals and Systems" });
+
+test("study-category work comes from the exams' routing data, not the hub's own words", () => {
+  assert.equal(hub.categoryOf("revise the Fourier series before the exam"), "study");
+  assert.equal(hub.categoryOf("anything", "study"), "study");
+  assert.equal(hub.categoryOf("anything", "maths"), "study");
+  assert.equal(hub.categoryOf("fix the tray restart bug"), "code-edit", "the exams' first match wins, as lane_for.py");
+  assert.equal(hub.categoryOf("list my PRs", "github"), null);
+  assert.equal(hub.chooseRoute("revise the Fourier series before the exam").kind, "study");
+  assert.equal(hub.chooseRoute("revise the Fourier series before the exam").agent, "codex");
+  assert.equal(hub.chooseRoute("fix the tutor quiz in tutor/exam.py").agent, "codex", "the hub's own rules still go first");
+  assert.equal(hub.chooseRoute("hello").kind, "quick_code");
+  assert.ok(Object.keys(hub.ROUTES).includes("study"));
+});
+
+test("ask_don returns the tutor's opinion as the tutor's, with confidence, sources and caveats", async () => {
+  process.env.AGENT_HUB_FAKE_ANSWERS = JSON.stringify({ don: OPINION });
+  try {
+    const out = await hub.callTool("ask_don", { prompt: "what do my notes say about the ROC?", module: "signals" });
+    assert.match(out, /^\[don\]\n/);
+    assert.match(out, /says \(high confidence, answered by local, Signals and Systems\): State the region of convergence first\./);
+    assert.match(out, /Sources: \[\[A\/Week 5 tutor\|Week 5 tutor\]\]/);
+    assert.match(out, /Caveats: No two-sided example/);
+    assert.match(out, /advisory, never an override/);
+    assert.match(readFileSync(hub.handoffPath(), "utf8"), /\[don\] ask_don: what do my notes say about the ROC\? → done/);
+  } finally { delete process.env.AGENT_HUB_FAKE_ANSWERS; }
+  assert.equal(hub.renderOpinion("plain words, no JSON"), "plain words, no JSON");
+});
+
+test("route_task puts study work to the tutor first, and the agent gets the opinion with the task", async () => {
+  process.env.AGENT_HUB_FAKE_CMD = FAKE_CMD;
+  try {
+    const out = await hub.callTool("route_task", { prompt: "explain the Fourier transform lecture ECHO TAG=st1" });
+    const don = out.indexOf("### don — study (consulted first)");
+    const agent = out.indexOf("### codex — study (guessed)");
+    assert.ok(don >= 0, out);
+    assert.ok(agent > don, "the tutor's section comes first, the agent's after");
+    assert.match(out, /fake don answer st1/);
+    assert.match(out, /prompt: TASK: .*study tutor, was asked first.*fake don answer st1.*never an override.*TASK: explain the Fourier/);
+    const note = readFileSync(hub.handoffPath(), "utf8");
+    assert.match(note, /\[don\] consult \(study\): explain the Fourier transform lecture/);
+    assert.match(note, /\[codex\] routed study \(guessed\) → codex: explain the Fourier transform lecture/, "the log keeps the task as asked");
+    // A kind the hub's own rules route still gets the consult when the words say study.
+    const summ = await hub.callTool("route_task", { prompt: "summarise the lecture notes ECHO TAG=st5" });
+    assert.match(summ, /### don — study \(consulted first\)[\s\S]*### gemini — summarise/);
+    // Not study: nobody is consulted.
+    const plain = await hub.callTool("route_task", { prompt: "list my open PRs on github ECHO TAG=st2" });
+    assert.doesNotMatch(plain, /consulted first/);
+    assert.match(plain, /prompt: TASK: list my open PRs/);
+    // split_tasks: the same, per sub-task.
+    const split = await hub.callTool("split_tasks", { tasks: [
+      { prompt: "revise Laplace for the exam ECHO TAG=st3" }, { prompt: "b TAG=st4", kind: "research" }] });
+    assert.match(split, /### don — study \(consulted first\)[\s\S]*### codex — study[\s\S]*fake codex answer st3/);
+    assert.equal((split.match(/consulted first/g) || []).length, 1);
+  } finally { delete process.env.AGENT_HUB_FAKE_CMD; }
+});
+
+test("a tutor that can't answer never stops study work, and nobody stands in for it", async () => {
+  process.env.AGENT_HUB_FAKE_FAIL = "don";
+  try {
+    const out = await hub.callTool("route_task", { prompt: "revise the Fourier series before the exam" });
+    assert.match(out, /### don — study \(consulted first\)\n\[don, exit 1\]/);
+    assert.doesNotMatch(out, /did it instead/);
+    assert.match(out, /### codex — study[\s\S]*fake codex answer/);
+    const alone = await hub.callTool("ask_don", { prompt: "the ROC?" });
+    assert.match(alone, /FAILED[\s\S]*\[don, exit 1\]/, "on its own, a failed consult is a failed job like any ask_*");
+    assert.doesNotMatch(alone, /did it instead/);
+  } finally { delete process.env.AGENT_HUB_FAKE_FAIL; }
+});
+
 test("FOR MEMORY lines are pulled out, 'none' is ignored", () => {
   assert.deepEqual(hub.memoryLines("answer\nFOR MEMORY:\n- a\n- b\n"), ["a", "b"]);
   assert.deepEqual(hub.memoryLines("answer\nFOR MEMORY: none"), []);
@@ -129,9 +203,13 @@ test("speaks MCP over stdio: initialize + tools/list", async () => {
   const msgs = lines.map((l) => JSON.parse(l));
   assert.equal(msgs[0].result.serverInfo.name, "agent-hub");
   const names = msgs[1].result.tools.map((t) => t.name);
-  for (const n of ["ask_codex", "ask_gemini", "ask_copilot", "route_task", "split_tasks", "ask_all", "remember", "memory_today",
-    "job_status", "job_result", "jobs"])
+  for (const n of ["ask_codex", "ask_gemini", "ask_copilot", "ask_don", "route_task", "split_tasks", "ask_all", "remember",
+    "memory_today", "job_status", "job_result", "jobs"])
     assert.ok(names.includes(n), n);
+  const don = msgs[1].result.tools.find((t) => t.name === "ask_don");
+  assert.match(don.description, /advisory, never an override/);
+  assert.ok(don.inputSchema.properties.module);
+  assert.ok(msgs[1].result.tools.find((t) => t.name === "route_task").inputSchema.properties.kind.enum.includes("study"));
   const codex = msgs[1].result.tools.find((t) => t.name === "ask_codex");
   assert.match(codex.description, /job_status/);
   assert.ok(codex.inputSchema.properties.wait_s);

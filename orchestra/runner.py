@@ -74,6 +74,7 @@ HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 import campaign  # noqa: E402  deadline + pause/stop; reads .review/campaign.json and control.json
+import consult  # noqa: E402  the study tutor's opinion before a lane starts; data in consult.json, advisory
 
 REPO = Path(os.environ.get("ORCHESTRA_REPO", HERE.parent))
 REVIEW = REPO / ".review"
@@ -1214,7 +1215,8 @@ def run_reviewer(task: Task, wt: Path, branch: str, report: Path, why: str) -> d
     read = lambda p: p.read_text(encoding="utf-8", errors="replace") if p.exists() else "(none)"
     prompt = REVIEW_DIFF_PROMPT.read_text(encoding="utf-8")
     for k, v in (("TASK", read(task.path)), ("REPORT", read(report)), ("BRANCH", branch),
-                 ("BASE", base), ("WHY", why), ("DIFF", diff)):  # DIFF last: it may contain {{...}}
+                 ("BASE", base), ("WHY", why), ("DON", consult.reviewer_section(wt)),
+                 ("DIFF", diff)):  # DIFF last: it may contain {{...}}
         prompt = prompt.replace("{{" + k + "}}", v)
     if Path(argv[0]).stem.lower() == "claude":
         (wt / ".review").mkdir(exist_ok=True)
@@ -1505,6 +1507,10 @@ def run_lane(task: Task, wt: Path, report: Path, timeout: int, prov: dict | None
     env.update(ORCHESTRA_TASK=str(local / "task.md"), ORCHESTRA_REPORT=str(local_report),
                ORCHESTRA_WORKTREE=str(wt), ORCHESTRA_MAIN=str(REPO))
     prompt = build_prompt(".review/task.md", ".review/report.md")
+    # The study tutor's opinion (consult.json): a task about his study tooling or studies has the
+    # tutor asked first, `.review/don.md` written in the worktree and named in the prompt. Advisory:
+    # a tutor that can't answer is a log line, and the prompt is exactly the one above.
+    prompt += consult.before_lane(task, wt, REPO, log)
     if any(PROMPT_FILE_PLACEHOLDER in str(a) for a in argv):
         prompt_file = local / "prompt.md"
         prompt_file.write_text(prompt, encoding="utf-8")

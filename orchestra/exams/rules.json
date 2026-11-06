@@ -99,6 +99,30 @@
     "local_files_prompt": "\n\nThe files:{files}",
     "local_file_template": "\n\n--- {name} ---\n{content}",
     "local_file_glob": "*.py",
-    "codex_last_file": ".codex-last.txt"
+    "codex_last_file": ".codex-last.txt",
+    "own_exams_only": [
+      "don"
+    ],
+    "don_command": [
+      "-m",
+      "tutor",
+      "consult",
+      "{prompt}",
+      "--json"
+    ],
+    "don_name_file": "tutor/tutor.json",
+    "don_name_key": "name",
+    "don_vault_dir": "vault",
+    "don_state_dir": "state",
+    "don_vault_args": [
+      "--vault",
+      "{vault}",
+      "--state",
+      "{state}"
+    ],
+    "don_answer": "{tutor} ({confidence} confidence, {who}; sources: {sources}; caveats: {caveats})\nANSWER:\n{answer}",
+    "don_none": "none",
+    "don_no_answer": "no grounded answer: {caveats}",
+    "don_no_json": "no opinion in the output"
   }
 }

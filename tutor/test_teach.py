@@ -379,7 +379,8 @@ class ExamTests(TeachFixture):
 # -- Denisse's side: registry, policy, router, the reply -------------------------------------------
 
 class RegistrationTests(TeachFixture):
-    TOOLS = ("tutor_explain", "tutor_quiz", "tutor_weak_topics", "tutor_exam_question", "tutor_mark_answer")
+    TOOLS = ("tutor_explain", "tutor_quiz", "tutor_weak_topics", "tutor_exam_question", "tutor_mark_answer",
+             "tutor_consult")
 
     def test_registered_described_and_policed(self):
         import brain
