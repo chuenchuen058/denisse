@@ -909,6 +909,27 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("no runs", r.stdout)
 
+    def test_status_windows_follow_config(self):
+        import status
+        status = importlib.reload(status)
+        original = {key: self.R.C[key] for key in ("status_by_prompt_days", "status_recent_runs")}
+        try:
+            self.R.C.update(status_by_prompt_days=3, status_recent_runs=2)
+            status = importlib.reload(status)
+            self.assertEqual(status.BY_PROMPT_DAYS, 3)
+            self.assertEqual(status.RECENT_RUNS, 2)
+            now = self.R.now()
+            ago = lambda days: (now - dt.timedelta(days=days)).isoformat()
+            state = {"tasks": {"a": {"history": [
+                {"end": ago(1), "result": "PASS", "prompt_file_sha": "recent"},
+                {"end": ago(4), "result": "PASS", "prompt_file_sha": "old"},
+            ]}}}
+            self.assertEqual([r["prompt_file_sha"] for r in status.by_prompt(state)], ["recent"])
+            self.assertEqual(len(status.recent_runs(state)), 2)
+        finally:
+            self.R.C.update(original)
+            importlib.reload(status)
+
     # ------------------------------------------------ daily exams (orchestra/exams/daily.py)
 
     def exam_spawns(self):

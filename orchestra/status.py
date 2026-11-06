@@ -20,9 +20,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import runner as R  # noqa: E402
 from watch import session_model  # noqa: E402
 
-BY_PROMPT_DAYS = 14
+BY_PROMPT_DAYS = R.C["status_by_prompt_days"]
 BY_PROMPT_RESULTS = ("PASS", "PARTIAL", "FAIL", "NO_REPORT")
-RECENT_RUNS = 5
+RECENT_RUNS = R.C["status_recent_runs"]
 
 
 def by_prompt(state: dict, days: int = BY_PROMPT_DAYS) -> list[dict]:

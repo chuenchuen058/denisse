@@ -40,8 +40,11 @@ except ImportError:  # run as a plain script from orchestra/
     from orchestra.local_team.core import validate
 
 HERE = Path(__file__).resolve().parent
-DEFAULTS = {"producer_queue_cap": 20, "producer_admit_per_hour": 4, "auto_admit_areas": [],
-            "producer_dedupe_days": 30, "vault_dir": ""}
+with (HERE / "config_defaults.json").open(encoding="utf-8") as _defaults_file:
+    _CONFIG_DEFAULTS = json.load(_defaults_file)
+DEFAULTS = {key: _CONFIG_DEFAULTS[key] for key in
+            ("producer_queue_cap", "producer_admit_per_hour", "auto_admit_areas", "producer_dedupe_days")}
+DEFAULTS["vault_dir"] = ""
 
 PACKET_SCHEMA = {
     "type": "object",

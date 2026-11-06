@@ -91,10 +91,12 @@
   "_daily_spend_cap_usd_note": "The normal cap. The sprint's $400 (2 Nov 2026: spare Claude allowance before it resets; claude -p's total_cost_usd is notional on his plan) was a campaign override; the sprint ended Wed 4 Nov 18:00 London, so $5 applies again.",
   "_daily_spend_cap_usd": "Summed from claude -p total_cost_usd. Runs killed before reporting are charged an estimate from minutes x today's cost per minute. Thomas's ledger saw under half of a 20-hour spend.",
   "unknown_cost_per_min_usd": 0.10,
-
   "done_window_days": 14,
   "_done_window_days": "A task whose exact content already PASSed within this window is not run again (content hash, not title: titles get reused).",
-
+  "status_by_prompt_days": 14,
+  "_status_by_prompt_days": "Lookback window for status.py's review-prompt version summary.",
+  "status_recent_runs": 5,
+  "_status_recent_runs": "How many recent lane runs status.py displays.",
   "vault_dir": "~/OneDrive - King's College London/Denisse",
   "_vault_dir": "Each finished task gets a section in <vault>/Calendar/Orchestra/<date>.md, committed in the vault repo (Chuen, 2 Nov 2026). Empty string turns it off.",
 
@@ -160,6 +162,10 @@
   "_exams_daily_at": "Once a day, at the first tick after this time, the runner starts one canary exam per agent (orchestra/exams/daily.py) in a hidden background process with its own lock (.review/exams.lock) and a total cap of exams_cap_s, so routing (orchestra/exams/lane_for.py) runs on real scores. Skipped while any lane is limited, on battery, or paused; it never takes a lane slot. claude only with exams_include_claude: true (Chuen's allowance). Empty string turns it off.",
 
   "git_timeout_s": 120,
+  "taskkill_timeout_s": 60,
+  "_taskkill_timeout_s": "Maximum wait for Windows taskkill when stopping a lane process tree.",
+  "process_exit_wait_timeout_s": 30,
+  "_process_exit_wait_timeout_s": "Grace period for a killed lane process to exit before treating it as timed out.",
   "tick_watchdog_extra_s": 900,
   "_tick_watchdog_extra_s": "The whole tick is killed this long after the longest possible lane timeout. Atrium hung 19 then 29 minutes on one call.",
   "keep_ref_prefix": "refs/keep/",
