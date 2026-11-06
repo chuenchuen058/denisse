@@ -2,8 +2,8 @@
 
     .venv\\Scripts\\python.exe -m atrium snapshot [--out DIR]
 Reads only local state (Orchestra's .review, the vault, a few CLI login files) and
-writes ten tables (agents, tasks, waiting, log, learner, spend, running, usage,
-outputs, activity; default folder <repo>/.review/hub). Nothing personal beyond what
+writes eleven tables (agents, tasks, waiting, log, learner, spend, running, usage,
+outputs, activity, study; default folder <repo>/.review/hub). Nothing personal beyond what
 the vault already holds. Every limit, path, label and sentence lives in
 atrium/config.json ("snapshot"), read at call time.
 """
@@ -410,6 +410,19 @@ def _activity() -> list[dict]:
     return [{"day": d, "lane": l, "minutes": round(acc[(d, l)])} for d in days for l in lanes]
 
 
+def _study() -> list[dict]:
+    """One row per module from the study tutor's last `python -m tutor progress`
+    (tutor/progress.py): lectures read vs on KEATS, mastery, weak topics, the next
+    deadline and what to study next. Nothing run yet, or unreadable: no rows."""
+    if str(REPO) not in sys.path:
+        sys.path.insert(0, str(REPO))
+    try:
+        from tutor import progress
+        return progress.hub_rows()
+    except Exception:  # noqa: BLE001 -- the hub never fails because of the tutor
+        return []
+
+
 def write(out: Path | None = None) -> Path:
     out = out or REVIEW / _c()["paths"]["hub"]
     out.mkdir(parents=True, exist_ok=True)
@@ -417,7 +430,7 @@ def write(out: Path | None = None) -> Path:
     running = _running()
     tables = {"agents": _agents(), "tasks": tasks, "waiting": _waiting(tasks), "log": _log(),
               "learner": _learner(), "spend": _spend(), "running": running, "usage": _usage(running),
-              "outputs": _outputs(), "activity": _activity()}
+              "outputs": _outputs(), "activity": _activity(), "study": _study()}
     for name, rows in tables.items():
         (out / f"{name}.json").write_text(json.dumps(rows, indent=1, ensure_ascii=False), encoding="utf-8")
     return out

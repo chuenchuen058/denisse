@@ -466,10 +466,77 @@ The fixture vault carries a Week 4 tutor note, a topic map, six cards and
 Anki stats for Signals (convolution weak), nothing for EM; a case gets a
 scratch copy of it, so the tutor's writes never touch the checked-in fixture.
 
-## Not built yet
+# Part 4: progress, per module
 
-- **Part 4, progress and tutoring.** What to revise before which coursework
-  question (`anki-<slug>.json` `weeks` per topic against the topic map's
-  `coursework` links), a study plan from the weak topics, and `study_brief.py`
-  citing the tutor note for each unwritten week. The practice history
-  (`practice-<slug>.json`) is the record it can plan from.
+Part 4 (5 Nov 2026) is where Chuen stands, module by module, in one place:
+
+```
+python -m tutor progress [module]
+```
+
+`tutor/progress.py` reads only what the other parts left behind -- no model
+call -- and for every module folder works out:
+
+- **Lectures: read vs on KEATS.** The weeks the inbox holds: every file the
+  last ingest placed (`ingest.json`), plus files downloaded since, placed by
+  their folder and file name only (nothing is extracted here). Against them,
+  the weeks that have a tutor note. A week on KEATS without one, or a new
+  file, makes "run the ingest" the first thing to do.
+- **Topics and mastery.** The topic map, plus any topic only the cards know,
+  each with its Anki numbers from part 2's stats (`anki-<slug>.json`).
+  Mastery is the share of the topic's cards reviewed times how well they are
+  kept: `1 - (lapses per reviewed card) / progress.mastery.lapse_rate_zero`,
+  floored at 0. None until something is reviewed; the module's figure is
+  card-weighted.
+- **Weak topics**: the stats' weak flags, worst score first, each with the
+  tutor notes to revise from and the coursework items the topic map links.
+- **Coursework**: every note matching `paths.coursework_globs` in the module
+  folder, its due date from `planner.coursework_deadlines` (none = undated,
+  never guessed) and its unticked items from `study_brief.read_coursework`.
+- **What to study next**, in `progress.next.order`: lectures not read yet; a
+  weak topic a coursework item due soonest needs; coursework due within
+  `horizon_days`; other weak topics; cards due in Anki; topics never
+  reviewed; topics with no cards. At most `next.max`.
+
+It writes:
+
+| Where | What |
+|---|---|
+| `Atlas/Academic/Study Progress.md` (`progress.note`) | The overview: a table of every module, then one section each. Only the block between `progress.block_start` and `block_end` is regenerated; everything he writes outside it is kept (only the frontmatter's `updated:` changes). A note of his without the markers gets the block appended. The Don hub links it. |
+| `<Don area>/data/progress-<slug>.json` | One module in full -- what `study_brief.py` reads. |
+| `<Don area>/data/study.json` (`progress.dataset_file`) | One flat row per module. `atrium/snapshot.py` copies it into the Atrium hub as `study.json` (the eleventh table); nothing run yet = an empty table. |
+
+Weak topics are also filed in the learner model (`don.feed_learner`, the same
+measured `struggles` beliefs `anki-sync` files; running it twice adds
+nothing), the Don notes are refreshed, and every write is committed through
+`vault_git.commit_owned` (`git.messages.progress`). With a module named, only
+that module is recomputed; the others keep their last rows.
+
+### The study brief puts weak topics first
+
+`study_brief.py` reads the module's `progress-<slug>.json` through
+`progress.focus` (step `tutor` of the brief job). With weak topics:
+
+- each becomes a plan step at the front (`tutor.revise_step`, at most
+  `tutor.revise_max`, weighted `tutor.revise_weight`);
+- coursework items those topics feed (named in the topic map, or revised
+  from one of their weeks) are planned before the others;
+- the brief gets a *Weak topics first* section linking the tutor notes to
+  revise from, and *Where you are* cites the tutor note for each week not
+  written up.
+
+No progress run, nothing weak, or anything unreadable: the brief is byte for
+byte what it was (the golden briefs in `scripts/test_study_brief_learner.py`
+still hold). Templates are `study_brief.json` `tutor`.
+
+### Tests
+
+`tutor/test_progress.py`, on `test_don`'s fixture (ingest, cards, a fake
+AnkiConnect with Laplace lapsing and Fourier kept, a new lecture PDF dropped
+in the inbox afterwards) checks: lectures read vs on KEATS, mastery, the weak
+topic with its tutor notes and coursework, the coursework due date and items,
+the next-step order (and that it follows the config), the sidecar, the hub
+rows, the learner model fed once, the note (his edits outside the block kept,
+inside replaced; a note without markers appended to), that the note is not a
+card source, the vault contract, a one-module run keeping the others, the
+CLI, and the study brief's weak-topic section, plan steps and order.

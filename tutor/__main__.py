@@ -10,6 +10,9 @@
   weak MODULE             what the Anki stats say he keeps losing
   exam MODULE [TOPIC]     an exam-style problem in the coursework / past-paper style
   mark MODULE ANSWER      mark his answer to the open quiz or exam question
+  progress [MODULE]       where he is per module: lectures read vs on KEATS, topics and
+                          Anki mastery, weak topics, coursework deadlines, what to study
+                          next -- into the vault's study progress note and the hub table
 
 Every command takes --vault PATH and --state DIR (the old private state
 folder, read until its files are moved into the vault). Every vault write is
@@ -22,7 +25,7 @@ import argparse
 import json
 import sys
 
-from . import anki, cards, conf, don, ingest, topics
+from . import anki, cards, conf, don, ingest, progress, topics
 from .conf import CONFIG
 
 CHAT_COMMANDS = ("explain", "quiz", "weak", "exam", "mark")
@@ -48,13 +51,13 @@ def main(argv=None, anki_client=None, calls=None, learner_core=None, checks=None
     ap = argparse.ArgumentParser(prog="python -m tutor", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("ingest", "topics", "cards", "anki-sync") + CHAT_COMMANDS:
+    for name in ("ingest", "topics", "cards", "anki-sync", "progress") + CHAT_COMMANDS:
         s = sub.add_parser(name)
         s.add_argument("--vault", default=None)
         s.add_argument("--state", default=None)
         if name == "ingest":
             s.add_argument("--dry", action="store_true")
-        elif name == "anki-sync":
+        elif name in ("anki-sync", "progress"):
             s.add_argument("module", nargs="?", default=None)
         else:
             s.add_argument("module")
@@ -114,6 +117,10 @@ def main(argv=None, anki_client=None, calls=None, learner_core=None, checks=None
         if module is None:
             return 1
         modules = [module]
+    if a.cmd == "progress":
+        out = progress.run(paths, modules, learner_core=learner_core)
+        don.commit(paths, out["touched"], "progress")
+        return 0
     out = anki.run(paths, modules, client=anki_client, learner_core=learner_core)
     don.commit(paths, out["touched"], "anki")
     return 0

@@ -45,6 +45,7 @@ _M = CONFIG["matching"]
 _S = CONFIG["schedule"]
 _L = CONFIG["limits"]
 _LEARN = CONFIG["learner"]
+_TU = CONFIG["tutor"]
 _PATHS = CONFIG["paths"]
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -426,6 +427,78 @@ def _shaped_by(shape: dict) -> list:
     return lines
 
 
+# -- the study tutor's weak topics (read-only) -----------------------------
+#
+# tutor/progress.py (python -m tutor progress) records, per module, the
+# topics Anki says he keeps losing and the tutor notes to revise them from.
+# The brief puts those first. No progress run, nothing weak, or any trouble
+# reading it: {} -- and the brief is exactly what it was without the tutor.
+
+def tutor_focus(module: str) -> dict:
+    """{tutor, weak: [{topic, weeks, coursework, notes: [(week, stem)]}],
+    tutor_notes: {week: stem}} from the tutor's last progress run, or {}."""
+    try:
+        from tutor import progress
+        return progress.focus(module, VAULT) or {}
+    except Exception:  # noqa: BLE001 -- a brief never fails because of the tutor
+        return {}
+
+
+def _norm(text: str) -> str:
+    return " ".join(str(text).split()).lower()
+
+
+def weak_item(item: dict, focus: dict) -> bool:
+    """A coursework item a weak topic feeds: the topic map names it, or it
+    is revised from one of the topic's weeks."""
+    for w in (focus or {}).get("weak", []):
+        if _norm(item.get("text", "")) in {_norm(c) for c in w.get("coursework", [])}:
+            return True
+        if set(item.get("weeks", [])) & set(w.get("weeks", [])):
+            return True
+    return False
+
+
+def prioritise(items: list, focus: dict) -> list:
+    """Items a weak topic feeds first, the rest after, each in its order."""
+    return ([i for i in items if weak_item(i, focus)]
+            + [i for i in items if not weak_item(i, focus)])
+
+
+def revise_steps(focus: dict) -> list:
+    """One plan step per weak topic, worst first, at most revise_max."""
+    out = []
+    for w in (focus or {}).get("weak", [])[:_TU["revise_max"]]:
+        weeks = (_TU["revise_weeks"].format(weeks=_TU["weeks_sep"].join(str(n) for n in w["weeks"]))
+                 if w.get("weeks") else "")
+        out.append({"text": _TU["revise_step"].format(topic=w["topic"], weeks=weeks, tutor=focus.get("tutor", "")),
+                    "weight": _TU["revise_weight"]})
+    return out
+
+
+def _tutor_lines(focus: dict, gaps: list) -> tuple:
+    """(where-you-are lines: the tutor notes for unwritten weeks; the
+    weak-topics section). Both empty with no focus."""
+    if not focus:
+        return [], []
+    where, lines = [], []
+    notes = {int(k): v for k, v in (focus.get("tutor_notes") or {}).items()}
+    cited = [_TU["link"].format(stem=notes[w["week"]], week=w["week"]) for w in gaps if w["week"] in notes]
+    if cited:
+        where.append(_TU["tutor_notes"].format(tutor=focus.get("tutor", ""), links=_TU["link_sep"].join(cited)))
+    weak = focus.get("weak", [])
+    if weak:
+        lines += _TU["heading"]
+        for w in weak:
+            links = _TU["link_sep"].join(_TU["link"].format(stem=s, week=n) for n, s in w.get("notes", []))
+            lines.append(_TU["weak"].format(
+                topic=w["topic"], tutor=focus.get("tutor", ""),
+                links=_TU["links"].format(links=links) if links else "",
+                coursework=_TU["coursework"].format(items=_TU["item_sep"].join(w["coursework"]))
+                if w.get("coursework") else ""))
+    return where, lines
+
+
 # -- the job ---------------------------------------------------------------
 
 def _job_file(module: str) -> str:
@@ -494,12 +567,15 @@ def _brief_text(job: dict, today: dt.date, shape: dict | None = None) -> str:
         lines.append(_B["gaps"].format(weeks=_T["list_sep"].join(
             _B["gap"].format(note=w["note"], week=w["week"])
             + ("" if short else _B["gap_status"].format(status=w["status"])) for w in gaps)))
+    tutor_where, tutor_lines = _tutor_lines(job["done"].get("tutor") or {}, gaps)
+    lines += tutor_where
     found = job["done"]["tasks"]
     if found and short:
         lines.append(_B["tasks_short"].format(count=len(found)))
     elif found:
         lines.append(_B["tasks"].format(count=len(found), preview=_B["task_sep"].join(
             t["text"][:_L["task_preview_chars"]] for t in found[:_L["task_preview"]])))
+    lines += tutor_lines
     lines += _B["left_heading"]
     for key in _format_shapes():
         if key in shape:
@@ -671,6 +747,7 @@ def run(text: str, now: dt.datetime | None = None) -> str:
         weeks = step("weeks", lambda: read_weeks(module_dir))
         step("tasks", lambda: [{"text": t["text"], "due": str(t.get("due") or "")}
                                for t in module_tasks(module, d.get("code", ""))])
+        focus = step("tutor", lambda: tutor_focus(module))
 
         def make_plan():
             by_week = {w["week"]: w for w in weeks}
@@ -690,13 +767,14 @@ def run(text: str, now: dt.datetime | None = None) -> str:
             if d["brief_unread"]:
                 work.append({"text": _T["read_brief_step"].format(module=module),
                              "weight": _S["read_brief_weight"]})
+            work.extend(revise_steps(focus))  # weak topics first (the study tutor)
             if not cw["has_questions"]:
                 # No question table to say which week each part needs: write
                 # up every gap among the weeks the note says feed it, first.
                 # No coursework note at all: every week not written up.
                 for w in (cw["feeds"] if d["path"] else sorted(by_week)):
                     write_up(w)
-            for i in cw["items"]:
+            for i in prioritise(cw["items"], focus):
                 if i["done"] or skip.match(i["text"]):
                     continue
                 for w in i.get("weeks", []):
