@@ -16,7 +16,7 @@
   "stale_days": 7,
   "parallel_lanes": true,
   "lane_slots": {"claude": 1, "codex": 1, "copilot": 1},
-  "lane_fallback": {"codex": "claude", "copilot": "claude"},
+  "lane_fallback": {"claude": "codex", "codex": "claude", "copilot": "claude"},
 
   "lane_argv": {
     "claude": ["claude", "-p", "--permission-mode", "acceptEdits", "--permission-prompts", "none",
