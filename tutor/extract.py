@@ -1,6 +1,7 @@
 """Text out of a KEATS file, with nothing installed for it.
 
-PDF through the installed PyMuPDF (fitz), falling back to pypdf; PPTX and
+PDF through the installed PyMuPDF (fitz), with optional local OCR for sparse
+pages and pypdf as the text-only fallback; PPTX and
 DOCX by reading their XML straight out of the zip (no python-pptx or
 python-docx here, and no pip); TXT and MD as they are. Audio only when
 tutor.json says audio.enabled, through the installed faster_whisper.
@@ -26,7 +27,7 @@ _REASONS = CONFIG["match"]["unmatched_reasons"]
 def sha256(path: str) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
-        for block in iter(lambda: f.read(1 << 20), b""):
+        for block in iter(lambda: f.read(_E["hash_block_bytes"]), b""):
             h.update(block)
     return h.hexdigest()
 
@@ -48,14 +49,17 @@ def wanted(name: str) -> bool:
 
 # -- readers -----------------------------------------------------------------
 
-def _pdf(path: str) -> str:
+def _pdf(path: str, ocr_session=None, digest=None) -> str:
+    from .ocr import Session
+    ocr_session = ocr_session if ocr_session is not None else Session(write=False)
+    digest = digest or sha256(path)
     pages = []
     try:
         import fitz  # PyMuPDF
         with fitz.open(path) as doc:
-            for n, page in enumerate(doc, 1):
-                pages.append((n, page.get_text()))
-    except Exception:  # noqa: BLE001 -- fitz missing or choked: pypdf has a go
+            pages = ocr_session.pdf(doc, digest)
+    except Exception as exc:  # fitz missing or choked: pypdf has a go
+        ocr_session.unavailable(exc)
         pages = []
     if not any(t.strip() for _, t in pages):
         from pypdf import PdfReader
@@ -134,7 +138,7 @@ def _audio(path: str) -> str:
     return "\n".join(s.text.strip() for s in segments if s.text.strip())
 
 
-def read(path: str) -> tuple:
+def read(path: str, *, ocr_session=None, digest=None) -> tuple:
     """(text, why). why is '' when text was read, else the reason from
     tutor.json match.unmatched_reasons."""
     k = kind(path)
@@ -144,7 +148,7 @@ def read(path: str) -> tuple:
         return "", _REASONS["audio_off"]
     reader = {"pdf": _pdf, "pptx": _pptx, "docx": _docx, "text": _text, "audio": _audio}[k]
     try:
-        text = reader(path)
+        text = reader(path, ocr_session, digest) if k == "pdf" else reader(path)
     except Exception as exc:  # noqa: BLE001 -- a broken file is recorded, never fatal
         return "", f"{_REASONS['empty']} ({type(exc).__name__}: {exc})"
     text = re.sub(r"[ \t]+\n", "\n", text or "").strip()

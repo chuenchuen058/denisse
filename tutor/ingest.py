@@ -31,7 +31,7 @@ import json
 import os
 import re
 
-from . import conf, don, extract, model, notes, topics
+from . import conf, don, extract, model, notes, ocr, topics
 from .conf import CONFIG, Module, Paths
 
 _MATCH = CONFIG["match"]
@@ -211,7 +211,7 @@ def _signature(hashes: list) -> str:
 # -- the job -----------------------------------------------------------------
 
 def run(paths: Paths, call=None, apply: bool = True, today: dt.date | None = None,
-        say=print, num_ctx: int | None = None) -> dict:
+        say=print, num_ctx: int | None = None, ocr_factory=None) -> dict:
     """The whole ingest. Returns counts: notes, unchanged, unmatched, failed,
     plus the lists behind them. `call` is the model (tests: a fake);
     `apply=False` scans and matches only."""
@@ -224,10 +224,13 @@ def run(paths: Paths, call=None, apply: bool = True, today: dt.date | None = Non
         say(_SAY["no_inbox"].format(module=CONFIG["paths"]["inboxes"]["module"],
                                     shared=", ".join(paths.shared_inboxes) or "-"))
     texts = {}
+    digests = {}
+    pdf_ocr = ocr.Session(paths.data(CONFIG["extract"]["ocr"]["cache_dir"]),
+                          say=say, write=apply, factory=ocr_factory)
 
     def read(path):
         if path not in texts:
-            texts[path] = extract.read(path)
+            texts[path] = extract.read(path, ocr_session=pdf_ocr, digest=digests.get(path))
         return texts[path]
 
     def text_of(path):
@@ -239,13 +242,23 @@ def run(paths: Paths, call=None, apply: bool = True, today: dt.date | None = Non
     seen_digests = set()
     for path, parts, home in files_:
         digest = extract.sha256(path)
+        digests[path] = digest
         if digest in seen_digests:
             continue  # the same file twice (inbox and Week folder): read once
         seen_digests.add(digest)
         known = state["files"].get(digest)
-        module, week, why = _place(path, parts, home, modules, known, read)
+        placement = known
+        if extract.kind(path) == "pdf":
+            info = (known or {}).get("extraction", {})
+            if info.get("settings") != pdf_ocr.settings or info.get("retry"):
+                placement = None
+                read(path)  # retry old scans and refresh mixed PDFs after OCR changes
+        module, week, why = _place(path, parts, home, modules, placement, read)
         rec = {"path": path, "module": module.slug if module else None, "week": week,
                "status": "matched" if module and week else "unmatched", "why": why, "seen": now}
+        info = pdf_ocr.records.get(digest) or (known or {}).get("extraction")
+        if info:
+            rec["extraction"] = info
         if known and known.get("status") == "matched" and known.get("module") == rec["module"] \
                 and known.get("week") == week:
             say(_SAY["skipped"].format(name=os.path.basename(path)))
@@ -264,7 +277,8 @@ def run(paths: Paths, call=None, apply: bool = True, today: dt.date | None = Non
         module = g["module"]
         lectures = state["lectures"].setdefault(slug, {})
         rec = lectures.get(str(week), {})
-        signature = _signature([h for _, h in g["files"]])
+        signature = _signature([h + state["files"][h].get("extraction", {}).get("signature", "")
+                                for _, h in g["files"]])
         note = notes.note_path(module, week)
         if rec.get("signature") == signature and os.path.exists(rec.get("written") or ""):
             say(_SAY["unchanged"].format(module=module.title, week=week))
@@ -283,7 +297,8 @@ def run(paths: Paths, call=None, apply: bool = True, today: dt.date | None = Non
             result, _n = model.extract_lecture(module.title, module.code, week,
                                                [os.path.basename(p) for p in sources], text,
                                                call=call, num_ctx=num_ctx)
-            body = notes.render(paths.vault, module, week, result, sources, today)
+            provenance = {p: state["files"][h].get("extraction", {}) for p, h in g["files"]}
+            body = notes.render(paths.vault, module, week, result, sources, today, provenance=provenance)
             path, kept = notes.write(note, body, state["written"])
         except (model.ModelError, OSError) as exc:
             say(_SAY["failed"].format(module=module.title, week=week, why=exc))
@@ -297,7 +312,7 @@ def run(paths: Paths, call=None, apply: bool = True, today: dt.date | None = Non
         changed_modules[slug] = module
         save_state(paths, state)  # progress survives a crash on the next week
 
-    touched = list(written)
+    touched = list(written) + pdf_ocr.touched
     if apply:
         for slug, module in changed_modules.items():
             lectures = state["lectures"].get(slug, {})

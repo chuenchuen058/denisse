@@ -62,6 +62,50 @@ Files stay in the inbox: the ingest never moves, renames or deletes his
 downloads. (Filing them into the Week folders is `scripts/nightly.py`'s
 existing job and is unchanged.)
 
+### Scanned PDF pages
+
+`python -m tutor ingest` also reads image-only and mixed PDFs through local
+Windows OCR (`Windows.Media.Ocr`). PyMuPDF renders each page whose stripped
+native text is shorter than `extract.ocr.min_text_chars`. The installed
+Windows PowerShell WinRT bridge supplies OCR; no pip package, installer,
+cloud request or language download is used. Windows' installed OCR
+languages determine availability.
+
+All options are in `tutor/tutor.json`, under `extract.ocr`: `enabled`,
+`engine` (`windows`), `language` (empty selects the user profile language),
+`min_text_chars` (20), `dpi` (200), and `page_cap` (100 sparse pages per PDF).
+Native-text pages do not consume the cap. Large pages render at a lower DPI
+when the engine's runtime image limit requires it. The bridge timeout and
+launch command are under `windows`; each call has a bounded lifetime and
+no visible console window. Set `enabled` to false for native text only.
+
+The model input marks OCR text as potentially noisy. Tutor notes warn which
+source pages used OCR and which remain unread because of failure or the
+cap; native text is retained. Equations, handwriting, diagrams and reading
+order still need checking against the scan. The engine is ordinary text
+recognition, not an equation parser.
+
+Successful OCR pages (including empty results) are saved atomically under
+`<Don area>/data/ocr/`, addressed by the PDF SHA-256 and OCR settings. Each
+JSON sidecar contains page text, native text, engine, actual language, DPI
+and render/recognition time. A rename, repeat ingest or failed model pass
+reuses that cache. Changing the file or OCR settings invalidates it.
+Interrupted OCR resumes from saved pages. Sidecars contain source material
+and belong with private tutor data, never in the public code repository.
+
+Old skipped scans and mixed PDFs are reconsidered when OCR settings change.
+Recognition failure logs one line per ingest, preserves native text, and
+is retried next time. Raising the cap reconsiders capped pages. Notes are
+regenerated when extracted content or coverage changes, with the existing
+protection for user edits. `python -m tutor ingest --dry` can perform OCR
+and read existing caches but writes neither cache, state nor notes.
+
+The offline regression suite uses temporary generated scans and fake OCR
+engines (`tutor/test_ocr.py`); it does not measure recognition quality. The
+bridge uses Microsoft's [OcrEngine](https://learn.microsoft.com/en-us/uwp/api/windows.media.ocr.ocrengine)
+and [BitmapDecoder](https://learn.microsoft.com/en-us/uwp/api/windows.graphics.imaging.bitmapdecoder)
+APIs.
+
 ### The tutor note
 
 Every line comes from a template in `tutor.json` (`note`). Frontmatter
