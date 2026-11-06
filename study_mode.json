@@ -67,6 +67,7 @@
     "off": "No study session is running.",
     "paused_state": "Study session paused: {left} min left of the {block}, round {round}. Resume to continue.",
     "running_state": "Study session running: {doing}, {left} min left of this {block}, round {round}; {next} at {time}.",
+    "round_offer": "{state} {offer}",
     "no_clock": "Study mode isn't available in this process (no tray running), so nothing happened. Tell him plainly.",
     "no_clock_status": "No study session is running (study mode isn't set up in this process).",
     "already_running": "Already running -- {state}",

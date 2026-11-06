@@ -32,6 +32,21 @@ from tutor import anki, cards, conf, don, sources  # noqa: E402
 from tutor import __main__ as cli  # noqa: E402
 from tutor.test_tutor import EM, HERE, MODULES, SS, Fixture  # noqa: E402
 
+_KINDS = None
+
+
+def setUpModule():
+    """These tests pin the core kinds; the style-matched tutorial kind has its own tests (test_tutorial_kind.py)."""
+    global _KINDS
+    _KINDS = copy.deepcopy(conf.CONFIG["cards"]["kinds"])
+    for k in [k for k, v in _KINDS.items() if v.get("style")]:
+        del conf.CONFIG["cards"]["kinds"][k]
+
+
+def tearDownModule():
+    conf.CONFIG["cards"]["kinds"].clear()
+    conf.CONFIG["cards"]["kinds"].update(_KINDS)
+
 CFG = conf.CONFIG
 
 
@@ -114,6 +129,9 @@ class FakeAnki:
         if action == "createModel":
             self.models[p["modelName"]] = p
             return {}
+        if action in ("updateModelTemplates", "updateModelStyling"):
+            assert p["model"]["name"] in self.models
+            return None
         if action in ("findNotes", "findCards"):
             hits = [nid for nid, n in self.notes.items()
                     if f'"deck:{n["deckName"]}"' in p["query"] and f'"note:{n["modelName"]}"' in p["query"]]

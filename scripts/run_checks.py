@@ -32,7 +32,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 ROOT = Path(__file__).resolve().parents[1]
 SANDBOX_SITE = ROOT / "scripts" / "checks_sandbox"
-TIMEOUT = 150  # seconds per module; the slowest takes ~30s alone
+# seconds per module. orchestra/test_runner.py takes ~3 min alone on a laptop on battery
+# (5 Nov 2026), so 150 s killed it there while CI passed; RUN_CHECKS_TIMEOUT_S overrides.
+TIMEOUT = int(os.environ.get("RUN_CHECKS_TIMEOUT_S") or 420)
 SKIP_DIRS = {".git", ".venv", "venv", "__pycache__", "node_modules", "models", "memory"}
 MARKER = re.compile(r"^#\s*checks:\s*(slow|quarantine)\b[ \t]*(.*)$", re.M)
 HOME = Path(os.path.expanduser("~"))

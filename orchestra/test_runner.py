@@ -486,6 +486,12 @@ class RunnerTest(unittest.TestCase):
             old = os.environ.get(k)
             os.environ[k] = str(v)
             self.addCleanup(lambda k=k, old=old: os.environ.__setitem__(k, old) if old is not None else os.environ.pop(k, None))
+        # a real copilot under this machine's home folder (~/AppData/Roaming/npm) must not stand in
+        # for the shim the test planted: point ~ at the temp folder too
+        from unittest import mock
+        hide = mock.patch.dict(os.environ, {"USERPROFILE": str(self.tmp), "HOME": str(self.tmp)})
+        hide.start()
+        self.addCleanup(hide.stop)
         argv = self.R.lanes()["copilot"]
         self.assertEqual(Path(argv[0]), npm / "copilot.cmd", "the Claude-app npm shim is found off PATH")
         self.assertIn("--allow-all-tools", argv)

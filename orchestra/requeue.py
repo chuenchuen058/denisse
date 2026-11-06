@@ -13,9 +13,11 @@ merge with a lane runner saving at the same time). Refuses while the task is run
 --merge-only is for a task whose work is done on branch review/<slug> but never reached
 master (merge conflict, integration reject). It takes the task from .review/parked/ or,
 failing that, the newest .review/archive/<day>/ (archive copies stay where they are), sets
-`Priority: urgent`, and inserts a paragraph before `## Gate` telling the session to merge
-that branch onto its fresh one, keep both sides, re-run the gate and report PASS. Exits 2
-if the branch doesn't exist. Running it again while that task is still queued is a no-op.
+`Priority: urgent`, and inserts a paragraph (config: merge_only_mark, merge_only_paragraph)
+before `## Gate`. The runner sees that mark and merges the existing branch itself (gate,
+reviewer, combined-tree integration) without running a lane; a missing branch or a merge
+that can't run parks the task. Exits 2 if the branch doesn't exist. Running it again while
+that task is still queued is a no-op.
 """
 from __future__ import annotations
 
@@ -38,7 +40,7 @@ class NoBranchError(RequeueError):
     """--merge-only on a slug with no review/<slug> branch: exit 2, nothing to merge."""
 
 
-MERGE_MARK = "Merge-only re-queue:"
+MERGE_MARK = R.C["merge_only_mark"]
 
 
 def running_slugs() -> dict[str, str]:
@@ -137,10 +139,8 @@ def find_source(slug: str) -> Path | None:
 
 
 def merge_paragraph(branch: str, when: str, note: str | None) -> str:
-    return (f"{MERGE_MARK} the work for this task is already on branch `{branch}` but never reached "
-            f"master. On your fresh branch, merge `{branch}`, resolve any conflicts keeping both sides, "
-            f"re-run the gate below, and report PASS if it passes. Re-queued {when}"
-            + (f": {note}" if note else "") + ".")
+    return R.C["merge_only_paragraph"].format(mark=MERGE_MARK, branch=branch, when=when,
+                                              note=f": {note}" if note else "")
 
 
 def merge_only_text(text: str, branch: str, when: str, note: str | None) -> str:
@@ -154,6 +154,7 @@ def merge_only_text(text: str, branch: str, when: str, note: str | None) -> str:
     else:
         at = next((i + 1 for i, l in enumerate(lines) if l.startswith("# ")), 0)
         lines.insert(at, "Priority: urgent")
+    lines = [l for l in lines if not l.startswith(MERGE_MARK)]  # parked by a merge-only run: one paragraph
     body = "\n".join(lines)
     para = merge_paragraph(branch, when, note)
     m = re.search(r"^##\s*Gate\s*$", body, re.M | re.I)
@@ -175,8 +176,8 @@ def requeue_merge_only(slug: str, note: str | None = None) -> str:
                             f"use a plain requeue to redo the work")
     target = R.QUEUE / f"{slug}.md"
     if target.exists():
-        if f"{MERGE_MARK} the work for this task is already on branch `{branch}`" \
-                in target.read_text(encoding="utf-8"):
+        if any(l.startswith(MERGE_MARK) and f"`{branch}`" in l
+               for l in target.read_text(encoding="utf-8").splitlines()):
             _reset_state(slug)  # idempotent: same queue file, attempts zeroed again
             why = R.why_not_runnable(R.parse_task(target), R.load_state())
             return f"already queued merge-only: {target.relative_to(R.REPO)}\nnow: {why or 'runnable'}"

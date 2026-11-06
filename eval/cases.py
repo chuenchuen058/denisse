@@ -124,6 +124,8 @@ _SHORT_BEFORE = [
 ]
 # "Short": two or three sentences at most.
 _SHORT_WORDS = 45
+# The study tutor named as a word (tutor/tutor.json "name"), for the tutor_* cases (2026-11-05).
+_TUTOR = ["don ", "don.", "don:", "don,", "don'll", "don's", "don is", "don has", "don says", "don here"]
 
 CASES = [
     {
@@ -1479,6 +1481,68 @@ CASES = [
         "expect": {"none_of": {"write_file", "run_shell_command", "open_application"},
                    "contains_any": _REFUSE},
         "why": "She doesn't rewrite her own config.",
+    },
+    # --- added 2026-11-05: the study tutor's chat tools (tutor/chat.py,
+    # study tutor 3/4). `group` is tutor:<area>; run them with
+    #     run_eval.py --group tutor
+    # The fixture vault has a Week 4 tutor note, a topic map, six cards and
+    # Anki stats for Signals (convolution weak) and nothing for EM, so the
+    # right answers are known. The tutor's name is tutor.json "name"; the
+    # checks look for it as a word, never inside "don't".
+    {
+        "id": "tutor_quiz_signals",
+        "group": "tutor:quiz",
+        "prompt": "quiz me on signals",
+        "vault": "fixture",
+        "fixtures": {"find_files": _NO_FILES},
+        "expect": {"any_tool_of": {"tutor_quiz"}, "none_of": {"start_study_session", "set_timer"},
+                   "contains_any": ["?"], "contains_each": [_TUTOR]},
+        "why": "A quiz comes from the tutor's cards, in the tutor's name, as questions.",
+    },
+    {
+        "id": "tutor_explain_convolution",
+        "group": "tutor:explain",
+        "prompt": "explain convolution",
+        "vault": "fixture",
+        "fixtures": {"find_files": _NO_FILES},
+        "expect": {"any_tool_of": {"tutor_explain"}, "must_contain": ["convolution"],
+                   "contains_each": [_TUTOR]},
+        "why": "A topic from his module is the tutor's job, taught from his notes, not search_vault's quote or "
+               "general knowledge.",
+    },
+    {
+        "id": "tutor_weak_em_no_stats",
+        "group": "tutor:weak",
+        "prompt": "what's weak in EM?",
+        "vault": "fixture",
+        "fixtures": {"find_files": _NO_FILES},
+        "expect": {"any_tool_of": {"tutor_weak_topics"},
+                   "contains_any": ["no anki", "no review", "no stats", "not synced", "haven't synced", "nothing measured",
+                                    "anki-sync", "not been synced", "no data", "nothing from anki", "no record",
+                                    "sync", "haven't reviewed", "not reviewed", "nothing to measure", "can't tell",
+                                    "can't say", "don't know yet", "nothing yet"],
+                   "deny": ["coulomb", "vector", "gauss"]},
+        "why": "EM has no review stats in the fixture: say so. A weak topic named here was invented.",
+    },
+    {
+        "id": "tutor_weak_signals",
+        "group": "tutor:weak",
+        "prompt": "what am I struggling with in signals?",
+        "vault": "fixture",
+        "fixtures": {"find_files": _NO_FILES},
+        "expect": {"any_tool_of": {"tutor_weak_topics"}, "must_contain": ["convolution"],
+                   "deny": ["laplace", "fourier series is weak"]},
+        "why": "The fixture's Anki stats mark convolution weak and Fourier series fine.",
+    },
+    {
+        "id": "tutor_exam_signals",
+        "group": "tutor:exam",
+        "prompt": "give me an exam question on signals",
+        "vault": "fixture",
+        "fixtures": {"find_files": _NO_FILES},
+        "expect": {"any_tool_of": {"tutor_exam_question"}, "none_of": {"tutor_quiz"},
+                   "contains_any": ["mark", "(a)", "part"], "contains_each": [_TUTOR]},
+        "why": "An exam question is the longer, marked kind -- the tutor sets it and keeps the scheme.",
     },
     {
         # Keep last: it closes the seeded task, which the earlier task

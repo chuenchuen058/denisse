@@ -158,6 +158,7 @@ _STUDY_ON, _STUDY_OFF, _STUDY_OFF_IF_ACTIVE = _patterns()
 
 _CURRENT = None  # the one StudyMode in this process, so is_active() is real
 _dispatch = None  # tray.py: run a callable on the Tk thread and return its result
+_round_end = None  # tray.py: fn(round_no) -> a line to offer when a study block ends ("" for none)
 
 
 def set_dispatcher(fn) -> None:
@@ -166,6 +167,24 @@ def set_dispatcher(fn) -> None:
     returns. None (the default, the eval, the CLI) calls directly."""
     global _dispatch
     _dispatch = fn
+
+
+def set_round_end(fn) -> None:
+    """What to offer when a study block ends and the rest starts: `fn(round_no)`
+    returns a line (the study tutor's short check, tools.tutor_round_offer) or
+    "". It goes into the clock's state line for the model and the status tool,
+    so the offer is made in chat; the bubble is unchanged. None: no offer."""
+    global _round_end
+    _round_end = fn
+
+
+def _offer(round_no: int) -> str:
+    if _round_end is None:
+        return ""
+    try:
+        return (_round_end(round_no) or "").strip()
+    except Exception:  # noqa: BLE001 -- the clock must never fail on the tutor's account
+        return ""
 
 
 def _on_clock(fn):
@@ -418,6 +437,7 @@ class StudyMode:
         self.ends_at = None
         self.round_no = 0
         self.paused_left = None  # seconds left in the phase while paused, else None
+        self.offer = ""  # the end-of-round line (set_round_end) while resting, else ""
         self._job = None
         # One StudyMode per process (tray.py builds it once). Registering it
         # here is what lets match_command answer "is it running?" without the
@@ -462,6 +482,7 @@ class StudyMode:
     def stop(self):
         self.phase = self.ends_at = None
         self.paused_left = None
+        self.offer = ""
         if self.badge is not None:
             self.badge.close()
             self.badge = None
@@ -518,13 +539,18 @@ class StudyMode:
         ph = _ph(self.phase)
         if self.paused:
             return _w("paused_state", left=self.minutes_left(), block=ph["block"], round=self.round_no)
-        return _w("running_state", doing=ph["doing"], left=self.minutes_left(), block=ph["block"],
-                  round=self.round_no, next=ph["next"], time=_clock(self.ends_at))
+        state = _w("running_state", doing=ph["doing"], left=self.minutes_left(), block=ph["block"],
+                   round=self.round_no, next=ph["next"], time=_clock(self.ends_at))
+        if self.offer and self.phase == "rest":
+            state = _w("round_offer", state=state, offer=self.offer)
+        return state
 
     def _enter(self, phase):
         self.phase = phase
         if phase == "study":
             self.round_no += 1
+        # A block just ended: the tutor may offer a short check for the rest.
+        self.offer = _offer(self.round_no) if phase == "rest" else ""
         self.ends_at = datetime.now() + timedelta(minutes=_minutes(phase))
         _chime()
         self.show(phase, self.ends_at, self.round_no)

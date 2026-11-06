@@ -26,7 +26,7 @@ import string
 import urllib.parse
 import urllib.request
 
-from . import cards, conf, don, ingest
+from . import cards, conf, don, ingest, mathfmt
 from .conf import CONFIG, Module, Paths
 
 _A = CONFIG["anki"]
@@ -90,7 +90,8 @@ def fields(paths: Paths, card: dict) -> dict:
     stem = card.get("source_name") or os.path.splitext(card["source"].split("/")[-1])[0]
     source = _A["source_html"].format(vault=urllib.parse.quote(os.path.basename(os.path.normpath(paths.vault))),
                                       file=urllib.parse.quote(card["source"]), stem=html.escape(stem))
-    values = {"front": _html(card["front"]), "back": _html(card["back"]), "source": source,
+    values = {"front": _html(mathfmt.normalise(card["front"], _A["math_target"])),
+              "back": _html(mathfmt.normalise(card["back"], _A["math_target"])), "source": source,
               "topic": html.escape(card.get("topic") or ""), "id": card["id"]}
     return {_A["field_of"][k]: v for k, v in values.items()}
 
@@ -142,6 +143,11 @@ def ensure(client, module: Module) -> None:
     if note_type() not in (client("model_names") or []):
         client("create_model", modelName=note_type(), inOrderFields=_A["fields"], css=_A["css"],
                isCloze=False, cardTemplates=_A["templates"])
+        return
+    # an existing note type gets the current look and templates (typed answer, maths), so old decks keep up
+    client("update_templates", model={"name": note_type(), "templates": {
+        t["Name"]: {k: v for k, v in t.items() if k != "Name"} for t in _A["templates"]}})
+    client("update_styling", model={"name": note_type(), "css": _A["css"]})
 
 
 def push(paths: Paths, client, module: Module, deck_cards: list) -> dict:

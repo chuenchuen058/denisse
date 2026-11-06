@@ -443,8 +443,23 @@ class _FileLock:
 def _merge_into(fresh: dict, state: dict, base: dict) -> dict:
     """Apply what this process changed (state vs base) onto the state another runner saved."""
     for slug, ts in state["tasks"].items():
-        if base["tasks"].get(slug) != ts:
+        bts = base["tasks"].get(slug)
+        if bts == ts:
+            continue
+        fts = fresh["tasks"].get(slug)
+        if fts is None or fts == bts:
             fresh["tasks"][slug] = ts
+            continue
+        # Both processes changed this task since we loaded (one finished the lane, the other
+        # reconciled it, say). Ours wins field by field, but the history entries the other one
+        # appended are kept: losing one left days[] charged for a run history no longer showed.
+        b_hist, ours, theirs = (bts or {}).get("history", []), ts.get("history", []), fts.get("history", [])
+        if len(ours) < len(b_hist) or theirs[:len(b_hist)] != b_hist[:len(theirs)]:
+            fresh["tasks"][slug] = ts  # history was rewritten, not appended to: nothing safe to splice
+            continue
+        extra = [e for e in theirs[len(b_hist):] if e not in ours[len(b_hist):]]
+        new = sorted(ours[len(b_hist):] + extra, key=lambda e: str(e.get("end", "")))
+        fresh["tasks"][slug] = {**ts, "history": ours[:len(b_hist)] + new}
     for k, v in state["done"].items():
         if base["done"].get(k) != v:
             fresh["done"][k] = v
@@ -948,20 +963,44 @@ def link_venv(wt: Path) -> None:
         os.symlink(src, dst, target_is_directory=True)
 
 
+def keep_unmerged(branch: str, slug: str, why: str) -> str | None:
+    """Before `branch` is deleted or reset: if it has commits not on master, point a ref under
+    C["keep_ref_prefix"] at its tip and log it. Returns that ref, or None (no branch, nothing
+    unmerged). Raises if the ref can't be written, so the caller never deletes the commits.
+    Twice in the week of 2 Nov 2026 a merge-only requeue fell into a fresh worktree whose
+    `branch -D` threw away reviewed, unmerged work (time-tasks-2 came back via git fsck)."""
+    if not branch or git("rev-parse", "--verify", "--quiet", f"refs/heads/{branch}", check=False).returncode:
+        return None
+    r = git("rev-list", "--count", f"HEAD..refs/heads/{branch}", check=False)
+    count = r.stdout.strip() if r.returncode == 0 else "?"  # can't tell: keep it anyway
+    if count == "0":
+        return None
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    ref, n = f"{C['keep_ref_prefix']}{slug}-{stamp}", 2
+    while git("rev-parse", "--verify", "--quiet", ref, check=False).returncode == 0:
+        ref, n = f"{C['keep_ref_prefix']}{slug}-{stamp}-{n}", n + 1
+    git("update-ref", ref, f"refs/heads/{branch}")
+    log(C["keep_ref_log"].format(branch=branch, count=count, ref=ref, why=why))
+    return ref
+
+
 def remove_worktree(wt: Path, branch: str, delete_branch: bool) -> None:
     unlink_link(wt / ".venv")  # first, so nothing can recurse into the real venv
     git("worktree", "remove", "--force", str(wt), check=False)
     if delete_branch:
+        keep_unmerged(branch, wt.name, "deleting the branch")
         git("branch", "-D", branch, check=False)
 
 
 def fresh_worktree(task: Task) -> tuple[Path, str]:
-    """Always a clean start: a retry must not build on the failed attempt's mess."""
+    """Always a clean start: a retry must not build on the failed attempt's mess. Commits on the
+    old branch that aren't on master are kept under C["keep_ref_prefix"] first, never deleted."""
     branch = f"review/{task.slug}"
     wt = WORKTREES / task.slug
     if wt.exists():
         remove_worktree(wt, branch, delete_branch=False)
     git("worktree", "prune", check=False)
+    keep_unmerged(branch, task.slug, "a fresh worktree")
     git("branch", "-D", branch, check=False)
     WORKTREES.mkdir(parents=True, exist_ok=True)
     git("worktree", "add", "-b", branch, str(wt), "HEAD")
@@ -1708,9 +1747,10 @@ def indent(text: str) -> str:
 
 
 def _after_pass(task: Task, state: dict, ts: dict, entry: dict, wt: Path, branch: str, report: Path,
-                stray: list[str], hooks_loaded: bool, progress: dict) -> str:
+                stray: list[str], hooks_loaded: bool, progress: dict, park_unmerged: bool = False) -> str:
     """Gate re-run, reviewer, combined-tree integration, archive. `progress["stage"]` names the
-    step under way, for the crash log if one of them raises."""
+    step under way, for the crash log if one of them raises. `park_unmerged` (a merge-only run):
+    a merge that needs doing by hand parks the task instead of archiving it."""
     problems = []
     if stray:
         problems.append(f"files changed in the main checkout during the run: {', '.join(stray)}")
@@ -1791,6 +1831,10 @@ def _after_pass(task: Task, state: dict, ts: dict, entry: dict, wt: Path, branch
         ts.pop("merge", None)  # the park reason already says it; STATE NOW would list it twice
         park(task, f"integration: {merge[len('parked:'):].strip()}. Master untouched; branch {branch} kept.", report)
         return "INTEGRATION-REJECTED"
+    if park_unmerged and merge not in ("merged", "no commits"):
+        ts.pop("merge", None)
+        park(task, C["merge_only_park"].format(why=f"integration: {merge}", branch=branch), report)
+        return "INTEGRATION-REJECTED"
     progress["stage"] = "archive"
     ts["merge"] = merge
     state["done"][task.digest] = now().isoformat()
@@ -1800,6 +1844,66 @@ def _after_pass(task: Task, state: dict, ts: dict, entry: dict, wt: Path, branch
     if merge in ("merged", "no commits"):
         remove_worktree(wt, branch, delete_branch=True)
     return "PASS"
+
+
+def is_merge_only(task: Task) -> bool:
+    """A requeue.py --merge-only task: its body has a line starting with C["merge_only_mark"]."""
+    mark = C["merge_only_mark"]
+    try:
+        text = task.path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return bool(mark) and any(l.lstrip().startswith(mark) for l in text.splitlines())
+
+
+def merge_only(task: Task, state: dict, ts: dict) -> str:
+    """Merge the existing review/<slug> branch -- gate, reviewer, combined-tree integration --
+    with no lane run. The branch missing, or a merge that can't run, parks the task: it never
+    falls through to a fresh worktree, whose new branch would replace the one to be merged."""
+    branch = f"review/{task.slug}"
+    report = REPORTS / f"{task.slug}.md"
+    entry = {"end": now().isoformat(), "result": "PASS", "seconds": 0, "weight": task.weight,
+             "note": "merge-only", "premise": "not stated", "spent": "none", "denied": [],
+             "main_checkout_changed": [], "hooks_loaded": True,
+             **provenance_fields("runner", None, {})}
+
+    def stop(why: str) -> str:
+        entry.update(result="MERGE_ONLY_PARKED", note=why)
+        ts["history"].append(entry)
+        ts.update(last_end=entry["end"], last_result="MERGE_ONLY_PARKED")
+        park(task, C["merge_only_park"].format(why=why, branch=branch), report if report.exists() else None)
+        return "MERGE-ONLY-PARKED"
+
+    log(f"MERGE-ONLY {task.slug}: merging the existing {branch}; no lane run")
+    if git("rev-parse", "--verify", "--quiet", f"refs/heads/{branch}", check=False).returncode:
+        return stop(f"branch {branch} does not exist, so there is nothing to merge; "
+                    f"a plain requeue.py {task.slug} redoes the work")
+    wt = WORKTREES / task.slug
+    try:
+        if wt.exists():
+            remove_worktree(wt, branch, delete_branch=False)
+        git("worktree", "prune", check=False)
+        WORKTREES.mkdir(parents=True, exist_ok=True)
+        git("worktree", "add", str(wt), branch)  # the branch as it is: no -b, nothing reset
+        link_venv(wt)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+        return stop(f"could not check out {branch}: {(getattr(e, 'stderr', '') or str(e)).strip()[:200]}")
+    REPORTS.mkdir(parents=True, exist_ok=True)
+    report.write_text(C["merge_only_report"].format(branch=branch), encoding="utf-8")
+    ts["history"].append(entry)
+    ts.update(last_end=entry["end"], last_result="PASS")
+    progress = {"stage": "gate"}
+    try:
+        return _after_pass(task, state, ts, entry, wt, branch, report, [], True, progress, park_unmerged=True)
+    except Exception as e:
+        stage = progress["stage"]
+        log(f"RUNNER CRASHED {task.slug}: {type(e).__name__} during merge-only {stage}: {e}\n"
+            + indent(traceback.format_exc()))
+        entry["crash"] = f"{stage}: {e!r}"
+        ts["last_result"] = "RUNNER_CRASH"
+        park(task, C["merge_only_park"].format(why=f"the runner crashed during {stage} ({e!r}; traceback in "
+                                                   f"runner.log)", branch=branch), report)
+        return "RUNNER-CRASHED"
 
 
 def _limited(task: Task, state: dict, ts: dict, hit: str, seconds: int, spent: str,
@@ -2201,6 +2305,11 @@ def _tick(dry_run: bool = False) -> str:
         if task.fields.get("lane-from"):
             fb = (f" (fallback: lane {task.fields['lane-from']} limited until "
                   f"{lane_limited(state, task.fields['lane-from']):%H:%M})")
+        if is_merge_only(task):  # before fresh_worktree: that would replace the branch to merge
+            result = merge_only(task, state, ts)
+            save_state(state)
+            write_vault_note(task, ts, result)
+            return result
         log(f"START {task.slug} lane={task.lane}{fb} weight={task.weight} timeout={timeout}s attempt={ts['attempts']}")
         try:
             wt, branch = fresh_worktree(task)

@@ -22,6 +22,7 @@ _M = CONFIG["model"]
 _PR = CONFIG["prompt"]
 _L = CONFIG["limits"]
 _FENCE = re.compile(_PR["fence"])
+_BAD_ESCAPE = re.compile(_PR["bad_escape"])
 
 EMPTY = {"outcomes": [], "methods": [], "examples": [], "check": [], "topics": []}
 
@@ -90,20 +91,60 @@ def ollama_call(system: str, user: str) -> str:
     return content or ""
 
 
+def _close(text: str) -> str:
+    """The closers a reply that stopped early left off: a lesson or an exam
+    question (2026-11-05, seen live) ended on `}]` with the outer object's
+    `}` missing. Brackets opened outside strings are closed in reverse."""
+    stack, in_str, esc = [], False, False
+    for ch in text:
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        elif ch == '"':
+            in_str = True
+        elif ch in "{[":
+            stack.append("}" if ch == "{" else "]")
+        elif ch in "}]" and stack and stack[-1] == ch:
+            stack.pop()
+    return text + ("\"" if in_str else "") + "".join(reversed(stack))
+
+
+def _loads(text: str):
+    """json.loads, then once more with the model's LaTeX backslashes
+    (`\\pi`, `\\frac`) escaped -- a backslash that starts no JSON escape is
+    prompt.bad_escape -- and the closers it left off put back."""
+    try:
+        return json.loads(text)
+    except ValueError:
+        pass
+    fixed = _BAD_ESCAPE.sub(r"\\\\", text)
+    for candidate in (fixed, _close(fixed)):
+        try:
+            return json.loads(candidate)
+        except ValueError:
+            continue
+    return None
+
+
 def parse(reply: str) -> dict | None:
-    """The JSON object in a reply, fences and prose around it tolerated.
-    None when there isn't one."""
+    """The JSON object in a reply, fences and prose around it tolerated,
+    LaTeX inside it and a missing closing brace repaired. None when there
+    isn't one."""
     text = (reply or "").strip()
     m = _FENCE.search(text)
     if m:
         text = m.group(1).strip()
     start, end = text.find(_PR["json_start"]), text.rfind(_PR["json_end"])
-    if start == -1 or end == -1 or end < start:
+    if start == -1:
         return None
-    try:
-        data = json.loads(text[start:end + 1])
-    except ValueError:
-        return None
+    end = len(text) - 1 if end < start else end
+    data = _loads(text[start:end + 1])
+    if data is None and end + 1 < len(text):
+        data = _loads(text[start:])
     return data if isinstance(data, dict) else None
 
 

@@ -1,0 +1,9 @@
+{
+  "module": "Signals and Systems",
+  "code": "5CCYB020",
+  "updated": "2026-11-04",
+  "topics": [
+    {"name": "Fourier series", "lectures": [4], "prerequisites": ["complex exponentials"], "coursework": []},
+    {"name": "Convolution", "lectures": [4], "prerequisites": ["integration", "LTI systems"], "coursework": []}
+  ]
+}

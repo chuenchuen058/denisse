@@ -51,6 +51,11 @@ on its own. `.venv` in this worktree is a link to the real one.
 8. Say what the gate does NOT cover, on the GATE line.
 
 ## The report
+Write it before your turn ends: when you stop, the run is over, and nothing
+will wake you for a background job or a notification. So never end a turn
+"waiting for" something; run checks in the foreground, and if one would take
+too long, say so under NOT DONE and write the report anyway.
+
 Write it to the second argument. First line exactly one of `RESULT: PASS`,
 `RESULT: PARTIAL`, `RESULT: FAIL`, then:
 

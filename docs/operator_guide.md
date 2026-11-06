@@ -90,7 +90,12 @@ Read `.review/parked/<slug>.why.txt` and the parked report first. A blind re-run
 PARTIAL or FAIL has never come back PASS; the note is how you change the outcome. Never
 edit `state.json` by hand. If the work is done on `review/<slug>` but never merged (conflict,
 integration reject), `requeue.py <slug> --merge-only [--note "..."]` takes it from parked or the
-newest archive, marks it urgent and tells the session to merge that branch and re-run the gate.
+newest archive and marks it urgent; the runner then merges that existing branch itself (gate,
+reviewer if risky, combined-tree integration) and runs no lane. A missing branch or a merge
+that can't run (conflict, dirty main checkout) parks it with the reason. Whenever the runner
+deletes or resets a `review/<slug>` branch that has commits not on master, it first saves them
+as `refs/keep/<slug>-<UTC time>` (config `keep_ref_prefix`) and logs `KEPT ...`; recover with
+`git branch <name> refs/keep/<slug>-<time>`.
 
 Pause, resume and stop (`orchestra/campaign.py`; the runner itself enforces these, and
 only `resume` undoes them — no tick, watchdog or logon clears a pause):

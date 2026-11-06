@@ -100,6 +100,12 @@ def _command(engine: str, prompt: str, outfile: str = "") -> tuple:
                 cmd += [spec["add_dir_flag"], d]
     if spec.get("stdin"):
         return cmd, (SYSTEM + CONFIG["stdin_separator"] + prompt).encode("utf-8")
+    # A prompt too long for one command line (WinError 206) goes on stdin; the rest of the argv stays.
+    limit = spec.get("stdin_over_chars")
+    if limit and len(prompt) > limit and "{prompt}" in spec["args"]:
+        at = spec["args"].index("{prompt}")
+        del cmd[1 + at]
+        return cmd, prompt.encode("utf-8")
     return cmd, None
 
 

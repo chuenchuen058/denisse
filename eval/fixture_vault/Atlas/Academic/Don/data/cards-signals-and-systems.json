@@ -1,0 +1,21 @@
+{
+  "module": "Signals and Systems",
+  "code": "5CCYB020",
+  "updated": "2026-11-04",
+  "sources": {
+    "Atlas/Academic/SEM 1 Modules/5CCYB020 Signals and Systems/Week 4/Signals and Systems Week 4 tutor.md": {
+      "hash": "fixture",
+      "kind": "tutor",
+      "week": 4,
+      "made": "2026-11-04",
+      "cards": [
+        {"id": "don-fixture0000000001", "kind": "recall", "front": "What is the formula for the Fourier coefficient c_k of a periodic signal?", "back": "c_k = (1/T) * integral over one period of x(t) e^{-j k w0 t} dt", "topic": "Fourier series", "source": "Atlas/Academic/SEM 1 Modules/5CCYB020 Signals and Systems/Week 4/Signals and Systems Week 4 tutor.md", "source_name": "Signals and Systems Week 4 tutor", "week": 4, "engine": "local"},
+        {"id": "don-fixture0000000002", "kind": "recall", "front": "State Parseval's theorem for a periodic signal.", "back": "The mean power (1/T) integral |x(t)|^2 dt equals the sum of |c_k|^2 over all k.", "topic": "Fourier series", "source": "Atlas/Academic/SEM 1 Modules/5CCYB020 Signals and Systems/Week 4/Signals and Systems Week 4 tutor.md", "source_name": "Signals and Systems Week 4 tutor", "week": 4, "engine": "local"},
+        {"id": "don-fixture0000000003", "kind": "method", "front": "A square wave is approximated by more and more harmonics. What happens to the overshoot at the jump?", "back": "It stays at about 9% of the jump (the Gibbs phenomenon); it gets narrower, not smaller.", "topic": "Fourier series", "source": "Atlas/Academic/SEM 1 Modules/5CCYB020 Signals and Systems/Week 4/Signals and Systems Week 4 tutor.md", "source_name": "Signals and Systems Week 4 tutor", "week": 4, "engine": "local"},
+        {"id": "don-fixture0000000004", "kind": "recall", "front": "Write the convolution integral for an LTI system with impulse response h(t).", "back": "y(t) = integral of x(tau) h(t - tau) dtau over all tau", "topic": "Convolution", "source": "Atlas/Academic/SEM 1 Modules/5CCYB020 Signals and Systems/Week 4/Signals and Systems Week 4 tutor.md", "source_name": "Signals and Systems Week 4 tutor", "week": 4, "engine": "local"},
+        {"id": "don-fixture0000000005", "kind": "method", "front": "What does convolution in the time domain become in the frequency domain?", "back": "Multiplication: X(w) H(w) (the convolution theorem).", "topic": "Convolution", "source": "Atlas/Academic/SEM 1 Modules/5CCYB020 Signals and Systems/Week 4/Signals and Systems Week 4 tutor.md", "source_name": "Signals and Systems Week 4 tutor", "week": 4, "engine": "local"},
+        {"id": "don-fixture0000000006", "kind": "problem", "front": "Convolve a rectangular pulse of width 1 with itself. What shape is the result, and how wide?", "back": "A triangle, of width 2: the overlap grows linearly then shrinks.", "topic": "Convolution", "source": "Atlas/Academic/SEM 1 Modules/5CCYB020 Signals and Systems/Week 4/Signals and Systems Week 4 tutor.md", "source_name": "Signals and Systems Week 4 tutor", "week": 4, "engine": "local"}
+      ]
+    }
+  }
+}

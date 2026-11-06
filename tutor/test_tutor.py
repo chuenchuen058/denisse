@@ -215,7 +215,12 @@ class MatchTests(Fixture):
         self.assertEqual(ingest.module_in("5CCYB020 week 6 handout", mods).title, "Signals and Systems")
         self.assertEqual(conf.find_module("signals", mods).title, "Signals and Systems")
         self.assertEqual(conf.find_module("Signals and Systems", mods).title, "Signals and Systems")
-        self.assertEqual(conf.find_module("em", mods), None)  # not a word of any title
+        # Part 3: the short forms he says -- the start of a one-word title, the initials of a longer one.
+        self.assertEqual(conf.find_module("em", mods).title, "Electromagnetism")
+        self.assertEqual(conf.find_module("EM", mods).title, "Electromagnetism")
+        self.assertEqual(conf.find_module("ss", mods).title, "Signals and Systems")
+        self.assertEqual(conf.find_module("comp", mods), None)  # not a word, an initial or a one-word start
+        self.assertEqual(conf.find_module("e", mods), None)  # too short to be a short form
         self.assertEqual(conf.find_module("", mods), None)
         self.assertEqual(conf.split_folder("5CCYB070 Computational Methods (26~27 SY)"),
                          ("5CCYB070", "Computational Methods"))

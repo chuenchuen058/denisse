@@ -177,8 +177,7 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual(text.count("Priority:"), 1)
         para = next(l for l in text.splitlines() if l.startswith(self.Q.MERGE_MARK))
         self.assertIn("`review/p1`", para)
-        self.assertIn("keeping both sides", para)
-        self.assertIn("report PASS", para)
+        self.assertTrue(self.R.is_merge_only(t), "the runner sees it as merge-only, so it runs no lane")
         if note:
             self.assertIn(note, para)
         self.assertLess(text.index(para), text.index("## Gate"), "paragraph goes before the gate")
