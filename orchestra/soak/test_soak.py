@@ -79,7 +79,16 @@ class ShortSoakTest(unittest.TestCase):
             self.assertGreaterEqual(s["lane_starts"], 4, report)
             self.assertGreaterEqual(s["ticks"], 10, report)
             self.assertEqual(set(f["name"] for f in findings), set(harness.INVARIANTS))
-            self.assertEqual(soak.queue_left() + s["parked"] + s["archived"], 8, report)
+            # Every one of the 8 tasks is still somewhere (queue, parked or archive). A PASS that needed
+            # a merge by hand also queues a <slug><suffix> follow-up (conflicts.py): that is the same
+            # task going round again, not a 9th one, so it counts as its original.
+            suffix = json.loads((HERE.parent / "config.json").read_text(encoding="utf-8")) \
+                .get("conflict_followup_suffix", "")
+            files = [*(soak.review / "queue").glob("*.md"), *(soak.review / "parked").glob("*.md"),
+                     *(soak.review / "archive").glob("*/*.md")]
+            stems = {p.stem for p in files if "." not in p.stem}  # task files, not x.report / x.why
+            originals = {st[:-len(suffix)] if suffix and st.endswith(suffix) else st for st in stems}
+            self.assertEqual(len(originals), 8, report + f"\ntask files: {sorted(stems)}")
         finally:
             soak.cleanup()
 
