@@ -5,6 +5,11 @@
   cards MODULE            make cards from every vault note of a module (changed notes only)
   anki-sync [MODULE]      write the Anki TSV per module; with AnkiConnect, add/update the
                           cards and read the review stats (weak topics) back
+  explain MODULE TOPIC    the tutor's lesson on a topic, from the vault (part 3; also a chat tool)
+  quiz MODULE [TOPIC]     a short check from the cards, weak topics first
+  weak MODULE             what the Anki stats say he keeps losing
+  exam MODULE [TOPIC]     an exam-style problem in the coursework / past-paper style
+  mark MODULE ANSWER      mark his answer to the open quiz or exam question
 
 Every command takes --vault PATH and --state DIR (the old private state
 folder, read until its files are moved into the vault). Every vault write is
@@ -19,6 +24,8 @@ import sys
 
 from . import anki, cards, conf, don, ingest, topics
 from .conf import CONFIG
+
+CHAT_COMMANDS = ("explain", "quiz", "weak", "exam", "mark")
 
 
 def _paths(a) -> conf.Paths:
@@ -41,7 +48,7 @@ def main(argv=None, anki_client=None, calls=None, learner_core=None, checks=None
     ap = argparse.ArgumentParser(prog="python -m tutor", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("ingest", "topics", "cards", "anki-sync"):
+    for name in ("ingest", "topics", "cards", "anki-sync") + CHAT_COMMANDS:
         s = sub.add_parser(name)
         s.add_argument("--vault", default=None)
         s.add_argument("--state", default=None)
@@ -51,12 +58,29 @@ def main(argv=None, anki_client=None, calls=None, learner_core=None, checks=None
             s.add_argument("module", nargs="?", default=None)
         else:
             s.add_argument("module")
+        if name in ("explain", "mark"):
+            s.add_argument("text", nargs="+")
+        elif name in ("quiz", "exam"):
+            s.add_argument("text", nargs="*")
     a = ap.parse_args(argv)
     try:
         sys.stdout.reconfigure(encoding="utf-8")
     except (AttributeError, ValueError):
         pass
     paths = _paths(a)
+    if a.cmd in CHAT_COMMANDS:
+        # The chat tools, from the command line: the same functions Denisse calls,
+        # a Claude job waited for rather than handed to the tray.
+        from . import chat
+        chat.PATHS, chat.BACKGROUND = paths, False
+        if calls:
+            chat.CALLS = calls
+        text = " ".join(getattr(a, "text", []) or [])
+        fn = {"explain": lambda: chat.explain(text, a.module), "quiz": lambda: chat.quiz(a.module, text),
+              "weak": lambda: chat.weak_topics(a.module), "exam": lambda: chat.exam_question(a.module, text),
+              "mark": lambda: chat.mark_answer(text, a.module)}[a.cmd]
+        print(fn())
+        return 0
     if a.cmd == "ingest":
         moved = [] if a.dry else don.migrate(paths)
         if moved:

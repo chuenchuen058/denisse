@@ -1,0 +1,13 @@
+{
+  "module": "Signals and Systems",
+  "code": "5CCYB020",
+  "deck": "Don::Signals and Systems",
+  "synced": "2026-11-04",
+  "cards": 6,
+  "reviewed": 6,
+  "topics": [
+    {"topic": "Convolution", "cards": 3, "reviewed": 3, "reviews": 9, "lapses": 4, "due": 2, "ease": 180, "weak": true, "score": 2.4, "weeks": [4]},
+    {"topic": "Fourier series", "cards": 3, "reviewed": 3, "reviews": 6, "lapses": 0, "due": 0, "ease": 260, "weak": false, "score": 0.0, "weeks": [4]}
+  ],
+  "weak": ["Convolution"]
+}

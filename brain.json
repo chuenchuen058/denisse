@@ -610,6 +610,98 @@
           ]
         },
         "enabled_env": "DENISSE_VAULT_SEARCH"
+      },
+      {
+        "name": "tutor_explain",
+        "_note": "The study tutor (tutor/, part 3, 2026-11-05). Its name is tutor.json 'name'; every result opens with it introducing itself, and tool_policy.json reply_must_mention keeps that in her reply. Hard topics and a local answer that fails its own check go to Claude in the background (delegate.py), so the result may be 'asked Claude; it will pop up'.",
+        "description": "Have the study tutor explain a topic from one of Chuen's university modules, step by step, from his own lecture notes and tutor notes -- 'explain convolution', 'teach me the Laplace transform', 'I don't get Gauss's law', 'go over the card I got wrong on impedance'. The result is the tutor's lesson plus one check question for him; put the lesson to him in the tutor's name and ask the check question, keeping the model answer back until he tries. If the result says the topic was sent to Claude, say that and that it will pop up. Not for general knowledge outside his modules, and not a search (search_vault quotes notes; this teaches).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "topic": {
+              "type": "string",
+              "description": "The topic in a few words, as he said it: 'convolution', 'Laplace transform', 'Gauss's law'."
+            },
+            "module": {
+              "type": "string",
+              "description": "The module, if he named one: its name, code or short form ('signals', 'EM', '5CCYB020'). Leave empty when he didn't; the tutor works it out or asks."
+            }
+          },
+          "required": [
+            "topic"
+          ]
+        }
+      },
+      {
+        "name": "tutor_quiz",
+        "description": "Quiz Chuen on a module from the study tutor's revision cards -- 'quiz me on signals', 'test me on EM', 'give me five questions on Fourier', or the end-of-round check study mode offers. Returns numbered questions, weakest topics first; the tutor keeps the answers. Put the questions to him in the tutor's name; when he answers, call tutor_mark_answer with what he wrote. If it says there are no cards yet, tell him how to make them (the result says).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "module": {
+              "type": "string",
+              "description": "The module: name, code or short form ('signals', 'EM'). Empty if he didn't say; the tutor asks."
+            },
+            "topic": {
+              "type": "string",
+              "description": "Narrow to one topic, if he named one ('Fourier'). Optional."
+            },
+            "count": {
+              "type": "integer",
+              "description": "How many questions, if he said. Optional; the tutor's default otherwise."
+            }
+          }
+        }
+      },
+      {
+        "name": "tutor_weak_topics",
+        "description": "What Chuen keeps getting wrong in a module, measured from his Anki reviews of the tutor's cards (lapses, ease, what is due) and the learner model -- 'what's weak in EM?', 'what should I revise for signals?', 'where am I struggling?'. Tell him the topics and which week's notes to revise, in the tutor's name. If it says there are no review stats yet, say exactly that; never guess what is weak.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "module": {
+              "type": "string",
+              "description": "The module: name, code or short form ('signals', 'EM'). Empty if he didn't say."
+            }
+          }
+        }
+      },
+      {
+        "name": "tutor_exam_question",
+        "description": "Set Chuen a longer exam-style problem on a module, in the style of his coursework and past papers, worth marks, with several parts -- 'give me an exam question', 'exam practice on signals', 'a past-paper style question on Laplace'. The tutor keeps the mark scheme. Give him the whole problem in the tutor's name; when he answers, call tutor_mark_answer with his whole answer. Takes a moment: it is written by the local model from his notes.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "module": {
+              "type": "string",
+              "description": "The module: name, code or short form. Empty if he didn't say."
+            },
+            "topic": {
+              "type": "string",
+              "description": "The topic to set it on, if he named one. Optional."
+            }
+          }
+        }
+      },
+      {
+        "name": "tutor_mark_answer",
+        "description": "Mark Chuen's answer to the question the study tutor last set him (a quiz or an exam-style problem) -- call it when he answers after a tutor_quiz or tutor_exam_question, or says 'mark this', 'here's my answer', 'check my working'. Quiz answers are marked against the cards straight away; an exam answer goes to Claude with the mark scheme and the result pops up later -- say so. Report the marks and the feedback on each step in the tutor's name. Pass his answer exactly as he wrote it.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "answer": {
+              "type": "string",
+              "description": "His answer, verbatim -- all of it, numbering kept."
+            },
+            "module": {
+              "type": "string",
+              "description": "The module, if he named one. Empty: the question set last."
+            }
+          },
+          "required": [
+            "answer"
+          ]
+        }
       }
     ]
   },

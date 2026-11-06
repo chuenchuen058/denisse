@@ -4,6 +4,8 @@
     python -m tutor topics <module>    print a module's topic map
     python -m tutor cards <module>     vault notes -> Anki cards (part 2, tutor/cards.py)
     python -m tutor anki-sync [module] cards -> Anki (TSV / AnkiConnect), review stats back
+    python -m tutor explain|quiz|weak|exam|mark ...   part 3 (tutor/chat.py): the same
+                                       functions Denisse's tutor_* chat tools call
 
 KEATS material arrives in a folder he downloads into (nothing here signs in
 to KEATS). Each lecture's text is read by the local model and written up as

@@ -120,17 +120,48 @@ def write_note(path: str, text: str, state: dict, say=print) -> str | None:
     return written
 
 
+def _module_notes(paths: Paths, module: Module) -> list:
+    """(path, link template key) for every Don note a module can have."""
+    from . import exam, teach  # part 3; imported here so don.py stays importable first
+    return [(progress_path(paths, module), "progress_link"), (cards_path(paths, module), "cards_link"),
+            (teach.lessons_path(paths, module), "lessons_link"), (exam.note_path(paths, module), "practice_link")]
+
+
 def _links(paths: Paths, module: Module, own: str) -> str:
     """Links from one of a module's Don notes to the others that exist."""
     out = []
     index = notes.index_path(module)
     if os.path.isfile(index):
         out.append(_D["index_link"].format(stem=_stem(index)))
-    for path, tpl in ((progress_path(paths, module), "progress_link"), (cards_path(paths, module), "cards_link")):
+    for path, tpl in _module_notes(paths, module):
         if path != own and os.path.isfile(path):
             out.append(_D[tpl].format(stem=_stem(path)))
     out.append(hub_link(paths))
     return CONFIG["note"]["link_sep"].join(out)
+
+
+def _practice_lines(paths: Paths, module: Module) -> list:
+    """The progress note's lessons-and-practice section (part 3)."""
+    from . import exam, teach
+    c = ctx(module)
+    lines = []
+    lessons = (load_json(paths, teach.sidecar(module)) or {}).get("lessons", [])
+    if lessons:
+        last = lessons[-1]
+        lines.append(_D["progress_lessons"].format(n=len(lessons), topic=last["topic"], date=last["date"], **c))
+    practice = load_json(paths, exam.sidecar(module)) or {}
+    exams = [h for h in practice.get("history", []) if h.get("kind") == exam.KIND_EXAM and h.get("total")]
+    if exams:
+        last = exams[-1]
+        mean = round(100 * sum(h["marks"] / h["total"] for h in exams) / len(exams))
+        lines.append(_D["progress_exams"].format(n=len(exams), mean=mean, marks=last["marks"], total=last["total"],
+                                                 title=last["title"], date=last["date"], **c))
+    quizzes = [h for h in practice.get("history", []) if h.get("kind") == exam.KIND_QUIZ]
+    if quizzes:
+        last = quizzes[-1]
+        lines.append(_D["progress_quizzes"].format(n=len(quizzes), right=last["right"], asked=last["asked"],
+                                                   answered=last.get("answered", last["asked"]), date=last["date"], **c))
+    return lines or [_D["progress_practice_none"].format(**c)]
 
 
 def render_progress(paths: Paths, module: Module, state: dict, today: dt.date) -> str:
@@ -188,12 +219,15 @@ def render_progress(paths: Paths, module: Module, state: dict, today: dt.date) -
             if week_links else ""))
     if not weak:
         lines.append(_D["progress_weak_none"])
+    lines += ["", _D["progress_practice_heading"], ""] + _practice_lines(paths, module)
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
 def has_data(paths: Paths, module: Module, state: dict) -> bool:
-    return bool(state["lectures"].get(module.slug)) or any(
-        os.path.exists(paths.readable(_D[k].format(slug=module.slug))) for k in ("card_file", "anki_file"))
+    from . import exam, teach
+    files = [_D[k].format(slug=module.slug) for k in ("card_file", "anki_file")]
+    files += [teach.sidecar(module), exam.sidecar(module)]
+    return bool(state["lectures"].get(module.slug)) or any(os.path.exists(paths.readable(f)) for f in files)
 
 
 def render_hub(paths: Paths, modules: list, today: dt.date) -> str:
@@ -205,8 +239,7 @@ def render_hub(paths: Paths, modules: list, today: dt.date) -> str:
         index = notes.index_path(module)
         if os.path.isfile(index):
             links.append(_D["index_link"].format(stem=_stem(index)))
-        for path, tpl in ((progress_path(paths, module), "progress_link"),
-                          (cards_path(paths, module), "cards_link")):
+        for path, tpl in _module_notes(paths, module):
             if os.path.isfile(path):
                 links.append(_D[tpl].format(stem=_stem(path)))
         if links:

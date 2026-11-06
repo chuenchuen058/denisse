@@ -157,8 +157,8 @@ vault, `memory/`, Ollama or the network, and runs under
 Chuen named the tutor **Don** (5 Nov 2026). The name is `tutor.json`
 `"name"`; nothing in `tutor/*.py` says it (`tutor/test_don.py` checks).
 Decks are `<name>::<module>`, the notes say Don wrote them, and commit
-messages start with the name. (The tutor has no chat tools yet, so no chat
-reply introduces itself; when one is added it takes the name from here.)
+messages start with the name. (Since part 3 the chat tools introduce
+themselves with it too.)
 
 ```
 python -m tutor cards <module>       cards from every vault note of a module
@@ -325,14 +325,151 @@ It checks:
 - the CLI and the vault contract;
 - that the tutor's name is not in the code.
 
+# Part 3: Don teaches, quizzes, sets exam questions and marks -- in chat
+
+Part 3 (5 Nov 2026) is Don as something Chuen talks to. Five tools in
+`tools.py` (`tutor_explain`, `tutor_quiz`, `tutor_weak_topics`,
+`tutor_exam_question`, `tutor_mark_answer`), described in `brain.json`,
+policed and routed by `tool_policy.json`, implemented in `tutor/chat.py` over
+`tutor/teach.py` (explaining) and `tutor/exam.py` (quizzes, exam problems,
+marking). The same functions run from the command line:
+
+```
+python -m tutor explain <module> <topic>    "explain convolution"
+python -m tutor quiz <module> [topic]       "quiz me on signals"
+python -m tutor weak <module>               "what's weak in EM?"
+python -m tutor exam <module> [topic]       "give me an exam question"
+python -m tutor mark <module> <answer...>   his answer to the open question
+```
+
+Every result opens with the tutor introducing itself (`chat.intro`,
+`"{tutor} here."`), so the model's reply can carry the name; when the reply
+leaves it out, `tool_policy.json`'s `reply_must_mention` / `fallback_reply`
+put that first sentence in front. For the quiz and the exam question the
+reply is **replaced** by the result instead (`must_mention_replaces`): on the
+first eval run the 8B model worked the problem itself rather than setting it,
+and a reply that isn't in the tutor's voice is a reply that didn't relay the
+question. What Chuen then sees is the questions verbatim -- the model-facing
+instructions in those two results sit after ` Tell him`, the brain's result
+cut marker, so they are cut off. The policy values are the name too
+(`tutor/test_teach.py` checks they agree with `tutor.json`); nothing in
+`tutor/*.py`, `tools.py` or `brain.json` says it.
+
+### Explain (`tutor/teach.py`)
+
+`teach.material` gathers what the vault holds on the topic: the topic map
+entry (which weeks lectured it), those weeks' tutor notes in full, then every
+other source note (`sources.collect`: tutor notes, then his own, capped at
+`teach.own_notes_max`) whose text names the topic -- all cut to
+`teach.material_share` of the model's chunk. No material means no model
+call: the tool says there is nothing in the vault about it, rather than
+teaching from general knowledge.
+
+The prompt (`teach.system` / `teach.user`) also carries how he learns: the
+learner model's current beliefs in `teach.learner_areas` (format, feedback,
+struggles), read through `learner/`'s API and never written here. The model
+answers JSON (`teach.schema`): a one-line summary, ordered steps, one check
+question with its model answer, and `confident`.
+
+Engines are `cards.engines` (local = Ollama, claude = `delegate.run`, his
+Claude plan through the CLI). The local model goes first unless the topic is
+**hard** (`teach.hard_topics`: Chuen's own list of topic words -- every word
+of an entry in the topic, or the reverse). A local answer must pass
+`teach.self_check` (enough steps of real length, a question, the model
+confident); one that fails goes to the fallback engine. Claude runs **in the
+background** (`chat.BACKGROUND`): the tool returns at once saying so, with
+the local take meanwhile, and the finished lesson is handed to
+`delegate.on_done` -- the tray's hook for a finished Claude job -- so it pops
+up like any other hand-off. With `delegate.DRY_RUN` (the eval) nothing is
+handed off and the tool says so.
+
+Each lesson is recorded in the Don area: `data/lessons-<slug>.json` and `Don -
+<module> lessons.md` (newest first, each with its sources as vault links and
+the check question), the progress note gets a *Lessons and practice* section,
+and every write is committed through `vault_git.commit_owned` (`git.messages
+.teach`). Never over a note he edited (the same rule as every Don note).
+
+### Quiz, weak topics (`tutor/exam.py`, `chat.py`)
+
+- **`tutor_quiz`**: `quiz.questions` cards (5, also the end-of-round check),
+  weak topics first by the Anki stats, then due, then the rest
+  (`quiz.order`), narrowed to a topic when he named one. The questions go to
+  the model; the answers stay in the practice sidecar as the **open item**.
+  No cards yet: the tool says how to make them.
+- **End of a study block**: `study_mode.set_round_end(fn)` (tray wires it to
+  `tools.tutor_round_offer`). When a block ends and the rest starts, the
+  clock's state line -- what the model is told and what the status tool says
+  -- carries `quiz.offer`: round done, Don can give a 5-question check. Only
+  when some module has cards; a failing hook never touches the clock. The
+  bubble is unchanged.
+- **`tutor_weak_topics`**: `anki-<slug>.json`'s weak topics with lapses,
+  reviewed count and the weeks to revise, plus the learner model's
+  `struggles` beliefs naming the module. No stats yet: said plainly, with
+  the command that gets them; nothing is guessed.
+
+### Exam practice and marking
+
+`tutor_exam_question` reads the module's coursework and past papers
+(`exam.paper_globs`, relative to the module folder; notes as text, PDFs and
+Office files through `extract.py`) as the **style** to copy, and the topic's
+material (or the latest tutor note when no topic was named) as the content.
+The engine (`exam.engine`, local by default) answers JSON: title, the problem
+with parts, total marks, and a mark scheme step by step. The scheme is kept
+in the open item; the problem goes to the model and into `Don - <module> exam
+practice.md` as *Open*.
+
+`tutor_mark_answer` marks the open item (the module named, else the one set
+last). A **quiz** is marked by `quiz.mark_engine` (local) against the card
+backs, question by question, unanswered ones listed. An **exam** answer goes
+to `exam.marking_engine` (Claude) with the mark scheme, in the background like
+a hard explanation: marks per step with a comment he can act on, and
+feedback on what to revise, popping up when done. Either way the result goes
+into the practice history, the practice note (the question, each step's
+marks, the feedback; quizzes as a score line) and the progress note.
+
+### Modules, short forms
+
+`conf.find_module` now takes the forms he says: a title's initials (`CAB`,
+`SS`) or, for a one-word title, letters picked in order from its start
+(`EM` for Electromagnetism) -- at least `modules.alias_min_chars` long, and
+no match when two modules fit. With no module named, a topic that only one
+module's topic map or cards know picks that module; one module with any data
+is taken; otherwise the tool asks which.
+
+### Config
+
+| Key | What it holds |
+|---|---|
+| `teach.*` | Hard topics, learner areas, material caps, the prompts and schema, the self-check, the lessons note templates. |
+| `quiz.*` | Count, order, the practice sidecar, the marking prompt, the end-of-round offer. |
+| `exam.*` | Paper globs, style caps, engines, the setting and marking prompts and schemas, the practice note templates. |
+| `chat.*` | Every sentence the tools return, `intro` first. |
+| `don.progress_practice_*`, `don.lessons_link`, `don.practice_link` | The progress note's practice section and the links between Don's notes. |
+| `git.messages.teach`, `git.messages.practice` | The vault commit messages. |
+
+### Tests and eval
+
+`tutor/test_teach.py` (on `test_don`'s fixture: ingest, cards, a fake
+delegate module, the learner store in the fixture vault) checks the material
+gathering, the local lesson and its records, the hard-topic and failed-check
+hand-offs (and that they go through `delegate.run` when no call is injected),
+the dry run, the honest no-material and no-JSON cases, module resolution and
+short forms, the quiz order and marking, the round-end offer reaching the
+clock, weak topics with and without stats, exam questions in coursework style
+and their marking (inline and through the fake delegate), the registry,
+policy, router and the name net in the brain, and the CLI. The vault contract
+passes on the result.
+
+`eval/cases.py` has five `tutor:*` cases (`run_eval.py --group tutor`): a
+quiz, an explanation, weak topics with and without stats, an exam question.
+The fixture vault carries a Week 4 tutor note, a topic map, six cards and
+Anki stats for Signals (convolution weak), nothing for EM; a case gets a
+scratch copy of it, so the tutor's writes never touch the checked-in fixture.
+
 ## Not built yet
 
-- **Teaching.** Reads the topic map and the tutor notes, asks the learner
-  model how he learns, explains a topic with the local model, and hands the
-  hard ones to Claude through `delegate.py`. Hooks: `topics.load(paths,
-  module)`, the `## Topics` / `## Key methods` sections of each note, and
-  `sources.collect` for his own notes.
-- **Progress and tutoring.** Reads `anki-<slug>.json` (`weak`, and `weeks`
-  per topic) to say what to revise before which coursework question, and
-  marks his answers (Claude via `delegate.py`). `study_brief.py` can then
-  cite the tutor note for each unwritten week.
+- **Part 4, progress and tutoring.** What to revise before which coursework
+  question (`anki-<slug>.json` `weeks` per topic against the topic map's
+  `coursework` links), a study plan from the weak topics, and `study_brief.py`
+  citing the tutor note for each unwritten week. The practice history
+  (`practice-<slug>.json`) is the record it can plan from.

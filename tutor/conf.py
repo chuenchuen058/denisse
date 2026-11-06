@@ -128,11 +128,33 @@ def modules(paths: Paths) -> list:
     return out
 
 
+def _alias(m: Module, token: str) -> bool:
+    """One short token naming a module the way he says it: the initials of
+    its title ('cab', 's&s' -> 'ss'), or, for a one-word title, letters
+    picked from the word in order starting with its first ('em' from
+    Electro-Magnetism, 'bio' from Biomaterials). At least alias_min_chars
+    long; a token that fits two modules is no match (find_module)."""
+    if len(token) < _M["alias_min_chars"] or not m.words:
+        return False
+    if token == "".join(w[0] for w in m.words):
+        return True
+    if len(m.words) != 1 or token[0] != m.words[0][0]:
+        return False
+    word, at = m.words[0], 0
+    for ch in token:
+        at = word.find(ch, at)
+        if at == -1:
+            return False
+        at += 1
+    return True
+
+
 def find_module(text: str, known: list) -> Module | None:
     """The module `text` names: its code; its slug; a short name made only
-    of words from its title ('signals', 'comp' is not); or a longer text
-    (a file name, a first page) holding every word of its title. Exactly
-    one hit, else None."""
+    of words from its title ('signals', 'comp' is not); its initials or the
+    start of a one-word title ('cab', 'em'); or a longer text (a file name,
+    a first page) holding every word of its title. Exactly one hit, else
+    None."""
     low = words(text)
     connectors = set(_M["connectors"])
     short = [w for w in low if w not in connectors]
@@ -140,7 +162,8 @@ def find_module(text: str, known: list) -> Module | None:
     for m in known:
         if ((m.code and m.code.lower() in low) or slug(text) == m.slug
                 or (short and all(w in m.words for w in short))
-                or (m.words and all(w in low for w in m.words))):
+                or (m.words and all(w in low for w in m.words))
+                or (len(short) == 1 and _alias(m, short[0]))):
             hits.append(m)
     return hits[0] if len(hits) == 1 else None
 
