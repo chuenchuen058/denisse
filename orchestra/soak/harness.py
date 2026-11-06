@@ -36,7 +36,7 @@ LANES = ("alpha", "beta", "gamma")
 SLOTS = {"alpha": 2, "beta": 1, "gamma": 2}
 FALLBACK = {"beta": "alpha"}
 TIMEOUTS = {"light": 20, "heavy": 60}
-INVARIANTS = ("no_concurrent_runs", "none_lost", "state_sums", "no_dead_locks", "master_merges_gated",
+INVARIANTS = ("no_concurrent_runs", "none_lost", "state_sums", "collected_once", "no_dead_locks", "master_merges_gated",
               "origin_gated", "no_orphans", "worktrees", "ticks_clean")
 GIT_ID = {"GIT_AUTHOR_NAME": "soak", "GIT_AUTHOR_EMAIL": "soak@example.invalid",
           "GIT_COMMITTER_NAME": "soak", "GIT_COMMITTER_EMAIL": "soak@example.invalid"}
@@ -416,6 +416,22 @@ class Soak:
                 yield f"days.{k} = {got[k]} but the history entries sum to {want[k]}"
         if abs(got["cost_usd"] - want["cost_usd"]) > 0.006 * max(1, n_money):
             yield f"days.cost_usd = {got['cost_usd']:.4f} but the history entries sum to {want['cost_usd']:.4f}"
+
+    def inv_collected_once(self):
+        """One lane start (the slot lock's run id) is recorded, and charged, at most once."""
+        try:
+            st = self.state()
+        except (OSError, ValueError) as e:
+            yield f"state.json does not parse: {e}"
+            return
+        for slug, ts in st.get("tasks", {}).items():
+            seen: dict[str, int] = {}
+            for h in ts.get("history", []):
+                if h.get("run"):
+                    seen[h["run"]] = seen.get(h["run"], 0) + 1
+            for run, n in seen.items():
+                if n > 1:
+                    yield f"{slug}: run {run} has {n} history entries (collected {n} times)"
 
     def inv_no_dead_locks(self):
         for lf in sorted(self.review.glob("*.lock")):

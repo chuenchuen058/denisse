@@ -930,8 +930,22 @@ def write_lock(path: Path, info: dict) -> None:
     path.write_text(json.dumps(info), encoding="utf-8")
 
 
-def set_lock_task(slug: str, lane: str = "") -> None:
-    write_lock(LOCK_FILE, _my_lock(task=slug, lane=lane))
+def run_id(info: dict | None) -> str:
+    """One lane start, named by the slot lock that dispatched it: the dispatching tick's pid and
+    the moment it claimed the task. finish() writes it into the history entry, and _collect()
+    skips a run whose id is already there, so a finished lane is charged and recorded once."""
+    info = info or {}
+    if info.get("run"):
+        return str(info["run"])
+    return f"{info['pid']}@{info['since']}" if info.get("pid") and info.get("since") else ""
+
+
+def set_lock_task(slug: str, lane: str = "") -> str:
+    """Name the task in this tick's slot lock; returns the run's id (see run_id)."""
+    info = _my_lock(task=slug, lane=lane)
+    info["run"] = run_id(info)
+    write_lock(LOCK_FILE, info)
+    return info["run"]
 
 
 def update_lock(**extra) -> None:
@@ -1723,7 +1737,7 @@ def charge(state: dict, task: Task, seconds: int, cost: float | None, lane: str 
 # ---------------------------------------------------------------- tick
 
 def finish(task: Task, state: dict, wt: Path, branch: str, outcome: str, seconds: int,
-           before_status: set[str] = frozenset(), prov: dict | None = None) -> str:
+           before_status: set[str] = frozenset(), prov: dict | None = None, run: str = "") -> str:
     report = REPORTS / f"{task.slug}.md"
     ts = task_state(state, task)
     lane_info = lane_result(REPORTS / f"{task.slug}.lane.log")
@@ -1742,7 +1756,7 @@ def finish(task: Task, state: dict, wt: Path, branch: str, outcome: str, seconds
         if auth:
             hit = auth_hit(auth)
         if hit:
-            return _limited(task, state, ts, hit, seconds, spent, provenance)
+            return _limited(task, state, ts, hit, seconds, spent, provenance, run)
     stray = sorted(main_checkout_status() - before_status)
     hooks_loaded = task.lane != "claude" or (wt / ".review" / "hook.log").exists()
 
@@ -1752,6 +1766,8 @@ def finish(task: Task, state: dict, wt: Path, branch: str, outcome: str, seconds
              "hooks_loaded": hooks_loaded, **provenance}
     if task.fields.get("lane-from"):
         entry["fallback_from"] = task.fields["lane-from"]
+    if run:
+        entry["run"] = run
     ts["history"].append(entry)
     ts.update(last_end=entry["end"], last_result=info["result"])
     log(f"{info['result']} {task.slug} after {seconds}s (attempt {ts['attempts']}, {spent}) "
@@ -1882,12 +1898,17 @@ def _after_pass(task: Task, state: dict, ts: dict, entry: dict, wt: Path, branch
     progress["stage"] = "archive"
     ts["merge"] = merge
     state["done"][task.digest] = now().isoformat()
+    _archive_pass(task, wt, branch, report, merge)
+    return "PASS"
+
+
+def _archive_pass(task: Task, wt: Path, branch: str, report: Path, merge: str) -> None:
+    """A passed task's last step: task file and report to today's archive, worktree removed if merged."""
     day = ARCHIVE / now().date().isoformat()
     move(task.path, day)
     move(report, day, f"{task.slug}.report.md")
     if merge in ("merged", "no commits"):
         remove_worktree(wt, branch, delete_branch=True)
-    return "PASS"
 
 
 def is_merge_only(task: Task) -> bool:
@@ -1951,7 +1972,7 @@ def merge_only(task: Task, state: dict, ts: dict) -> str:
 
 
 def _limited(task: Task, state: dict, ts: dict, hit: str, seconds: int, spent: str,
-             provenance: dict | None = None) -> str:
+             provenance: dict | None = None, run: str = "") -> str:
     """The lane hit its usage limit: not an attempt. Record when the lane may run again."""
     until = parse_limit_until(hit) or now() + dt.timedelta(minutes=C["limit_default_min"])
     state.setdefault("lanes", {})[task.lane] = {"limited_until": until.isoformat(),
@@ -1961,6 +1982,8 @@ def _limited(task: Task, state: dict, ts: dict, hit: str, seconds: int, spent: s
     entry = {"end": now().isoformat(), "result": "LIMITED", "seconds": seconds, "lane": task.lane,
              "weight": task.weight, "note": note, "premise": "not stated", "spent": spent,
              **(provenance or provenance_fields(task.lane, None, {}))}
+    if run:
+        entry["run"] = run
     ts["history"].append(entry)
     ts.update(last_end=entry["end"], last_result="LIMITED")
     log(f"LIMITED {task.slug} lane={task.lane} until {until.isoformat(sep=' ', timespec='minutes')}"
@@ -2050,7 +2073,10 @@ def reconcile(state: dict) -> dict:
                 if read_lock(lf) != info:
                     continue
                 log(f"RECONCILE dead owner {info['pid']} for {slug}")
-                write_lock(lf, _my_lock(task=slug, lane=info.get("lane", ""), reconciling=True))
+                # Keep what the dead owner recorded (its run id, lane start, provenance): if this
+                # tick dies mid-collect too, the next reconciler still knows which run it is.
+                write_lock(lf, {**info, **_my_lock(task=slug, lane=info.get("lane", ""), reconciling=True),
+                                "run": run_id(info)})
         except TimeoutError:
             continue
         try:
@@ -2073,6 +2099,21 @@ def _collect(state: dict, info: dict, slug: str) -> str:
         task.fields["lane-from"], task.fields["lane"] = task.lane, info["lane"]
     wt, branch = WORKTREES / slug, f"review/{slug}"
     local_report, report = wt / ".review" / "report.md", REPORTS / f"{slug}.md"
+    run = run_id(info)
+    # Collected already? Its owner (a tick, or an earlier reconciler) can die after saving the
+    # history entry and the charge but before removing the slot lock; collecting again charged
+    # days[] twice for one run (soak, CI, 6 Nov 2026). Judged on the state as saved now, not on
+    # this tick's copy, which may predate that save.
+    fresh = load_state()["tasks"].get(slug, {})
+    done = [h for h in fresh.get("history", []) if run and h.get("run") == run]
+    if done:
+        if done[-1].get("result") == "PASS" and fresh.get("merge") == "merged":
+            # died after recording the merge (push() saves it at once), before archiving
+            _archive_pass(task, wt, branch, report, "merged")
+            log(f"RECONCILE {slug}: run {run} already collected and merged; archived")
+            return "already collected (archived)"
+        log(f"RECONCILE {slug}: run {run} already collected; not charged or recorded again")
+        return "already collected"
     report.unlink(missing_ok=True)
     if local_report.exists():
         shutil.copyfile(local_report, report)
@@ -2086,7 +2127,7 @@ def _collect(state: dict, info: dict, slug: str) -> str:
     ts = task_state(state, task)
     n = len(ts["history"])
     prov = {k: info.get(k) for k in PROVENANCE_KEYS}  # run_lane put them in the lock
-    result = finish(task, state, wt, branch, "ran", seconds, before, prov)
+    result = finish(task, state, wt, branch, "ran", seconds, before, prov, run)
     for entry in ts["history"][n:]:
         entry["recovered"] = True
     save_state(state)
@@ -2343,7 +2384,7 @@ def _tick(dry_run: bool = False) -> str:
             ts["attempts"] += 1
             ts["last_start"] = now().isoformat()
             save_state(state)  # count the attempt before running, so a crash still counts
-            set_lock_task(task.slug, task.lane)
+            run = set_lock_task(task.slug, task.lane)
         start_watchdog(timeout + C["tick_watchdog_extra_s"])
         fb = ""
         if task.fields.get("lane-from"):
@@ -2382,7 +2423,7 @@ def _tick(dry_run: bool = False) -> str:
                 park(task, outcome, None)
             save_state(state)
             return "LANE_MISSING"
-        result = finish(task, state, wt, branch, outcome, seconds, before, prov)
+        result = finish(task, state, wt, branch, outcome, seconds, before, prov, run)
         save_state(state)
         write_vault_note(task, ts, result)
         return result

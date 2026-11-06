@@ -406,6 +406,72 @@ class CrashRecoveryTest(unittest.TestCase):
         task = next(t for t in self.R.load_queue() if t.slug == "t9")
         self.assertIn(task.digest, self.state()["done"])
 
+    def killed_before_the_lock_went(self):
+        """What a tick killed after its state save leaves: its slot lock, naming the task, owner dead."""
+        info = self.R.read_lock(self.R.LOCK_FILE)
+        self.assertTrue(info and info.get("task") and info.get("run"), info)
+        p = subprocess.Popen([sys.executable, "-c", "pass"])
+        p.wait()
+        info.update(pid=p.pid, created=1)
+        self.R.LOCK_FILE.write_text(json.dumps(info))
+        return info
+
+    def test_a_run_already_collected_is_not_charged_or_recorded_again(self):
+        """CI soak, 6 Nov 2026: days.work_s one run ahead of the history. A tick saved the run, died
+        before removing its slot lock, and the next tick's reconcile collected the same run again."""
+        self.add("t12")
+        os.environ["FAKE_NO_REPORT"] = "1"  # NO_REPORT: the task stays queued for its retry
+        self.R.release_lock = lambda: None  # killed after the save, before the finally's unlink
+        self.assertEqual(self.R.tick(), "NO_REPORT")
+        info = self.killed_before_the_lock_went()
+        before = self.state()
+        self.assertEqual([h.get("run") for h in before["tasks"]["t12"]["history"]], [info["run"]])
+        self.assertEqual(self.R.reconcile(self.R.load_state()), {"t12": "already collected"})
+        after = self.state()
+        self.assertEqual(after["tasks"]["t12"]["history"], before["tasks"]["t12"]["history"])
+        self.assertEqual(after["days"], before["days"], "charged once")
+        self.assertFalse(self.R.LOCK_FILE.exists(), "slot freed")
+        self.assertTrue((self.R.QUEUE / "t12.md").exists(), "still queued for its retry")
+        self.assertIn("already collected", self.R.LOG_FILE.read_text(encoding="utf-8"))
+
+    def test_a_merged_run_already_collected_is_only_archived(self):
+        """Killed after the merge was recorded (bug 11), before the archive moves: reconcile
+        finishes the archive step and charges nothing."""
+        self.add("t13")
+        os.environ["FAKE_FILE"] = "new13.txt"
+        real_move = self.R.move
+
+        def killed_here(*a, **k):
+            raise KeyboardInterrupt("tick killed")
+        self.R.move = killed_here
+        self.R.release_lock = lambda: None
+        with self.assertRaises(KeyboardInterrupt):
+            self.R.tick()
+        self.R.move = real_move
+        self.killed_before_the_lock_went()
+        before = self.state()
+        self.assertEqual(before["tasks"]["t13"]["merge"], "merged")
+        self.assertEqual(self.R.reconcile(self.R.load_state()), {"t13": "already collected (archived)"})
+        after = self.state()
+        self.assertEqual(len(after["tasks"]["t13"]["history"]), 1)
+        self.assertEqual(after["days"], before["days"], "charged once")
+        day = next(self.R.ARCHIVE.iterdir())
+        self.assertTrue((day / "t13.md").exists() and (day / "t13.report.md").exists())
+        self.assertFalse((self.R.QUEUE / "t13.md").exists())
+        self.assertFalse((self.R.WORKTREES / "t13").exists(), "merged: worktree removed")
+
+    def test_run_id_comes_from_the_slot_lock_and_survives_its_rewrites(self):
+        """The run id is named once, at dispatch, and every later rewrite of the lock keeps it."""
+        self.R.LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+        info = {"pid": 1, "since": "2026-11-06T05:00:00", "task": "x"}
+        self.assertEqual(self.R.run_id(info), "1@2026-11-06T05:00:00")
+        self.assertEqual(self.R.run_id({**info, "run": "7@earlier"}), "7@earlier")
+        self.assertEqual(self.R.run_id({"task": "x"}), "")
+        run = self.R.set_lock_task("x", "fake")
+        self.assertEqual(self.R.read_lock(self.R.LOCK_FILE)["run"], run)
+        self.R.update_lock(lane_pid=5)
+        self.assertEqual(self.R.read_lock(self.R.LOCK_FILE)["run"], run, "kept through update_lock")
+
     def test_lock_rewrites_are_never_seen_half_written(self):
         """A tick scanning the slots must never read an empty or partial lock while its owner
         rewrites it (write_text truncates first); that hid a running task and it was dispatched twice."""
