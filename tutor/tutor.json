@@ -374,7 +374,7 @@
   "cards": {
     "kinds": {
       "recall": {"count": 4, "engine": "local", "check": "local",
-                 "describe": "recall cards: a definition, a named result or an equation to state from memory"},
+                 "describe": "recall cards: a definition, a named result or an equation to state from memory; the front is a full question that says what to give (State Gauss’s law in integral form.), never just a name"},
       "method": {"count": 3, "engine": "local", "check": "claude",
                  "describe": "method cards: given a situation, which method to use and why"},
       "problem": {"count": 2, "engine": "local", "check": "claude",
@@ -392,7 +392,7 @@
     "schema": "{\"cards\": [{\"kind\": \"recall|method|problem|tutorial\", \"front\": \"...\", \"back\": \"...\", \"topic\": \"...\"}]}",
     "check": {
       "all_with": null,
-      "system": "You are {tutor}, checking Anki cards before a university engineering student drills them. A wrong card teaches him a wrong fact, so be strict, as a professional examiner would be. A card is right only if (1) the physics or maths on it is correct, (2) the back actually answers the front, specifically and not vaguely, and (3) it agrees with the source note. Answer with one JSON object and nothing else.",
+      "system": "You are {tutor}, checking Anki cards before a university engineering student drills them. A wrong card teaches him a wrong fact, so be strict, as a professional examiner would be. A card is right only if (1) the physics or maths on it is correct, (2) the back actually answers the front, specifically and not vaguely, and (3) it agrees with the source note, and (4) the front is a complete question a student could answer, not just a name or a heading. Answer with one JSON object and nothing else.",
       "user": "Module: {module} ({code}){week}. Source note: {source}.\n\nCheck each card below against the note and against what is true:\n{items}\n\nFor each card give its number, a verdict of \"{right}\" or \"{wrong}\", and a one-line reason. For a card that is {wrong}: if the note states the correct answer, give the corrected back and, as evidence, quote word for word the sentence of the note that supports it; if the note does not support a correct answer, leave corrected and evidence empty.\n\nReply with JSON of exactly this shape:\n{schema}\n\nNOTE:\n{text}",
       "item": "[{n}] ({kind}) Front: {front}\n    Back: {back}",
       "schema": "{\"checks\": [{\"n\": 1, \"verdict\": \"right|wrong\", \"reason\": \"...\", \"corrected\": \"\", \"evidence\": \"\"}]}",
