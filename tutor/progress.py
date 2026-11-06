@@ -2,10 +2,11 @@
 
 For every module folder in the vault:
 
-    lectures    weeks the KEATS inbox holds (what the last ingest placed,
-                plus files downloaded since, placed by folder and name
-                only -- nothing is extracted here) against the weeks that
-                have a tutor note
+    lectures    weeks with lecture files -- in the KEATS inbox or in the
+                vault's own Week folders (what the last ingest placed, plus
+                files added since, placed by folder and name only --
+                nothing is extracted here) against the weeks that have a
+                tutor note
     topics      the topic map, each with its Anki numbers (part 2's stats)
                 and a mastery figure: reviewed share x retention
     weak        the stats' weak topics, worst first, with the tutor notes
@@ -55,19 +56,19 @@ def _weeks_text(weeks) -> str:
 # -- what there is -------------------------------------------------------------------
 
 def lectures(paths: Paths, module: Module, state: dict, modules: list) -> dict:
-    """Weeks on KEATS (from the inbox) against weeks read into a tutor note."""
+    """Weeks with lecture files (inboxes and the vault's Week folders) against
+    weeks read into a tutor note."""
     on_keats, new_files = set(), 0
     for rec in state["files"].values():
         if rec.get("status") == "matched" and rec.get("module") == module.slug and rec.get("week"):
             on_keats.add(int(rec["week"]))
-    for folder, home in ingest.inboxes(paths, modules):
-        for path, parts in ingest.scan(folder):
-            if extract.sha256(path) in state["files"]:
-                continue
-            placed, week, _why = ingest.match(path, parts, home, modules, lambda _p: "")
-            if placed is not None and placed.slug == module.slug and week:
-                on_keats.add(int(week))
-                new_files += 1
+    for path, parts, home in ingest.files(paths, modules)[0]:
+        if extract.sha256(path) in state["files"]:
+            continue
+        placed, week, _why = ingest.match(path, parts, home, modules, lambda _p: "")
+        if placed is not None and placed.slug == module.slug and week:
+            on_keats.add(int(week))
+            new_files += 1
     read = set()
     for week, rec in state["lectures"].get(module.slug, {}).items():
         if rec.get("note") and os.path.isfile(rec.get("written") or rec["note"]):

@@ -1,7 +1,7 @@
 {
   "_help": [
     "Read by the tutor package at import (AGENTS.md Rule 0: nothing in tutor/*.py names a path, a module, a model or a limit).",
-    "paths: relative to the vault unless said otherwise. {vault}, ~ and {module_dir} are filled at runtime. inboxes.module is a folder looked for inside EVERY module folder; inboxes.shared are extra folders (outside the vault allowed) scanned as well, skipped when absent.",
+    "paths: relative to the vault unless said otherwise. {vault}, ~ and {module_dir} are filled at runtime. inboxes.module is a folder looked for inside EVERY module folder; inboxes.shared are extra folders (outside the vault allowed) scanned as well, skipped when absent. in_place: his own lecture files already in the vault, read where they are (never copied, moved or renamed): inside each module folder, every folder directly in it whose name matches one of in_place.folders, every file (at any depth below that folder) with one of in_place.extensions whose name (without extension) matches one of in_place.files. Week from the folder name first (match.week_dir), then the file name, then its first page.",
     "state: where private tutor state lives, relative to the repo (memory/ is git-ignored). DENISSE_TUTOR_STATE overrides it.",
     "modules: how a module folder name becomes a code and a title (mirrors scripts/next_lecture.json). Modules are discovered from the vault folder names; there is no list here.",
     "match: regexes that find a week number or a module code in a folder name, a file name, or the first content_chars of a file's text. Keep capture group 1 as the number. First hit wins, folder before file name before contents.",
@@ -17,6 +17,16 @@
     "inboxes": {
       "module": "KEATS inbox",
       "shared": ["~/Downloads/KEATS"]
+    },
+    "in_place": {
+      "folders": ["^Week \\d{1,2}$", "^Reference$"],
+      "extensions": [".pdf", ".pptx", ".docx"],
+      "files": {
+        "lecture": "(?i)\\b(lectures?|slides?|notes?|handouts?)\\b",
+        "tutorial": "(?i)\\b(tutorials?|questions?|problem (class|sheet)s?)\\b",
+        "exercise": "(?i)\\bexercises?\\b",
+        "solution": "(?i)\\bsolutions?\\b"
+      }
     },
     "coursework_globs": ["Coursework.md", "Coursework/*.md"],
     "week_note": "{module} Week {week}.md",
@@ -190,7 +200,7 @@
     "stop_words": ["with", "from", "this", "that", "into", "using", "their", "there", "which", "what", "when", "then", "than", "them", "your", "have", "will", "also", "each", "more", "some", "only", "over", "such", "between", "about", "these", "those", "where", "while", "being", "after", "before", "through", "method", "methods", "lecture", "week", "week's", "question", "questions", "part", "parts"]
   },
   "say": {
-    "scan": "{n} file(s) in {inboxes} inbox folder(s)",
+    "scan": "{n} file(s) in {inboxes} inbox folder(s) and {folders} vault folder(s)",
     "no_inbox": "no inbox folder found (looked for '{module}' inside each module folder, and {shared})",
     "file": "  {status:<12}{module} Week {week}  {name}",
     "unmatched": "  unmatched    {name}: {why}",
