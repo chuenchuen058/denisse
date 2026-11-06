@@ -83,7 +83,8 @@ def _lines(para: str, limit: int) -> list:
 def ollama_call(system: str, user: str) -> str:
     import ollama
     import model_config
-    r = ollama.chat(model=model_config.model(_M["config_entry"]), keep_alive=_M["keep_alive"],
+    extra = {} if _M.get("think") is None else {"think": _M["think"]}
+    r = ollama.chat(**extra, model=model_config.model(_M["config_entry"]), keep_alive=_M["keep_alive"],
                     options={"temperature": _M["temperature"], "num_ctx": conf.num_ctx()},
                     messages=[{"role": "system", "content": system}, {"role": "user", "content": user}])
     msg = r["message"] if isinstance(r, dict) else getattr(r, "message", None)

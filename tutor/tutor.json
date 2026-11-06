@@ -90,6 +90,7 @@
     "min_chars": 40
   },
   "model": {
+    "think": false,
     "config_entry": "chat",
     "temperature": 0.2,
     "keep_alive": "10m",

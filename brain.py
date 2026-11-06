@@ -90,6 +90,12 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _chat_extra() -> dict:
+    """Keyword arguments every ollama.chat call takes from brain.json chat (think)."""
+    think = CONFIG["chat"].get("think")
+    return {} if think is None else {"think": think}
+
+
 def _chat_options() -> dict:
     return {"temperature": CONFIG["chat"]["temperature"], "num_ctx": NUM_CTX}
 
@@ -1431,7 +1437,7 @@ class Brain:
             evidence = clarify.evidence(got)
             reply = ""
             try:  # one call, with only the item he picked: it can't repeat the rejected one
-                r = ollama.chat(model=MODEL, keep_alive=CONFIG["chat"]["keep_alive"], options=_chat_options(),
+                r = ollama.chat(**_chat_extra(), model=MODEL, keep_alive=CONFIG["chat"]["keep_alive"], options=_chat_options(),
                                 messages=[{"role": "system", "content": SYSTEM_PROMPT},
                                           {"role": "user", "content": p["request"]},
                                           {"role": "system", "content": CONFIG["nudges"]["clarified_answer"].format(
@@ -1933,7 +1939,7 @@ class Brain:
             # next -- measured directly (get_news: inconsistent/often wrong
             # at default temperature, 4/4 clean and on-topic at 0.2, no
             # loss of personality on casual chat).
-            response = ollama.chat(
+            response = ollama.chat(**_chat_extra(), 
                 model=MODEL, messages=full_messages, tools=round_tools, keep_alive=CONFIG["chat"]["keep_alive"],
                 options=_chat_options(),
             )
@@ -1986,7 +1992,7 @@ class Brain:
                     # Same question, history left out, no tools: the clean
                     # condition, where this answer was fine. Kept only if
                     # it's an actual answer.
-                    retry = ollama.chat(
+                    retry = ollama.chat(**_chat_extra(), 
                         model=MODEL,
                         messages=([full_messages[0]] + _style_examples()
                                   + [{"role": "user", "content": latest_user}]),
@@ -2001,7 +2007,7 @@ class Brain:
                     # One retry, no tools, with the nudge as a system note
                     # for this call only -- never added to `messages`, so it
                     # is never persisted. Keep the retry if it's usable.
-                    retry = ollama.chat(
+                    retry = ollama.chat(**_chat_extra(), 
                         model=MODEL,
                         messages=full_messages + [{"role": "system",
                                                    "content": CONFIG["reply_nets"]["plain_reply_nudge"]}],

@@ -14,7 +14,9 @@
   "chat": {
     "_about": "Options on every ollama.chat call. temperature 0.2: Ollama's default (~0.8) answered the same question with a correct summary one run and a non-sequitur the next; 4/4 clean at 0.2 with no loss of personality on chat. keep_alive -1 keeps the model loaded (a cold reload is ~4-6 s).",
     "temperature": 0.2,
-    "keep_alive": -1
+    "keep_alive": -1,
+    "_think": "Ollama's think flag on every chat call; null = leave it to the model. false: qwen3.5:9b thinks by default, which left empty replies after tool results and a 5x slower mean in the 6 Nov bake-off; a no-op for models that don't think.",
+    "think": false
   },
   "prompt": {
     "_about": "The system prompt, in parts, joined machine_facts + identity + conduct at configure(). machine_facts is filled with this machine's OS, release, user (unknown_user when neither USERNAME nor USER is set), home and program folders and path separator, plus path_example_windows or path_example_other -- derived at runtime so they can't drift from the machine (the model guessed POSIX paths for file tools on Windows, 2026-09). identity takes {model}. Every sentence here is as tuned, and the A/B record says to leave it so: the folder sentence was reworded three ways on 2026-11-04 and each moved another case (a longer one sent garbled input to get_news 4/6, a same-length one turned 'ha, do that again' into 'No worries.' 6/6; 'what am I working on?' is fixed by cues.vault_queries instead). A 'RELAYING TOOL RESULTS' paragraph (2026-09-23) took clean 10/10 -> 8/10 (greetings called recall, '17 times 23' answered 'I called the calculate tool'); pairing the greeting examples and narrowing the garbled clause (2026-10-21) took clean 25,25 -> 24,24. The lesson is budget: ~4000 characters that an 8B model spreads its attention over, so guidance for one tool belongs in that tool's description (tools.definitions) and the JSON ban in json_leak. Think hard before adding a sentence.",
