@@ -211,10 +211,11 @@ C = load_config()
 # Lanes: argv lists from config.json "lane_argv"; the prompt goes in on stdin. Override or add
 # lanes in .review/lanes.json. The allow list is broad on purpose; the real limits are in
 # hooks/guard.py, which the runner passes with --settings (Thomas: a prefix allow list mostly
-# buys refusals). Three placeholders are resolved at run time:
+# buys refusals). Placeholders are resolved at run time:
 #   {npm:<package>:<bin>}  a global npm CLI's JS entry (run with node); the lane is left out
 #                          when the package isn't installed.
 #   {npm-shim:<name>}      the full path of npm's <name>.cmd shim if found, else <name>.
+#   {repo-path:<relative>} a REPO-relative path resolved to its absolute target.
 #   {prompt-file}          (anywhere inside an argument) the path of <worktree>/.review/prompt.md,
 #                          which then holds the prompt, for a CLI that takes its prompt as an
 #                          argument: a long prompt must never go on a cmd.exe command line.
@@ -230,7 +231,8 @@ C = load_config()
 # gemini: auto_edit = may edit files, may not run shell commands. The runner runs the gate itself.
 # copilot: `-p` wants the prompt as an argument, so -p only points at {prompt-file}.
 # --allow-all-tools (required for -p) without --allow-all-paths: file access stays inside the
-# working directory (the worktree; --add-dir is never given) plus the temp dir. No
+# working directory (the worktree) plus the temp dir and the resolved venv directory
+# granted by --add-dir (the worktree's venv junction points outside the worktree). No
 # --allow-all-urls. Built-in GitHub MCP servers off, git push / gh denied, no ask_user: it can't
 # post as Chuen and can't stall on a question. Copilot reports no cost (unpriced_lanes).
 PROMPT_FILE_PLACEHOLDER = "{prompt-file}"
@@ -280,11 +282,11 @@ def npm_shim(name: str) -> str:
     return name
 
 
-_PLACEHOLDER = re.compile(r"\{(npm|npm-shim):([^{}]+)\}")
+_PLACEHOLDER = re.compile(r"\{(npm|npm-shim|repo-path):([^{}]+)\}")
 
 
 def resolve_argv(argv: list) -> list | None:
-    """argv with its {npm:...}/{npm-shim:...} placeholders filled in; None if an npm CLI is missing."""
+    """Resolve npm entries/shims and repo paths; None if an npm CLI is missing."""
     out = []
     for arg in argv:
         m = _PLACEHOLDER.fullmatch(str(arg))
@@ -292,6 +294,8 @@ def resolve_argv(argv: list) -> list | None:
             out.append(arg)
         elif m.group(1) == "npm-shim":
             out.append(npm_shim(m.group(2)))
+        elif m.group(1) == "repo-path":
+            out.append(str((REPO / m.group(2)).resolve()))
         else:
             pkg, _, name = m.group(2).rpartition(":")
             found = npm_bin(pkg, name) if pkg else None

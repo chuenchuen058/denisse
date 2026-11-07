@@ -49,13 +49,14 @@
     "copilot": ["{npm-shim:copilot}", "-p",
                 "Your full instructions are in the file {prompt-file}. Read that file first and follow it exactly.",
                 "--allow-all-tools", "--no-ask-user", "--no-color", "--no-auto-update", "--disable-builtin-mcps",
+                "--add-dir", "{repo-path:.venv}",
                 "--deny-tool", "shell(git push)", "--deny-tool", "shell(gh)"]
   },
   "_lane_argv": "Each lane's command; the prompt goes in on stdin. {npm-shim:<name>} = full path of npm's <name>.cmd if found (the scheduled task's PATH has no %APPDATA%\\npm), else <name>. {npm:<package>:<bin>} = that global npm CLI's JS entry, run with node; the lane is left out if it isn't installed. .review/lanes.json still overrides or adds lanes. Why each flag: comment above lane_argv in runner.py (claude stream-json for the live watch; codex full access and MCP off, Chuen 2 Nov 2026; gemini auto_edit = edits, no shell).",
   "unpriced_lanes": ["codex", "gemini", "copilot"],
   "npm_dirs": ["%APPDATA%/npm", "~/AppData/Roaming/npm", "%LOCALAPPDATA%/Packages/Claude_*/LocalCache/Roaming/npm"],
   "_npm_dirs": "Where global npm CLIs (codex, copilot, gemini) are looked for, in order, by the lanes ({npm-shim:..}, {npm:..}), orchestra/exams and the agent hub: one list for all three. %VAR% and ~ are expanded, * globs; an entry whose variable is unset is skipped. The scheduled task's PATH has no %APPDATA%\\npm, and npm installs made from the Claude desktop app live in its packaged AppData (3 Nov 2026: the daily exams logged copilot skipped: Copilot CLI not found).",
-  "_copilot_lane": "copilot: -p only points at {prompt-file} (<worktree>/.review/prompt.md, the full prompt), so no long prompt reaches cmd.exe. --allow-all-tools without --allow-all-paths keeps file access to the worktree (plus temp); no --allow-all-urls; built-in GitHub MCP off and git push / gh denied so it cannot post as Chuen; the pre-push hook refuses pushes anyway (ORCHESTRA_WORKTREE is set).",
+  "_copilot_lane": "copilot: -p only points at {prompt-file} (<worktree>/.review/prompt.md, the full prompt), so no long prompt reaches cmd.exe. --add-dir {repo-path:.venv} grants only the repo's venv, resolved at runtime through junctions/symlinks: the worktree links to the main venv outside its allowed paths, which denied Python execution on 6 Nov 2026. --allow-all-tools without --allow-all-paths keeps access to the worktree, temp and that venv; no --allow-all-urls; built-in GitHub MCP off and git push / gh denied so it cannot post as Chuen; the pre-push hook refuses pushes anyway (ORCHESTRA_WORKTREE is set).",
   "_unpriced_lanes": "Lanes that report no cost, so the daily spend cap never blocks them.",
 
   "limit_patterns": {

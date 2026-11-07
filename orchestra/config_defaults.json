@@ -33,8 +33,10 @@
     "copilot": ["{npm-shim:copilot}", "-p",
                 "Your full instructions are in the file {prompt-file}. Read that file first and follow it exactly.",
                 "--allow-all-tools", "--no-ask-user", "--no-color", "--no-auto-update", "--disable-builtin-mcps",
+                "--add-dir", "{repo-path:.venv}",
                 "--deny-tool", "shell(git push)", "--deny-tool", "shell(gh)"]
   },
+  "_copilot_lane": "--add-dir {repo-path:.venv} grants only the repo's venv, resolved at runtime through junctions/symlinks: the worktree links to the main venv outside its allowed paths, which denied Python execution on 6 Nov 2026. Keep --allow-all-paths and --allow-all-urls absent, built-in GitHub MCP off, and git push / gh denied.",
   "unpriced_lanes": ["codex", "gemini", "copilot"],
   "npm_dirs": ["%APPDATA%/npm", "~/AppData/Roaming/npm", "%LOCALAPPDATA%/Packages/Claude_*/LocalCache/Roaming/npm"],
 
