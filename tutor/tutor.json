@@ -464,7 +464,8 @@
     "id_key": "{module}|{source}|{kind}|{n}"
   },
   "math": {
-    "_help": "tutor/mathfmt.py. delimited: [kind, regex with a 'body' group], display kinds first. bare: maths written with no delimiters; a token with 'sign' starts it, 'operator'/'operand' tokens around it join it, 'trailing' punctuation is left outside. targets: the delimiters each place renders.",
+    "_help": "tutor/mathfmt.py. delimited: [kind, regex with a 'body' group, optional reject-body regex], earliest accepted span wins; config order breaks ties (display first). Single dollars cannot close before a digit or another dollar; a number followed by prose words or punctuation and whitespace is treated as currency. Numeric equations and padded maths remain valid; escaped dollars stay in the body. adjacent_separator keeps neighbouring maths spans from forming ambiguous target delimiters. bare: 'token' splits prose, 'braces' groups balanced arguments; a token with 'sign' starts maths, 'operator'/'operand' tokens around it join it, 'trailing' punctuation is left outside. targets: the delimiters each place renders.",
+    "adjacent_separator": " ",
     "delimited": [
       [
         "display",
@@ -480,10 +481,13 @@
       ],
       [
         "inline",
-        "(?<![\\\\$])\\$(?!\\$)(?P<body>[^$\\n]+?)(?<!\\\\)\\$"
+        "(?<![\\\\$])\\$(?!\\$)(?P<body>(?:\\\\[^\\n]|[^$\\\\\\n])+?)(?<!\\\\)\\$(?![\\d$])",
+        "^\\s*[+-]?\\d[\\d,.]*(?:[.,;:!?](?:\\s+|$)|\\s+[^\\W\\d_]{2,}\\b)"
       ]
     ],
     "bare": {
+      "token": "\\S+",
+      "braces": {"open": "{", "close": "}", "escaped": ["\\{", "\\}"]},
       "sign": "\\\\[A-Za-z]+|\\^",
       "operator": "[=+\\-<>/*]|\\u2248|\\u2192|->|\\\\cdot|\\\\times|\\\\approx",
       "operand": "[A-Za-z0-9().,']{1,4}",
