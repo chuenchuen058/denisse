@@ -19,9 +19,13 @@ back off (RISKY_TOOLS are still asked about, by voice).
 disable_startup_program is still gated -- it's reversible
 (restore_startup_program undoes it), but changes what launches at login,
 which is worth a human glance rather than running silently.
+
+draft_email is gated too (2026-11-07): it only saves a draft and never
+sends, but an email in his name is his to start -- he says yes before she
+writes one.
 """
 
-RISKY_TOOLS = {"disable_startup_program"}
+RISKY_TOOLS = {"disable_startup_program", "draft_email"}
 
 
 def confirm_risky_tool(name: str, args: dict) -> bool:
