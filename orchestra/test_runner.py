@@ -519,7 +519,7 @@ class RunnerTest(unittest.TestCase):
         """lanes.json's copilot = the shipped config argv with the CLI swapped for the fake."""
         fake = self.tmp / "fake_copilot.py"
         fake.write_text(self.COPILOT_FAKE, encoding="utf-8")
-        argv = [sys.executable, str(fake), *self.R.C["lane_argv"]["copilot"][1:]]
+        argv = [sys.executable, str(fake), *self.R.resolve_argv(self.R.C["lane_argv"]["copilot"])[1:]]
         (self.R.REVIEW / "lanes.json").write_text(json.dumps({"fake": [sys.executable, "-c", FAKE], "copilot": argv}))
         seen = self.tmp / "seen.json"
         os.environ["FAKE_COPILOT_SEEN"] = str(seen)
@@ -545,8 +545,26 @@ class RunnerTest(unittest.TestCase):
         argv = self.R.lanes()["copilot"]
         self.assertEqual(Path(argv[0]), npm / "copilot.cmd", "the Claude-app npm shim is found off PATH")
         self.assertIn("--allow-all-tools", argv)
-        for banned in ("--allow-all-urls", "--allow-all-paths", "--allow-all", "--yolo", "--add-dir"):
+        for banned in ("--allow-all-urls", "--allow-all-paths", "--allow-all", "--yolo"):
             self.assertNotIn(banned, argv)
+        self.assertEqual(argv.count("--add-dir"), 1)
+        venv = (self.repo / ".venv").resolve()
+        self.assertEqual(argv[argv.index("--add-dir") + 1], str(venv))
+        self.assertIn("--disable-builtin-mcps", argv)
+        self.assertIn("--no-ask-user", argv)
+        self.assertEqual([argv[i + 1] for i, a in enumerate(argv) if a == "--deny-tool"],
+                         ["shell(git push)", "shell(gh)"])
+        defaults = json.loads(self.R.CONFIG_DEFAULTS.read_text(encoding="utf-8"))
+        self.assertEqual(self.R.C["lane_argv"]["copilot"], defaults["lane_argv"]["copilot"])
+        # Also build from a linked checkout: grant the real target, not the junction
+        # inside the worktree, and never its parent (the whole main checkout).
+        wt = self.R.WORKTREES / "copilot linked tree with spaces"
+        wt.mkdir(parents=True)
+        self.R.link_venv(wt)
+        self.assertTrue(self.R.is_link(wt / ".venv"))
+        with mock.patch.object(self.R, "REPO", wt):
+            linked_argv = self.R.lanes()["copilot"]
+        self.assertEqual(linked_argv, argv)
         p = argv[argv.index("-p") + 1]
         self.assertIn(self.R.PROMPT_FILE_PLACEHOLDER, p)
         self.assertLess(len(p), 300, "only a pointer to the prompt file goes on the command line")
@@ -578,6 +596,11 @@ class RunnerTest(unittest.TestCase):
         wt = Path(got["worktree"])
         self.assertEqual(Path(got["prompt_path"]), wt / ".review" / "prompt.md")
         self.assertEqual(Path(got["cwd"]).resolve(), wt.resolve())
+        self.assertEqual(got["args"].count("--add-dir"), 1)
+        self.assertEqual(got["args"][got["args"].index("--add-dir") + 1],
+                         str((self.repo / ".venv").resolve()))
+        for banned in ("--allow-all-paths", "--allow-all-urls", "--allow-all", "--yolo"):
+            self.assertNotIn(banned, got["args"])
         self.assertFalse(any(self.R.PROMPT_FILE_PLACEHOLDER in a for a in got["args"]))
         self.assertLess(max(len(a) for a in got["args"]), 400, "no long prompt on the command line")
         h = self.state()["tasks"]["cp"]["history"][-1]
