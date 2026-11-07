@@ -903,6 +903,14 @@ def check_calendar(day: str = "") -> str:
     return _error("calendar", "no_reader")
 
 
+def draft_email(to: str = "", subject: str = "", gist: str = "", replying_to: str = "",
+                attachments=None) -> str:
+    """An email DRAFT for him to send himself (email_drafts.py). Never sends."""
+    import email_drafts
+    return email_drafts.draft_email(to=to, subject=subject, gist=gist,
+                                    replying_to=replying_to, attachments=attachments)
+
+
 TOOL_FUNCTIONS = {
     "run_shell_command": run_shell_command,
     "open_application": open_application,
@@ -959,4 +967,6 @@ TOOL_FUNCTIONS = {
     "tutor_exam_question": tutor_exam_question,
     "tutor_mark_answer": tutor_mark_answer,
     "tutor_consult": tutor_consult,
+    # Email drafts (email_drafts.py, 2026-11-07): saved, never sent.
+    "draft_email": draft_email,
 }

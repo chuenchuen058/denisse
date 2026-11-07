@@ -725,6 +725,42 @@
             "question"
           ]
         }
+      },
+      {
+        "name": "draft_email",
+        "_note": "Email drafts (email_drafts.py, 2026-11-07). Denisse never sends: this saves a draft (classic Outlook's Drafts, else a .eml file Outlook opens unsent, plus the clipboard) and he presses Send. A write tool, offered only when his words are about email (tool_policy.json groups.email) and confirmed before it runs (safety.RISKY_TOOLS).",
+        "description": "Prepare an email DRAFT for Chuen to check and send himself -- 'draft a reply to this email', 'send my CV and cover letter to my personal tutor', 'email Prof X saying I can't make Thursday'. It never sends anything. Recipients: pass exactly who he named (an email address, or the person as he said it, e.g. 'my personal tutor'); for a reply, leave 'to' empty and pass the email he is replying to as replying_to. Never invent an address; if the result asks who it goes to, ask him. Attachments: the files as he named them, in his words ('my latest CV', 'my cover letter'), or full paths from find_files. When it says the draft is ready, tell him where it is and that he presses Send; never say it was sent.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "to": {
+              "type": "string",
+              "description": "Who it is to, exactly as he said it: an address, or a name/role like 'my personal tutor'. Empty for a reply to replying_to's sender."
+            },
+            "subject": {
+              "type": "string",
+              "description": "A short subject in plain words. Empty for a reply: it uses 'Re:' and the original subject."
+            },
+            "gist": {
+              "type": "string",
+              "description": "What he wants the email to say, in his words. Nothing he didn't say."
+            },
+            "replying_to": {
+              "type": "string",
+              "description": "The full text of the email he is replying to (from what he pasted, or look_at_this), headers included. Empty if it isn't a reply."
+            },
+            "attachments": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Files to attach, as he named them ('my latest CV') or full paths. Empty if none."
+            }
+          },
+          "required": [
+            "gist"
+          ]
+        }
       }
     ]
   },
@@ -1268,7 +1304,7 @@
     "real_time": "It's {weekday} {day} {month}, {hour}:{minute} {ampm}."
   },
   "cues": {
-    "_about": "Requests the code answers before the model, because the eval showed the model wrong 3 runs out of 3 (2026-10-29), each matched against his whole message. news_off: switch the daily briefing off (not a news request). self_model: what she runs on is a fact (model_config). briefing / plan_study: planner.py's jobs. watchlist_*: invest.py, no model. study_brief: one module's brief from his notes (study_brief.py); the *_with_module patterns need a module name (module_names, mirroring study_brief.json's aliases) later in the sentence. follow_on: 'go on, do that one' -- the job is the turn before's (carry_*). plan_yes: accepting a planner offer (planner_offer_marker in her last reply). ack: a bare acknowledgement, skipped when looking for the request a complaint is about. delegate / keep_local: writing, research and solutions go to Claude (delegate.py) unless the request is local and checkable. done_word: a complaint about 'Done'. style_note_excludes: a reply preference (tool_policy.json cue reply_preference) that is really a reminder. vault_queries: his internships and projects live in the vault; a request matching every pattern in all_of_patterns searches for query. vault_overview_query: what search_vault is asked for when he wants the overview (instincts.wants_vault_overview). verify_claim_pattern: a yes/no about her last action ('did you open it?'), answered from the evidence; promise_pattern: her reply promised it ('Opening it now'), so nothing recorded means it didn't happen.",
+    "_about": "Requests the code answers before the model, because the eval showed the model wrong 3 runs out of 3 (2026-10-29), each matched against his whole message. news_off: switch the daily briefing off (not a news request). self_model: what she runs on is a fact (model_config). briefing / plan_study: planner.py's jobs. watchlist_*: invest.py, no model. study_brief: one module's brief from his notes (study_brief.py); the *_with_module patterns need a module name (module_names, mirroring study_brief.json's aliases) later in the sentence. follow_on: 'go on, do that one' -- the job is the turn before's (carry_*). plan_yes: accepting a planner offer (planner_offer_marker in her last reply). ack: a bare acknowledgement, skipped when looking for the request a complaint is about. delegate / keep_local: writing, research and solutions go to Claude (delegate.py) unless the request is local and checkable. Email (a draft, a reply, sending files to someone) is local since 2026-11-07: draft_email, email_drafts.py. done_word: a complaint about 'Done'. style_note_excludes: a reply preference (tool_policy.json cue reply_preference) that is really a reminder. vault_queries: his internships and projects live in the vault; a request matching every pattern in all_of_patterns searches for query. vault_overview_query: what search_vault is asked for when he wants the overview (instincts.wants_vault_overview). verify_claim_pattern: a yes/no about her last action ('did you open it?'), answered from the evidence; promise_pattern: her reply promised it ('Opening it now'), so nothing recorded means it didn't happen.",
     "news_off_pattern": "\\b(?:stop|quit|no\\s+more|don'?t|do\\s+not|never|turn\\s+off|switch\\s+off|disable|cancel|unsubscribe)\\b[^.?!]{0,40}?\\b(?:news|headlines?|briefings?|cna)\\b",
     "self_model_patterns": [
       "\\bhow\\s+many\\s+parameters?\\b",
@@ -1336,7 +1372,7 @@
       "\\bhow\\s+to\\s+(?:do|approach|answer|tackle)\\b",
       "\\b(?:ask|use|get)\\s+(?:claude|codex)\\b",
       "\\bhand\\s+(?:it|this|that)\\s+(?:to|over)\\b",
-      "\\b(?:draft|write)\\s+(?:me\\s+)?(?:a|an|the)\\s+(?:email|message|post|letter|reply|essay|summary|report)\\b"
+      "\\b(?:draft|write)\\s+(?:me\\s+)?(?:a|an|the)\\s+(?:post|letter|essay|summary|report)\\b"
     ],
     "keep_local_patterns": [
       "\\bremind\\b",
@@ -1344,7 +1380,8 @@
       "\\btask\\b",
       "\\bto-?do\\b",
       "\\btimer\\b",
-      "\\b(?:find|open|pull\\s+up|bring\\s+up|show\\s+me|where(?:'s|\\s+is))\\s+(?:me\\s+)?(?:my|the)\\b"
+      "\\b(?:find|open|pull\\s+up|bring\\s+up|show\\s+me|where(?:'s|\\s+is))\\s+(?:me\\s+)?(?:my|the)\\b",
+      "\\b(?:send|e-?mail|forward)\\b[^.?!]{0,60}\\bto\\b|\\be-?mails?\\b|\\brepl(?:y|ies)\\s+to\\b"
     ],
     "done_word_pattern": "\\bdone\\b",
     "style_note_excludes_pattern": "\\bremind\\b",

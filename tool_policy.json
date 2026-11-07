@@ -151,6 +151,14 @@
       ],
       "cues": "quiz|test me|explain|teach|tutor|\\bweak|struggl|exam|past paper|practi[sc]e|\\bmark\\b|my answer|check my|understand|don'?t get|lesson|lecture|module|topic|coursework|go over|walk me through|step by step|my notes say|does the lecture"
     },
+    "email": {
+      "tools": [
+        "draft_email",
+        "find_files",
+        "look_at_this"
+      ],
+      "cues": "e-?mails?\\b|\\bmail\\b|inbox|outlook|\\bdrafts?\\b|\\brepl(?:y|ies)\\s+to\\b|\\bsend\\b[^.?!]{0,60}\\bto\\b|\\bforward\\b"
+    },
     "preferences": {
       "tools": [
         "reply_preference"
@@ -417,6 +425,12 @@
       "once_per_turn": true,
       "reply_must_mention": "\\bDon\\b",
       "fallback_reply": "Don here."
+    },
+    "draft_email": {
+      "_note": "email_drafts.py (2026-11-07). A write: it saves a draft and says where; it never sends. Offered only by groups.email, confirmed first (safety.RISKY_TOOLS). Her reply must call it a draft, else the tool's own sentence is used -- 'sent it' would be a lie he acts on.",
+      "side_effect": "write",
+      "once_per_turn": true,
+      "reply_must_mention": "\\bdraft"
     },
     "tutor_consult": {
       "_note": "The tutor's opinion for a question (part 5). A reply that leaves the tutor out gets the tutor's opening in front, so Chuen can tell the tutor's view from Denisse's. The record of the consult goes to the tutor's own area of the vault.",

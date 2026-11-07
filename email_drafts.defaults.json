@@ -1,0 +1,95 @@
+{
+  "_doc": "Shipped defaults for email_drafts.json -- the draft_email tool (email_drafts.py). Edit email_drafts.json, not this file; any key missing or invalid there falls back to the value here, with a log line. Denisse never sends: every backend below only SAVES a draft, and he presses Send. Paths starting with ~ are under his home folder. Templates are str.format strings and may only use the {fields} their default here uses.",
+
+  "backends": {
+    "_doc": "Tried in this order; the first that saves wins. outlook_desktop: classic Outlook's COM object (Outlook.Application) -- the draft is saved into his Drafts folder, never sent; absent on this machine on 2026-11-07 (only the new Outlook app, which has no local automation). eml_file: a .eml file in drafts_folder that Outlook opens as an unsent message, plus the text on the clipboard.",
+    "order": ["outlook_desktop", "eml_file"],
+    "outlook_progid": "Outlook.Application",
+    "outlook_mail_item": 0,
+    "outlook_where": "your Outlook Drafts folder"
+  },
+
+  "eml": {
+    "_doc": "drafts_folder: where .eml drafts go. extra_headers: X-Unsent makes classic Outlook open the file as an unsent draft with a Send button. file_name: {date} is today (date_format), {subject} the subject with unsafe characters dropped and cut to max_name_chars.",
+    "drafts_folder": "~/Documents/Denisse drafts",
+    "file_name": "{date} {subject}.eml",
+    "date_format": "%Y-%m-%d %H%M",
+    "max_name_chars": 60,
+    "unsafe_name_chars": "<>:\"/\\|?*",
+    "extra_headers": {"X-Unsent": "1"},
+    "where": "a draft file, {path}"
+  },
+
+  "clipboard": {
+    "_doc": "The draft's text goes on the clipboard too, so he can paste it into any mail app. command gets the text on stdin in encoding (utf-16 carries a BOM, which clip.exe reads as Unicode).",
+    "enabled": true,
+    "command": ["clip"],
+    "encoding": "utf-16",
+    "timeout_seconds": 5,
+    "template": "To: {to}\nSubject: {subject}\n\n{body}"
+  },
+
+  "recipients": {
+    "_doc": "Who a draft is to comes from what he said (an address, or a name in contacts_file) or from the email being replied to (reply_headers, first found wins). Never guessed: anything else is a question back to him. contacts_file: private, [{\"name\": ..., \"address\": ..., \"aliases\": [...]}]; a name matches when its words equal his words once filler_words are dropped.",
+    "contacts_file": "memory/email_contacts.json",
+    "reply_headers": ["Reply-To", "From"],
+    "filler_words": ["my", "the", "to", "a", "an", "dear", "please"],
+    "separators": "[,;]|\\band\\b|&"
+  },
+
+  "attachments": {
+    "_doc": "Files named in plain words ('my latest CV'). Each kind: words -- any of these in his phrase picks this kind; folder -- where its files live; patterns -- file names that count (first pattern with a match wins); recursive -- look in subfolders too. The newest matching file is used. A phrase that is an existing full path is attached as it is. Nothing else is guessed.",
+    "kinds": [
+      {
+        "name": "CV",
+        "words": ["cv", "resume", "résumé"],
+        "folder": "~/OneDrive - King's College London/Documents/ChatGPT/Denisse/output/cv",
+        "patterns": ["*.pdf", "*.docx"],
+        "recursive": false
+      },
+      {
+        "name": "cover letter",
+        "words": ["cover letter", "covering letter"],
+        "folder": "~/OneDrive - King's College London/Documents/ChatGPT/Denisse/output",
+        "patterns": ["*cover*letter*.pdf", "*cover*letter*.docx"],
+        "recursive": true
+      }
+    ]
+  },
+
+  "writing": {
+    "_doc": "How the body is written: the local chat model (config.json models.chat), given voice + his saved reply preferences (reply_preferences.py) + the request. reply_prefix: added to the original subject for a reply. sign_off: appended when the body doesn't already end with his name.",
+    "name": "Chuen",
+    "sign_off": "Best,\nChuen",
+    "reply_prefix": "Re: ",
+    "subject_header": "Subject",
+    "max_reply_chars": 4000,
+    "voice": [
+      "You write emails for Chuen, a university student, in his own voice, as if he typed them himself.",
+      "Humble, polite and plain. Short sentences. British spelling.",
+      "Say only what his gist says. Never add claims about him, his work or his plans that the gist doesn't give.",
+      "No AI tells: no 'I hope this email finds you well', no 'delve', no 'I am writing to', no bullet lists, no em dashes, no exclamation marks.",
+      "Write only the body: the greeting, a few short paragraphs, nothing after the last sentence. No subject line, no sign-off, no notes to Chuen."
+    ],
+    "request": "Write the body of an email to {to}.\nWhat he wants to say: {gist}\nAttached: {attachments}\n{reply_block}",
+    "reply_block": "It replies to this email:\n---\n{original}\n---",
+    "no_attachments": "nothing"
+  },
+
+  "wording": {
+    "_doc": "What the tool tells her. 'Error: ' / 'Refused' openings are read by brain.py as no evidence that anything happened.",
+    "ready": "Draft ready -- {where}.{clipboard} To: {to}. Subject: {subject}. Attached: {attachments}. Nothing was sent. Tell him it's ready and that he presses Send himself.",
+    "on_clipboard": " The text is on your clipboard too.",
+    "ask_recipient": "Refused: no draft made. I can't tell who this goes to{detail}. Ask him, in one short question, for their email address. Never guess one.",
+    "ask_recipient_detail": " -- '{value}' isn't an address or a saved contact",
+    "ask_recipient_ambiguous": "Refused: no draft made. '{value}' could be {options}. Ask him which one, in one short question.",
+    "ask_subject": "Refused: no draft made -- there's no subject. Ask him what the email is about in a few words, or pass a short subject yourself.",
+    "ask_gist": "Refused: no draft made -- nothing says what the email should say. Ask him what he wants to tell them.",
+    "ask_attachment": "Refused: no draft made. I don't know which file '{value}' is. Ask him which file he means, or use find_files and pass its full path.",
+    "missing_attachment": "Refused: no draft made. There's no {kind} in {folder} ({patterns}). Tell him, and ask which file to attach.",
+    "folder_not_set": "Refused: no draft made. No folder is set for his {kind} (email_drafts.json attachments). Tell him, and ask which file to attach.",
+    "writer_failed": "Error: couldn't write the email ({error}). No draft was made.",
+    "save_failed": "Error: couldn't save the draft anywhere ({error}). Nothing was sent.",
+    "list_joiner": ", "
+  }
+}
