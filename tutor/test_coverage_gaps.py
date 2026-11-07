@@ -29,15 +29,14 @@ class MathfmtGapTests(unittest.TestCase):
         self.assertTrue(out.endswith("\\)"), out)
         self.assertIn(r"\left(\frac{a}{b}\right) + c", out)
 
-    @unittest.skip("real bug: already-delimited maths get mangled when a later $ appears in the same prose")
     def test_already_delimited_math_is_not_wrapped_twice(self):
         text = r"Use $x$ and then \(y\)"
         self.assertEqual(mathfmt.normalise(text, "anki"), "Use \\(x\\) and then \\(y\\)")
 
-    @unittest.skip("real bug: $ in prose is treated as opening/closing math and strips the surrounding text")
     def test_dollar_signs_in_prose_are_left_alone(self):
         text = "The price is $5, not $x$"
-        self.assertEqual(mathfmt.normalise(text, "anki"), text)
+        # The price is prose; the explicitly delimited variable is still maths.
+        self.assertEqual(mathfmt.normalise(text, "anki"), r"The price is $5, not \(x\)")
 
     def test_empty_input_is_unchanged(self):
         self.assertEqual(mathfmt.normalise("", "anki"), "")

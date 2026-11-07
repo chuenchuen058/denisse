@@ -13,23 +13,28 @@ import re
 from .conf import CONFIG
 
 _M = CONFIG["math"]
-_DELIMITED = [(kind, re.compile(rx, re.S)) for kind, rx in _M["delimited"]]
+_DELIMITED = [(spec[0], re.compile(spec[1], re.S),
+               re.compile(spec[2]) if len(spec) > 2 else None)
+              for spec in _M["delimited"]]
 _BARE_SIGN = re.compile(_M["bare"]["sign"])
 _OPERATOR = re.compile(_M["bare"]["operator"])
 _OPERAND = re.compile(_M["bare"]["operand"])
 _TRAIL = _M["bare"]["trailing"]
+_TOKEN = re.compile(_M["bare"]["token"])
+_BRACES = _M["bare"]["braces"]
 
 
 def _depth(s: str) -> int:
     """Open braces left unclosed in s (escaped \\{ \\} don't count)."""
-    s = s.replace("\\{", "").replace("\\}", "")
-    return s.count("{") - s.count("}")
+    for escaped in _BRACES["escaped"]:
+        s = s.replace(escaped, "")
+    return s.count(_BRACES["open"]) - s.count(_BRACES["close"])
 
 
 def _bare(text: str) -> list:
     """(start, end) spans of undelimited maths in plain text."""
     tokens = []
-    for m in re.finditer(r"\S+", text):
+    for m in _TOKEN.finditer(text):
         # a space inside braces ("{\partial x}") belongs to the same piece of maths: join until they balance
         if tokens and _depth(tokens[-1][2]) > 0:
             s, _, _ = tokens.pop()
@@ -75,28 +80,47 @@ def normalise(text: str, target: str) -> str:
     if not text:
         return text or ""
     wrap = _M["targets"][target]
-    out, pos = [], 0
-    found = []
-    for kind, rx in _DELIMITED:
-        for m in rx.finditer(text):
-            if not any(m.start() < e and s < m.end() for s, e, _, _ in found):
-                found.append((m.start(), m.end(), kind, m.group("body")))
-    found.sort()
-    for s, e, kind, body in found:
-        out.append(_plain(text[pos:s], wrap))
-        a, b = wrap[kind]
-        out.append(f"{a}{body.strip()}{b}")
-        pos = e
-    out.append(_plain(text[pos:], wrap))
+    pieces, pos = [], 0
+    while pos < len(text):
+        # Consume the next complete span before looking inside it. Config order
+        # breaks ties (display before inline), not precedence across the text.
+        found = []
+        for priority, (kind, rx, reject) in enumerate(_DELIMITED):
+            match = rx.search(text, pos)
+            while match and reject and reject.search(match.group("body")):
+                # A currency dollar must not consume the next formula's opener.
+                match = rx.search(text, match.start() + 1)
+            if match:
+                found.append((match.start(), priority, kind, match))
+        if not found:
+            break
+        start, _, kind, match = min(found)
+        pieces.extend(_plain(text[pos:start]))
+        pieces.append((kind, match.group("body").strip()))
+        pos = match.end()
+    pieces.extend(_plain(text[pos:]))
+    out, previous = [], None
+    for kind, body in pieces:
+        if not body:
+            continue
+        if kind:
+            if previous:
+                # Keep adjacent target delimiters from forming a display opener.
+                out.append(_M["adjacent_separator"])
+            a, b = wrap[kind]
+            out.append(f"{a}{body}{b}")
+        else:
+            out.append(body)
+        previous = kind
     return "".join(out)
 
 
-def _plain(text: str, wrap: dict) -> str:
+def _plain(text: str) -> list:
+    """Prose and bare-maths pieces, to wrap only after all spans are known."""
     out, pos = [], 0
-    a, b = wrap["inline"]
     for s, e in _bare(text):
-        out.append(text[pos:s])
-        out.append(f"{a}{text[s:e]}{b}")
+        out.append((None, text[pos:s]))
+        out.append(("inline", text[s:e]))
         pos = e
-    out.append(text[pos:])
-    return "".join(out)
+    out.append((None, text[pos:]))
+    return out

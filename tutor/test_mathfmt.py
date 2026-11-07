@@ -46,6 +46,11 @@ class Bare(unittest.TestCase):
 
 
 class Delimited(unittest.TestCase):
+    def assert_normalised(self, text, expected, target):
+        result = mathfmt.normalise(text, target)
+        self.assertEqual(result, expected)
+        self.assertEqual(mathfmt.normalise(result, target), result)
+
     def test_each_style_becomes_the_targets_style(self):
         cases = [(r"Use \[ \vec{F} = I\vec{L}\times\vec{B} \] here", "display", r"\vec{F} = I\vec{L}\times\vec{B}"),
                  (r"Use $$ \oint B\cdot dl = \mu_0 I $$ here", "display", r"\oint B\cdot dl = \mu_0 I"),
@@ -59,6 +64,79 @@ class Delimited(unittest.TestCase):
     def test_already_right_is_unchanged(self):
         s = "Gauss: " + wrapped(A, "inline", r"\oint \vec{E}\cdot d\vec{A} = Q/\epsilon_0")
         self.assertEqual(mathfmt.normalise(s, "anki"), s)
+
+    def test_mixed_delimiters_and_bare_latex_are_normalised_once(self):
+        text = r"Use \( x^2 \), $y^2$, \[ z^2 \], $$ w^2 $$ and \frac{1}{2}."
+        for name, target in (("anki", A), ("obsidian", O)):
+            with self.subTest(target=name):
+                expected = ("Use " + wrapped(target, "inline", "x^2") + ", "
+                            + wrapped(target, "inline", "y^2") + ", "
+                            + wrapped(target, "display", "z^2") + ", "
+                            + wrapped(target, "display", "w^2") + " and "
+                            + wrapped(target, "inline", r"\frac{1}{2}") + ".")
+                self.assert_normalised(text, expected, name)
+
+    def test_currency_and_lone_dollars_are_prose(self):
+        cases = ["It costs $5 and $10.", "It costs $5 and$10.",
+                 "Prices: $5.50, $10.25, $1,000.", "A lone $ sign.",
+                 "It costs $5", "The symbol is $", r"Escaped prices: \$5 and \$10."]
+        for text in cases:
+            for name in ("anki", "obsidian"):
+                with self.subTest(text=text, target=name):
+                    self.assert_normalised(text, text, name)
+
+    def test_currency_beside_real_maths_preserves_both(self):
+        for name, target in (("anki", A), ("obsidian", O)):
+            cases = [
+                (r"Price $5, maths $x^2$ then \frac{1}{2}.",
+                 "Price $5, maths " + wrapped(target, "inline", "x^2")
+                 + " then " + wrapped(target, "inline", r"\frac{1}{2}") + "."),
+                (r"Use $x^2$ and \(y\) for $5 or $10.",
+                 "Use " + wrapped(target, "inline", "x^2") + " and "
+                 + wrapped(target, "inline", "y") + " for $5 or $10."),
+                (r"Costs $5 and $10; use $$ x^2 $$ or \[ y^2 \].",
+                 "Costs $5 and $10; use " + wrapped(target, "display", "x^2")
+                 + " or " + wrapped(target, "display", "y^2") + "."),
+                (r"Costs \$5; use $x^2$.",
+                 r"Costs \$5; use " + wrapped(target, "inline", "x^2") + "."),
+            ]
+            for text, expected in cases:
+                with self.subTest(text=text, target=name):
+                    self.assert_normalised(text, expected, name)
+
+    def test_numeric_maths_is_not_currency(self):
+        for name, target in (("anki", A), ("obsidian", O)):
+            with self.subTest(target=name):
+                expected = ("Values " + wrapped(target, "inline", "2 + 3 = 5")
+                            + " and " + wrapped(target, "inline", "5") + ".")
+                self.assert_normalised("Values $2 + 3 = 5$ and $5$.", expected, name)
+
+    def test_padding_inside_inline_dollars_is_trimmed(self):
+        for body in ("x^2", r"\frac{1}{2}", "5", "5 + x", "5.50", "5,10"):
+            for left, right in ((" ", " "), ("", " "), (" ", "")):
+                for name, target in (("anki", A), ("obsidian", O)):
+                    with self.subTest(body=body, left=left, right=right, target=name):
+                        self.assert_normalised(f"Use ${left}{body}{right}$ here.",
+                                               "Use " + wrapped(target, "inline", body) + " here.", name)
+
+    def test_adjacent_maths_spans_have_unambiguous_target_delimiters(self):
+        for text, kinds, bodies in (
+                (r"\(x^2\)+\frac{1}{2}", ("inline", "inline"), ("x^2", r"+\frac{1}{2}")),
+                (r"\(x^2\)\(y^2\)", ("inline", "inline"), ("x^2", "y^2")),
+                (r"\[x^2\]\(y^2\)", ("display", "inline"), ("x^2", "y^2"))):
+            for name, target in (("anki", A), ("obsidian", O)):
+                with self.subTest(text=text, target=name):
+                    expected = " ".join(wrapped(target, kind, body) for kind, body in zip(kinds, bodies))
+                    self.assert_normalised(text, expected, name)
+
+    def test_escaped_dollars_inside_maths_are_not_delimiters(self):
+        body = r"x + \text{\$5}"
+        for name, target in (("anki", A), ("obsidian", O)):
+            for source in (A, O):
+                for kind in ("inline", "display"):
+                    with self.subTest(target=name, source=source, kind=kind):
+                        self.assert_normalised(wrapped(source, kind, body),
+                                               wrapped(target, kind, body), name)
 
 
 class AnkiCard(unittest.TestCase):
