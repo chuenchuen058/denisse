@@ -156,5 +156,78 @@
     "skip_results": ["NO_REPORT"],
     "activity_days": 7,
     "activity_lanes": ["claude", "codex"]
+  },
+
+  "chatlog": {
+    "_note": "The day's chat note and the one handoff line per save, shared by `python -m atrium digest` and `python -m atrium hub-save` (was .review/hub_digest.py). Each writer appends under its own heading, so neither touches the other's entries. Only the chat note and the handoff note are committed. {date} = YYYY-MM-DD, {time} = time_format.",
+    "note": "Calendar/Chats/{date} claude hub.md",
+    "time_format": "%H:%M",
+    "new_note": "---\nname: \"{date} claude hub\"\ndescription: \"Digest of the Claude hub chat (the one chat Chuen uses to run Denisse, Orchestra, Don and UROP) and of the laptop side on {date}, saved as it goes.\"\nupdated: {date}\ntype: chat\nsource: claude-hub\ndate: {date}\ntags: [chat, claude, hub]\n---\n\n# {date} Claude hub\n",
+    "never_write": [".obsidian"],
+    "git": ["git"],
+    "git_timeout_s": 60,
+    "writers": {
+      "hub": {"heading": "## Saved {time}", "agent": "claude",
+              "handoff": "hub chat digest saved -> [[{stem}]]",
+              "commit": "Claude hub: chat digest {date} {time}"},
+      "atrium": {"heading": "## Laptop digest {time} (Atrium, since {since})", "agent": "atrium",
+                 "handoff": "laptop digest saved ({lines} line(s): {sections}) -> [[{stem}]]",
+                 "commit": "Atrium: laptop digest {date} {time}"}
+    }
+  },
+
+  "digest": {
+    "_note": "python -m atrium digest [--since HOURS] [--dry]: what happened on this laptop since the last digest. Sections are written in the order listed and a section with no lines is left out. When no section with counts_as_activity has a line, nothing is written (the state still moves on). log/review are repo-relative; state_file and globs are vault-relative.",
+    "state_file": "Dev/digest-state.json",
+    "first_run_hours": 1,
+    "max_lines": 40,
+    "section_max_lines": 10,
+    "line_chars": 200,
+    "ellipsis": "…",
+    "more": "- (+{n} more)",
+    "section_heading": "### {title}",
+    "since_format": "%Y-%m-%d %H:%M",
+    "nothing": "nothing happened since {since}; nothing written",
+    "dry_header": "(dry run: nothing written, state unchanged)",
+    "saved": "saved {note}",
+    "sections": [
+      {"kind": "runner", "title": "Orchestra", "counts_as_activity": true, "log": ".review/runner.log",
+       "_events": "Orchestra's runner.log line format: '<ISO time> <WORD> <task>[:] <rest>'. WORD -> the label it is listed under (in this order), or -> {what <rest> starts with: label} when the outcome is in the rest; other words and outcomes are ignored.",
+       "events": {"START": "started", "PASS": "passed", "PARTIAL": "partial", "FAIL": "failed",
+                  "PARKED": "parked",
+                  "merge": {"merged": "merged", "parked": "merge parked"},
+                  "push": {"pushed": "pushed", "not pushed": "not pushed", "push failed": "push failed"},
+                  "LIMITED": "hit a limit"},
+       "task_strip": ["review/", ":"],
+       "line": "- {label}: {items}",
+       "spend_events": ["PASS", "PARTIAL", "FAIL"],
+       "spend_pattern": "\\$([0-9]+(?:\\.[0-9]+)?)\\)",
+       "spend": "- spend: ${total:.2f} over {runs} run(s) with a known cost"},
+      {"kind": "git", "title": "Denisse repo", "counts_as_activity": true, "where": "repo",
+       "args": ["log", "--no-merges", "--format=%cI%x09%h%x09%s"],
+       "line": "- `{hash}` {subject}", "skip_prefixes": []},
+      {"kind": "git", "title": "Vault", "counts_as_activity": true, "where": "vault",
+       "args": ["log", "--no-merges", "--format=%cI%x09%h%x09%s"],
+       "line": "- `{hash}` {subject}",
+       "_skip_prefixes": "Subjects starting with one of these are left out: the digests' own commits, so a digest never reports the last one.",
+       "skip_prefixes": ["Atrium: laptop digest", "Claude hub: chat digest"]},
+      {"kind": "pages", "title": "Don's pages changed", "counts_as_activity": true,
+       "globs": ["Atlas/Academic/Study Progress.md", "Atlas/Academic/SEM 1 Modules/**/*.md"],
+       "line": "- [[{stem}]]"},
+      {"kind": "queue", "title": "Queue", "counts_as_activity": false, "review": ".review",
+       "waiting": "- waiting: {n} task(s){titles}", "titles_sep": ", ", "titles_lead": ": ", "titles_max": 5,
+       "draft": "- needs Chuen: approve draft {task} (Queue: draft -> auto)",
+       "parked": "- needs Chuen: parked {task}",
+       "auto": "auto", "title_chars": 90}
+    ]
+  },
+
+  "install_digest": {
+    "_note": "atrium/install_digest.py: the hourly Windows scheduled task for the digest. Prints the command; only --register runs it. python and script are repo-relative.",
+    "task_name": "Denisse Atrium Digest",
+    "python": ".venv/Scripts/pythonw.exe",
+    "script": "atrium/digest_task.py",
+    "log_file": "Dev/digest.log",
+    "create": ["schtasks", "/Create", "/F", "/SC", "HOURLY", "/MO", "1", "/TN", "{name}", "/TR", "\"{python}\" \"{script}\""]
   }
 }

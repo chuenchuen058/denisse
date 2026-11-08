@@ -4,6 +4,9 @@
   credits [--days N]     list decision lines in the vault that don't say who decided (exit 1 if any)
   snapshot [--out DIR]   write the Atrium Hub page's tables (default .review/hub)
   capture                Claude Code hook (stdin): save the session into the vault
+  digest [--since HOURS] [--dry]
+                         save what happened on this laptop since the last digest into the vault
+  hub-save FILE          save the hub chat's digest (markdown FILE) into the vault
 """
 import argparse
 import sys
@@ -20,6 +23,10 @@ def main(argv=None) -> int:
     k = sub.add_parser("credits"); k.add_argument("--days", type=int, default=conf.section("credits")["default_days"])
     sn = sub.add_parser("snapshot"); sn.add_argument("--out", default=None)
     sub.add_parser("capture")
+    dg = sub.add_parser("digest")
+    dg.add_argument("--since", type=float, default=None, metavar="HOURS")
+    dg.add_argument("--dry", action="store_true")
+    hs = sub.add_parser("hub-save"); hs.add_argument("file")
     a = ap.parse_args(argv)
     if a.cmd == "context":
         sys.stdout.reconfigure(encoding="utf-8")
@@ -28,6 +35,17 @@ def main(argv=None) -> int:
     if a.cmd == "capture":
         from . import capture
         return capture.main()
+    if a.cmd == "digest":
+        from . import digest
+        sys.stdout.reconfigure(encoding="utf-8")
+        print(digest.run(since_hours=a.since, dry=a.dry))
+        return 0
+    if a.cmd == "hub-save":
+        from pathlib import Path
+        from . import chatlog
+        out = chatlog.save("hub", Path(a.file).read_text(encoding="utf-8"))
+        print(f"saved {out['note']}" + (f" (not committed: {out['error']})" if out["error"] else ""))
+        return 0 if out["committed"] else 1
     if a.cmd == "snapshot":
         from pathlib import Path
         print(snapshot.write(Path(a.out) if a.out else None))
