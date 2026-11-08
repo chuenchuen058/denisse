@@ -67,8 +67,10 @@ def _links(vault: str, module: Module, week: int | None) -> str:
 
 
 def render(vault: str, module: Module, week: int, result: dict, sources: list,
-           today: dt.date, name: str | None = None, provenance: dict | None = None) -> str:
-    """The whole note. `sources` are full paths of the files it was read from."""
+           today: dt.date, name: str | None = None, provenance: dict | None = None,
+           missing: list | None = None, chunks: int = 0) -> str:
+    """The whole note. `sources` are full paths of the files it was read from;
+    `missing` the chunk numbers (of `chunks`) the model never answered for."""
     name = name or _N["name"].format(slug=module.slug, week=week)
     ctx = {"module": module.title, "code": module.code, "week": week, "slug": module.slug,
            "today": today.isoformat(), "name": name, "tutor": tutor_name()}
@@ -77,6 +79,9 @@ def render(vault: str, module: Module, week: int, result: dict, sources: list,
     if links:
         lines.append(_N["links_line"].format(links=links))
     lines += [line.format(**ctx) for line in _N["generated_callout"]]
+    if missing:
+        lines += [line.format(failed=len(missing), chunks=chunks,
+                              list=_N["list_sep"].join(str(n) for n in missing)) for line in _N["incomplete_callout"]]
     lines += [_N["sources_heading"], ""]
     for src in sources:
         base = os.path.basename(src)

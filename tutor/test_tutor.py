@@ -27,6 +27,7 @@ if REPO not in sys.path:
 
 from tutor import conf, extract, ingest, model, notes, topics  # noqa: E402
 from tutor import __main__ as cli  # noqa: E402
+from ollama import ResponseError  # noqa: E402
 
 MODULES = os.path.join("Atlas", "Academic", "SEM 1 Modules")
 SS = "5CCYB020 Signals and Systems"
@@ -327,6 +328,62 @@ class IngestTests(Fixture):
         result2, log2, _ = self.run_ingest()
         self.assertEqual(len(result2["notes"]), 3)
 
+    def test_one_weeks_model_error_does_not_stop_the_run(self):
+        """7-8 Nov 2026, live: Ollama's ResponseError on one week crashed the
+        whole ingest and every later week was skipped."""
+        good = fake_model([])
+        calls = []
+
+        def call(system, user):
+            calls.append(user)
+            if "Parseval" in user:
+                raise ResponseError("prediction aborted, token repeat limit reached", 500)
+            return good(system, user)
+        out = io.StringIO()
+        result = ingest.run(self.paths, call=call, say=lambda s: out.write(s + "\n"), today=self.today)
+        said = out.getvalue()
+        week4 = os.path.join(self.ss, "Week 4", "Signals and Systems Week 4 tutor.md")
+        self.assertEqual(len(result["failed"]), 1)
+        self.assertEqual(result["failed"][0][:2], (conf.find_module("Signals", conf.modules(self.paths)).slug, 4))
+        self.assertEqual(len(result["notes"]), 2)  # weeks 5 and 6 still written
+        self.assertFalse(os.path.exists(week4))
+        self.assertIn("token repeat limit reached", said)
+        self.assertIn("2 week note(s) written (0 incomplete)", said)
+        self.assertIn("1 week(s) failed", said)
+        self.assertIn("0 OCR page(s) used", said)
+        # Asked 1 + chunk_retries times before giving up on that chunk.
+        self.assertEqual(sum("Parseval" in u for u in calls), 1 + model._M["chunk_retries"])
+        # Nothing recorded as done for week 4: the next run tries it again.
+        result2, _log, _said = self.run_ingest()
+        self.assertEqual(result2["notes"], [week4])
+
+    def test_some_chunks_fail_writes_an_incomplete_note_retried_next_run(self):
+        good = fake_model([])
+
+        def call(system, user):
+            if "Week 4" in user and "This is part 2 of" in user:
+                raise ResponseError("prediction aborted", 500)
+            return good(system, user)
+        out = io.StringIO()
+        result = ingest.run(self.paths, call=call, say=lambda s: out.write(s + "\n"), today=self.today,
+                            num_ctx=2240)
+        said = out.getvalue()
+        self.assertEqual(result["failed"], [])
+        self.assertEqual([(w, chunks) for _s, w, chunks in result["incomplete"]], [(4, [2])])
+        week4 = os.path.join(self.ss, "Week 4", "Signals and Systems Week 4 tutor.md")
+        self.assertIn(week4, result["notes"])
+        body = self.read(week4)
+        self.assertIn("[!warning] Incomplete: 1 of", body)
+        self.assertIn("chunk 2 of", said)
+        self.assertIn("(1 incomplete)", said)
+        # The incomplete week is not "unchanged" next time: it is read again, now whole.
+        result2, _log, _said = self.run_ingest(num_ctx=2240)
+        self.assertEqual(result2["notes"], [week4])
+        self.assertEqual(result2["incomplete"], [])
+        self.assertNotIn("Incomplete:", self.read(week4))
+        code, out = self.contract()
+        self.assertEqual(code, 0, out)
+
     def test_no_inbox_is_quiet(self):
         shutil.rmtree(self.inbox)
         shutil.rmtree(self.shared)
@@ -372,6 +429,50 @@ class ModelTests(unittest.TestCase):
         self.assertIn("not valid JSON", log[1])
         with self.assertRaises(model.ModelError):
             model.extract_lecture("M", "", 1, [], "text", call=lambda s, u: "nope", num_ctx=3000)
+
+    def test_model_errors_are_per_chunk(self):
+        text = "Fourier " + "a" * 3000 + "\n\nLaplace " + "b" * 3000
+        good = fake_model([])
+
+        def call(system, user):
+            if "This is part 2 of" in user:
+                raise ResponseError("prediction aborted, token repeat limit reached", 500)
+            return good(system, user)
+        failed, said = [], []
+        result, n = model.extract_lecture("M", "", 4, [], text, call=call, num_ctx=3000, failed=failed,
+                                          say=lambda k, parts, why: said.append((k, why)))
+        self.assertGreater(n, 2)
+        self.assertEqual([k for k, _ in failed], [2])
+        self.assertIn("token repeat limit", failed[0][1])
+        self.assertIn((1, None), said)
+        self.assertIn("Outcome from part 1", result["outcomes"])
+        self.assertNotIn("Outcome from part 2", result["outcomes"])
+
+    def test_every_kind_of_model_error_is_caught(self):
+        import httpx
+        for exc in (ResponseError("boom", 500), TimeoutError("timed out"), ConnectionError("refused"),
+                    httpx.ConnectError("no server"), httpx.ReadTimeout("slow"), model.ModelError("x")):
+            def call(system, user, exc=exc):
+                raise exc
+            with self.assertRaises(model.ModelError):  # every chunk failed: the lecture's error
+                model.extract_lecture("M", "", 1, [], "text", call=call, num_ctx=3000)
+
+    def test_retry_recovers_with_configured_options(self):
+        seen = []
+
+        def call(system, user, options=None):
+            seen.append(options)
+            if len(seen) == 1:
+                raise ResponseError("prediction aborted", 500)
+            if len(seen) == 2:
+                return "not json"
+            return '{"outcomes": ["ok"]}'
+        with unittest.mock.patch.dict(model._M, {"chunk_retries": 2,
+                                                 "retry_options": [{"repeat_penalty": 9.0}, {"temperature": 0.9}]}):
+            result, _ = model.extract_lecture("M", "", 1, [], "text", call=call, num_ctx=3000)
+        self.assertEqual(result["outcomes"], ["ok"])
+        self.assertEqual(seen, [None, {"repeat_penalty": 9.0}, {"temperature": 0.9}])
+        self.assertEqual(model.retry_options(0), {})
 
     def test_parse_and_normalise_are_forgiving(self):
         self.assertEqual(model.parse("Sure! {\"outcomes\": [\"a\"]} done")["outcomes"], ["a"])

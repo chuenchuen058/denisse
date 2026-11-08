@@ -12,6 +12,7 @@ Nothing here composes prose: the model's lists are kept as lists, capped
 """
 from __future__ import annotations
 
+import inspect
 import json
 import re
 
@@ -21,6 +22,7 @@ from .conf import CONFIG
 _M = CONFIG["model"]
 _PR = CONFIG["prompt"]
 _L = CONFIG["limits"]
+_SAY = CONFIG["say"]
 _FENCE = re.compile(_PR["fence"])
 _BAD_ESCAPE = re.compile(_PR["bad_escape"])
 
@@ -29,6 +31,24 @@ EMPTY = {"outcomes": [], "methods": [], "examples": [], "check": [], "topics": [
 
 class ModelError(RuntimeError):
     pass
+
+
+def model_errors() -> tuple:
+    """What one model call can raise that is the model's (or the server's)
+    fault, not a bug here: ours, the OS's (connection refused, timeouts are
+    OSError), and the Ollama client's and its HTTP layer's when installed."""
+    errors = [ModelError, OSError]
+    try:
+        import ollama
+        errors += [ollama.ResponseError, ollama.RequestError]
+    except ImportError:
+        pass
+    try:
+        import httpx
+        errors.append(httpx.HTTPError)
+    except ImportError:
+        pass
+    return tuple(errors)
 
 
 # -- chunking ----------------------------------------------------------------
@@ -80,12 +100,14 @@ def _lines(para: str, limit: int) -> list:
 
 # -- the call ----------------------------------------------------------------
 
-def ollama_call(system: str, user: str) -> str:
+def ollama_call(system: str, user: str, options: dict | None = None) -> str:
+    """One chat call. `options` are laid over the defaults (a retry's
+    tweaks, tutor.json model.retry_options)."""
     import ollama
     import model_config
     extra = {} if _M.get("think") is None else {"think": _M["think"]}
     r = ollama.chat(**extra, model=model_config.model(_M["config_entry"]), keep_alive=_M["keep_alive"],
-                    options={"temperature": _M["temperature"], "num_ctx": conf.num_ctx()},
+                    options={"temperature": _M["temperature"], "num_ctx": conf.num_ctx(), **(options or {})},
                     messages=[{"role": "system", "content": system}, {"role": "user", "content": user}])
     msg = r["message"] if isinstance(r, dict) else getattr(r, "message", None)
     content = msg["content"] if isinstance(msg, dict) else getattr(msg, "content", "")
@@ -209,25 +231,58 @@ def merge(parts: list) -> dict:
     return out
 
 
+def _takes_options(call) -> bool:
+    try:
+        params = inspect.signature(call).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(p.name == "options" or p.kind is p.VAR_KEYWORD for p in params)
+
+
+def retry_options(attempt: int) -> dict:
+    """The Ollama options for attempt `attempt` (0 = first try: none)."""
+    tweaks = _M.get("retry_options") or []
+    return {} if attempt == 0 or not tweaks else dict(tweaks[min(attempt, len(tweaks)) - 1])
+
+
 def extract_lecture(module: str, code: str, week: int, sources: list, text: str,
-                    call=None, num_ctx: int | None = None, say=None) -> tuple:
-    """(result, chunk_count). Raises ModelError when a chunk never gives
-    JSON, so a note is never written from a half-read lecture."""
+                    call=None, num_ctx: int | None = None, say=None, failed: list | None = None) -> tuple:
+    """(result, chunk_count). Each chunk is asked up to 1 + model.chunk_retries
+    times; a model error or a reply with no JSON is that chunk's failure,
+    not the lecture's. A chunk that never answers is skipped and recorded in
+    `failed` as (chunk number, why); the rest are merged. Raises ModelError
+    only when every chunk failed, so a note is never written from nothing."""
     call = call or ollama_call
+    with_options = _takes_options(call)
+    errors = model_errors()
     pieces = chunks(text, chunk_chars(num_ctx))
-    parts = []
+    parts, missed = [], []
     for n, piece in enumerate(pieces, 1):
         user = _PR["user"].format(module=module, code=code or "", week=week, sources="; ".join(sources),
                                   part=n, parts=len(pieces), schema=_PR["schema"], text=piece)
-        data = None
-        for attempt in range(1 + _M["json_retries"]):
-            reply = call(_PR["system"], user if attempt == 0 else user + _PR["retry"])
+        data, why, bad_json = None, _SAY["no_json"], False
+        for attempt in range(1 + _M["chunk_retries"]):
+            prompt = user + _PR["retry"] if bad_json else user
+            options = retry_options(attempt)
+            try:
+                reply = call(_PR["system"], prompt, options) if with_options and options                     else call(_PR["system"], prompt)
+            except errors as exc:
+                why, bad_json = (str(exc) or type(exc).__name__), False
+                continue
             data = parse(reply)
             if data is not None:
                 break
+            why, bad_json = _SAY["no_json"], True
         if data is None:
-            raise ModelError(f"chunk {n} of {len(pieces)}: the model did not answer with JSON")
+            missed.append((n, why))
+            if failed is not None:
+                failed.append((n, why))
+            if say:
+                say(n, len(pieces), why)
+            continue
         parts.append(normalise(data))
         if say:
-            say(n, len(pieces))
+            say(n, len(pieces), None)
+    if not parts:
+        raise ModelError(_SAY["all_chunks_failed"].format(parts=len(pieces), why=missed[-1][1]))
     return merge(parts), len(pieces)

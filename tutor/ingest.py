@@ -213,7 +213,9 @@ def _signature(hashes: list) -> str:
 def run(paths: Paths, call=None, apply: bool = True, today: dt.date | None = None,
         say=print, num_ctx: int | None = None, ocr_factory=None) -> dict:
     """The whole ingest. Returns counts: notes, unchanged, unmatched, failed,
-    plus the lists behind them. `call` is the model (tests: a fake);
+    plus the lists behind them; incomplete (weeks written with some chunks
+    unread, retried next run) and ocr_pages (pages read by OCR this run).
+    One week's model or file error is that week's failure, never the run's. `call` is the model (tests: a fake);
     `apply=False` scans and matches only."""
     today = today or dt.date.today()
     now = dt.datetime.now().isoformat(timespec="seconds")
@@ -272,7 +274,8 @@ def run(paths: Paths, call=None, apply: bool = True, today: dt.date | None = Non
             g = groups.setdefault((module.slug, week), {"module": module, "files": []})
             g["files"].append((path, digest))
 
-    written, unchanged, failed, changed_modules = [], [], [], {}
+    written, unchanged, failed, incomplete, changed_modules = [], [], [], [], {}
+    model_errors = model.model_errors()
     for (slug, week), g in sorted(groups.items(), key=lambda kv: (kv[0][0], kv[0][1])):
         module = g["module"]
         lectures = state["lectures"].setdefault(slug, {})
@@ -280,7 +283,7 @@ def run(paths: Paths, call=None, apply: bool = True, today: dt.date | None = Non
         signature = _signature([h + state["files"][h].get("extraction", {}).get("signature", "")
                                 for _, h in g["files"]])
         note = notes.note_path(module, week)
-        if rec.get("signature") == signature and os.path.exists(rec.get("written") or ""):
+        if rec.get("signature") == signature and os.path.exists(rec.get("written") or "")                 and not rec.get("incomplete"):
             say(_SAY["unchanged"].format(module=module.title, week=week))
             unchanged.append((slug, week))
             continue
@@ -293,21 +296,31 @@ def run(paths: Paths, call=None, apply: bool = True, today: dt.date | None = Non
         if not apply:
             say(_SAY["dry"].format(path=note))
             continue
+        missed = []
+
+        def chunk_said(n, parts, why, module=module, week=week):
+            if why is not None:
+                say(_SAY["chunk_failed"].format(module=module.title, week=week, n=n, parts=parts, why=why))
         try:
-            result, _n = model.extract_lecture(module.title, module.code, week,
-                                               [os.path.basename(p) for p in sources], text,
-                                               call=call, num_ctx=num_ctx)
+            result, n_chunks = model.extract_lecture(module.title, module.code, week,
+                                                     [os.path.basename(p) for p in sources], text,
+                                                     call=call, num_ctx=num_ctx, say=chunk_said, failed=missed)
             provenance = {p: state["files"][h].get("extraction", {}) for p, h in g["files"]}
-            body = notes.render(paths.vault, module, week, result, sources, today, provenance=provenance)
+            body = notes.render(paths.vault, module, week, result, sources, today, provenance=provenance,
+                                missing=[n for n, _why in missed], chunks=n_chunks)
             path, kept = notes.write(note, body, state["written"])
-        except (model.ModelError, OSError) as exc:
+        except model_errors as exc:
             say(_SAY["failed"].format(module=module.title, week=week, why=exc))
             failed.append((slug, week, str(exc)))
             continue
         say(_SAY["kept"].format(path=note, copy=path) if kept else _SAY["wrote"].format(path=path))
         lectures[str(week)] = {"signature": signature, "note": note, "written": path,
                                "copy": path if kept else None, "files": sources,
-                               "topics": result["topics"], "updated": now}
+                               "topics": result["topics"], "updated": now,
+                               "incomplete": [n for n, _why in missed]}
+        if missed:
+            say(_SAY["incomplete"].format(module=module.title, week=week, failed=len(missed), parts=n_chunks))
+            incomplete.append((slug, week, [n for n, _why in missed]))
         written.append(path)
         changed_modules[slug] = module
         save_state(paths, state)  # progress survives a crash on the next week
@@ -339,7 +352,9 @@ def run(paths: Paths, call=None, apply: bool = True, today: dt.date | None = Non
         touched.append(paths.state_file())
     else:
         say(_SAY["dry_model"])
-    say(_SAY["done"].format(notes=len(written), unchanged=len(unchanged), unmatched=len(unmatched),
-                            failed=len(failed)))
+    ocr_pages = sum(len(r.get("ocr_pages", [])) for r in pdf_ocr.records.values())
+    say(_SAY["done"].format(notes=len(written), incomplete=len(incomplete), unchanged=len(unchanged),
+                            unmatched=len(unmatched), failed=len(failed), ocr=ocr_pages))
     return {"notes": written, "unchanged": unchanged, "unmatched": unmatched, "failed": failed,
+            "incomplete": incomplete, "ocr_pages": ocr_pages,
             "modules": sorted(changed_modules), "touched": touched if apply else []}
