@@ -100,7 +100,7 @@ def mark_quiz(module: Module, item: dict, answer: str, calls: dict | None = None
     items = "\n".join(_Q["mark_item"].format(**card) for card in item["cards"])
     system = _Q["mark_system"].format(**c)
     user = _Q["mark_user"].format(items=items, answer=answer, schema=_Q["mark_schema"], **c)
-    data = cards._ask(cards.engine_call(_Q["mark_engine"], calls), system, user)
+    data = cards._ask(cards.engine_call(_Q["mark_engine"], calls), system, user, _Q["mark_schema"])
     verdicts = {}
     for r in data.get("results") or []:
         if isinstance(r, dict) and str(r.get("n", "")).strip().isdigit():
@@ -179,7 +179,7 @@ def set_exam(paths: Paths, module: Module, topic: str = "", calls: dict | None =
     user = _X["user"].format(topic=_X["topic_line"].format(topic=topic) if topic else "",
                              style=style or _X["style_none"], marks=_X["marks"], schema=_X["schema"],
                              material=material[:limit], **c)
-    item = _normalise_exam(cards._ask(cards.engine_call(_X["engine"], calls), system, user))
+    item = _normalise_exam(cards._ask(cards.engine_call(_X["engine"], calls), system, user, _X["schema"]))
     if not item["question"]:
         raise model.ModelError(_SAY["cards_no_json"])
     item.update(kind=KIND_EXAM, date=today.isoformat(), topic=topic, style=names, links=found["links"])
@@ -201,7 +201,7 @@ def mark_prompt(module: Module, item: dict, answer: str) -> tuple:
 def mark_exam(module: Module, item: dict, answer: str, calls: dict | None = None, engine: str | None = None) -> dict:
     """{marks, total, steps: [{step, awarded, of, comment}], feedback}."""
     system, user = mark_prompt(module, item, answer)
-    data = cards._ask(cards.engine_call(engine or _X["marking_engine"], calls), system, user)
+    data = cards._ask(cards.engine_call(engine or _X["marking_engine"], calls), system, user, _X["mark_schema"])
     steps = []
     for s in (data.get("steps") or [])[:_X["max_scheme"]]:
         if not isinstance(s, dict):

@@ -115,6 +115,9 @@
   },
 
   "agent": {
+    "structured_output": true,
+    "schema_file": "agent_decision.schema.json",
+    "_structured_output": "False disables format; a server format rejection retries once without it. schema_file defines the decision shape once; available tools and observed IDs constrain it at runtime. think comes from brain.json chat.",
     "_doc": "agent_loop.py: the bounded plan/observe/check loop for unattended reviews, on the same local model and context as chat. note_max / focus_max bound each model decision; the model's JSON reply is refused above reply_max_chars.",
     "max_steps": 4,
     "run_budget_s": 90,

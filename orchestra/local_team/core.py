@@ -218,22 +218,31 @@ def ready(ctx: Ctx) -> str:
 def ask(ctx: Ctx, role: Role, payload: dict) -> dict:
     """One inference under the GPU lease. Skip if the lease is held; BadOutput if the answer
     isn't valid JSON for the role's schema."""
+    from ollama_output import call_with_schema
+
     model = ready(ctx)
     lease = GpuLease.for_repo(ctx.repo, f"orchestra.local_team {role.name}", ctx.cfg["gpu_lease_ttl_s"])
     if not lease.try_acquire():
         held = lease.info() or {}
         raise Skip(f"GPU lease held by {held.get('holder', '?')} (pid {held.get('pid', '?')})")
     try:
-        body = {"model": model, "stream": False, "format": role.schema,
+        body = {"model": model, "stream": False,
                 # Same num_ctx as Denisse, so the loaded model is reused rather than reloaded.
                 "options": {"temperature": load()["ollama"]["temperature"], "num_ctx": ctx.cfg["local_team_num_ctx"]},
                 "messages": [{"role": "system", "content": role.prompt},
                              {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]}
-        req = urllib.request.Request(ctx.ollama + "/api/chat", data=json.dumps(body).encode("utf-8"),
-                                     headers={"Content-Type": "application/json"})
-        try:
+        if ctx.cfg["local_team_think"] is not None:
+            body["think"] = ctx.cfg["local_team_think"]
+
+        def send(**request_body):
+            req = urllib.request.Request(ctx.ollama + "/api/chat", data=json.dumps(request_body).encode("utf-8"),
+                                         headers={"Content-Type": "application/json"})
             with urllib.request.urlopen(req, timeout=ctx.cfg["local_team_timeout_s"]) as r:
-                data = json.loads(r.read().decode("utf-8"))
+                return json.loads(r.read().decode("utf-8"))
+
+        try:
+            data = call_with_schema(send, schema=role.schema,
+                                    enabled=ctx.cfg["local_team_structured_output"], **body)
         except (OSError, ValueError) as e:
             raise Skip(f"Ollama call failed: {e}")
     finally:

@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tool", "note", "focus_ids"],
+  "properties": {
+    "tool": {"type": "string"},
+    "note": {"type": "string"},
+    "focus_ids": {"type": "array", "items": {"type": "string"}}
+  }
+}

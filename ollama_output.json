@@ -1,0 +1,5 @@
+{
+  "_doc": "Only server request/unsupported-feature errors that name structured decoding get one retry without format. Connection, model-not-found, authentication and generic server errors propagate.",
+  "rejection_statuses": [400, 422, 501],
+  "rejection_pattern": "\\b(format|schema|grammar|structured outputs?)\\b"
+}

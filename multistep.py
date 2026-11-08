@@ -59,12 +59,14 @@ conjunctions and punctuation. Whether it is worth planning stays with
 tool_router's cues, and the steps themselves with the model.
 """
 import calendar
+import copy
 import json
 import logging
 import os
 import re
 
 import dialogue_rules
+from ollama_output import call_with_schema
 
 _R = dialogue_rules.get("multistep")
 
@@ -112,11 +114,9 @@ def _is_action(words: list) -> bool:
         return False
     return bool(_verb(words[0])) or (words[1] in _OBJECT and words[0] not in _OBJECT)
 
-_PLAN_SCHEMA = {
-    "type": "object", "additionalProperties": False, "required": ["steps"],
-    "properties": {"steps": {"type": "array", "minItems": 1, "maxItems": MAX_STEPS,
-                             "items": {"type": "string", "maxLength": STEP_CHARS}}},
-}
+_PLAN_SCHEMA = copy.deepcopy(_R["plan_schema"])
+_PLAN_SCHEMA["properties"]["steps"]["maxItems"] = MAX_STEPS
+_PLAN_SCHEMA["properties"]["steps"]["items"]["maxLength"] = STEP_CHARS
 
 # No example wording in here. Live on 2026-11-02, an example step ("Find my
 # signals coursework notes") was planned for a weather request, and quoting
@@ -216,8 +216,10 @@ def make_plan(request: str, chat=None) -> list | None:
     parts = action_parts(request)
     numbered = "\n".join(f"{i}. {p}" for i, p in enumerate(parts, 1))
     try:
-        r = chat(model=brain.MODEL, keep_alive=-1, format=_PLAN_SCHEMA,
-                 options={"temperature": 0, "num_ctx": brain.NUM_CTX, "num_predict": _R["plan_num_predict"]},
+        r = call_with_schema(chat, schema=_PLAN_SCHEMA, enabled=_R["structured_output"],
+                 **brain._chat_extra(), model=brain.MODEL, keep_alive=brain.CONFIG["chat"]["keep_alive"],
+                 options={"temperature": _R["plan_temperature"], "num_ctx": brain.NUM_CTX,
+                          "num_predict": _R["plan_num_predict"]},
                  messages=[{"role": "system", "content": _PLAN_PROMPT},
                            {"role": "user", "content": _R["plan_user_message"].format(request=request, parts=numbered)}])
         raw = brain._get(brain._get(r, "message"), "content", "") or ""

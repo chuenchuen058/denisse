@@ -12,9 +12,10 @@ Nothing here composes prose: the model's lists are kept as lists, capped
 """
 from __future__ import annotations
 
-import inspect
 import json
 import re
+
+from ollama_output import accepts_keyword, call_with_schema, schema_from_example
 
 from . import conf
 from .conf import CONFIG
@@ -100,15 +101,19 @@ def _lines(para: str, limit: int) -> list:
 
 # -- the call ----------------------------------------------------------------
 
-def ollama_call(system: str, user: str, options: dict | None = None) -> str:
+def ollama_call(system: str, user: str, options: dict | None = None, *, schema: str | None = None) -> str:
     """One chat call. `options` are laid over the defaults (a retry's
-    tweaks, tutor.json model.retry_options)."""
+    tweaks, tutor.json model.retry_options). `schema` is the same JSON
+    example used in this operation's prompt, converted to types for format."""
     import ollama
     import model_config
     extra = {} if _M.get("think") is None else {"think": _M["think"]}
-    r = ollama.chat(**extra, model=model_config.model(_M["config_entry"]), keep_alive=_M["keep_alive"],
-                    options={"temperature": _M["temperature"], "num_ctx": conf.num_ctx(), **(options or {})},
-                    messages=[{"role": "system", "content": system}, {"role": "user", "content": user}])
+    shape = schema_from_example(json.loads(schema)) if schema is not None else None
+    r = call_with_schema(
+        ollama.chat, schema=shape, enabled=_M["structured_output"], **extra,
+        model=model_config.model(_M["config_entry"]), keep_alive=_M["keep_alive"],
+        options={"temperature": _M["temperature"], "num_ctx": conf.num_ctx(), **(options or {})},
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}])
     msg = r["message"] if isinstance(r, dict) else getattr(r, "message", None)
     content = msg["content"] if isinstance(msg, dict) else getattr(msg, "content", "")
     return content or ""
@@ -231,12 +236,14 @@ def merge(parts: list) -> dict:
     return out
 
 
-def _takes_options(call) -> bool:
-    try:
-        params = inspect.signature(call).parameters.values()
-    except (TypeError, ValueError):
-        return False
-    return any(p.name == "options" or p.kind is p.VAR_KEYWORD for p in params)
+def invoke(call, system: str, user: str, *, schema: str, options: dict | None = None) -> str:
+    """Pass shape/options to local calls, preserving existing injected/delegate calls."""
+    extra = {}
+    if accepts_keyword(call, "schema"):
+        extra["schema"] = schema
+    if options and accepts_keyword(call, "options"):
+        extra["options"] = options
+    return call(system, user, **extra)
 
 
 def retry_options(attempt: int) -> dict:
@@ -253,7 +260,6 @@ def extract_lecture(module: str, code: str, week: int, sources: list, text: str,
     `failed` as (chunk number, why); the rest are merged. Raises ModelError
     only when every chunk failed, so a note is never written from nothing."""
     call = call or ollama_call
-    with_options = _takes_options(call)
     errors = model_errors()
     pieces = chunks(text, chunk_chars(num_ctx))
     parts, missed = [], []
@@ -265,7 +271,7 @@ def extract_lecture(module: str, code: str, week: int, sources: list, text: str,
             prompt = user + _PR["retry"] if bad_json else user
             options = retry_options(attempt)
             try:
-                reply = call(_PR["system"], prompt, options) if with_options and options                     else call(_PR["system"], prompt)
+                reply = invoke(call, _PR["system"], prompt, schema=_PR["schema"], options=options)
             except errors as exc:
                 why, bad_json = (str(exc) or type(exc).__name__), False
                 continue

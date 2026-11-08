@@ -1,5 +1,7 @@
 {
   "defaults": {
+    "local_team_structured_output": true,
+    "local_team_think": false,
     "local_team_timeout_s": 240,
     "local_team_num_ctx": 8192,
     "local_team_gpu_busy_pct": 60,

@@ -2,6 +2,12 @@
   "_about": "Word lists and limits for multistep.py (is this request several jobs?) and clarify.py (which one did he mean?). Loaded once by dialogue_rules.py. Every entry is {\"why\": what it is for, \"value\": the data}. These are grammar and filler words, not Chuen's phrasings: the code decides from sentence structure, and tolerates typos and stretched words (\"yesss\", \"remnd\") by itself.",
 
   "multistep": {
+    "structured_output": {"why": "Pass the plan schema to Ollama; false uses existing plan parsing/fallback. Server format rejections retry once without format.", "value": true},
+    "plan_temperature": {"why": "Sampling temperature for the plan call.", "value": 0},
+    "plan_schema": {"why": "Plan output shape. max_steps and step_max_chars supply the dynamic bounds.", "value": {
+      "type": "object", "additionalProperties": false, "required": ["steps"],
+      "properties": {"steps": {"type": "array", "minItems": 1, "items": {"type": "string"}}}
+    }},
     "max_steps": {"why": "Most steps a plan may have; also the JSON schema's maxItems.", "value": 5},
     "summary_chars": {"why": "Characters of each earlier step's reply passed to the next step.", "value": 240},
     "file_chars": {"why": "Characters of a found file put into the step that uses it.", "value": 4000},
