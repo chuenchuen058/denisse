@@ -15,7 +15,10 @@ a re-sync to Anki updates a card instead of adding it twice.
 
 Every card is then checked before it can reach Anki (tutor.json
 cards.check): the physics or maths right, the back answering the front,
-agreeing with the source note. Each kind names its checker (`check`;
+agreeing with the source note and belonging to the module. Topic maps and
+note topic metadata identify foreign-only topics before a model check;
+the checker judges shared maths and cross-module mentions from the note.
+Each kind names its checker (`check`;
 default: recall by the local model, method and problem by Claude through
 delegate.py); `check.all_with` sends every kind to one engine. A wrong card
 is corrected when the checker gives a corrected back and quotes the note
@@ -23,8 +26,8 @@ sentence that backs it (the quote must really be in the note); otherwise it
 is held back: kept in the sidecar's `held` list and under "Held back" in the
 cards note with the reason, never sent to Anki. Every card records its
 check (by, verdict, when, reason, and the key of the card as written), so a
-re-run checks only cards that are new or changed, whose checker changed, or
-that could not be checked last time.
+re-run checks cards that are new or changed, whose source, module scope or
+checker changed, or that could not be checked last time.
 
 The cards live in the Don area: a JSON sidecar (cards-<slug>.json) and a
 readable note listing each card under a link to its source.
@@ -33,10 +36,11 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import json
 import os
 import re
 
-from . import don, ingest, model, sources
+from . import conf, don, ingest, model, sources, topics
 from .conf import CONFIG, Module, Paths
 
 _C = CONFIG["cards"]
@@ -108,21 +112,53 @@ def style_example(module: Module, src: sources.Source) -> str:
     return ""
 
 
+def module_scope(paths: Paths, module: Module, found: list) -> dict:
+    """Topic ownership from the vault's maps and note topic metadata, never outbound links.
+
+    Exact names identify known foreign topics; the checker interprets synonyms
+    and whether the source actually teaches a shared concept in this module.
+    """
+    own = [t["name"] for t in (topics.load(paths, module) or {}).get("topics", [])]
+    own += [src.topic for src in found if src.topic]
+    others = [{"module": other.title,
+               "topics": [t["name"] for t in (topics.load(paths, other) or {}).get("topics", [])]}
+              for other in conf.modules(paths) if other.slug != module.slug]
+    return {"module": module.title, "topics": sorted(set(own)), "other_modules": others}
+
+
+def _scope_context(module: Module, src: sources.Source, scope: dict | None) -> str:
+    scope = scope if scope is not None else {"module": module.title, "topics": [], "other_modules": []}
+    return _C["scope"]["context"].format(scope=json.dumps(scope, ensure_ascii=False), topic=src.topic,
+                                         **don.ctx(module))
+
+
+def _other_topic(card: dict, scope: dict | None) -> bool:
+    if scope is None:
+        return False
+    def key(value):
+        return " ".join(str(value or "").casefold().split())
+    topic = key(card.get("topic"))
+    own = {key(t) for t in [scope["module"], *scope["topics"]]}
+    foreign = {key(t) for other in scope["other_modules"] for t in [other["module"], *other["topics"]]}
+    return bool(topic and topic in foreign and topic not in own)
+
+
 def generate(module: Module, src: sources.Source, calls: dict | None = None, num_ctx: int | None = None,
-             only: set | None = None) -> list:
-    """The cards for one source note, every kind (or only those in `only`), each from its engine."""
+             only: set | None = None, scope: dict | None = None) -> list:
+    """Candidates for one source; known foreign topics carry a held verdict for the sidecar."""
     by_engine = {}
     for kind, spec in _C["kinds"].items():
         if spec["count"] > 0 and (only is None or kind in only):
             by_engine.setdefault(spec["engine"], []).append(kind)
     text = src.text[:model.chunk_chars(num_ctx)]
     c = don.ctx(module)
-    system = _C["system"].format(**c)
+    system = _C["system"].format(**c) + _C["scope"]["rule"].format(**c)
     out = []
     for engine, kinds in by_engine.items():
         wanted = "\n".join(_C["wanted"].format(kind=k, **_C["kinds"][k]) for k in kinds)
         user = _C["user"].format(week=_C["week"].format(week=src.week) if src.week else "", source=src.stem,
-                                 wanted=wanted, schema=_C["schema"], text=text, **c)
+                                 wanted=wanted, schema=_C["schema"], text=text,
+                                 scope=_scope_context(module, src, scope), **c)
         if any(_C["kinds"][k].get("style") for k in kinds):
             user += style_example(module, src)
         data = _ask(engine_call(engine, calls), system, user, _C["schema"])
@@ -140,6 +176,9 @@ def generate(module: Module, src: sources.Source, calls: dict | None = None, num
                         "back": back,
                         "topic": _clip(item.get("topic"), _C["topic_chars"]) or src.topic or src.stem,
                         "source": src.rel, "source_name": src.stem, "week": src.week, "engine": engine})
+            if _other_topic(out[-1], scope):
+                _verdict(out[-1], _C["scope"]["checker"], _V["wrong"], _K["reasons"]["other_module"],
+                         dt.datetime.now().isoformat(timespec="seconds"))
     return out
 
 
@@ -196,7 +235,7 @@ def as_written(card: dict) -> dict:
 def check_key(card: dict) -> str:
     """Identifies the card as written, so an unchanged card is not re-checked."""
     w = as_written(card)
-    return _hash(_K["key"].format(kind=w["kind"], front=w["front"], back=w["back"]))
+    return _hash(_K["key"].format(kind=w["kind"], front=w["front"], back=w["back"], topic=w.get("topic", "")))
 
 
 def _words(text) -> list:
@@ -225,6 +264,10 @@ def _judge(card: dict, answer, engine: str, text: str, when: str) -> dict:
     """One card, one answer from the checker -> the card with its check."""
     reasons = _K["reasons"]
     verdict = str((answer or {}).get("verdict", "")).strip().lower() if isinstance(answer, dict) else ""
+    if verdict == _K["other_module"] or (isinstance(answer, dict)
+            and str(answer.get("reason", "")).strip().casefold() == reasons["other_module"].casefold()):
+        # Scope rejection cannot be repaired into another module's card, even with a valid quote.
+        return _verdict(card, engine, _V["wrong"], reasons["other_module"], when)
     if verdict == _K["right"]:
         return _verdict(card, engine, _V["right"], answer.get("reason"), when)
     if verdict != _K["wrong"]:
@@ -256,33 +299,44 @@ def _ask_checks(call, system: str, user: str) -> list:
 
 
 def check(module: Module, src: sources.Source, written: list, before: dict, checks: dict | None = None,
-          when: str | None = None, num_ctx: int | None = None) -> tuple:
+          when: str | None = None, num_ctx: int | None = None, scope: dict | None = None) -> tuple:
     """Check `written` (cards as their writer gave them) against `src`.
     `before`: check key -> the card as it stood after an earlier check,
-    reused when the same checker would check it again. `checks` (tests)
+    reused only with the same checker, source and module scope. `checks` (tests)
     overrides checker engines by name. Returns (passed, held, counts)."""
     when = when or dt.datetime.now().isoformat(timespec="seconds")
     text = src.text[:model.chunk_chars(num_ctx)]
     c = don.ctx(module)
+    scope_text = _scope_context(module, src, scope)
+    scope_key = _hash(json.dumps([text, scope_text, _C["scope"], _K["system"], _K["user"], _K["schema"],
+                                 _K["other_module"], _K["reasons"]],
+                                sort_keys=True, ensure_ascii=False))
     done, pending = [], {}
+    reused = 0
     for i, card in enumerate(written):
+        if _other_topic(card, scope):
+            done.append((i, _verdict(as_written(card), _C["scope"]["checker"], _V["wrong"],
+                                    _K["reasons"]["other_module"], when)))
+            continue
         engine = check_engine(card["kind"])
         old = before.get(check_key(card))
         chk = (old or {}).get("check") or {}
-        if chk.get("by") == engine and chk.get("verdict") != _V["unchecked"]:
+        if (chk.get("by") == engine and chk.get("verdict") != _V["unchecked"]
+                and chk.get("scope") == scope_key):
             done.append((i, {**card, **{k: old[k] for k in ("front", "written_front", "back", "written_back",
                                                             "check") if k in old}}))
+            reused += 1
         else:
             pending.setdefault(engine, []).append((i, as_written(card)))
-    reused = len(done)
-    system = _K["system"].format(**c)
+    system = _K["system"].format(**c) + _C["scope"]["rule"].format(**c)
     for engine, batch in pending.items():
-        items = "\n".join(_K["item"].format(n=n, kind=card["kind"], front=card["front"], back=card["back"])
+        items = "\n".join(_K["item"].format(n=n, kind=card["kind"], front=card["front"], back=card["back"],
+                                           topic=card.get("topic", ""))
                           + _C["kinds"].get(card["kind"], {}).get("check_note", "")
                           for n, (_i, card) in enumerate(batch, 1))
         user = _K["user"].format(week=_C["week"].format(week=src.week) if src.week else "", source=src.stem,
                                  items=items, schema=_K["schema"], right=_K["right"], wrong=_K["wrong"],
-                                 text=text, **c)
+                                 other_module=_K["other_module"], scope=scope_text, text=text, **c)
         try:
             replies = _ask_checks(engine_call(engine, checks), system, user)
         except (model.ModelError, OSError) as exc:
@@ -297,6 +351,8 @@ def check(module: Module, src: sources.Source, written: list, before: dict, chec
                 continue
         done += [(i, _judge(card, answers.get(n), engine, text, when)) for n, (i, card) in enumerate(batch, 1)]
     done.sort(key=lambda pair: pair[0])
+    for _i, card in done:
+        card["check"]["scope"] = scope_key
     passed = [card for _i, card in done if card["check"]["verdict"] in _PASS]
     held = [card for _i, card in done if card["check"]["verdict"] not in _PASS]
     counts = {"reused": reused, "held": len(held),
@@ -356,6 +412,7 @@ def run(paths: Paths, module: Module, calls: dict | None = None, today: dt.date 
     today = today or dt.date.today()
     deck = load(paths, module)
     found = sources.collect(paths, module)
+    scope = module_scope(paths, module, found)
     say(_SAY["sources"].format(module=module.title, n=len(found),
                                own=sum(1 for s in found if s.kind == CONFIG["sources"]["own"])))
     made, kept, failed, held_all = [], [], [], []
@@ -374,7 +431,7 @@ def run(paths: Paths, module: Module, calls: dict | None = None, today: dt.date 
             missing = [k for k in active_kinds() if k not in asked]
             if missing:
                 try:
-                    extra = generate(module, src, calls, num_ctx, only=set(missing))
+                    extra = generate(module, src, calls, num_ctx, only=set(missing), scope=scope)
                 except (model.ModelError, OSError) as exc:
                     failed.append((src.rel, str(exc)))
                     say(_SAY["cards_failed"].format(name=src.stem, why=exc))
@@ -385,7 +442,7 @@ def run(paths: Paths, module: Module, calls: dict | None = None, today: dt.date 
                     say(_SAY["cards_source"].format(status="made", name=src.stem, n=len(extra)))
         else:
             try:
-                written = generate(module, src, calls, num_ctx)
+                written = generate(module, src, calls, num_ctx, scope=scope)
             except (model.ModelError, OSError) as exc:
                 failed.append((src.rel, str(exc)))
                 say(_SAY["cards_failed"].format(name=src.stem, why=exc))
@@ -398,7 +455,7 @@ def run(paths: Paths, module: Module, calls: dict | None = None, today: dt.date 
                          "kinds_asked": active_kinds()}
                 made.append(src.rel)
                 say(_SAY["cards_source"].format(status="made", name=src.stem, n=len(written)))
-        passed, held, counts = check(module, src, written, before, checks, num_ctx=num_ctx)
+        passed, held, counts = check(module, src, written, before, checks, num_ctx=num_ctx, scope=scope)
         if counts["reused"] < len(written):
             say(_SAY["cards_checked"].format(name=src.stem, **counts))
         entry["cards"], entry["held"] = passed, held

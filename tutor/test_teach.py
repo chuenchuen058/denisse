@@ -422,6 +422,7 @@ class RegistrationTests(TeachFixture):
 
     def test_a_reply_that_drops_the_tutor_gets_its_first_sentence(self):
         import brain
+        import study_brief
 
         def call(name, args=None):
             return {"message": {"content": "", "tool_calls": [{"function": {"name": name, "arguments": args or {}}}]}}
@@ -432,7 +433,10 @@ class RegistrationTests(TeachFixture):
             isolated = {name: (lambda **kw: "Refused: isolated tool") for name in brain.tools.TOOL_FUNCTIONS}
             isolated["tutor_quiz"] = brain.tools.tutor_quiz
             isolated.update(functions or {})
-            with unittest.mock.patch.object(brain.ollama, "chat", side_effect=lambda **kw: next(it)), \
+            # Brain checks study-brief module names before reaching the tutor tool.
+            # That discovery must use this fixture too, even outside run_checks' sandbox.
+            with unittest.mock.patch.object(study_brief, "VAULT", self.vault), \
+                    unittest.mock.patch.object(brain.ollama, "chat", side_effect=lambda **kw: next(it)), \
                     unittest.mock.patch.dict(brain.tools.TOOL_FUNCTIONS, isolated, clear=True):
                 return bot.respond([{"role": "user", "content": prompt}])[0]
         self.with_cards()

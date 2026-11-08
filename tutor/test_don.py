@@ -477,7 +477,7 @@ class CheckTests(DonFixture):
         self.assertIn("μ0 I_enc", tsv)
         self.assertEqual(len([r for r in tsv.splitlines() if not r.startswith("#")]), 2)
 
-    def test_rerun_checks_only_new_or_changed_cards(self):
+    def test_rerun_reuses_checks_until_cards_or_source_change(self):
         self.em_cards()
         # Unchanged note: nothing written, nothing checked.
         writer_log, check_log = [], []
@@ -485,16 +485,17 @@ class CheckTests(DonFixture):
         self.assertEqual((writer_log, check_log), ([], []))
         self.assertEqual(len(out["cards"]), 2)
         self.assertEqual(len(out["held"]), 2)
-        # The note changes and the writer rewrites one card: only that card is checked again,
-        # and the same wrong card written again keeps its correction without a new check.
+        # A changed note can change module scope or remove supporting evidence.
+        # Recheck every card against it, including previously corrected ones.
         with open(os.path.join(self.vault, MODULES, EM, "My EM notes.md"), "a", encoding="utf-8") as f:
             f.write("\nThe unit of B is the tesla, T = N/(A m).\n")
         new_good = {**GOOD, "back": "∮B·dA = 0 over any closed surface"}
         writer_log, check_log = [], []
         out = self.em_cards(writer_log, check_log, deck=(BAD_FLUX, BAD_FIELD, BAD_VAGUE, new_good))
         self.assertEqual(len(writer_log), 1)
-        self.assertEqual([_items(u) for _t, u in check_log],
-                         [[(1, "recall", new_good["front"], new_good["back"])]])
+        self.assertCountEqual([(k, f, b) for _t, u in check_log for _n, k, f, b in _items(u)],
+                              [(c["kind"], c["front"], c["back"])
+                               for c in (BAD_FLUX, BAD_FIELD, BAD_VAGUE, new_good)])
         backs = {c["front"]: c["back"] for c in out["cards"]}
         self.assertIn("μ0 I_enc", backs[BAD_FLUX["front"]])
         self.assertEqual(len(out["held"]), 2)
