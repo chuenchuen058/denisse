@@ -10,6 +10,18 @@
       "why": "faster-whisper size for speech-to-text. small.en is ~480 MB, downloaded once; it shares the GPU with the chat model (stt_whisper.py docstring).",
       "env": "DENISSE_WHISPER_MODEL",
       "value": "small.en"
+    },
+    "vosk": {
+      "why": "Vosk offline model slug used by scripts/download_vosk_model.py. Keep it alongside other speech model choices so a different local model is just a config change.",
+      "env": "DENISSE_VOSK_MODEL",
+      "value": "vosk-model-en-us-0.22-lgraph"
+    }
+  },
+  "voice": {
+    "vosk_model_url": {
+      "why": "Official Vosk download URL for the selected model. This keeps the URL near the model slug and remains overrideable by environment.",
+      "env": "DENISSE_VOSK_MODEL_URL",
+      "value": "https://alphacephei.com/vosk/models/vosk-model-en-us-0.22-lgraph.zip"
     }
   },
   "settings": {

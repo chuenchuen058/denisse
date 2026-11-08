@@ -18,6 +18,9 @@ sys.path.insert(0, str(HERE))
 from orchestra import admission  # noqa: E402
 
 WHEN = dt.datetime(2026, 11, 2, 21, 0)
+# Captured from tokens() before the hardcoding refactor, for packet() below.
+LEGACY_GOAL = ["after", "backoff", "cause", "next", "park", "parked", "partial", "path",
+               "record", "retrie", "retry", "runner", "sees", "session", "why", "widget"]
 
 
 class AdmissionTest(unittest.TestCase):
@@ -85,6 +88,26 @@ class AdmissionTest(unittest.TestCase):
         self.assertEqual(side["area"], "orchestra")
         rec = json.loads((self.repo / ".review" / "local_team" / "admission.jsonl").read_text("utf-8").splitlines()[-1])
         self.assertEqual(rec["kind"], "admitted")
+        for name, saved in (("admission.jsonl", rec), ("packet sidecar", side)):
+            with self.subTest(saved=name):
+                self.assertEqual(saved["goal"], LEGACY_GOAL)
+
+    def test_refused_packet_preserves_legacy_goal_in_record(self):
+        r = self.admit(self.packet(gate={"id": "shell", "arg": "x"}))
+        self.assertEqual(r["kind"], "gate", r)
+        self.assertEqual(admission.records(self.repo)[-1]["goal"], LEGACY_GOAL)
+
+    def test_saved_goals_use_configured_stop_words_for_admissions_and_refusals(self):
+        stop = admission.load_config(self.repo)["admission_stop_words"] + ["runner", "widget"]
+        expected = [word for word in LEGACY_GOAL if word not in {"runner", "widget"}]
+        for gate, kind in ((self.packet()["gate"], "admitted"), ({"id": "shell", "arg": "x"}, "gate")):
+            with self.subTest(kind=kind):
+                r = self.admit(self.packet(gate=gate), admission_stop_words=stop)
+                self.assertEqual(r["kind"], kind, r)
+                self.assertEqual(admission.records(self.repo)[-1]["goal"], expected)
+                if r["admitted"]:
+                    side = self.repo / ".review" / "local_team" / "packets" / f"{r['slug']}.json"
+                    self.assertEqual(json.loads(side.read_text("utf-8"))["goal"], expected)
 
     def test_sidecar_fingerprints_evidence_and_runner_agrees(self):
         r = self.admit(self.packet())
