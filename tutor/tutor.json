@@ -415,7 +415,7 @@
     "cards_checked_mark": " · checked by {by}",
     "cards_fixed_mark": " · corrected by {by}",
     "cards_held_heading": "## Held back",
-    "cards_held_intro": "Cards the check found wrong and could not correct from the note. They are not in Anki.",
+    "cards_held_intro": "Cards held back by the check, including cards about another module. They are not sent to Anki.",
     "cards_held_card": "- *{kind}* **{front}** — {back} · {reason} ({by}, {when}) · from {link}"
   },
   "sources": {
@@ -431,9 +431,15 @@
     "source_link": "[[{rel}|{stem}]]"
   },
   "cards": {
+    "scope": {
+      "_help": "Topic ownership is discovered from module folders, their topic maps and source-note topic metadata. Match full names ignoring case and whitespace; do not infer ownership from links or word overlap. A name shared with the current module is eligible, but the checker must still judge its use in the source. The scope fingerprint invalidates checks when ownership or policy changes.",
+      "checker": "topic map",
+      "rule": "\nStay within {module}. Its topic map and its notes define what it teaches; the map may be incomplete. Other modules may share mathematical tools: keep a shared tool when the NOTE actually explains or applies it inside {module}. A link, heading or one-line cross-reference to another module is navigation, not teaching or evidence for a card. Do not turn it into a question about that other module. Judge the front and back as well as the topic label: relabelling a foreign fact does not make it part of this module. Use only substantive teaching in the NOTE; an empty cards list is better than cards inferred from links.",
+      "context": "MODULE SCOPE (topic names from maps and note metadata, not an exhaustive syllabus):\n{scope}\nSource note topic: {topic}"
+    },
     "kinds": {
       "recall": {"count": 4, "engine": "local", "check": "local",
-                 "describe": "recall cards: a definition, a named result or an equation to state from memory; the front is a full question that says what to give (State Gauss’s law in integral form.), never just a name"},
+                 "describe": "recall cards: a definition, a named result or an equation to state from memory; the front is a full question that says what to give, never just a name"},
       "method": {"count": 3, "engine": "local", "check": "claude",
                  "describe": "method cards: given a situation, which method to use and why"},
       "problem": {"count": 2, "engine": "local", "check": "claude",
@@ -445,25 +451,27 @@
       "claude": {"via": "delegate", "delegate_engines": ["claude"]}
     },
     "system": "You are {tutor}, a careful study tutor writing Anki cards for a university engineering student. Use only what the note says; nothing invented. Equations in LaTeX between \\( and \\). Answer with one JSON object and nothing else.",
-    "user": "Module: {module} ({code}){week}. Source note: {source}.\n\nWrite these cards from the note below:\n{wanted}\n\nEach card: a short front (the question), a back (the answer, at most a few lines), its kind, and the topic it tests (a few words).\n\nReply with JSON of exactly this shape:\n{schema}\n\nRules: only what the note says; leave a kind short rather than guess; no markdown outside the JSON.\n\nNOTE:\n{text}",
+    "user": "Module: {module} ({code}){week}. Source note: {source}.\n\n{scope}\n\nWrite these cards from the note below:\n{wanted}\n\nEach card: a short front (the question), a back (the answer, at most a few lines), its kind, and the topic it tests (a few words).\n\nReply with JSON of exactly this shape:\n{schema}\n\nRules: only what the note says; leave a kind short rather than guess; no markdown outside the JSON.\n\nNOTE:\n{text}",
     "week": ", Week {week}",
     "wanted": "- {count} {describe} (kind: \"{kind}\")",
     "schema": "{\"cards\": [{\"kind\": \"recall|method|problem|tutorial\", \"front\": \"...\", \"back\": \"...\", \"topic\": \"...\"}]}",
     "check": {
       "all_with": null,
-      "system": "You are {tutor}, checking Anki cards before a university engineering student drills them. A wrong card teaches him a wrong fact, so be strict, as a professional examiner would be. A card is right only if (1) the physics or maths on it is correct, (2) the back actually answers the front, specifically and not vaguely, and (3) it agrees with the source note, and (4) the front is a complete question a student could answer, not just a name or a heading. Answer with one JSON object and nothing else.",
-      "user": "Module: {module} ({code}){week}. Source note: {source}.\n\nCheck each card below against the note and against what is true:\n{items}\n\nFor each card give its number, a verdict of \"{right}\" or \"{wrong}\", and a one-line reason. For a card that is {wrong}: if the note states the correct answer, give the corrected back and, as evidence, quote word for word the sentence of the note that supports it; if the note does not support a correct answer, leave corrected and evidence empty. If the front is not a complete question (only a name or a heading), give corrected_front: the same card as a full question its back answers; and if the back is right as it stands, set front_only to true.\n\nReply with JSON of exactly this shape:\n{schema}\n\nNOTE:\n{text}",
-      "item": "[{n}] ({kind}) Front: {front}\n    Back: {back}",
-      "schema": "{\"checks\": [{\"n\": 1, \"verdict\": \"right|wrong\", \"reason\": \"...\", \"corrected\": \"\", \"evidence\": \"\", \"corrected_front\": \"\", \"front_only\": false}]}",
+      "system": "You are {tutor}, checking Anki cards before a university engineering student drills them. A wrong card teaches him a wrong fact, so be strict, as a professional examiner would be. A card is right only if (1) the physics or maths on it is correct, (2) the back actually answers the front, specifically and not vaguely, and (3) it agrees with the source note, (4) the front is a complete question a student could answer, not just a name or a heading, and (5) it teaches this module, with substantive support in the source rather than a link or mention of a different module. Answer with one JSON object and nothing else.",
+      "user": "Module: {module} ({code}){week}. Source note: {source}.\n\n{scope}\n\nCheck each card below against the note and against what is true:\n{items}\n\nFor each card give its number, a verdict of \"{right}\", \"{wrong}\" or \"{other_module}\", and a one-line reason. If its topic or content belongs to a different module, or relies only on a cross-module link or mention, give \"{other_module}\" and leave all corrections empty. Shared maths applied or explained in this module is eligible even if another map also lists it. For a card that is {wrong}: if the note states the correct answer, give the corrected back and, as evidence, quote word for word the sentence of the note that supports it; if the note does not support a correct answer, leave corrected and evidence empty. If the front is not a complete question (only a name or a heading), give corrected_front: the same card as a full question its back answers; and if the back is right as it stands, set front_only to true.\n\nReply with JSON of exactly this shape:\n{schema}\n\nNOTE:\n{text}",
+      "item": "[{n}] ({kind}) Front: {front}\n    Back: {back}\n    Topic: {topic}",
+      "schema": "{\"checks\": [{\"n\": 1, \"verdict\": \"right|wrong|other module\", \"reason\": \"...\", \"corrected\": \"\", \"evidence\": \"\", \"corrected_front\": \"\", \"front_only\": false}]}",
       "right": "right",
       "wrong": "wrong",
+      "other_module": "other module",
       "verdicts": {"right": "right", "fixed": "fixed", "wrong": "wrong", "unchecked": "unchecked"},
       "evidence_min_words": 3,
       "evidence_min_overlap": 0.8,
       "word": "[^\\W_]+",
       "reason_chars": 300,
-      "key": "{kind}|{front}|{back}",
+      "key": "{kind}|{front}|{back}|{topic}",
       "reasons": {
+        "other_module": "other module",
         "no_verdict": "not checked: the checker gave no verdict for this card",
         "unreachable": "not checked: the checker ({engine}) did not answer ({why})",
         "no_fix": "wrong, and the note gives no corrected answer: {reason}",
