@@ -7,23 +7,26 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+from pathlib import Path
 
 from . import conf
 from .context import VAULT
 
 
-def path(date: str | None = None):
-    return VAULT / conf.section("handoff")["note"].format(date=date or dt.date.today().isoformat())
+def path(date: str | None = None, vault: Path | None = None):
+    return (Path(vault) if vault else VAULT) / conf.section("handoff")["note"].format(
+        date=date or dt.date.today().isoformat())
 
 
-def remember(agent: str, lines: list[str]) -> bool:
+def remember(agent: str, lines: list[str], vault: Path | None = None, now: dt.datetime | None = None) -> bool:
     c = conf.section("handoff")
     lines = [re.sub(r"\s+", " ", l).strip()[:c["line_chars"]] for l in lines if l and l.strip()]
-    if not lines or not VAULT.is_dir():
+    vault = Path(vault) if vault else VAULT
+    if not lines or not vault.is_dir():
         return False
-    now = dt.datetime.now()
+    now = now or dt.datetime.now()
     d = now.date().isoformat()
-    p = path(d)
+    p = path(d, vault)
     p.parent.mkdir(parents=True, exist_ok=True)
     if not p.exists():
         p.write_text(c["new_note"].format(date=d), encoding="utf-8")
