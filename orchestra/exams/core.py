@@ -203,7 +203,15 @@ def run_exam(agent, exam: dict, timeout: float | None = None) -> dict:
             (tmp / name).parent.mkdir(parents=True, exist_ok=True)  # a fixture vault is a tree
             (tmp / name).write_text(content, encoding="utf-8")
         try:
-            reply = agent(exam["prompt"], tmp, t)
+            extra = {}
+            if exam["grader"]["type"] == "json":
+                # The runner imports this module with only orchestra/ on sys.path.
+                # Local inference runs from the repo root; scheduling needs no model helper.
+                from ollama_output import accepts_keyword, schema_from_example
+                if accepts_keyword(agent, "schema"):
+                    # Infer types only; never expose the grader's expected values to the model.
+                    extra["schema"] = schema_from_example(exam["grader"]["answer"])
+            reply = agent(exam["prompt"], tmp, t, **extra)
         except Exception as e:  # a broken agent is a fail with its reason, never a stopped run
             reply = Reply(error=f"{type(e).__name__}: {e}")
         secs = round(time.monotonic() - start, limits["seconds_digits"])

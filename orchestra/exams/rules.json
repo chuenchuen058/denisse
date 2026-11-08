@@ -91,6 +91,8 @@
     "timeout_s": 30
   },
   "agents": {
+    "local_structured_output": true,
+    "local_think": false,
     "ollama_url": "http://127.0.0.1:11434",
     "discovery_timeout_s": 3,
     "not_served_pattern": "IneligibleTier|no longer supported|not (signed|logged) in|please log ?in|unauthori[sz]ed|usage limit|quota exceeded",

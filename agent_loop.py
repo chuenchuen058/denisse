@@ -9,8 +9,10 @@ the "agent" section of housekeeping.json (AGENTS.md Rule 0).
 import json
 import time
 from datetime import datetime
+from pathlib import Path
 
 import housekeeping
+from ollama_output import call_with_schema
 
 CONFIG = {}
 
@@ -103,7 +105,7 @@ class LocalModel:
     """Same local model/context as chat; finite HTTP timeout and output budget."""
     def __call__(self, messages, names):
         import ollama
-        from brain import MODEL, NUM_CTX
+        from brain import MODEL, NUM_CTX, _chat_extra
         observed_ids = set()
         prefix = CONFIG["observation_prefix"]
         for message in messages:
@@ -111,16 +113,23 @@ class LocalModel:
             if message.get("role") == "user" and content.startswith(prefix + "{"):
                 data = json.loads(content[len(prefix):])
                 observed_ids.update(t["id"] for t in data.get("tasks", []))
-        schema = {"type": "object", "additionalProperties": False,
-                  "required": ["tool", "note", "focus_ids"], "properties": {
-                      "tool": {"type": "string", "enum": list(names)},
-                      "note": {"type": "string", "maxLength": CONFIG["note_max"],
-                               "description": _text("note_description")},
-                      "focus_ids": {"type": "array", "maxItems": min(CONFIG["focus_max"], len(observed_ids)),
-                                    "items": ({"type": "string", "enum": sorted(observed_ids)}
-                                              if observed_ids else {"type": "string"})}}}
-        response = ollama.Client(timeout=CONFIG["model_timeout_s"]).chat(
-            model=MODEL, messages=messages, format=schema, keep_alive=CONFIG["keep_alive"],
+        schema = json.loads(Path(housekeeping.path(CONFIG["schema_file"])).read_text(encoding="utf-8"))
+        props = schema["properties"]
+        props["tool"]["enum"] = list(names)
+        props["note"].update(maxLength=CONFIG["note_max"], description=_text("note_description"))
+        props["focus_ids"]["maxItems"] = min(CONFIG["focus_max"], len(observed_ids))
+        if observed_ids:
+            props["focus_ids"]["items"]["enum"] = sorted(observed_ids)
+        # The same schema grounds the prompt when an older server cannot constrain decoding.
+        instruction = {"role": "system", "content": json.dumps(schema)}
+        if messages and messages[0].get("role") == "system":
+            instruction["content"] = messages[0].get("content", "") + "\n\n" + instruction["content"]
+            messages = [instruction, *messages[1:]]
+        else:
+            messages = [instruction, *messages]
+        response = call_with_schema(ollama.Client(timeout=CONFIG["model_timeout_s"]).chat,
+            schema=schema, enabled=CONFIG["structured_output"], **_chat_extra(),
+            model=MODEL, messages=messages, keep_alive=CONFIG["keep_alive"],
             options={"temperature": CONFIG["temperature"], "num_ctx": NUM_CTX,
                      "num_predict": CONFIG["num_predict"]})
         text = response.message.content or ""

@@ -118,6 +118,8 @@
     }
   },
   "model": {
+    "_structured_output": "Constrain local replies using types derived from each prompt's schema example. False uses the tolerant parser alone; a server format rejection retries once without format. Shared by all tutor JSON calls; think is retained on both paths.",
+    "structured_output": true,
     "think": false,
     "config_entry": "chat",
     "temperature": 0.2,

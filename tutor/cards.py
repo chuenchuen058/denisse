@@ -75,9 +75,10 @@ def engine_call(name: str, calls: dict | None = None):
     return model.ollama_call
 
 
-def _ask(call, system: str, user: str) -> dict:
+def _ask(call, system: str, user: str, schema: str) -> dict:
     for attempt in range(1 + CONFIG["model"]["json_retries"]):
-        data = model.parse(call(system, user if attempt == 0 else user + CONFIG["prompt"]["retry"]))
+        data = model.parse(model.invoke(call, system,
+                           user if attempt == 0 else user + CONFIG["prompt"]["retry"], schema=schema))
         if data is not None:
             return data
     raise model.ModelError(_SAY["cards_no_json"])
@@ -124,7 +125,7 @@ def generate(module: Module, src: sources.Source, calls: dict | None = None, num
                                  wanted=wanted, schema=_C["schema"], text=text, **c)
         if any(_C["kinds"][k].get("style") for k in kinds):
             user += style_example(module, src)
-        data = _ask(engine_call(engine, calls), system, user)
+        data = _ask(engine_call(engine, calls), system, user, _C["schema"])
         counts = {k: 0 for k in kinds}
         for item in data.get("cards") or []:
             if not isinstance(item, dict):
@@ -247,7 +248,8 @@ def _judge(card: dict, answer, engine: str, text: str, when: str) -> dict:
 
 def _ask_checks(call, system: str, user: str) -> list:
     for attempt in range(1 + CONFIG["model"]["json_retries"]):
-        data = model.parse(call(system, user if attempt == 0 else user + CONFIG["prompt"]["retry"]))
+        data = model.parse(model.invoke(call, system,
+                           user if attempt == 0 else user + CONFIG["prompt"]["retry"], schema=_K["schema"]))
         if data is not None and isinstance(data.get("checks"), list):
             return data["checks"]
     raise model.ModelError(_SAY["cards_no_json"])

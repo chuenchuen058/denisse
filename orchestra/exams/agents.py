@@ -122,16 +122,25 @@ def ollama_models(timeout: float | None = None) -> list[str]:
 
 
 def local(model: str):
-    def ask(prompt: str, cwd: Path, timeout: float) -> Reply:
+    from ollama_output import call_with_schema
+
+    def ask(prompt: str, cwd: Path, timeout: float, *, schema: dict | None = None) -> Reply:
         policy = load()["agents"]
         files = "".join(policy["local_file_template"].format(name=p.name, content=p.read_text(encoding="utf-8"))
                         for p in sorted(cwd.glob(policy["local_file_glob"])))
-        body = json.dumps({"model": model, "prompt": prompt + (policy["local_files_prompt"].format(files=files) if files else ""),
-                           "stream": False}).encode()
-        req = urllib.request.Request(f"{OLLAMA}/api/generate", data=body, headers={"Content-Type": "application/json"})
-        try:
+        body = {"model": model, "prompt": prompt + (policy["local_files_prompt"].format(files=files) if files else ""),
+                "stream": False}
+        if policy["local_think"] is not None:
+            body["think"] = policy["local_think"]
+
+        def send(**request_body):
+            req = urllib.request.Request(f"{OLLAMA}/api/generate", data=json.dumps(request_body).encode(),
+                                         headers={"Content-Type": "application/json"})
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return Reply(text=json.load(resp).get("response", ""))
+
+        try:
+            return call_with_schema(send, schema=schema, enabled=policy["local_structured_output"], **body)
         except TimeoutError:
             return Reply(error=f"timed out after {timeout:g}s")
         except urllib.error.URLError as e:
