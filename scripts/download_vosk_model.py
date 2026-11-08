@@ -13,13 +13,35 @@ https://alphacephei.com/vosk/models for other sizes if accuracy still isn't
 good enough after real-world use -- swap the URL below and re-run.
 """
 
+import json
 import os
 import sys
 import zipfile
 from urllib.request import urlretrieve
 
-MODEL_NAME = "vosk-model-en-us-0.22-lgraph"
-MODEL_URL = f"https://alphacephei.com/vosk/models/{MODEL_NAME}.zip"
+
+def _model_config() -> tuple[str, str]:
+    config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json")
+    config = {}
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, encoding="utf-8") as fh:
+                config = json.load(fh)
+        except (OSError, ValueError):
+            config = {}
+    model_name = os.environ.get(
+        "DENISSE_VOSK_MODEL",
+        config.get("models", {}).get("vosk", {}).get("value", "vosk-model-en-us-0.22-lgraph")
+    )
+    model_url = os.environ.get(
+        "DENISSE_VOSK_MODEL_URL",
+        config.get("voice", {}).get("vosk_model_url", {}).get("value",
+                                      f"https://alphacephei.com/vosk/models/{model_name}.zip")
+    )
+    return model_name, model_url
+
+
+MODEL_NAME, MODEL_URL = _model_config()
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODELS_DIR = os.path.join(ROOT, "models")

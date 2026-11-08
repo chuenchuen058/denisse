@@ -37,7 +37,21 @@ OVERRIDE_KEYS = {"lane_slots", "daily_spend_cap_usd"}
 FIELDS = {"schema", "id", "purpose", "enabled", "started_at", "stop_at", "stop_at_source",
           "timezone", "overrides", "restart_after_stop"}
 
-PAUSED, ENDED, SCHEDULE_OFF = "paused by Chuen", "campaign ended", "scheduled dispatch disabled by Chuen"
+
+def _config() -> dict:
+    path = HERE / "config.json"
+    defaults = json.loads((HERE / "config_defaults.json").read_text(encoding="utf-8"))
+    cfg = {k: v for k, v in defaults.items() if not k.startswith("_")}
+    if path.exists():
+        extra = json.loads(path.read_text(encoding="utf-8"))
+        cfg.update({k: v for k, v in extra.items() if not k.startswith("_")})
+    return cfg
+
+
+CFG = _config()
+PAUSED = CFG["campaign_paused_status"]
+ENDED = CFG["campaign_ended_status"]
+SCHEDULE_OFF = CFG["campaign_schedule_disabled_status"]
 
 
 def utcnow() -> dt.datetime:
@@ -277,7 +291,7 @@ def disable_schedule(review: Path, now: dt.datetime | None = None) -> str:
     ctl["schedule_disabled"] = True
     _event(ctl, "disable-schedule", now)
     save_control(review, ctl)
-    return ("scheduled dispatch disabled: every tick (Task Scheduler, logon, by hand) starts nothing "
+    return (f"{SCHEDULE_OFF}: every tick (Task Scheduler, logon, by hand) starts nothing "
             "until `campaign.py resume`. The scheduled task itself still fires and exits at once.")
 
 
@@ -293,7 +307,8 @@ def proc_alive(pid, created=None) -> bool:
 
 def kill_tree_pid(pid: int) -> None:
     if os.name == "nt":
-        subprocess.run(["taskkill", "/PID", str(int(pid)), "/T", "/F"], capture_output=True, timeout=60)
+        subprocess.run(["taskkill", "/PID", str(int(pid)), "/T", "/F"], capture_output=True,
+                       timeout=CFG.get("taskkill_timeout_s", 60))
     else:
         import signal
         try:
@@ -352,12 +367,12 @@ def emergency_stop(R, now: dt.datetime | None = None) -> list[str]:
                 state = R.load_state()
                 ts = R.task_state(state, task)
                 ts.update(last_end=R.now().isoformat(), last_result="CANCELLED")
-                ts.setdefault("history", []).append({"end": R.now().isoformat(), "result": "CANCELLED",
-                                                     "note": "cancelled by Chuen (emergency-stop)"})
+                note = f"{CFG['campaign_cancelled_status']} (emergency-stop)"
+                ts.setdefault("history", []).append({"end": R.now().isoformat(), "result": "CANCELLED", "note": note})
                 R.save_state(state)
-                R.park(task, f"cancelled by Chuen (emergency-stop); branch review/{slug} and its worktree kept",
+                R.park(task, f"{note}; branch review/{slug} and its worktree kept",
                        R.REPORTS / f"{slug}.md")
-                lines.append(f"parked {slug} as cancelled by Chuen; branch review/{slug} kept")
+                lines.append(f"parked {slug} as {CFG['campaign_cancelled_status']}; branch review/{slug} kept")
     return lines
 
 
@@ -391,7 +406,7 @@ def campaign_line(review: Path, now: dt.datetime | None = None) -> str | None:
         extra = f", ${cap:g}/day" if cap is not None else ""
         return f"**Sprint:** ends {when}, {fmt_left(stop_at - now)} left, {slots}{extra}{tail}"
     if camp["id"] in ctl.get("ended", {}):
-        return f"**Sprint:** {camp['id']} stopped by Chuen; config.json values apply{tail}"
+        return f"**Sprint:** {camp['id']} {CFG['campaign_stopped_by_chuen_status']}; config.json values apply{tail}"
     if not camp["enabled"]:
         return f"**Sprint:** {camp['id']} disabled; config.json values apply{tail}"
     if now >= stop_at:
@@ -414,8 +429,9 @@ def status_text(R, now: dt.datetime | None = None) -> str:
     else:
         stop_at = parse_utc(camp["stop_at"])
         active = overrides_active(camp, ctl, now)
-        state = ("active" if active else "stopped by Chuen" if camp["id"] in ctl.get("ended", {})
-                 else "disabled" if not camp["enabled"] else "ended" if now >= stop_at else "not started")
+        state = ("active" if active else CFG["campaign_stopped_by_chuen_status"]
+                 if camp["id"] in ctl.get("ended", {}) else "disabled" if not camp["enabled"]
+                 else "ended" if now >= stop_at else "not started")
         out += [f"Campaign: {camp['id']} ({camp['purpose']}) -- {state}",
                 f"  stop at {fmt_london(stop_at)} (source: {camp['stop_at_source']})"
                 + (f", {fmt_left(stop_at - now)} left" if now < stop_at else ""),

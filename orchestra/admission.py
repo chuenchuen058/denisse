@@ -43,7 +43,9 @@ HERE = Path(__file__).resolve().parent
 with (HERE / "config_defaults.json").open(encoding="utf-8") as _defaults_file:
     _CONFIG_DEFAULTS = json.load(_defaults_file)
 DEFAULTS = {key: _CONFIG_DEFAULTS[key] for key in
-            ("producer_queue_cap", "producer_admit_per_hour", "auto_admit_areas", "producer_dedupe_days")}
+            ("producer_queue_cap", "producer_admit_per_hour", "auto_admit_areas", "producer_dedupe_days",
+             "admission_forbidden_prefixes", "admission_policy_files", "admission_remembered_kinds",
+             "admission_stop_words")}
 DEFAULTS["vault_dir"] = ""
 
 PACKET_SCHEMA = {
@@ -73,15 +75,7 @@ PACKET_SCHEMA = {
 
 # Never in a machine-proposed task's scope: runtime data, git, the venv, and the files that
 # set this layer's own policy (a log line must not be able to loosen admission).
-FORBIDDEN = (".review/", ".git/", ".venv/", "venv/", "node_modules/", "models/", ".claude/",
-             "orchestra/hooks/", "orchestra/local_team/roles/")
-POLICY_FILES = ("orchestra/admission.py", "orchestra/gates.json", "orchestra/config.json",
-                "orchestra/install_task.ps1", ".gitignore", ".gitattributes")
-REMEMBERED = {"invalid", "path", "gate", "premise"}  # refusals that block the same evidence later
 HEADER = re.compile(r"^[A-Za-z][A-Za-z-]*:\s")
-STOP = set("a an the and or of to in on for with is are be by from at as it its this that into not "
-           "no when what which so do does should can will make makes made fix fixes add adds use "
-           "uses task tasks file files".split())
 PATHLIKE = re.compile(r"(?<![\w/.-])((?:[\w.-]+[\\/])+[\w.-]+\.[A-Za-z0-9]+)")
 
 
@@ -151,9 +145,10 @@ def path_problem(p: str, repo: Path, cfg: dict) -> str | None:
         except ValueError:
             pass
     low = rel.lower().rstrip("/")
-    if any(low == f.rstrip("/") or low.startswith(f) for f in FORBIDDEN):
+    forbidden = tuple(cfg.get("admission_forbidden_prefixes", ()))
+    if any(low == f.rstrip("/") or low.startswith(f) for f in forbidden):
         return f"{raw!r} is in a directory the local team may not scope"
-    if low in POLICY_FILES:
+    if low in tuple(cfg.get("admission_policy_files", ())):
         return f"{raw!r} is a policy file; only a human or a Claude chat changes it"
     if full.is_dir() or raw.endswith(("/", "\\")):
         # Found 2 Nov 2026: llama3.1:8b scoped a task to "orchestra/". Not a bounded task.
@@ -227,10 +222,11 @@ def premise_problem(evidence: list, repo: Path) -> str | None:
 
 # ---------------------------------------------------------------- identity / dedupe
 
-def tokens(text: str) -> set[str]:
+def tokens(text: str, cfg: dict | None = None) -> set[str]:
     out = set()
+    stop = set((cfg or {}).get("admission_stop_words", ()))
     for w in re.findall(r"[a-z0-9]+", text.lower()):
-        if len(w) < 3 or w in STOP:
+        if len(w) < 3 or w in stop:
             continue
         out.add(w[:-1] if w.endswith("s") and len(w) > 4 else w)
     return out
@@ -318,11 +314,12 @@ def records(repo: Path) -> list[dict]:
 
 def duplicate_of(packet: dict, repo: Path, cfg: dict, recs: list[dict]) -> str | None:
     fp = evidence_fp(packet["evidence"])
-    goal = tokens(packet["title"] + " " + packet["objective"])
-    title_t, files = tokens(packet["title"]), {p.replace("\\", "/") for p in packet["scope_paths"]}
+    goal = tokens(packet["title"] + " " + packet["objective"], cfg)
+    title_t, files = tokens(packet["title"], cfg), {p.replace("\\", "/") for p in packet["scope_paths"]}
     cutoff = _now() - dt.timedelta(days=cfg["producer_dedupe_days"])
+    remembered = set(cfg.get("admission_remembered_kinds", ()))
     for r in recs:
-        if r.get("kind") != "admitted" and r.get("kind") not in REMEMBERED:
+        if r.get("kind") != "admitted" and r.get("kind") not in remembered:
             continue
         try:
             if dt.datetime.fromisoformat(r["at"]) < cutoff:
@@ -335,7 +332,7 @@ def duplicate_of(packet: dict, repo: Path, cfg: dict, recs: list[dict]) -> str |
         if _jaccard(goal, set(r.get("goal", []))) >= 0.6:
             return f"same goal as {what} ({r['kind']} {r['at']})"
     for t in existing_tasks(repo, cfg["producer_dedupe_days"]):
-        other = tokens(t["title"])
+        other = tokens(t["title"], cfg)
         if norm_title(t["title"]) == norm_title(packet["title"]):
             return f"same title as {t['status']} task {t['slug']}"
         ov = _overlap(title_t, other)
@@ -424,7 +421,7 @@ def admit(packet: dict, repo: Path, *, cfg: dict | None = None, gates: dict | No
         if isinstance(packet.get("evidence"), list) and not validate(packet.get("evidence"), PACKET_SCHEMA["properties"]["evidence"]):
             rec["evidence_fp"] = evidence_fp(packet["evidence"])
         if isinstance(packet.get("title"), str) and isinstance(packet.get("objective"), str):
-            rec["goal"] = sorted(tokens(packet["title"] + " " + packet["objective"]))
+            rec["goal"] = sorted(tokens(packet["title"] + " " + packet["objective"], cfg))
         home.mkdir(parents=True, exist_ok=True)
         with (home / "admission.jsonl").open("a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
@@ -494,7 +491,7 @@ def _decide(packet, repo, cfg, gates, lane, when) -> dict:
     side.mkdir(parents=True, exist_ok=True)
     (side / f"{path.stem}.json").write_text(json.dumps(
         {"packet": packet, "area": area, "gate_command": cmd, "queue": queue, "evidence_fp": fp,
-         "goal": sorted(tokens(packet["title"] + " " + packet["objective"])), "admitted": when.isoformat(),
+         "goal": sorted(tokens(packet["title"] + " " + packet["objective"], cfg)), "admitted": when.isoformat(),
          "base": _head(repo), "evidence_files": evidence_files(packet["evidence"], repo)}, indent=2, ensure_ascii=False), encoding="utf-8")
     return {"admitted": True, "kind": "admitted", "path": f".review/queue/{path.name}", "slug": path.stem,
             "queue": queue, "area": area, "gate": cmd,
