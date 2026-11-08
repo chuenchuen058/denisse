@@ -6,7 +6,7 @@
     "modules: how a module folder name becomes a code and a title (mirrors scripts/next_lecture.json). Modules are discovered from the vault folder names; there is no list here.",
     "match: regexes that find a week number or a module code in a folder name, a file name, or the first content_chars of a file's text. Keep capture group 1 as the number. First hit wins, folder before file name before contents.",
     "extract: which extensions are read how. audio is off unless audio.enabled is true (faster_whisper, installed already; no download happens here).",
-    "model: config_entry names the entry in config.json 'models' (model_config.py); context comes from brain.json limits.num_ctx, DENISSE_NUM_CTX winning, the same knob the brain uses. chars_per_token and reserve_tokens size the chunks a long lecture is cut into.",
+    "model: config_entry names the entry in config.json 'models' (model_config.py); context comes from brain.json limits.num_ctx, DENISSE_NUM_CTX winning, the same knob the brain uses. chars_per_token and reserve_tokens size the chunks a long lecture is cut into. chunk_retries: how many more times one lecture chunk is asked after a model error (Ollama ResponseError, timeout, connection) or a reply with no JSON; retry_options[i] are Ollama options laid over the defaults on retry i+1 (the last one repeats). A chunk that still fails is skipped: the week's note is written from the chunks that worked and marked incomplete, or (every chunk failed) not written; either way the week is tried again on the next run.",
     "prompt: what the local model is asked, per chunk. {module} {code} {week} {sources} {part} {parts} {text} are filled. It must answer with the JSON shape in prompt.schema; a reply that isn't JSON gets one retry with prompt.retry appended. bad_escape: a backslash in the reply that is the model's LaTeX, not a JSON escape (\\pi, \\frac, \\theta, \\neq: no escape, or a letter escape followed by a lowercase letter) -- doubled before parsing; a closing brace the reply stopped short of is put back (model.parse).",
     "note: the tutor note's name, frontmatter and section templates. {module} {code} {week} {slug} {today} {outcomes_n} ... are filled. The name slug must be unique across the vault (scripts/vault_contract.py), hence the suffix.",
     "limits: caps on what one note holds, so a long lecture gives a usable note, not a dump."
@@ -124,7 +124,12 @@
     "keep_alive": "10m",
     "chars_per_token": 3.5,
     "reserve_tokens": 2200,
-    "json_retries": 1
+    "json_retries": 1,
+    "chunk_retries": 2,
+    "retry_options": [
+      {"repeat_penalty": 1.3, "temperature": 0.4},
+      {"repeat_penalty": 1.5, "temperature": 0.6}
+    ]
   },
   "prompt": {
     "system": "You are a careful study tutor for a university engineering module. You read lecture material and write down exactly what it teaches: nothing invented, nothing from outside the text. Equations are written in LaTeX between $ signs. Answer with one JSON object and nothing else.",
@@ -173,6 +178,11 @@
     "week_link": "[[{module} Week {week}|Week {week} note]]",
     "hub_link": "[[{module} notes|Module hub]]",
     "index_link": "[[{module} tutor|Tutor index]]",
+    "incomplete_callout": [
+      "> [!warning] Incomplete: {failed} of {chunks} chunk(s) not read",
+      "> The local model failed on chunk(s) {list} of the material, so parts of it are missing below. The next ingest tries those weeks again.",
+      ""
+    ],
     "generated_callout": [
       "",
       "> [!info] Written by {tutor} from the material below",
@@ -242,7 +252,11 @@
     "dry": "  would write  {path}",
     "index": "  index        {path}",
     "topics": "  topic map    {path}",
-    "done": "{notes} note(s) written, {unchanged} unchanged, {unmatched} unmatched, {failed} failed",
+    "chunk_failed": "  FAILED       {module} Week {week}: chunk {n} of {parts}: {why}",
+    "no_json": "the model did not answer with JSON",
+    "all_chunks_failed": "all {parts} chunk(s) failed (last: {why}); no note written, tried again next run",
+    "incomplete": "  incomplete   {module} Week {week}: {failed} of {parts} chunk(s) failed; tried again next run",
+    "done": "{notes} week note(s) written ({incomplete} incomplete), {unchanged} unchanged, {unmatched} unmatched, {failed} week(s) failed; {ocr} OCR page(s) used",
     "no_module": "no module called '{text}' in the vault; known: {modules}",
     "no_topics": "no topic map for {module} yet; run python -m tutor ingest",
     "dry_model": "dry run: nothing extracted and nothing written",
