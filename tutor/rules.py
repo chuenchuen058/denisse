@@ -344,7 +344,7 @@ def _holder(path: str) -> dict | None:
         age = time.time() - os.path.getmtime(path)
     except OSError:
         return None
-    if age > _R["lock"]["stale_s"] or not _alive(info.get("pid")) or info.get("pid") == os.getpid():
+    if age > _R["lock"]["stale_s"] or not _alive(info.get("pid")):
         with contextlib.suppress(OSError):
             os.remove(path)
         return None
@@ -411,16 +411,17 @@ def check_kinds(say=print) -> list:
 
 # -- the day's Handoff line ---------------------------------------------------------------
 
-def handoff(paths: Paths, command: str, say=None, now: dt.datetime | None = None, **fields) -> bool:
-    """One line for one job in the vault's Handoff note (atrium.handoff)."""
+def handoff(paths: Paths, job: str, say=None, now: dt.datetime | None = None, **fields) -> bool:
+    """One line for one job (rules.handoff.commands key) in the vault's
+    Handoff note (atrium.handoff)."""
     c = _R["handoff"]
-    tpl = c["commands"].get(command)
+    tpl = c["commands"].get(job)
     if not on("handoff") or not tpl:
         return False
     from . import don
     try:
         from atrium import handoff as writer
-        line = tpl.format(command=command, **{**don.ctx(), **fields})
+        line = tpl.format(**{"command": job, **don.ctx(), **fields})
         return writer.remember(c["agent"].format(**don.ctx()), [line], vault=paths.vault, now=now)
     except Exception as exc:  # noqa: BLE001 -- the job's work stands without its log line
         if say:
