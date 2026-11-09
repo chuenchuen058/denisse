@@ -78,6 +78,8 @@ def recent_runs(state: dict, n: int = RECENT_RUNS) -> list[dict]:
     return [{k: h.get(k) for k in keep} for h in runs[:n]]
 
 
+ALLOWANCE_WORDS = {"held": "held (limited)", "conserve": "conserved", "spend": "spending down", "spread": "spread"}
+
 LOCK_NAME = re.compile(r"^runner(?:\.(?P<lane>[^.]+)(?:\.(?P<slot>\d+))?)?\.lock$")
 
 
@@ -156,7 +158,8 @@ def collect() -> dict:
     except Exception as e:  # reads only; a power reading must never break status
         pw = {"ac": None, "battery_percent": None, "dispatch_paused": False, "text": f"unknown ({e})"}
 
-    return {"generated": R.now().isoformat(), "power": pw, "running": _running(), "queue": queue, "parked": parked,
+    return {"generated": R.now().isoformat(), "power": pw, "running": _running(),
+            "allowance": R.allowance_rows(state), "queue": queue, "parked": parked,
             "recent": recent_runs(state),
             "today": {"date": today, "results": results, "cost_usd": round(u.get("cost_usd", 0), 2),
                       "spend_cap_usd": R.C["daily_spend_cap_usd"],
@@ -170,6 +173,9 @@ def render(s: dict) -> str:
     out += [f"  {r['lane']} slot {r['slot']}: {r['task'] or '(starting)'} since {r['since'] or '?'}"
             f" model {r['model']}" + (f" (actual {r['actual_model']})" if r['actual_model'] else "")
             for r in s["running"]] or ["  nothing"]
+    out += ["", "Allowance (orchestra/allowance.py show; tell it what you know with allowance.py set):"]
+    out += [f"  {a['lane']}: {ALLOWANCE_WORDS.get(a['mode'], a['mode'])} -- {a['why']}\n    {a['text']}"
+            for a in s.get("allowance", [])] or ["  no allowance model (config allowance)"]
     out += ["", f"Queue ({len(s['queue'])}):"]
     out += [f"  {q['slug']} [{q['priority']}/{q['kind']}/{q['lane']}, attempts {q['attempts']}]: "
             f"{q['why_not_runnable'] or 'runnable'}" for q in s["queue"]] or ["  empty"]

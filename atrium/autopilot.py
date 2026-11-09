@@ -279,9 +279,12 @@ def recent_runs(state: dict, lane: str, at: dt.datetime, hours: float) -> int:
     return n
 
 
-def choose_lane(bugfix: bool, available: dict, load: dict, cfg: dict) -> tuple[str | None, str]:
-    """(lane, why). Bug fixes to bugfix_lane if it has allowance; otherwise the lane with
-    allowance left and the fewest recent runs (config order breaks a tie)."""
+def choose_lane(bugfix: bool, available: dict, load: dict, cfg: dict,
+                prefer: dict | None = None) -> tuple[str | None, str]:
+    """(lane, why). Bug fixes to bugfix_lane if it has allowance; then a lane the allowance plan
+    is spending down before its reset (`prefer`: lane -> (rank, why), lowest rank first;
+    orchestra/allowance.py); otherwise the lane with allowance left and the fewest recent runs
+    (config order breaks a tie)."""
     order = list(cfg["autopilot_lanes"])
     free = [l for l in order if l in available and available[l] is None]
     if not free:
@@ -289,6 +292,10 @@ def choose_lane(bugfix: bool, available: dict, load: dict, cfg: dict) -> tuple[s
     want = cfg["bugfix_lane"]
     if bugfix and want in free:
         return want, cfg["bugfix_route_note"].format(lane=want)
+    spend = [l for l in free if l in (prefer or {})]
+    if spend:
+        lane = min(spend, key=lambda l: (prefer[l][0], order.index(l)))
+        return lane, prefer[lane][1]
     lane = min(free, key=lambda l: (load.get(l, 0), order.index(l)))
     why = "fewest recent runs (" + ", ".join(f"{l} {load.get(l, 0)}" for l in free) + ")"
     if bugfix and want:
@@ -338,7 +345,8 @@ def _since(entries: list, at: dt.datetime, delta: dt.timedelta, status: str) -> 
 # ---------------------------------------------------------------- the planner
 
 def refill(*, cfg: dict, review: Path, repo: Path, vault: Path | None, state: dict, available: dict, power: dict,
-           busy: dict, files_of, log, classify=None, create=None, at: dt.datetime | None = None) -> list[Path]:
+           busy: dict, files_of, log, classify=None, create=None, at: dt.datetime | None = None,
+           prefer: dict | None = None) -> list[Path]:
     """Write up to the caps' worth of new tasks into <review>/queue. Returns their paths."""
     at = at or dt.datetime.now().replace(microsecond=0)
     review, repo = Path(review), Path(repo)
@@ -423,7 +431,7 @@ def refill(*, cfg: dict, review: Path, repo: Path, vault: Path | None, state: di
                 log(f"AUTOPILOT held {title!r}: {why}")
             note(c, "held", why, cls=cls)
             continue
-        lane, lane_why = choose_lane(bug, available, load, cfg)
+        lane, lane_why = choose_lane(bug, available, load, cfg, prefer)
         if lane is None:
             log(f"AUTOPILOT skip: {lane_why}")
             break

@@ -264,9 +264,41 @@ def _exam_pass_rates() -> dict[str, float]:
     return {lane: round(p / n, 3) for lane, (p, n) in tally.items() if n}
 
 
+def _allowance() -> dict:
+    """lane -> Orchestra's allowance plan for it (orchestra/allowance.py): estimated % left in
+    its tightest window, next reset, and whether it is held, conserved, spent down or spread.
+    Reads orchestra's config and .review/<allowance_file>; anything unreadable: no rows."""
+    try:
+        orch = REPO / "orchestra"
+        if str(orch) not in sys.path:
+            sys.path.insert(0, str(orch))
+        import allowance
+        cfg = {}
+        for name in ("config_defaults.json", "config.json"):
+            try:
+                cfg.update({k: v for k, v in json.loads((orch / name).read_text(encoding="utf-8")).items()
+                            if not k.startswith("_")})
+            except (OSError, ValueError):
+                pass
+        now = dt.datetime.now().replace(microsecond=0)
+        limited = {}
+        for lane, v in (_state().get("lanes") or {}).items():
+            try:
+                until = dt.datetime.fromisoformat((v or {}).get("limited_until") or "")
+            except ValueError:
+                continue
+            if until > now:
+                limited[lane] = until
+        data = allowance.load(REVIEW / str(cfg.get("allowance_file", "allowance.json")))
+        return {r["lane"]: r for r in allowance.rows(cfg, data, list(cfg.get("allowance") or {}), now, limited)}
+    except Exception:  # noqa: BLE001 -- the hub never fails because of the allowance file
+        return {}
+
+
 def _usage(running: list[dict]) -> list[dict]:
-    """One row per model: can it take work now, and what it did today. Claude Max does not
-    expose a remaining-allowance figure to the CLI, so its row shows activity, not a %."""
+    """One row per model: can it take work now, and what it did today, plus Orchestra's
+    allowance plan for the lane (allowance_*: estimated % left, next reset, held / conserve /
+    spend / spread; None where it has no model or reading)."""
     c = _c()
     words = c["usage_status"]
     limit_re = re.compile(c["limit_pattern"], re.I)
@@ -331,6 +363,7 @@ def _usage(running: list[dict]) -> list[dict]:
     except Exception:
         local = o["down"]
     exam_rates = _exam_pass_rates()
+    plan = _allowance()
     bad = tuple(c["bad_status_prefixes"])
     rows = []
     for u in c["usage"]:
@@ -352,6 +385,11 @@ def _usage(running: list[dict]) -> list[dict]:
                      "passed_today": p["pass"], "minutes_today": round(p["minutes"]),
                      "est_cost_today": round(p["cost"], 2), "last_run": p["last"],
                      "exam_pass_rate": exam_rates.get(lane),
+                     "allowance_left_pct": (plan.get(lane) or {}).get("left_pct"),
+                     "allowance_window": (plan.get(lane) or {}).get("window"),
+                     "allowance_resets": (plan.get(lane) or {}).get("resets"),
+                     "allowance_plan": (plan.get(lane) or {}).get("mode"),
+                     "allowance_why": (plan.get(lane) or {}).get("why"),
                      "state": ("bad" if status.startswith(bad)
                                else "busy" if busy.get(lane) else "ok")})
     return rows
