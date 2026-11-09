@@ -272,6 +272,7 @@
     "cards_no_json": "the model did not answer with JSON cards",
     "cards_done": "{module}: {n} checked card(s) from {sources} note(s); {made} note(s) asked, {kept} unchanged, {failed} failed; {held} card(s) held back",
     "cards_note": "  cards note   {path}",
+    "cards_dropped": "  dropped      {name}: {n} candidate(s) before the check ({why})",
     "cards_checked": "  checked      {name}: {right} right, {fixed} fixed, {held} held back, {reused} already checked",
     "no_cards": "no cards for {module} yet; run python -m tutor cards {module}",
     "tsv": "  anki tsv     {path} ({n} card(s); import it in Anki: File > Import)",
@@ -438,12 +439,12 @@
       "context": "MODULE SCOPE (topic names from maps and note metadata, not an exhaustive syllabus):\n{scope}\nSource note topic: {topic}"
     },
     "kinds": {
-      "recall": {"count": 4, "engine": "local", "check": "local",
-                 "describe": "recall cards: a definition, a named result or an equation to state from memory; the front is a full question that says what to give, never just a name"},
-      "method": {"count": 3, "engine": "local", "check": "claude",
-                 "describe": "method cards: given a situation, which method to use and why"},
-      "problem": {"count": 2, "engine": "local", "check": "claude",
-                  "describe": "short worked problems: a small problem on the front, the worked answer in a few steps on the back"},
+      "recall": {"count": 4, "engine": "local", "check": "local", "ground": true,
+                 "describe": "recall cards: a definition, a named result or an equation the NOTE itself states, to state from memory; the back gives it as the note does, in the note's own symbols and convention (j or i, t or x, its limits and factors), never a textbook version from memory; the front is a full question that says what to give, never just a name"},
+      "method": {"count": 3, "engine": "local", "check": "claude", "ground": true, "answer_label": "Key step: ",
+                 "describe": "method cards: given a situation the note deals with, which method the note uses and why; the back names the method and why it fits that situation, never just 'use the formula' or 'use the definition'; 'answer' is its key first step, written out (the equation or the operation)"},
+      "problem": {"count": 2, "engine": "local", "check": "claude", "ground": true, "answer_label": "Answer: ",
+                  "describe": "short worked problems the note itself works through or whose result it states: the front gives every quantity, function and convention needed; the back works it in a few steps to the end, never just the steps to take; 'answer' is the final result alone (a value or an expression), as the note gives it"},
       "tutorial": {"count": 2, "engine": "claude", "check": "claude", "front_chars": 1500, "back_chars": 4000, "style": true, "describe": "tutorial problems written like the module's problem-class sheets (STYLE below): a physical set-up with its given quantities and symbols, then numbered parts (i), (ii), (iii) that build up (derive, then calculate, then interpret). Write NEW problems: set-ups and numbers may be new, but every law, equation and method must be one the note uses. The back is a full worked solution laid out like a walkthrough, each label on its own line: 'Set-up:' (axes, assumptions), then '(i)', '(ii)'... each with short working and its key equation in \\\\[ \\\\] on one line, then 'Answer:' with every final result and its units, then 'Check:' with one sanity check (limits, units or direction). Never point to the note by number (eq. (9), Figure 2): he sees the card without the note, so name the law or write the equation out", "check_note": " [new problem: its numbers are not in the note. Judge whether the physics, every step and every number in the worked solution are correct, and whether the method is one the note uses.]"}
     },
     "engines": {
@@ -451,10 +452,15 @@
       "claude": {"via": "delegate", "delegate_engines": ["claude"]}
     },
     "system": "You are {tutor}, a careful study tutor writing Anki cards for a university engineering student. Use only what the note says; nothing invented. Equations in LaTeX between \\( and \\). Answer with one JSON object and nothing else.",
-    "user": "Module: {module} ({code}){week}. Source note: {source}.\n\n{scope}\n\nWrite these cards from the note below:\n{wanted}\n\nEach card: a short front (the question), a back (the answer, at most a few lines), its kind, and the topic it tests (a few words).\n\nReply with JSON of exactly this shape:\n{schema}\n\nRules: only what the note says; leave a kind short rather than guess; no markdown outside the JSON.\n\nNOTE:\n{text}",
+    "user": "Module: {module} ({code}){week}. Source note: {source}.\n\n{scope}\n\nWrite these cards from the note below:\n{wanted}\n\nEach card: a short front (the question), a back (the answer, at most a few lines), its kind, the topic it tests (a few words), quote (copied word for word from the NOTE: the sentence or equation the card rests on) and answer (the final result alone, or empty when the back is already just the result). A card the NOTE does not state or work through has no quote: leave it out.\n\nReply with JSON of exactly this shape:\n{schema}\n\nRules: only what the note says; leave a kind short rather than guess; no markdown outside the JSON.\n\nNOTE:\n{text}",
     "week": ", Week {week}",
     "wanted": "- {count} {describe} (kind: \"{kind}\")",
-    "schema": "{\"cards\": [{\"kind\": \"recall|method|problem|tutorial\", \"front\": \"...\", \"back\": \"...\", \"topic\": \"...\"}]}",
+    "schema": "{\"cards\": [{\"kind\": \"recall|method|problem|tutorial\", \"front\": \"...\", \"back\": \"...\", \"topic\": \"...\", \"quote\": \"...\", \"answer\": \"...\"}]}",
+    "ground": {
+      "_help": "Candidates are screened before the check. A kind with ground: true needs its quote really in the note (the check's backed_by rule); a kind with answer_label needs a non-empty answer, added to the back under that label unless the back already contains it. A writer that leaves a field out of its reply entirely (older replies, fakes) is not screened on that field. Dropped candidates are counted, never sent to the check or to Anki.",
+      "no_quote": "no quote from the note",
+      "no_answer": "no final answer"
+    },
     "check": {
       "all_with": null,
       "system": "You are {tutor}, checking Anki cards before a university engineering student drills them. A wrong card teaches him a wrong fact, so be strict, as a professional examiner would be. A card is right only if (1) the physics or maths on it is correct, (2) the back actually answers the front, specifically and not vaguely, and (3) it agrees with the source note, (4) the front is a complete question a student could answer, not just a name or a heading, and (5) it teaches this module, with substantive support in the source rather than a link or mention of a different module. Answer with one JSON object and nothing else.",
