@@ -202,6 +202,11 @@ def main():
                "SPOTIFY_CLIENT_ID": "", "SPOTIFY_CLIENT_SECRET": "",
                "OLLAMA_HOST": "http://127.0.0.1:11434"}
         env.pop("DENISSE_CHECKS_GUARD_MODE", None)
+        # A GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE inherited from a hook or a lane session makes
+        # any git a test runs (fixture or code under test) act on that repo -- on 9 Nov 2026 the
+        # real one. Fixtures also go through testing_git.hermetic_git; this covers the rest.
+        for k in [k for k in env if k.upper().startswith("GIT_")]:
+            del env[k]
         with ThreadPoolExecutor(max(1, args.jobs)) as pool:
             futures = [pool.submit(run_one, p, env, sandbox / "guard") for p in todo]
             for f in futures:
