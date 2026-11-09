@@ -2,7 +2,10 @@
   "_about": "The study tutor as a specialist the runner consults before a lane starts (Chuen, 5 Nov 2026: 'treat Don like a professional opinion on task'). Orchestra's own data file, read by orchestra/consult.py on every use: orchestra/config.json is pinned by tests and holds limits, this holds the consult. ORCHESTRA_CONSULT_FILE points at another copy for tests. Advisory throughout: a consult that fails, times out or gives low confidence never stops a task and never blocks a merge.",
 
   "enabled": true,
-  "_enabled": "The switch. false: no task is consulted, nothing else changes.",
+  "_enabled": "The switch. false: no task is consulted, nothing else changes. WHICH tasks is the runner's config rule consult_applies (orchestra/config.json); applies_off / applies_named are its values here, anything else is all (why_all).",
+  "applies_off": "off",
+  "applies_named": "named",
+  "why_all": "every task is consulted (config consult_applies)",
 
   "name": "don",
   "name_file": "tutor/tutor.json",
@@ -20,13 +23,26 @@
   "python": ".venv/Scripts/python.exe",
   "command": ["{python}", "-m", "tutor", "consult", "{question}", "--json"],
   "timeout_s": 420,
+  "notes_command": ["{python}", "-m", "tutor", "consult", "{question}", "--json", "--notes-only"],
+  "_notes_command": "The quick path: no model at all, the matching lines of his notes. The runner takes it when the GPU stays busy past config consult_busy_wait_s, or the full command failed. The runner's limits are config.json consult_timeout_s / consult_notes_timeout_s; timeout_s here is only the default for ask() called on its own. lease_holder names the consult in .review/gpu.lease while the full command runs.",
+  "lease_holder": "orchestra consult",
+  "busy_lease": "the GPU lease is held by {holder}",
+  "busy_someone": "another job",
+  "busy_gpu": "the GPU is {pct}% busy (limit {limit}%)",
+  "how": {
+    "model": "the full consult",
+    "busy": "notes only: {why} after waiting {waited}s",
+    "failed": "notes only: the full consult failed ({why})"
+  },
+  "failed_both": "{first}; notes-only also failed ({second})",
   "_command": "Run in the main checkout. {python} is the repo venv (python above), else the runner's own interpreter; {question} is the rendered question. The last JSON object line of stdout is the opinion (python -m tutor consult --json). Exit 1 = the tutor had no grounded answer: logged, no note written. The timeout covers a hand-off to Claude for a hard topic (delegate.py), which can take minutes.",
 
   "question_chars": 6000,
+  "question_general": "Another assistant is about to run this task in Chuen's Denisse repo. From his notes: does anything bear on it, what should it respect or get right, and what should it not assume? Keep to what the notes support, and say plainly if they don't cover it.\n\nTask: {title}\n\n{body}",
   "question": "Another assistant is about to run this task, which touches Chuen's study tooling or his studies. From his notes: what bears on it, what should it respect or get right, and what should it not assume? Keep to what the notes support.\n\nTask: {title}\n\n{body}",
 
   "file": ".review/don.md",
-  "note": "# {name}'s opinion on this task (advisory)\n\nAsked by the runner before the lane started ({when}), because: {why}.\nConfidence: **{confidence}**. Answered by: {who}.\n\n{answer}\n\n## Sources\n\n{sources}\n\n## Caveats\n\n{caveats}\n\n## The question put to {name}\n\n{question}\n",
+  "note": "# {name}'s opinion on this task (advisory)\n\nAsked by the runner before the lane started ({when}), because: {why}.\nConfidence: **{confidence}**. Answered by: {who} ({how}).\n\n{answer}\n\n## Sources\n\n{sources}\n\n## Caveats\n\n{caveats}\n\n## The question put to {name}\n\n{question}\n",
   "note_source": "- {link}",
   "note_caveat": "- {text}",
   "note_none": "- none",
@@ -35,9 +51,10 @@
   "reviewer_section": "{text}\n(Advisory: the tutor's view of the subject matter, for context only. It is never a reason to block, and going against it is not a reason to block.)",
   "reviewer_none": "(none: the tutor was not consulted for this task)",
 
-  "log": "CONSULT {slug}: {name} asked ({why}) -> {confidence} confidence by {who} after {seconds}s; {file} written",
+  "log": "CONSULT {slug}: {name} asked ({why}) path={path} -> {confidence} confidence by {who} after {seconds}s ({how}); {file} written",
   "log_failed": "CONSULT {slug}: {name} could not answer ({why}); the lane runs without it",
   "log_skipped": "CONSULT {slug}: skipped ({why})",
+  "not_installed": "no tutor in this checkout ({file} missing)",
   "why_header": "task header {header}: {name}",
   "why_paths": "task text names {match}",
   "failed_exit": "exit {code}: {tail}",

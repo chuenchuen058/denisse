@@ -136,5 +136,20 @@
   "merge_only_mark": "Merge-only re-queue:",
   "merge_only_paragraph": "{mark} the work for this task is already on branch `{branch}` but never reached master. The runner merges that branch onto current master itself and re-runs the gate below (plus the reviewer, if the diff is risky); no new lane runs. If the branch is missing or the merge can't run, the task is parked. Re-queued {when}{note}.",
   "merge_only_report": "RESULT: PASS\nGATE: re-run by the runner before the merge\nHUMAN: none\nPREMISE: not stated\nDONE:\n- merge-only re-queue: the runner merged the existing branch {branch}; no lane ran\n",
-  "merge_only_park": "merge-only re-queue not merged: {why}. No lane was run; branch {branch} kept if it exists"
+  "merge_only_park": "merge-only re-queue not merged: {why}. No lane was run; branch {branch} kept if it exists",
+  "consult_applies": "all",
+  "consult_timeout_s": 180,
+  "consult_notes_timeout_s": 60,
+  "consult_busy_wait_s": 120,
+  "consult_busy_poll_s": 10,
+  "consult_gpu_busy_pct": 60,
+  "consult_notes_fallback": true,
+  "live_window": true,
+  "live_window_title": "Orchestra live",
+  "live_window_argv": ["{python}", "{watch}", "--title", "{title}"],
+  "toasts": true,
+  "toast_started": "Orchestra: {lane} started {title}",
+  "toast_finished": "Orchestra: {lane} finished: {result} {title}",
+  "toast_argv": ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", "{script}", "-Text", "{text}"],
+  "toast_timeout_s": 30
 }

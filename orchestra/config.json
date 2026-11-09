@@ -193,5 +193,22 @@
   "merge_only_paragraph": "{mark} the work for this task is already on branch `{branch}` but never reached master. The runner merges that branch onto current master itself and re-runs the gate below (plus the reviewer, if the diff is risky); no new lane runs. If the branch is missing or the merge can't run, the task is parked. Re-queued {when}{note}.",
   "merge_only_report": "RESULT: PASS\nGATE: re-run by the runner before the merge\nHUMAN: none\nPREMISE: not stated\nDONE:\n- merge-only re-queue: the runner merged the existing branch {branch}; no lane ran\n",
   "merge_only_park": "merge-only re-queue not merged: {why}. No lane was run; branch {branch} kept if it exists",
-  "_keep_ref_prefix": "Before the runner deletes or resets a review/<slug> branch (a fresh worktree, cleanup), any commits it has that aren't on master are saved as <keep_ref_prefix><slug>-<UTC time> and logged with keep_ref_log. Twice in the week of 2 Nov 2026 a branch with reviewed, unmerged commits was deleted (time-tasks-2 came back only via git fsck). merge_only_* : a requeue.py --merge-only task (its body has a line starting with merge_only_mark) is merged by the runner from the existing branch -- gate, reviewer, combined-tree integration -- and never runs a lane; a missing branch or a merge that can't run parks it with merge_only_park."
+  "_keep_ref_prefix": "Before the runner deletes or resets a review/<slug> branch (a fresh worktree, cleanup), any commits it has that aren't on master are saved as <keep_ref_prefix><slug>-<UTC time> and logged with keep_ref_log. Twice in the week of 2 Nov 2026 a branch with reviewed, unmerged commits was deleted (time-tasks-2 came back only via git fsck). merge_only_* : a requeue.py --merge-only task (its body has a line starting with merge_only_mark) is merged by the runner from the existing branch -- gate, reviewer, combined-tree integration -- and never runs a lane; a missing branch or a merge that can't run parks it with merge_only_park.",
+  "consult_applies": "all",
+  "consult_timeout_s": 180,
+  "consult_notes_timeout_s": 60,
+  "consult_busy_wait_s": 120,
+  "consult_busy_poll_s": 10,
+  "consult_gpu_busy_pct": 60,
+  "consult_notes_fallback": true,
+  "live_window": true,
+  "live_window_title": "Orchestra live",
+  "live_window_argv": ["{python}", "{watch}", "--title", "{title}"],
+  "toasts": true,
+  "toast_started": "Orchestra: {lane} started {title}",
+  "toast_finished": "Orchestra: {lane} finished: {result} {title}",
+  "toast_argv": ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", "{script}", "-Text", "{text}"],
+  "toast_timeout_s": 30,
+  "_consult_applies": "Which tasks the study tutor (Don) is asked about before their lane starts, any lane: all = every task (Chuen, 9 Nov 2026: every agent goes through Don); named = only a task whose header says Consult: don or whose text names the study tooling (consult.json path_patterns); off = none. Advisory either way: the lane may disagree and says so under ODD. consult_timeout_s caps the full consult (local model, Claude for a hard topic); consult_notes_timeout_s the notes-only one (python -m tutor consult --notes-only: no model). Before the full consult the runner checks the GPU: the gpu.lease held by another job, or nvidia-smi at least consult_gpu_busy_pct busy, is busy; it waits up to consult_busy_wait_s (polling every consult_busy_poll_s), then, with consult_notes_fallback, takes the notes-only path instead, as it does when the full consult fails. The log line says which path was used.",
+  "_live_window": "Visible runs (Chuen, 9 Nov 2026: 'I want to see Claude Code running'). live_window: when a lane starts, one console window titled live_window_title running orchestra/watch.py is opened if none is open already (its pid is kept in .review/live_window.json), shown without taking focus; never a second one. {python} is the runner's interpreter, {watch} watch.py. toasts: a Windows toast at each lane start and finish, from toast_started / toast_finished, sent by orchestra/toast.ps1 ({script}) with {text}; a toast that fails or takes over toast_timeout_s is ignored."
 }

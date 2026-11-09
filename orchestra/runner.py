@@ -1544,10 +1544,11 @@ def run_lane(task: Task, wt: Path, report: Path, timeout: int, prov: dict | None
     env.update(ORCHESTRA_TASK=str(local / "task.md"), ORCHESTRA_REPORT=str(local_report),
                ORCHESTRA_WORKTREE=str(wt), ORCHESTRA_MAIN=str(REPO))
     prompt = build_prompt(".review/task.md", ".review/report.md")
-    # The study tutor's opinion (consult.json): a task about his study tooling or studies has the
-    # tutor asked first, `.review/don.md` written in the worktree and named in the prompt. Advisory:
+    # The study tutor's opinion (consult.py): which tasks is config consult_applies (default every
+    # task, any lane); the tutor is asked first, `.review/don.md` written in the worktree and named
+    # in the prompt; a busy GPU means the notes-only path, and the log line says which. Advisory:
     # a tutor that can't answer is a log line, and the prompt is exactly the one above.
-    prompt += consult.before_lane(task, wt, REPO, log)
+    prompt += consult.before_lane(task, wt, REPO, log, rule=C)
     if any(PROMPT_FILE_PLACEHOLDER in str(a) for a in argv):
         prompt_file = local / "prompt.md"
         prompt_file.write_text(prompt, encoding="utf-8")
