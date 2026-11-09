@@ -648,10 +648,11 @@
     "delegate_task": "{system}\n\n{user}",
     "who_none": "none",
     "who_labels": {"local": "the local model", "claude": "Claude", "none": "no model", "notes": "his notes, no model"},
-    "_notes_only": "python -m tutor consult --notes-only: the quick opinion with no model call at all (from_notes). Orchestra uses it when the GPU is busy or the model consult failed. The chosen notes' lines that hold the question's words, at most max_lines per note, each note's excerpt capped at excerpt_chars, one line per note joined by sep. who names it in the result; confidence drops one level (no model weighed it).",
+    "_notes_only": "python -m tutor consult --notes-only: the quick opinion with no model call at all (from_notes). Lines matching skip_line_patterns (a line of links only, a callout header, a rule) are never quoted. Orchestra uses it when the GPU is busy or the model consult failed. The chosen notes' lines that hold the question's words, at most max_lines per note, each note's excerpt capped at excerpt_chars, one line per note joined by sep. who names it in the result; confidence drops one level (no model weighed it).",
     "notes_only": {
       "who": "notes",
       "max_lines": 4,
+      "skip_line_patterns": ["^\\s*([-*]\\s*)?(\\[\\[[^\\]]*\\]\\]\\s*[^\\w\\[]*\\s*)+$", "^\\s*>\\s*\\[!", "^\\s*-{3,}\\s*$"],
       "line_sep": " / ",
       "excerpt_chars": 400,
       "line": "- {name}: {text}",

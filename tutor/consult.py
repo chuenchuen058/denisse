@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import re
 
 from . import cards, conf, don, model, sources, teach, topics
 from .conf import CONFIG, Module, Paths
@@ -248,7 +249,8 @@ def from_notes(paths: Paths, question: str, module_text: str = "", today: dt.dat
     qw = _words(out["question"])
     parts = []
     for src in found["picked"]:
-        lines = [ln.strip() for ln in src.text.splitlines() if ln.strip() and _words(ln) & qw]
+        lines = [ln.strip() for ln in src.text.splitlines() if ln.strip() and _words(ln) & qw
+                 and not any(re.search(pat, ln) for pat in n["skip_line_patterns"])]
         excerpt = _clip(n["line_sep"].join(lines[:n["max_lines"]]), n["excerpt_chars"])
         if excerpt:
             parts.append(n["line"].format(name=src.stem, text=excerpt))
