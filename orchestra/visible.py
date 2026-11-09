@@ -129,7 +129,7 @@ def toast(cfg: dict, text: str, log, run=None) -> bool:
         r = (run or RUN)(argv, capture_output=True, text=True, timeout=cfg["toast_timeout_s"],
                                     stdin=subprocess.DEVNULL)
         if r.returncode != 0:
-            log(f"TOAST failed (exit {r.returncode}): {' '.join((r.stderr or r.stdout or '').split())[-200:]}")
+            log(f"TOAST failed (exit {r.returncode}): {' '.join((r.stderr or r.stdout or '').split())[-int(cfg['toast_error_chars']):]}")
             return False
         return True
     except Exception as e:  # noqa: BLE001
