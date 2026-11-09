@@ -23,6 +23,8 @@ os.environ["ORCHESTRA_TOASTS"] = "false"
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE / "hooks"))
+sys.path.append(str(HERE.parent))  # testing_git; appended so it never shadows a local module
+import testing_git  # noqa: E402
 
 # The fake lane: starts a grandchild `sleep 60` that writes its own pid, then copies the slot
 # lock (written before it reads stdin) and sleeps past the timeout. With FAKE_ORPHAN the
@@ -74,6 +76,7 @@ def wait_for_pid(path: Path, seconds: float = 20) -> int:
 @unittest.skipUnless(os.name == "nt", "Windows Job Objects")
 class SupervisionTest(unittest.TestCase):
     def setUp(self):
+        testing_git.hermetic_git(self)  # first: no inherited GIT_* reaches a real repo
         self.tmp = Path(tempfile.mkdtemp(prefix="orch sup King's "))  # space + apostrophe round-trip
         self.repo = self.tmp / "repo"
         self.repo.mkdir()

@@ -14,6 +14,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import testing_git
 from atrium import conf
 
 SHIPPED = json.loads(conf.DEFAULT.read_text(encoding="utf-8"))
@@ -47,6 +48,7 @@ def stamp(t):
 
 class DigestTest(unittest.TestCase):
     def setUp(self):
+        testing_git.hermetic_git(self)  # first: no inherited GIT_* reaches a real repo
         self.tmp = Path(tempfile.mkdtemp())
         self.v, self.r = self.tmp / "vault", self.tmp / "repo"
         self.cfg_path = self.tmp / "atrium.json"

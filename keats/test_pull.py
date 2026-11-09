@@ -12,6 +12,7 @@ import time
 import unittest
 from unittest.mock import Mock, patch
 
+import testing_git
 from keats import conf, pull
 from keats.ingest import commands
 from keats.scan import LoginRequired, Resource, Response, discover, filename, resolve
@@ -59,6 +60,7 @@ class FakeBrowser:
 
 class PullTests(unittest.TestCase):
     def setUp(self):
+        testing_git.hermetic_git(self)  # first: no inherited GIT_* reaches a real repo
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)

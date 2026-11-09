@@ -7,7 +7,9 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.append(str(Path(__file__).resolve().parents[1]))  # testing_git; appended, never shadows
 import aftercare  # noqa: E402
+import testing_git  # noqa: E402
 
 REPORT = """RESULT: PASS
 GATE: tests -> OK
@@ -31,6 +33,7 @@ def g(repo, *a):
 
 class TestAftercare(unittest.TestCase):
     def setUp(self):
+        testing_git.hermetic_git(self)  # first: no inherited GIT_* reaches a real repo
         self.tmp = Path(tempfile.mkdtemp())
 
     def tearDown(self):
@@ -94,6 +97,7 @@ HOT = ("---\r\nname: hot\r\n---\r\n# hot\r\n\r\n## Now\r\n- Chuen's line — é\
 
 class TestWaitingList(unittest.TestCase):
     def setUp(self):
+        testing_git.hermetic_git(self)  # first: no inherited GIT_* reaches a real repo
         self.tmp = Path(tempfile.mkdtemp())
         self.v = self.tmp / "vault"
         self.v.mkdir()

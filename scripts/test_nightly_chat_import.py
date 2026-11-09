@@ -10,7 +10,9 @@ import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.append(str(Path(__file__).resolve().parents[1]))  # testing_git; appended, never shadows
 import nightly_chat_import as step  # noqa: E402
+import testing_git  # noqa: E402
 
 NOW = 2_000_000_000.0          # a fixed "now"; mtimes are set relative to it
 OLD = NOW - 2 * 3600           # settled: two hours ago
@@ -19,6 +21,7 @@ FRESH = NOW - 5 * 60           # five minutes ago: still running
 
 class NightlyChatImportTest(unittest.TestCase):
     def setUp(self):
+        testing_git.hermetic_git(self)  # first: no inherited GIT_* reaches a real repo
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         root = Path(tmp.name).resolve()

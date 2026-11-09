@@ -28,6 +28,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO not in sys.path:
     sys.path.insert(0, REPO)
 
+import testing_git  # noqa: E402
 from tutor import anki, cards, conf, don, sources  # noqa: E402
 from tutor import __main__ as cli  # noqa: E402
 from tutor.test_tutor import EM, HERE, MODULES, SS, Fixture  # noqa: E402
@@ -705,6 +706,10 @@ class MigrationTests(DonFixture):
 
 
 class GitTests(DonFixture):
+    def setUp(self):
+        testing_git.hermetic_git(self)  # first: no inherited GIT_* reaches a real repo
+        super().setUp()
+
     def git(self, *args):
         return subprocess.run(["git", *args], cwd=self.vault, capture_output=True, text=True, check=True).stdout
 
