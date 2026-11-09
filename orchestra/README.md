@@ -153,6 +153,47 @@ never twice. A Windows toast says "Orchestra: <lane> started <title>" and
 lane. If Task Scheduler runs the runner "whether the user is logged on or not",
 it has no desktop and neither can be seen: run it as the logged-on user.
 
+**A tab per lane run** (`lane_tab.py`, `visible.lane_tab`). Each claude, codex
+or copilot run also gets its own Windows Terminal tab, "Claude: <task title>",
+in one wt window named `orchestra`. The lane itself is unchanged: still
+headless `claude -p --output-format stream-json`, so the report file, the
+timeout and kill-on-close job, the cost read from the result event, the
+worktree, the guard hook and the Don consult work exactly as before. The tab
+is only a reader of `<slug>.lane.log` that shows it the way Claude Code does
+(assistant text, each tool call with its file or command, Edit/Write diffs,
+tool errors, the final result). When the lane exits the runner writes
+`<slug>.lane.done`; the tab prints DONE with the lane's RESULT and closes after
+`lane_tab_linger_s`. With no DONE (a killed runner) it gives up after the
+timeout plus `lane_tab_extra_s`. No `wt.exe`: the same view in a plain console
+(`lane_tab_fallback_console`). Interactive `claude` driven through the Stop hook
+was the other option; it was not taken because the runner would lose the
+exit code, the timeout kill, the result event's cost and the refused-tool
+list, and a session can sit waiting for input. Off: `lane_tabs: false`.
+
+## Autopilot: the queue refills itself (`atrium/autopilot.py`)
+
+When no `Queue: auto` task is left, the laptop is on AC and a lane has
+allowance, the runner asks the planner for the next tasks (one tick at a time,
+`.review/autopilot.lock`). It reads the vault's `Atlas/Task Ideas.md` Inbox,
+NOT DONE / ODD lines of recent reports, parked tasks (not those waiting on
+Chuen) and hot.md's "Waiting on Chuen" (not Orchestra's own block). The local
+model judges each one (actionable? repo-only? a bug fix? title, files). If it
+can't answer, the fallback rule applies and the task is a draft. `Queue: auto` only
+for repo-only work whose gate (`autopilot_gate`) can run; everything else is
+`Queue: draft` and is listed in hot.md. Caps: `autopilot_max_per_hour`,
+`_per_day`, `_per_refill`; never two tasks predicted to edit the same files;
+never anything open, parked or done in the last 14 days. The lane is the one
+with allowance (not LIMITED, spend cap not reached) and the fewest runs in
+`autopilot_balance_hours`. Every decision is one `AUTOPILOT ...` line in
+runner.log; the ledger is `.review/autopilot.json`. Off: `autopilot: false`.
+
+**Bug fixes go to Claude.** `Kind: bugfix` (config `bugfix_kinds`), or the
+planner's own reading (a PARTIAL/FAIL report's follow-up, a parked failure, the
+model saying so), runs on `bugfix_lane` (claude) whatever the balance says,
+unless Claude is limited (then the normal `lane_fallback`) or the task says
+`Lane-Fixed: yes`. The START line says `(claude: bug fix; header lane ...)`.
+Off: `bugfix_lane: ""`.
+
 ## Handing work to the queue (`new_task.py`)
 
 Every agent that has real work for a repo hands it to the queue rather than

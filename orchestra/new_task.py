@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import os
 import re
 import sys
@@ -23,7 +24,20 @@ from pathlib import Path
 REVIEW = Path(os.environ.get("ORCHESTRA_REPO") or Path(__file__).resolve().parent.parent) / ".review"
 PRIORITIES = ("urgent", "normal")
 WEIGHTS = ("light", "heavy")
-KINDS = ("work", "maintenance")
+def _bugfix_kinds() -> tuple[str, ...]:
+    """Kinds that mean a bug or error fix (config bugfix_kinds; the runner routes them to bugfix_lane)."""
+    here = Path(__file__).resolve().parent
+    for name in ("config.json", "config_defaults.json"):
+        try:
+            kinds = json.loads((here / name).read_text(encoding="utf-8")).get("bugfix_kinds")
+        except (OSError, ValueError):
+            continue
+        if isinstance(kinds, list) and all(isinstance(k, str) for k in kinds):
+            return tuple(k.lower() for k in kinds)
+    return ()
+
+
+KINDS = ("work", "maintenance", *_bugfix_kinds())
 TITLE_PLACEHOLDER = "<short title, what will be true when done>"
 SAME_TITLE_DAYS = 14
 

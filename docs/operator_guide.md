@@ -64,8 +64,16 @@ What is happening now (read-only):
 is waiting, parked tasks and why, today's results and spend, the last log lines.
 `watch.py` follows the running sessions live; the runner opens it itself, once, in a window
 titled "Orchestra live" when a lane starts, and toasts each start and finish (config
-`live_window`, `toasts`; orchestra/README.md, "Seeing it run"). `runner.py --dry-run` shows what the next
+`live_window`, `toasts`; orchestra/README.md, "Seeing it run"). Each lane run also gets its own
+Windows Terminal tab, "Claude: <task title>", that shows the session the way Claude Code does
+and closes itself after DONE (config `lane_tabs`). `runner.py --dry-run` shows what the next
 tick would pick without running anything.
+
+When the queue has no `Queue: auto` task left, the autopilot planner writes the next ones from
+the vault's Task Ideas Inbox, recent reports' NOT DONE / ODD, parked tasks and hot.md's waiting
+items. It spreads them over the lanes with allowance left and sends bug fixes to Claude. Anything
+not shown to be repo-only is a draft listed in hot.md. Its decisions are the `AUTOPILOT` lines in
+runner.log (config `autopilot`, `bugfix_lane`; orchestra/README.md, "Autopilot").
 
 Writing a task:
 
