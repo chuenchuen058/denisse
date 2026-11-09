@@ -1,8 +1,8 @@
 """The live Atrium page, served on this laptop: python -m atrium live [--port N] [--open]
 
 Reads the same tables `atrium snapshot` builds (snapshot.tables, nothing collected
-twice), shapes them into the page's three rows (agents + needs you, today's timeline,
-progress) and pushes a new copy down a server-sent event stream whenever a watched file
+twice), shapes them into the page's rows (agents + needs you, where each agent is working and
+who is about to collide (atrium/cursors.py), today's timeline, progress) and pushes a new copy down a server-sent event stream whenever a watched file
 changes. Binds loopback only. Read-only: every handler is a GET, nothing is written, and
 nothing runs while no tab holds the stream open. Every port, interval, path, label and
 colour: atrium/config.json "live".
@@ -19,7 +19,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import conf, context, snapshot
+from . import conf, context, cursors, snapshot
 
 HERE = Path(__file__).resolve().parent
 
@@ -152,8 +152,11 @@ def collect() -> dict:
                        "held": words["held"] if n and limited else "", "why": why,
                        "until": lim.isoformat(timespec="minutes") if lim and lim > now else ""})
     icons = c["needs_icons"]
-    needs = [{"icon": icons.get(w["kind"], ""), "item": w["item"], "kind": w["kind"]}
-             for w in snapshot.waiting_items(t["tasks"])][:c["needs_max"]]
+    where = dict(cursors.collect(t["running"], agents, c["refresh_s"], words), icon=icons.get("overlap", ""))
+    needs = [{"icon": icons.get("overlap", ""), "item": o["text"], "kind": "overlap"} for o in where["overlaps"]]
+    needs += [{"icon": icons.get(w["kind"], ""), "item": w["item"], "kind": w["kind"]}
+              for w in snapshot.waiting_items(t["tasks"])]
+    needs = needs[:c["needs_max"]]
     timeline = _timeline(state, t["running"], now)
     today = now.date().isoformat()
     done_res = set(c["progress"]["done_results"])
@@ -178,7 +181,7 @@ def collect() -> dict:
                          "text": b["text"].format(**v)})
     return {"title": c["title"], "subtitle": c["subtitle"], "panels": c["panels"], "headings": c["headings"],
             "power": {"ac": pw.get("ac"), "battery_percent": pw.get("battery_percent")},
-            "agents": agents, "needs": needs, "timeline": timeline, "progress": progress,
+            "agents": agents, "needs": needs, "timeline": timeline, "progress": progress, "where": where,
             "timeline_cfg": {k: c["timeline"][k] for k in ("start_hour", "end_hour", "pad_hours", "tick_hours")},
             "words": words}
 

@@ -4,7 +4,7 @@
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const colour = c => c && c.startsWith("#") ? c : `var(--${c})`;
-let D = null, got = 0, es = null;
+let D = null, got = 0, es = null, still = true;  // still: next placement jumps, no glide
 const ONCE = new URLSearchParams(location.search).has("once");  // one fetch, no stream (screenshots)
 
 function nowH() { return D ? D.now_h + (Date.now() - got) / 3600000 : 0; }
@@ -38,6 +38,61 @@ function needs() {
     ? n.map(x => `<div class="needs" title="${esc(x.item)}"><b>${esc(x.icon)}</b><span>${esc(x.item)}</span></div>`).join("")
     : `<div class="needs none">${esc(D.words.nothing_needed)}</div>`;
   document.querySelector(".needs-card").classList.toggle("on", n.length > 0);
+}
+
+// -- agent cursors: one per running task, glides only when its data moves it -----
+const ARROW = `<svg viewBox="0 0 10 14" aria-hidden="true"><path d="M0.5 0.5V12.5L3.8 9.4L6 13.6L8 12.7L5.8 8.6H10Z"/></svg>`;
+const cur = (k, cls) => `<span class="cur ${cls}" data-seat="${esc(k.id)}" style="--c:var(--agent-${esc(k.lane)})">${ARROW}<b>${esc(k.label)}</b></span>`;
+
+function place(listId, rowsHtml, want) {
+  // want: cursor id -> true for every cursor that has a seat in rowsHtml
+  const box = $(listId), layer = box.querySelector(".layer");
+  box.querySelector(".rows").innerHTML = rowsHtml;
+  const byId = Object.fromEntries((D.where.cursors).map(k => [k.id, k]));
+  for (const el of [...layer.children]) if (!want[el.dataset.seat]) el.remove();
+  if (still) layer.classList.add("still");
+  for (const id of Object.keys(want)) {
+    const seat = box.querySelector(`.rows .seat[data-seat="${CSS.escape(id)}"]`);
+    let el = layer.querySelector(`[data-seat="${CSS.escape(id)}"]`);
+    if (!seat) { if (el) el.remove(); continue; }
+    if (!el) {
+      layer.insertAdjacentHTML("beforeend", cur(byId[id], "fly"));
+      el = layer.lastElementChild;
+      layer.classList.add("still");  // a new cursor appears where it is, it does not fly in
+    }
+    el.querySelector("b").textContent = byId[id].label;
+    el.style.transform = `translate(${seat.offsetLeft}px, ${seat.offsetTop}px)`;
+  }
+  void layer.offsetWidth;  // apply the jump before the transition comes back
+  layer.classList.remove("still");
+}
+
+function where() {
+  const W = D.where, w = D.words, r = document.documentElement.style;
+  r.setProperty("--cur-arrow", W.cursor_cfg.arrow_px + "px");
+  r.setProperty("--cur-tag", W.cursor_cfg.tag_px + "px");
+  r.setProperty("--cur-row", W.cursor_cfg.row_px + "px");
+  r.setProperty("--cur-glide", W.cursor_cfg.glide_ms + "ms");
+  const byId = Object.fromEntries(W.cursors.map(k => [k.id, k]));
+  const onTask = Object.fromEntries(W.cursors.map(k => [k.id, true]));
+  place("where-tasks", W.cursors.length
+    ? W.cursors.map(k => `<div class="row" title="${esc(k.task)}">${cur(k, "seat")}<span class="t">${esc(k.task)}</span></div>`).join("")
+    : `<div class="none">${esc(w.nobody_working)}</div>`, onTask);
+  const warn = Object.fromEntries(W.overlaps.map(o => [o.path, o.text]));
+  const onFile = {};
+  const rows = W.files.map(f => {
+    const marks = f.who.map(id => {
+      const k = byId[id];
+      if (k.file === f.path) { onFile[id] = true; return cur(k, "seat"); }
+      return cur(k, "mini");
+    }).join("");
+    return `<div class="row${f.shared ? " shared" : ""}" title="${esc(f.path)}">${marks}<span class="t">${esc(f.path)}</span></div>` +
+           (f.shared ? `<div class="warn">${esc(W.icon)} ${esc(warn[f.path])}</div>` : "");
+  }).join("");
+  place("where-files", W.files.length
+    ? rows + (W.more_files ? `<div class="more">${esc(W.more_files)}</div>` : "")
+    : `<div class="none">${esc(W.cursors.length ? w.no_files : w.nobody_working)}</div>`, onFile);
+  still = false;
 }
 
 function timeline() {
@@ -77,14 +132,14 @@ function progress() {
     `<span>${esc(p.text)}</span></div>`).join("") + `</div>`;
 }
 
-function draw() { if (!D) return; header(); agents(); needs(); timeline(); progress(); }
+function draw() { if (!D) return; header(); agents(); needs(); where(); timeline(); progress(); }
 
 function live(on) {
   $("dot").classList.toggle("off", !on);
   if (D) $("state").textContent = on ? D.words.live : D.words.stale;
 }
 
-function take(d) { if (!D || d.version !== D.version || d.day !== D.day) { D = d; got = Date.now(); draw(); } else { D.now_h = d.now_h; got = Date.now(); } live(true); }
+function take(d) { if (!D || d.version !== D.version || d.day !== D.day) { D = d; got = Date.now(); draw(); } else { D.now_h = d.now_h; got = Date.now(); } still = false; live(true); }
 
 function connect() {
   if (es || document.hidden) return;
@@ -98,8 +153,10 @@ function connect() {
 
 // No tab visible: close the stream, so the laptop does no work for a page nobody sees.
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) { if (es) { es.close(); es = null; } } else connect();
+  if (document.hidden) { if (es) { es.close(); es = null; } } else { still = true; connect(); }
 });
+// A new width moves the rows: put the cursors back where they belong, without a glide.
+addEventListener("resize", () => { if (D) { still = true; where(); } });
 // The now line and running blocks move with the clock; only while the tab is visible.
 setInterval(() => { if (!document.hidden && D) timeline(); }, 60000);
 

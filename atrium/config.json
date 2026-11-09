@@ -271,10 +271,11 @@
     "panels": [
       "agents",
       "needs",
+      "cursors",
       "timeline",
       "progress"
     ],
-    "headings": {"agents": "Agents", "needs": "Needs you", "timeline": "Today", "progress": "Progress"},
+    "headings": {"agents": "Agents", "needs": "Needs you", "cursors": "Where they are", "files": "Files in play", "timeline": "Today", "progress": "Progress"},
     "title": "Atrium Live",
     "subtitle": "What's happening in the background",
     "_agents": "One bar and one timeline row each, in this order. lane = the Orchestra lane (snapshot usage rows); colour = the accent used everywhere that agent appears.",
@@ -301,10 +302,29 @@
       }
     ],
     "needs_max": 3,
+    "_needs": "Overlaps (two agents in one file, from cursors below) come first: they need you before a merge does.",
     "needs_icons": {
+      "overlap": "⚠",
       "note": "⌘",
       "draft": "✎",
       "parked": "⏸"
+    },
+    "_cursors": "atrium/cursors.py: one pointer per running task, in its agent's colour, on its task row and on the file its worktree touched last; every touched file listed once (shared first, then newest, at most max_files) with who is in it. A file two agents both touch is an overlap: one warning per file, also in Needs you. worktrees = the runner's worktree folder ({repo_parent}, {repo_name} of this checkout; orchestra/runner.py WORKTREES); touched = committed since merge-base with base_ref + uncommitted + untracked, read-only (git_env: no index refresh). Ignored: the runner's own orchestra/config.json <runner_ignore_key> prefixes when use_runner_ignores, plus ignore (globs on the path or the file name). Cached per worktree for refresh_s, so the page's existing loop is the only one. page: the keys sent to app.js (pixel sizes, glide time); the glide is one CSS transition, none under prefers-reduced-motion or when a hidden tab comes back.",
+    "cursors": {
+      "worktrees": "{repo_parent}/{repo_name}-wt",
+      "base_ref": "master",
+      "git_timeout_s": 5,
+      "git_env": {"GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0"},
+      "use_runner_ignores": true,
+      "runner_ignore_key": "conflict_ignore_prefixes",
+      "ignore": [".review/*", "__pycache__/*", "*/__pycache__/*", "*.pyc", ".pytest_cache/*", "*/.pytest_cache/*",
+                 ".mypy_cache/*", ".ruff_cache/*", "graphify-out/*", "*.log", "*.tmp"],
+      "max_files": 8,
+      "arrow_px": 13,
+      "tag_px": 10.5,
+      "row_px": 26,
+      "glide_ms": 350,
+      "page": ["arrow_px", "tag_px", "row_px", "glide_ms"]
     },
     "timeline": {
       "start_hour": 10,
@@ -367,6 +387,12 @@
       "theme": "◐ Theme",
       "now": "now",
       "nothing_needed": "Nothing waiting on you",
+      "nobody_working": "Nobody working right now",
+      "no_files": "No files touched yet",
+      "cursor_slot": "{label} {slot}",
+      "both_in": "{who} both in {path}",
+      "both_join": " + ",
+      "more_files": "+{n} more",
       "elapsed": "{m} min",
       "foot": "Updates itself · read-only"
     }
