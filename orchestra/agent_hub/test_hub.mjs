@@ -553,3 +553,34 @@ test("job files: output at or below the limit is unchanged and a linked outside 
     else process.env.AGENT_HUB_FAKE_CMD = originalCmd;
   }
 });
+
+test("queue_task hands work to Orchestra's queue through new_task.py, with its body, gate and source", () => {
+  const repo = mkdtempSync(join(tmpdir(), "hub-queue-"));
+  mkdirSync(join(repo, ".review"), { recursive: true });
+  writeFileSync(join(repo, ".review", "TEMPLATE.md"), readFileSync(join(HERE, "..", "..", ".review", "TEMPLATE.md"), "utf8"));
+  const before = { repo: process.env.ORCHESTRA_REPO, py: process.env.AGENT_HUB_PYTHON };
+  process.env.ORCHESTRA_REPO = repo;
+  process.env.AGENT_HUB_PYTHON = TEST_PY;
+  try {
+    assert.ok(hub.TOOLS.some((t) => t.name === "queue_task"));
+    assert.throws(() => hub.queueTask({ title: "x" }), /needs a body/);
+    const text = hub.queueTask({ title: "Summarise week 5", body: "Read the week 5 notes.", lane: "codex",
+      gate: ["echo --fast ok"] });
+    assert.match(text, /Queued for Orchestra: .*queue/);
+    const path = text.split("\n")[0].replace("Queued for Orchestra: ", "").trim();
+    const task = readFileSync(path, "utf8");
+    assert.match(task, /^# Summarise week 5/);
+    assert.match(task, /^Queue: auto$/m);
+    assert.match(task, /^Lane: codex$/m);
+    assert.match(task, /^From: agent hub$/m);
+    assert.match(task, /Read the week 5 notes\./);
+    assert.match(task, /```\r?\necho --fast ok\r?\n```/);
+    const dflt = hub.queueTask({ title: "Default gate", body: "Do it.", lane: "claude" });
+    const task2 = readFileSync(dflt.split("\n")[0].replace("Queued for Orchestra: ", "").trim(), "utf8");
+    assert.match(task2, /run_checks\.py --fast/, "no gate given: the repo's fast checks");
+    assert.match(readFileSync(hub.handoffPath(), "utf8"), /\[hub\] queued for Orchestra: Summarise week 5/);
+  } finally {
+    if (before.repo === undefined) delete process.env.ORCHESTRA_REPO; else process.env.ORCHESTRA_REPO = before.repo;
+    if (before.py === undefined) delete process.env.AGENT_HUB_PYTHON; else process.env.AGENT_HUB_PYTHON = before.py;
+  }
+});

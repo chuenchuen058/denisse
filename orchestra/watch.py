@@ -145,9 +145,13 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--once", action="store_true", help="print current state and exit")
     ap.add_argument("--tail", type=int, default=8, help="events to show per task on start")
+    ap.add_argument("--title", default=None, help="console window title (the runner's live window)")
     args = ap.parse_args()
     if os.name == "nt":
         os.system("")  # enable ANSI colours in the Windows console
+        if args.title:
+            import ctypes
+            ctypes.windll.kernel32.SetConsoleTitleW(args.title)
         try:
             sys.stdout.reconfigure(encoding="utf-8")
         except AttributeError:

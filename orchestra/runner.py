@@ -75,6 +75,7 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 import campaign  # noqa: E402  deadline + pause/stop; reads .review/campaign.json and control.json
 import consult  # noqa: E402  the study tutor's opinion before a lane starts; data in consult.json, advisory
+import visible  # noqa: E402  the live window and toasts, so Chuen sees a lane run (config live_window, toasts)
 
 REPO = Path(os.environ.get("ORCHESTRA_REPO", HERE.parent))
 REVIEW = REPO / ".review"
@@ -199,8 +200,11 @@ def load_config(now_utc: dt.datetime | None = None, log_fn=None, path: Path | No
         if env is not None:
             # ("{", "[") not the string "{[": "" is in every string, and ORCHESTRA_VAULT_DIR="" (vault
             # notes off) then crashed every tick at import with json.loads("") (soak test, 3 Nov 2026)
+            # A switch reads its word: bool("false") is True, so ORCHESTRA_TOASTS=false used to turn it on.
             try:
-                cfg[k] = json.loads(env) if env[:1] in ("{", "[") else type(v)(env) if not isinstance(v, (dict, list)) else v
+                cfg[k] = (json.loads(env) if env[:1] in ("{", "[") else
+                          env.strip().lower() in ("1", "true", "yes", "on") if isinstance(v, bool) else
+                          type(v)(env) if not isinstance(v, (dict, list)) else v)
             except ValueError as e:
                 say(f"config: ORCHESTRA_{k.upper()} ignored ({e})")
     return validated(cfg, defaults, complete, say)
@@ -685,9 +689,31 @@ def fallback_lane(task: Task, state: dict) -> str | None:
     return fb
 
 
+def is_bugfix(task: Task) -> bool:
+    """A bug or error fix by its Kind header (config bugfix_kinds, e.g. Kind: bugfix)."""
+    return task.kind in [k.lower() for k in C["bugfix_kinds"]]
+
+
+def bugfix_lane(task: Task, state: dict) -> str | None:
+    """The lane a bug fix goes to (config bugfix_lane; Chuen, 9 Nov 2026: "whenever there's bugs
+    and errors use Claude Code"), whatever balancing chose, unless that lane is limited or not
+    configured (then the normal fallback rule applies) or the header says Lane-Fixed: yes."""
+    want = str(C["bugfix_lane"] or "")
+    if (not want or not is_bugfix(task) or task.lane == want or want not in lanes() or lane_limited(state, want)
+            or task.fields.get("lane-fixed", "").lower() in ("yes", "true", "1")):
+        return None
+    return want
+
+
 def route(tasks: list[Task], state: dict) -> list[Task]:
-    """Move tasks off a limited lane onto its fallback; the header's lane is kept as lane-from."""
+    """Bug fixes onto bugfix_lane (header lane kept as lane-routed, why as route-why); then
+    tasks off a limited lane onto its fallback (header lane kept as lane-from)."""
     for t in tasks:
+        if "lane-routed" not in t.fields:
+            want = bugfix_lane(t, state)
+            if want:
+                t.fields["lane-routed"], t.fields["lane"] = t.lane, want
+                t.fields["route-why"] = C["bugfix_route_note"].format(lane=want)
         if "lane-from" not in t.fields and lane_limited(state, t.lane):
             fb = fallback_lane(t, state)
             if fb:
@@ -708,6 +734,8 @@ def header_problem(task: Task) -> str | None:
     if "queue" not in task.fields:
         return "no Queue: line"
     for key, allowed in VALID.items():
+        if key == "kind":  # a bug fix is work, routed to bugfix_lane (config bugfix_kinds)
+            allowed = (*allowed, *(k.lower() for k in C["bugfix_kinds"]))
         if key in task.fields and task.fields[key].lower() not in allowed:
             return f"{key.title()}: {task.fields[key]!r} is not one of {'/'.join(allowed)}"
     if task.lane not in lanes():
@@ -1544,10 +1572,11 @@ def run_lane(task: Task, wt: Path, report: Path, timeout: int, prov: dict | None
     env.update(ORCHESTRA_TASK=str(local / "task.md"), ORCHESTRA_REPORT=str(local_report),
                ORCHESTRA_WORKTREE=str(wt), ORCHESTRA_MAIN=str(REPO))
     prompt = build_prompt(".review/task.md", ".review/report.md")
-    # The study tutor's opinion (consult.json): a task about his study tooling or studies has the
-    # tutor asked first, `.review/don.md` written in the worktree and named in the prompt. Advisory:
+    # The study tutor's opinion (consult.py): which tasks is config consult_applies (default every
+    # task, any lane); the tutor is asked first, `.review/don.md` written in the worktree and named
+    # in the prompt; a busy GPU means the notes-only path, and the log line says which. Advisory:
     # a tutor that can't answer is a log line, and the prompt is exactly the one above.
-    prompt += consult.before_lane(task, wt, REPO, log)
+    prompt += consult.before_lane(task, wt, REPO, log, rule=C)
     if any(PROMPT_FILE_PLACEHOLDER in str(a) for a in argv):
         prompt_file = local / "prompt.md"
         prompt_file.write_text(prompt, encoding="utf-8")
@@ -1555,7 +1584,13 @@ def run_lane(task: Task, wt: Path, report: Path, timeout: int, prov: dict | None
     p = run_provenance(wt, prompt)
     if prov is not None:
         prov.update(p)
-    out = (REPORTS / f"{task.slug}.lane.log").open("w", encoding="utf-8")
+    lane_log = REPORTS / f"{task.slug}.lane.log"
+    done_file = REPORTS / f"{task.slug}.lane.done"
+    out = lane_log.open("w", encoding="utf-8")
+    # Its own Windows Terminal tab (config lane_tabs): a reader of this log, nothing more. The
+    # lane itself stays headless below, so the report, timeout, job, cost and hooks are unchanged.
+    tab = visible.lane_tab(task, C, log_path=lane_log, done_path=done_file, timeout=timeout,
+                           log=log) if tabs_enabled() else "off"
     start = time.time()
     proc, job = spawn_lane([exe, *argv[1:]], cwd=wt, env=env, stdin=subprocess.PIPE,
                            stdout=out, stderr=subprocess.STDOUT, text=True, encoding="utf-8")
@@ -1583,6 +1618,8 @@ def run_lane(task: Task, wt: Path, report: Path, timeout: int, prov: dict | None
     out.close()
     if local_report.exists():
         shutil.copyfile(local_report, report)
+    if tab == "opened":
+        visible.lane_tab_done(done_file, outcome, report, log)
     return outcome, int(time.time() - start)
 
 
@@ -2001,6 +2038,87 @@ def aftercare_on() -> bool:
     return os.environ.get("ORCHESTRA_AFTERCARE") == "1" or "ORCHESTRA_REPO" not in os.environ
 
 
+def tabs_enabled() -> bool:
+    """Lane tabs open for the real repo only (tests patch this): a test's temp repo never
+    opens a Windows Terminal tab. The switch itself is config lane_tabs."""
+    return aftercare_on()
+
+
+def autopilot_enabled() -> bool:
+    """The planner writes tasks for the real repo only (tests patch this). The switch itself
+    is config autopilot."""
+    return aftercare_on()
+
+
+def lane_availability(state: dict) -> dict:
+    """lane -> None if the planner may give it work now, else why not: limited (LIMITED wait
+    or a sign-in failure) or, for a priced lane, the day's spend cap reached."""
+    out = {}
+    have = lanes()
+    for lane in C["autopilot_lanes"]:
+        until = lane_limited(state, lane)
+        if lane not in have:
+            out[lane] = "not configured or not installed"
+        elif until:
+            out[lane] = f"limited until {until:%H:%M}"
+        elif lane not in C["unpriced_lanes"] and spend_left(state) <= 0:
+            out[lane] = f"daily spend cap ${C['daily_spend_cap_usd']:.2f} reached"
+        else:
+            out[lane] = None
+    return out
+
+
+def busy_files() -> tuple[dict, object]:
+    """({slug: files it is predicted to edit} for every queued or running task, files_of(text))
+    from conflicts.py's predictor, so the planner never queues two tasks on the same files."""
+    import conflicts
+    known, m = conflicts.known_files(), conflicts.load_map()
+    out = {}
+    for t in load_queue():
+        try:
+            out[t.slug] = conflicts.predict(t, known, m)
+        except Exception:  # noqa: BLE001 -- one unreadable task must not stop the planner
+            continue
+    for slug in running_tasks():
+        out[slug] = out.get(slug, set()) | conflicts.worktree_files(slug)
+    return out, (lambda text: conflicts.paths_in_text(text, known))
+
+
+def autopilot_step(state: dict, classify=None, power_status=None) -> list:
+    """When no Queue: auto task is left, let the planner (atrium/autopilot.py) write the next
+    ones. Every decision it takes is one runner.log line. Never raises."""
+    try:
+        with _FileLock(REVIEW / "autopilot.lock", wait=0, stale=int(C["autopilot_lock_stale_s"])):
+            return _autopilot_step(state, classify, power_status)
+    except TimeoutError:
+        return []  # another tick is planning right now
+    except Exception as e:  # noqa: BLE001 -- the planner must never stop a tick
+        log(f"AUTOPILOT failed: {type(e).__name__}: {e}")
+        return []
+
+
+def _autopilot_step(state: dict, classify=None, power_status=None) -> list:
+    if any(t.auto for t in load_queue()):
+        return []
+    if str(HERE.parent) not in sys.path:
+        sys.path.insert(0, str(HERE.parent))
+    from atrium import autopilot
+    import power
+    vault = Path(os.path.expandvars(os.path.expanduser(C.get("vault_dir", "") or "")))
+    vault = vault if C.get("vault_dir") and vault.is_dir() else None
+    files, files_of = busy_files()
+    made = autopilot.refill(
+        cfg=C, review=REVIEW, repo=REPO, vault=vault, state=state, available=lane_availability(state),
+        power=(power_status or power.power_status)(), busy=files, files_of=files_of, log=log,
+        classify=classify, at=now())
+    if made and vault and aftercare_on():  # a new draft is listed in hot.md "Waiting on Chuen"
+        import aftercare
+        lines = aftercare.waiting_lines(queue_dir=QUEUE, parked_dir=PARKED, state=load_state(), now=now())
+        if aftercare.update_waiting(vault, lines):
+            log(f"hot.md waiting list updated ({len(lines)} item(s))")
+    return made
+
+
 def write_vault_note(task: Task, ts: dict, result: str) -> None:
     """One section per finished task in <vault>/Calendar/Orchestra/<date>.md (Chuen, 2 Nov 2026)."""
     vault = Path(os.path.expandvars(os.path.expanduser(C.get("vault_dir", ""))))
@@ -2338,7 +2456,9 @@ def _tick(dry_run: bool = False) -> str:
         return "on battery"
     if exams_enabled():  # background; returns at once, holds no lane slot
         exams_step(state)
-    tasks = [t for t in route(load_queue(), state) if t.slug not in orphans]
+    if autopilot_enabled() and not campaign.dispatch_block(REVIEW):  # queue empty: write the next tasks
+        autopilot_step(state)
+    tasks =[t for t in route(load_queue(), state) if t.slug not in orphans]
     if parallel:
         # One runner per lane at a time (Chuen, 2 Nov 2026: use Claude and Codex together).
         # Each lane has its own lock; state saves merge, and merges are serialised.
@@ -2400,7 +2520,10 @@ def _tick(dry_run: bool = False) -> str:
             save_state(state)
             write_vault_note(task, ts, result)
             return result
+        if task.fields.get("route-why"):
+            fb += f" ({task.fields['route-why']}; header lane {task.fields['lane-routed']})"
         log(f"START {task.slug} lane={task.lane}{fb} weight={task.weight} timeout={timeout}s attempt={ts['attempts']}")
+        visible.lane_started(task, C, REVIEW, REPO, log, alive=proc_created)  # never raises
         try:
             wt, branch = fresh_worktree(task)
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
@@ -2409,6 +2532,7 @@ def _tick(dry_run: bool = False) -> str:
             if ts["attempts"] > C["infra_retries"]:
                 park(task, "could not create its worktree", None)
             save_state(state)
+            visible.lane_finished(task, "WORKTREE_FAILED", C, log)
             return "WORKTREE_FAILED"
         block = campaign.dispatch_block(REVIEW)  # paused while the worktree was being made
         if block:
@@ -2427,10 +2551,12 @@ def _tick(dry_run: bool = False) -> str:
             if ts["attempts"] > C["infra_retries"]:
                 park(task, outcome, None)
             save_state(state)
+            visible.lane_finished(task, "LANE_MISSING", C, log)
             return "LANE_MISSING"
         result = finish(task, state, wt, branch, outcome, seconds, before, prov, run)
         save_state(state)
         write_vault_note(task, ts, result)
+        visible.lane_finished(task, result, C, log)
         return result
     except Exception as e:
         if task is not None:  # dispatched, then the runner itself failed: count it, don't just re-dispatch

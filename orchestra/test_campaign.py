@@ -22,6 +22,9 @@ sys.path.insert(0, str(HERE / "hooks"))
 import campaign  # noqa: E402
 import guard  # noqa: E402
 import test_runner as TR  # noqa: E402  (its fake lane and task template; its tests are not re-run here)
+# Never a real window or toast from a test (orchestra/visible.py: the live window and toasts).
+os.environ["ORCHESTRA_LIVE_WINDOW"] = "false"
+os.environ["ORCHESTRA_TOASTS"] = "false"
 
 UTC = dt.timezone.utc
 START = dt.datetime(2026, 11, 2, 20, 0, tzinfo=UTC)

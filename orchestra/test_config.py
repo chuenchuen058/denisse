@@ -14,6 +14,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from unittest import mock
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -42,11 +43,20 @@ class ConfigTest(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp())
         self.repo = self.tmp / "repo"
         (self.repo / ".review").mkdir(parents=True)
-        self._env = {k: os.environ.get(k) for k in ("ORCHESTRA_REPO", "ORCHESTRA_POWER")}
+        # Other test modules switch the live window and toasts off by env at import; this one
+        # compares the loaded config with the defaults, so those overrides stay out of it.
+        self._env = {k: os.environ.get(k) for k in ("ORCHESTRA_REPO", "ORCHESTRA_POWER",
+                                                    "ORCHESTRA_LIVE_WINDOW", "ORCHESTRA_TOASTS")}
+        os.environ.pop("ORCHESTRA_LIVE_WINDOW", None)
+        os.environ.pop("ORCHESTRA_TOASTS", None)
         os.environ["ORCHESTRA_REPO"] = str(self.repo)
         os.environ["ORCHESTRA_POWER"] = "ac"
         import runner
         self.R = importlib.reload(runner)
+        # No tick here, but never a real window or toast whatever a test reaches (orchestra/visible.py).
+        quiet = mock.patch.multiple(self.R.visible, SPAWN=mock.Mock(return_value=0), RUN=mock.Mock())
+        quiet.start()
+        self.addCleanup(quiet.stop)
         self.shipped = dict(self.R.C)
         self.defaults = {k: v for k, v in json.loads(self.R.CONFIG_DEFAULTS.read_text(encoding="utf-8")).items()
                          if not k.startswith("_")}
@@ -98,6 +108,12 @@ class ConfigTest(unittest.TestCase):
     def test_shipped_config_loads_clean(self):
         self.use({})
         self.assertEqual(self.logged, [])
+
+    def test_env_switch_reads_its_word(self):
+        """ORCHESTRA_<KEY>=false is off: bool("false") would have been True."""
+        for word, want in (("false", False), ("0", False), ("", False), ("no", False), ("true", True), ("1", True)):
+            with self.subTest(word=word), mock.patch.dict(os.environ, {"ORCHESTRA_TOASTS": word}):
+                self.assertIs(self.use({"toasts": not want})["toasts"], want)
 
     # --- each moved value changes behaviour
 

@@ -617,6 +617,16 @@ export const TOOLS = [
       required: ["tasks"] } },
   { name: "ask_all", description: "Ask Codex, Gemini and Copilot the same question at once, read-only, for second opinions. Runs as one job." + JOB_NOTE,
     inputSchema: { type: "object", properties: { prompt: taskProps.prompt, cwd: taskProps.cwd, ...jobProps }, required: ["prompt"] } },
+  { name: "queue_task", description: "Hand a piece of work to Orchestra, Chuen's task runner, instead of running it here: it is written to the queue (orchestra/new_task.py), run by a lane in its own git worktree, consulted with the study tutor first, checked by its gate and merged only on a pass, and it shows in runner.log, STATE NOW, the hub and the 'Orchestra live' window. Use it for real work on a repo (code changes, fixes, write-ups) that can wait for the runner; use ask_* for a question you need answered in this chat. The body must stand alone: the lane cannot see this chat.",
+    inputSchema: { type: "object", properties: {
+      title: { type: "string", description: "Short title: what will be true when it is done." },
+      body: { type: "string", description: "The facts the session needs: which files, what is wrong, what you want. Real paths, relative to the repo root." },
+      gate: { type: "array", items: { type: "string" }, description: "Commands that must all exit 0 before the work is merged. Default: the repo's fast checks." },
+      lane: { type: "string", description: "claude, codex, copilot or gemini. Default: the best-scoring lane for the work (exam scores)." },
+      work: { type: "string", description: "Kind of work for the lane choice when no lane is given: code-edit, debug, writing, study, extract." },
+      priority: { type: "string", enum: ["urgent", "normal"] },
+      weight: { type: "string", enum: ["light", "heavy"] } },
+      required: ["title", "body"] } },
   { name: "job_status", description: "Check a background agent job: running / done / failed, seconds elapsed, and the last 20 lines of its output. Use this to follow a slow ask_* call instead of asking again.",
     inputSchema: { type: "object", properties: { job_id: { type: "string" } }, required: ["job_id"] } },
   { name: "job_result", description: "Get a finished job's full answer (its FOR MEMORY lines are already filed to the vault, once). If it is still running, says so: keep polling job_status.",
@@ -649,7 +659,43 @@ async function routed(t, r = pickRoute(t.prompt, t.kind)) {
 
 const ASK = { ask_codex: "codex", ask_gemini: "gemini", ask_copilot: "copilot", ask_don: TUTOR_KEY };
 
+// Work handed to Orchestra rather than run here (Chuen, 9 Nov 2026: every agent's work goes
+// through the queue, so it shows in runner.log, STATE NOW and the hub snapshot). new_task.py
+// writes the task; the runner does the rest. The default gate and the From: name are
+// orchestra/config.json (hub_queue_default_gate, hub_queue_source).
+export function queueTask(a = {}) {
+  const title = oneLine(String(a.title || ""), 120).trim();
+  if (!title) throw new Error("queue_task needs a title.");
+  if (!String(a.body || "").trim()) throw new Error("queue_task needs a body: the lane cannot see this chat.");
+  let cfg = {};
+  try { cfg = JSON.parse(readFileSync(CONFIG, "utf8")); } catch {}
+  const gate = Array.isArray(a.gate) && a.gate.length ? a.gate.map(String) : (cfg.hub_queue_default_gate || []);
+  const dir = mkdtempSync(join(tmpdir(), "hub-task-"));
+  try {
+    const bodyFile = join(dir, "body.md");
+    writeFileSync(bodyFile, String(a.body), "utf8");
+    const args = [join(REPO, "orchestra", "new_task.py"), title, "--auto", `--body-file=${bodyFile}`,
+      `--from=${cfg.hub_queue_source || "agent hub"}`, ...gate.map((g) => `--gate=${g}`)];
+    for (const k of ["priority", "weight", "lane", "work"]) if (a[k]) args.push(`--${k}=${a[k]}`);
+    let out;
+    try {
+      out = execFileSync(pythonPath(), args, { cwd: REPO, timeout: 30000, encoding: "utf8", windowsHide: true,
+        env: { ...process.env, PYTHONIOENCODING: "utf-8" } });
+    } catch (e) {
+      throw new Error(`queue_task: new_task.py failed: ${String(e.stderr || e.stdout || e.message).trim()}`);
+    }
+    const lines = out.trim().split(/\r?\n/);
+    const path = lines.pop();
+    remember("hub", [`queued for Orchestra: ${title} (${path})`]);
+    return [`Queued for Orchestra: ${path}`, ...lines,
+      "The runner picks it up on its next tick: follow it in runner.log, STATE NOW or the 'Orchestra live' window."].join("\n");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 export async function callTool(name, a = {}) {
+  if (name === "queue_task") return queueTask(a);
   if (ASK[name]) return asJob(name, ASK[name], a, () => dispatch(ASK[name], a, name));
   if (name === "route_task") {
     const r = pickRoute(a.prompt, a.kind);
