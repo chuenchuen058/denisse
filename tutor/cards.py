@@ -40,7 +40,7 @@ import json
 import os
 import re
 
-from . import conf, don, ingest, model, sources, topics
+from . import conf, don, ingest, model, rules, sources, topics
 from .conf import CONFIG, Module, Paths
 
 _C = CONFIG["cards"]
@@ -150,9 +150,10 @@ def generate(module: Module, src: sources.Source, calls: dict | None = None, num
     for kind, spec in _C["kinds"].items():
         if spec["count"] > 0 and (only is None or kind in only):
             by_engine.setdefault(spec["engine"], []).append(kind)
-    text = src.text[:model.chunk_chars(num_ctx)]
+    standing = rules.block("cards")
+    text = src.text[:max(0, model.chunk_chars(num_ctx) - len(standing))]
     c = don.ctx(module)
-    system = _C["system"].format(**c) + _C["scope"]["rule"].format(**c)
+    system = _C["system"].format(**c) + _C["scope"]["rule"].format(**c) + standing
     out = []
     for engine, kinds in by_engine.items():
         wanted = "\n".join(_C["wanted"].format(kind=k, **_C["kinds"][k]) for k in kinds)
@@ -305,7 +306,8 @@ def check(module: Module, src: sources.Source, written: list, before: dict, chec
     reused only with the same checker, source and module scope. `checks` (tests)
     overrides checker engines by name. Returns (passed, held, counts)."""
     when = when or dt.datetime.now().isoformat(timespec="seconds")
-    text = src.text[:model.chunk_chars(num_ctx)]
+    standing = rules.block("check")
+    text = src.text[:max(0, model.chunk_chars(num_ctx) - len(standing))]
     c = don.ctx(module)
     scope_text = _scope_context(module, src, scope)
     scope_key = _hash(json.dumps([text, scope_text, _C["scope"], _K["system"], _K["user"], _K["schema"],
@@ -328,7 +330,7 @@ def check(module: Module, src: sources.Source, written: list, before: dict, chec
             reused += 1
         else:
             pending.setdefault(engine, []).append((i, as_written(card)))
-    system = _K["system"].format(**c) + _C["scope"]["rule"].format(**c)
+    system = _K["system"].format(**c) + _C["scope"]["rule"].format(**c) + standing
     for engine, batch in pending.items():
         items = "\n".join(_K["item"].format(n=n, kind=card["kind"], front=card["front"], back=card["back"],
                                            topic=card.get("topic", ""))

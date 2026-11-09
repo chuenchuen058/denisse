@@ -115,9 +115,30 @@ def write_note(path: str, text: str, state: dict, say=print) -> str | None:
     try:
         written, _kept = notes.write(path, text, state["written"])
     except (OSError, FileExistsError) as exc:
-        say(_SAY["failed"].format(module=_stem(path), week="-", why=exc))
+        not_ours(state, path, exc, say, module=_stem(path), week="-")
         return None
+    said_ours(state, path)
     return written
+
+
+def not_ours(state: dict, path: str, exc: Exception, say=print, **where) -> bool:
+    """Say that `path` (and the copy beside it) isn't the tutor's -- once
+    per file, not every run (rules.not_ours_once); any other error every
+    time. Returns whether it was said."""
+    from . import rules
+    line = _SAY["failed"].format(why=exc, **where)
+    if isinstance(exc, FileExistsError) and rules.on("not_ours_once"):
+        said = state.setdefault(CONFIG["rules"]["not_ours_once"]["state_key"], {})
+        if path in said:
+            return False
+        said[path] = dt.date.today().isoformat()
+    say(line)
+    return True
+
+
+def said_ours(state: dict, path: str) -> None:
+    """The file is the tutor's again: a later clash is said again."""
+    state.get(CONFIG["rules"]["not_ours_once"]["state_key"], {}).pop(path, None)
 
 
 def _module_notes(paths: Paths, module: Module) -> list:

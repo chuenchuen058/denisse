@@ -344,8 +344,9 @@ def run(paths: Paths, call=None, apply: bool = True, today: dt.date | None = Non
                 path, _kept = notes.write(notes.index_path(module), index, state["written"])
                 touched.append(path)
                 say(_SAY["index"].format(path=path))
+                don.said_ours(state, notes.index_path(module))
             except (OSError, FileExistsError) as exc:
-                say(_SAY["failed"].format(module=module.title, week="index", why=exc))
+                don.not_ours(state, notes.index_path(module), exc, say, module=module.title, week="index")
         if changed_modules:  # the hub and progress notes can link the new indexes now
             touched += don.refresh(paths, state, modules, today, say=lambda _s: None)
         save_state(paths, state)

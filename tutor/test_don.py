@@ -664,12 +664,15 @@ class AnkiTests(DonFixture):
         out = io.StringIO()
         log = []
         with unittest.mock.patch("sys.stdout", out):
+            # cards ends with an anki-sync (the rules note): a closed port, never a real Anki.
+            down = anki.Connect(url=closed_port_url(), timeout=1)
             rc = cli.main(["cards", "signals", "--vault", self.vault, "--state", self.state],
-                          calls={"local": fake_cards(log)}, checks=passing_checks())
+                          calls={"local": fake_cards(log)}, checks=passing_checks(), anki_client=down)
             self.assertEqual(rc, 0)
             rc = cli.main(["anki-sync", "--vault", self.vault, "--state", self.state], anki_client=self.client)
             self.assertEqual(rc, 0)
-            rc = cli.main(["cards", "basket weaving", "--vault", self.vault, "--state", self.state])
+            rc = cli.main(["cards", "basket weaving", "--vault", self.vault, "--state", self.state],
+                          anki_client=down)
             self.assertEqual(rc, 1)
         said = out.getvalue()
         self.assertIn("anki tsv", said)
@@ -722,7 +725,8 @@ class GitTests(DonFixture):
         out = io.StringIO()
         with unittest.mock.patch("sys.stdout", out):
             rc = cli.main(["cards", "signals", "--vault", self.vault, "--state", self.state],
-                          calls={"local": fake_cards([])}, checks=passing_checks())
+                          calls={"local": fake_cards([])}, checks=passing_checks(),
+                          anki_client=anki.Connect(url=closed_port_url(), timeout=1))  # never a real Anki
         self.assertEqual(rc, 0)
         self.assertIn("vault commit", out.getvalue())
         msg = self.git("log", "-1", "--format=%s")

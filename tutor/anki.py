@@ -26,7 +26,7 @@ import string
 import urllib.parse
 import urllib.request
 
-from . import cards, conf, don, ingest, mathfmt
+from . import cards, conf, don, ingest, mathfmt, rules
 from .conf import CONFIG, Module, Paths
 
 _A = CONFIG["anki"]
@@ -227,6 +227,53 @@ def review_stats(client, module: Module, deck_cards: list, today: dt.date) -> di
             "weak": [t["topic"] for t in topics if t["weak"]]}
 
 
+def apply_scope(paths: Paths, client, module: Module, deck_cards: list, today: dt.date, say=print) -> dict:
+    """The rules note's exam scope in Anki: while an exam is ahead, the
+    module's cards from weeks outside it are suspended and tagged with the
+    exam's tag; a tagged card whose exams are all past (or gone from the
+    table) is untagged and unsuspended. Only cards carrying an exam tag are
+    ever unsuspended, so one he suspended himself stays as it is.
+    Counts: suspended, unsuspended."""
+    out = {"suspended": 0, "unsuspended": 0}
+    if not rules.on("exam_scope"):
+        return out
+    ahead = rules.active_exams(paths, module, today)
+    for e in ahead:
+        if e.date is None:
+            say(CONFIG["rules"]["exam_scope"]["say_undated"].format(exam=e.name, module=module.title))
+    week_of = {card["id"]: card.get("week") for card in deck_cards}
+    prefix = rules.tag_prefix()
+    id_field = _A["field_of"]["id"]
+    ids = client("find_notes", query=_query(_K["query_notes"], module)) or []
+    suspend, unsuspend, add, remove = [], [], {}, {}
+    for info in (client("notes_info", notes=ids) if ids else []) or []:
+        card_id = ((info.get("fields") or {}).get(id_field) or {}).get("value", "")
+        week = week_of.get(card_id)
+        want = {e.tag for e in ahead if week and int(week) not in e.weeks}
+        have = {t for t in info.get("tags") or [] if t.startswith(prefix)}
+        for tag in want - have:
+            add.setdefault(tag, []).append(info["noteId"])
+        for tag in have - want:
+            remove.setdefault(tag, []).append(info["noteId"])
+        if want and want - have:
+            suspend += info.get("cards") or []
+        elif have and not want:
+            unsuspend += info.get("cards") or []
+    for tag, notes in add.items():
+        client("add_tags", notes=notes, tags=tag)
+    for tag, notes in remove.items():
+        client("remove_tags", notes=notes, tags=tag)
+    if suspend:
+        client("suspend", cards=suspend)
+    if unsuspend:
+        client("unsuspend", cards=unsuspend)
+    out.update(suspended=len(suspend), unsuspended=len(unsuspend))
+    if ahead or suspend or unsuspend:
+        say(CONFIG["rules"]["exam_scope"]["say_scope"].format(deck=deck_name(module), exams=CONFIG["note"]["list_sep"].join(
+            e.name for e in ahead) or "-", **out))
+    return out
+
+
 # -- the job -----------------------------------------------------------------------
 
 def run(paths: Paths, modules: list | None = None, client=None, today: dt.date | None = None,
@@ -247,7 +294,7 @@ def run(paths: Paths, modules: list | None = None, client=None, today: dt.date |
             tsvs.append(path)
             touched.append(path)
             say(_SAY["tsv"].format(path=path, n=len(deck_cards)))
-    reachable, stats, synced = False, {}, {}
+    reachable, stats, synced, scoped = False, {}, {}, {}
     if decks and not _K["enabled"]:
         say(_SAY["anki_off"])
     elif decks:
@@ -260,6 +307,7 @@ def run(paths: Paths, modules: list | None = None, client=None, today: dt.date |
             try:
                 synced[module.slug] = push(paths, client, module, deck_cards)
                 say(_SAY["anki_sync"].format(deck=deck_name(module), **synced[module.slug]))
+                scoped[module.slug] = apply_scope(paths, client, module, deck_cards, today, say=say)
                 stats[module.slug] = review_stats(client, module, deck_cards, today)
             except AnkiError as exc:
                 say(_SAY["anki_down"].format(url=getattr(client, "url", _K["url"]), why=exc))
@@ -273,4 +321,5 @@ def run(paths: Paths, modules: list | None = None, client=None, today: dt.date |
         touched += don.refresh(paths, state, modules, today, say=say)
         ingest.save_state(paths, state)
         touched.append(paths.state_file())
-    return {"tsv": tsvs, "synced": synced, "stats": stats, "reachable": reachable, "touched": touched}
+    return {"tsv": tsvs, "synced": synced, "stats": stats, "scoped": scoped, "reachable": reachable,
+            "decks": [m.slug for m, _c in decks], "touched": touched}
