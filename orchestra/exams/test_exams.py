@@ -186,7 +186,8 @@ class TestRun(Base):
         self.assertEqual(rows[0]["seconds"], 5)
 
     def test_ollama_not_running_means_no_local_agents(self):
-        with mock.patch.object(agents, "OLLAMA", "http://127.0.0.1:9"):
+        # port 0: refused at once; a refused port (:9) costs ~2s per try on Windows
+        with mock.patch.object(agents, "OLLAMA", "http://127.0.0.1:0"):
             self.assertEqual(agents.ollama_models(timeout=1), [])
             found = agents.available()
             with_claude = agents.available(include_claude=True)  # inside the patch: no real Ollama

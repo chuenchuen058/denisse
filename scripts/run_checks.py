@@ -36,6 +36,9 @@ SANDBOX_SITE = ROOT / "scripts" / "checks_sandbox"
 # (5 Nov 2026), so 150 s killed it there while CI passed; RUN_CHECKS_TIMEOUT_S overrides.
 TIMEOUT = int(os.environ.get("RUN_CHECKS_TIMEOUT_S") or 420)
 SKIP_DIRS = {".git", ".venv", "venv", "__pycache__", "node_modules", "models", "memory"}
+# Set for every module by a run without --fast. A test too slow for a plain
+# `unittest discover` gate (orchestra's soak) skips unless it is set.
+SLOW_ENV = "RUN_CHECKS_SLOW"
 MARKER = re.compile(r"^#\s*checks:\s*(slow|quarantine)\b[ \t]*(.*)$", re.M)
 HOME = Path(os.path.expanduser("~"))
 # Never touched by a test: the real vault, Claude's memory, and the tray's
@@ -202,6 +205,8 @@ def main():
                "SPOTIFY_CLIENT_ID": "", "SPOTIFY_CLIENT_SECRET": "",
                "OLLAMA_HOST": "http://127.0.0.1:11434"}
         env.pop("DENISSE_CHECKS_GUARD_MODE", None)
+        if not args.fast:  # a full run also runs the tests that skip themselves unless asked
+            env[SLOW_ENV] = "1"
         # A GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE inherited from a hook or a lane session makes
         # any git a test runs (fixture or code under test) act on that repo -- on 9 Nov 2026 the
         # real one. Fixtures also go through testing_git.hermetic_git; this covers the rest.

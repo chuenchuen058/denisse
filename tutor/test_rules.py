@@ -123,9 +123,12 @@ class RulesFixture(DonFixture):
         os.makedirs(os.path.dirname(self.note_path), exist_ok=True)
         with open(self.note_path, "w", encoding="utf-8") as f:
             f.write(rules_note(date))
-        # a fresh mtime even inside one clock tick
+        # A fresh mtime even inside one clock tick: rules.load caches on mtime,
+        # so each rewrite must land strictly after the one before it.
         st = os.stat(self.note_path)
-        os.utime(self.note_path, (st.st_atime, st.st_mtime + len(date)))
+        mtime = max(st.st_mtime, getattr(self, "_note_mtime", 0)) + 1
+        self._note_mtime = mtime
+        os.utime(self.note_path, (st.st_atime, mtime))
 
     def card(self, n, week, topic="Laplace transform"):
         return {"id": f"card-{n}", "kind": "recall", "front": f"Question {n}?", "back": f"Answer {n}",

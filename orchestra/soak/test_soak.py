@@ -65,6 +65,11 @@ class PlansTest(unittest.TestCase):
             self.assertIn("budget/ has 3", r.stdout)
 
 
+SLOW_ENV = "RUN_CHECKS_SLOW"  # scripts/run_checks.py SLOW_ENV, set by a run without --fast
+
+
+@unittest.skipUnless(os.environ.get(SLOW_ENV), f"slow (~35-50s): set {SLOW_ENV}=1, or run "
+                     "scripts/run_checks.py without --fast")
 class ShortSoakTest(unittest.TestCase):
     def test_short_soak_holds_every_invariant(self):
         soak = harness.Soak(minutes=0.6, seed=2, tasks=8, procs=3, kill_every=6, flip_every=5, quiet=True)
