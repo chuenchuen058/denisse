@@ -7,10 +7,15 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.append(str(Path(__file__).resolve().parents[1]))  # testing_git; appended, never shadows
 import vault_git
+import testing_git  # noqa: E402
 
 
 class VaultGitTests(unittest.TestCase):
+    def setUp(self):
+        testing_git.hermetic_git(self)  # first: no inherited GIT_* reaches a real repo
+
     def test_checkpoint_preserves_other_staged_work_and_uses_repo_identity(self):
         with tempfile.TemporaryDirectory() as tmp:
             def git(*args):

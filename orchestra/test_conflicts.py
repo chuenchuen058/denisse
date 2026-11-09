@@ -22,6 +22,8 @@ os.environ["ORCHESTRA_TOASTS"] = "false"
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+sys.path.append(str(HERE.parent))  # testing_git; appended so it never shadows a local module
+import testing_git  # noqa: E402
 
 # Worker lane: writes FAKE_EDITS ({path: text}) into its worktree, commits, reports PASS.
 FAKE_WORKER = textwrap.dedent("""
@@ -87,6 +89,7 @@ ENV = ("FAKE_EDITS", "FAKE_RESOLVE")
 
 class ConflictsTest(unittest.TestCase):
     def setUp(self):
+        testing_git.hermetic_git(self)  # first: no inherited GIT_* reaches a real repo
         self.tmp = Path(tempfile.mkdtemp())
         self.repo = self.tmp / "repo"
         self.repo.mkdir()

@@ -21,6 +21,8 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE / "hooks"))
 import campaign  # noqa: E402
 import guard  # noqa: E402
+sys.path.append(str(HERE.parent))  # testing_git; appended so it never shadows a local module
+import testing_git  # noqa: E402
 import test_runner as TR  # noqa: E402  (its fake lane and task template; its tests are not re-run here)
 # Never a real window or toast from a test (orchestra/visible.py: the live window and toasts).
 os.environ["ORCHESTRA_LIVE_WINDOW"] = "false"
@@ -202,6 +204,7 @@ class RunnerCampaignTest(unittest.TestCase):
     """The runner honours the controls: a throwaway git repo and the fake lane from test_runner."""
 
     def setUp(self):
+        testing_git.hermetic_git(self)  # first: no inherited GIT_* reaches a real repo
         self.tmp = Path(tempfile.mkdtemp())
         self.repo = self.tmp / "repo"
         self.repo.mkdir()

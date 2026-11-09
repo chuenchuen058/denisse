@@ -25,6 +25,8 @@ os.environ["ORCHESTRA_TOASTS"] = "false"
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+sys.path.append(str(HERE.parent))  # testing_git; appended so it never shadows a local module
+import testing_git  # noqa: E402
 
 # Fake lane: optionally writes FAKE_FILE with FAKE_TEXT (UTF-8) and commits it, then reports PASS.
 FAKE = textwrap.dedent("""
@@ -72,6 +74,7 @@ ENV = ("FAKE_FILE", "FAKE_TEXT", "FAKE_SLEEP", "FAKE_REVIEW_FLAG", "FAKE_NO_REPO
 
 class CrashRecoveryTest(unittest.TestCase):
     def setUp(self):
+        testing_git.hermetic_git(self)  # first: no inherited GIT_* reaches a real repo
         self.tmp = Path(tempfile.mkdtemp())
         self.repo = self.tmp / "repo"
         self.repo.mkdir()

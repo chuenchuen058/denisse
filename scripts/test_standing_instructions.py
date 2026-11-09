@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import agent_loop
 import agent_tools
 import standing_instructions as standing
+import testing_git
 
 
 def decision(tool, **kwargs):
@@ -276,6 +277,9 @@ class InstructionTests(unittest.TestCase):
 
 
 class ToolTests(unittest.TestCase):
+    def setUp(self):
+        testing_git.hermetic_git(self)  # first: no inherited GIT_* reaches a real repo
+
     def test_user_briefs_use_observations_instead_of_invented_model_claims(self):
         result = {"status": "completed", "focus_ids": ["a"], "suggestion": "All tasks completed. Dirty Git tree.",
                   "evidence": {"task_snapshot": {"open_count": 1, "tasks": [

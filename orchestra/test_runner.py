@@ -21,7 +21,9 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE / "hooks"))
+sys.path.append(str(HERE.parent))  # testing_git; appended so it never shadows an orchestra module
 import guard  # noqa: E402
+import testing_git  # noqa: E402
 # Never a real window or toast from a test (orchestra/visible.py: the live window and toasts).
 os.environ["ORCHESTRA_LIVE_WINDOW"] = "false"
 os.environ["ORCHESTRA_TOASTS"] = "false"
@@ -88,6 +90,7 @@ FAKE_ENV = ("FAKE_RESULT", "FAKE_HUMAN", "FAKE_SLEEP", "FAKE_COMMIT", "FAKE_STRA
 
 class RunnerTest(unittest.TestCase):
     def setUp(self):
+        testing_git.hermetic_git(self)  # before any git call: a leaked GIT_DIR would hit the real repo
         self.tmp = Path(tempfile.mkdtemp())
         self.repo = self.tmp / "repo"
         self.repo.mkdir()
@@ -1178,25 +1181,17 @@ class PrePushTest(unittest.TestCase):
     suite can inherit GIT_DIR / GIT_INDEX_FILE (a hook, a sandboxed CLI), and a leaked
     GIT_INDEX_FILE left `main` without a commit, so the push failed with "src refspec main does
     not match any" (2026-11-09T1050, Copilot). Every GIT_* variable is dropped and the global and
-    system git config are ignored for the test, then restored."""
+    system git config are ignored for the test, then restored (testing_git.hermetic_git, shared
+    with every temp-repo fixture)."""
 
     def setUp(self):
+        testing_git.hermetic_git(self)
         self.tmp = Path(tempfile.mkdtemp())
-        env = mock.patch.dict(os.environ)
-        env.start()
-        self.addCleanup(env.stop)
-        for k in [k for k in os.environ if k.upper().startswith("GIT_")]:
-            del os.environ[k]
-        (self.tmp / "gitconfig").write_text("", encoding="utf-8")
-        os.environ.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=str(self.tmp / "gitconfig"))
         self.repo = self.tmp / "repo"
         self.remote = self.tmp / "remote.git"
         self.wt = self.tmp / "repo-wt" / "task-1"
         self.git(self.tmp, "init", "-q", "--bare", str(self.remote))
-        self.repo.mkdir()
-        self.git(self.repo, "init", "-q", "-b", "main")
-        self.git(self.repo, "config", "user.name", "t")
-        self.git(self.repo, "config", "user.email", "t@t")
+        testing_git.init_repo(self.repo, "-b", "main")
         (self.repo / "a.txt").write_text("a")
         self.git(self.repo, "add", "a.txt")
         self.git(self.repo, "commit", "-qm", "init")
