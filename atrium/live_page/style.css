@@ -1,0 +1,43 @@
+/* Every colour and font the page uses, in one place. Agent accents come from
+   atrium/config.json "live" -> "agents" and are set as --agent-<lane> by app.js. */
+:root{
+  --bg:#0b0e14;--panel:#121722;--panel2:#1a2030;--line:#232b3b;--text:#e6e9f0;--muted:#8a93a6;--faint:#5b6478;
+  --ok:#4fd1a5;--warn:#f2c14e;--bad:#f2706b;--idle:#2a3242;--logo-a:#e8875b;--logo-b:#5fb3f2;--logo-c:#a78bfa;--logo-d:#4fd1a5;
+  --r:14px;--font:"Inter","Segoe UI",system-ui,sans-serif;
+}
+:root[data-theme="light"]{--bg:#f4f5f8;--panel:#fff;--panel2:#eef0f5;--line:#e3e6ee;--text:#151a24;--muted:#5f687a;--faint:#9aa2b2;--idle:#dfe3ea}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--text);font:14px/1.4 var(--font);padding:20px 24px 28px}
+header{display:flex;align-items:center;gap:14px;margin-bottom:18px}
+.logo{width:34px;height:34px;border-radius:10px;background:conic-gradient(var(--logo-a),var(--logo-b),var(--logo-c),var(--logo-d),var(--logo-a));display:grid;place-items:center}
+.logo::after{content:"";width:22px;height:22px;border-radius:7px;background:var(--bg)}
+h1{font-size:19px;font-weight:650}
+.sub{color:var(--muted);font-size:12.5px}
+.live{margin-left:auto;display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12.5px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ok);display:inline-block;transition:background .3s}
+.dot.off{background:var(--warn)}
+button.theme{background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:9px;padding:6px 10px;cursor:pointer;font:inherit;font-size:12px}
+.grid{display:grid;gap:14px;margin-bottom:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;transition:border-color .3s}
+h2{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;font-weight:600;margin-bottom:10px}
+.g2a{grid-template-columns:1.6fr 1fr}
+.cap{display:grid;grid-template-columns:64px 1fr 110px 64px;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin:7px 0}
+.cap span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cap .q{color:var(--faint);text-align:right}
+.cap .bad{color:var(--bad)}
+.prog .cap{grid-template-columns:150px 1fr 110px;margin:10px 0}
+.prog .cap span:last-child{text-align:right}
+.track{height:10px;border-radius:6px;background:var(--idle);overflow:hidden;display:flex}
+.track i{display:block;height:100%;transition:width .6s ease}
+svg text{font-family:var(--font)}
+svg rect.run{transition:width .6s ease}
+.needs{display:flex;gap:10px;align-items:center;padding:6px 0;font-size:12.5px}
+.needs b{width:22px;height:22px;border-radius:7px;display:grid;place-items:center;background:color-mix(in srgb,var(--warn) 18%,transparent);color:var(--warn);font-size:12px;flex:none}
+.needs span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.needs.none{color:var(--faint)}
+.needs-card.on{border-color:color-mix(in srgb,var(--warn) 45%,var(--line))}
+.foot{margin-top:8px;color:var(--faint);font-size:11.5px;text-align:center}
+[hidden]{display:none!important}
+@media (max-width:1100px){.g2a{grid-template-columns:1fr}}
+@media (max-width:560px){body{padding:14px 16px}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}

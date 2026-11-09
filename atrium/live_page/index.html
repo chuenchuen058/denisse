@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title></title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="logo"></div>
+  <div><h1 id="title"></h1><div class="sub" id="subtitle"></div></div>
+  <div class="live"><span class="dot" id="dot"></span><span id="state"></span><span id="power"></span>
+    <button class="theme" id="theme" type="button"></button></div>
+</header>
+
+<section class="grid g2a" data-panel="agents needs">
+  <div class="card" data-panel="agents"><h2 data-heading="agents"></h2><div id="capacity"></div></div>
+  <div class="card needs-card" data-panel="needs"><h2 data-heading="needs"></h2><div id="needs"></div></div>
+</section>
+
+<section class="grid" data-panel="timeline"><div class="card"><h2 data-heading="timeline"></h2><svg id="gantt" width="100%" viewBox="0 0 1000 190" role="img" aria-label="Today's runs per agent"></svg></div></section>
+
+<section class="grid" data-panel="progress"><div class="card"><h2 data-heading="progress"></h2><div id="progress"></div></div></section>
+<div class="foot" id="foot"></div>
+<script src="app.js"></script>
+</body>
+</html>

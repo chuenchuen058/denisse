@@ -229,5 +229,175 @@
     "script": "atrium/digest_task.py",
     "log_file": "Dev/digest.log",
     "create": ["schtasks", "/Create", "/F", "/SC", "HOURLY", "/MO", "1", "/TN", "{name}", "/TR", "\"{python}\" \"{script}\""]
+  },
+
+  "live": {
+    "_note": "python -m atrium live: the laptop's own live Atrium page (atrium/live.py, page in atrium/live_page/). Read-only: it serves what atrium/snapshot.py collects and never writes. host must be one of loopback. Work happens only while a browser tab holds the event stream open: every poll_s the watched files are stat'ed and the data rebuilt when one changed (or refresh_s passed, for limits that lift with the clock).",
+    "host": "127.0.0.1",
+    "port": 8765,
+    "loopback": [
+      "127.0.0.1",
+      "::1",
+      "localhost"
+    ],
+    "poll_s": 2,
+    "refresh_s": 60,
+    "keepalive_s": 15,
+    "page_dir": "live_page",
+    "tables": [
+      "tasks",
+      "waiting",
+      "spend",
+      "running",
+      "usage"
+    ],
+    "_watch": "review: globs inside .review (a folder counts its entries and their subfolders); vault: vault-relative files.",
+    "watch": {
+      "review": [
+        "state.json",
+        "runner.log",
+        "campaign.json",
+        "config.json",
+        "runner.*.lock",
+        "queue",
+        "parked",
+        "archive",
+        "exams/scores.json"
+      ],
+      "vault": [
+        "hot.md"
+      ]
+    },
+    "panels": [
+      "agents",
+      "needs",
+      "timeline",
+      "progress"
+    ],
+    "headings": {"agents": "Agents", "needs": "Needs you", "timeline": "Today", "progress": "Progress"},
+    "title": "Atrium Live",
+    "subtitle": "What's happening in the background",
+    "_agents": "One bar and one timeline row each, in this order. lane = the Orchestra lane (snapshot usage rows); colour = the accent used everywhere that agent appears.",
+    "agents": [
+      {
+        "lane": "claude",
+        "label": "Claude",
+        "colour": "#e8875b"
+      },
+      {
+        "lane": "copilot",
+        "label": "Copilot",
+        "colour": "#a78bfa"
+      },
+      {
+        "lane": "codex",
+        "label": "Codex",
+        "colour": "#5fb3f2"
+      },
+      {
+        "lane": "local",
+        "label": "Don",
+        "colour": "#4fd1a5"
+      }
+    ],
+    "needs_max": 3,
+    "needs_icons": {
+      "note": "⌘",
+      "draft": "✎",
+      "parked": "⏸"
+    },
+    "timeline": {
+      "start_hour": 10,
+      "end_hour": 19,
+      "pad_hours": 1,
+      "tick_hours": 3,
+      "_classes": "result -> colour class (ok/warn/bad); a run still going is drawn in its agent's colour.",
+      "classes": {
+        "PASS": "ok",
+        "PARTIAL": "warn"
+      },
+      "default_class": "bad"
+    },
+    "progress": {
+      "done_results": [
+        "PASS"
+      ],
+      "bars": [
+        {
+          "key": "tasks",
+          "label": "Tasks today",
+          "colour": "ok",
+          "text": "{v} of {m} done"
+        },
+        {
+          "key": "study",
+          "label": "Study notes written",
+          "colour": "#5fb3f2",
+          "text": "{v} of {m} weeks"
+        },
+        {
+          "key": "spend",
+          "label": "Spend today",
+          "colour": "#e8875b",
+          "text": "${v:.0f} of ${m:.0f}"
+        }
+      ]
+    },
+    "_study": "Week notes written of weeks filed: every week_glob folder under each module in root (vault-relative) is filed; it is written when it holds a note_glob file of at least written_min_chars characters.",
+    "study": {
+      "root": "Atlas/Academic/SEM 1 Modules",
+      "week_glob": "Week *",
+      "note_glob": "*Week*.md",
+      "written_min_chars": 800
+    },
+    "words": {
+      "working": "working",
+      "free": "free",
+      "queued": "{n} queued",
+      "held": "held",
+      "why_limited": "lane limited", "until": "until {time}", "until_format": "%H:%M",
+      "why_full": "slot full",
+      "why_battery": "on battery",
+      "why_none": "",
+      "live": "Live",
+      "stale": "Reconnecting…",
+      "ac": "⚡",
+      "battery": "🔋",
+      "power_unknown": "",
+      "theme": "◐ Theme",
+      "now": "now",
+      "nothing_needed": "Nothing waiting on you",
+      "elapsed": "{m} min",
+      "foot": "Updates itself · read-only"
+    }
+  },
+
+  "install_live": {
+    "_note": "atrium/install_live.py: starts the live page hidden at logon and adds shortcuts that open it. schtasks ONLOGON needs admin on this laptop (9 Nov 2026: Access is denied), so it uses the per-user Startup folder. folder = a .NET Environment.SpecialFolder name. Prints the PowerShell only; --register runs it. python and script are repo-relative.",
+    "python": ".venv/Scripts/pythonw.exe",
+    "script": "atrium/live_task.py",
+    "powershell": [
+      "powershell",
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command"
+    ],
+    "shortcuts": [
+      {
+        "folder": "Startup",
+        "name": "Atrium Live (background).lnk",
+        "run": true
+      },
+      {
+        "folder": "Desktop",
+        "name": "Atrium Live.url"
+      },
+      {
+        "folder": "Programs",
+        "name": "Atrium Live.url"
+      }
+    ],
+    "log_file": "Dev/atrium-live.log"
   }
 }
