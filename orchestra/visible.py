@@ -3,6 +3,9 @@ running, not just in the background, because I don't know if it's actually happe
 
     lane_started(task, cfg, review, log)           the live window (once) + a start toast
     lane_finished(task, result, cfg, log)          a finish toast
+    lane_tab(task, cfg, log_path=..., done_path=..., timeout=..., log=...)
+                                                   the lane's own Windows Terminal tab (lane_tab.py)
+    lane_tab_done(done_path, outcome, report)      tells that tab the lane has exited
 
 The live window is one console titled cfg["live_window_title"] running orchestra/watch.py.
 It is opened when a lane starts and no such window is open (its pid and creation time are
@@ -15,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -134,6 +138,75 @@ def toast(cfg: dict, text: str, log, run=None) -> bool:
         except Exception:  # noqa: BLE001
             pass
         return False
+
+
+WHICH = shutil.which  # finds wt.exe; tests replace it
+
+
+def tab_title(task, cfg: dict) -> str:
+    """'Claude: <task title>' (config lane_tab_title), cut to lane_tab_title_max. ';' would split
+    a wt.exe command line into two commands, so it never reaches one."""
+    lane = str(task.lane)
+    try:
+        text = cfg["lane_tab_title"].format(Lane=lane[:1].upper() + lane[1:], lane=lane, title=task.title,
+                                            slug=task.slug)
+    except (KeyError, IndexError, ValueError):
+        text = f"{lane}: {task.title}"
+    text = " ".join(text.replace(";", ",").replace('"', "'").split())
+    n = int(cfg["lane_tab_title_max"])
+    return text if len(text) <= n else text[: max(1, n - 1)] + "…"
+
+
+def lane_tab(task, cfg: dict, *, log_path: Path, done_path: Path, timeout: int, log, spawn=None,
+             which=None) -> str:
+    """Open the lane's own tab (lane_tab.py following its lane log). Returns opened / off /
+    failed. wt.exe missing: the same renderer in a plain console (lane_tab_fallback_argv), or
+    nothing if that is []. Never raises: a lane never waits for, or depends on, its tab."""
+    try:
+        if not cfg.get("lane_tabs") or task.lane not in cfg["lane_tab_lanes"]:
+            return "off"
+        Path(done_path).unlink(missing_ok=True)  # an earlier attempt's DONE would close it at once
+        title = tab_title(task, cfg)
+        values = dict(python=console_python(), script=HERE / "lane_tab.py", log=log_path, done=done_path,
+                      tab_title=title, window=cfg["lane_tab_window"], lane=task.lane,
+                      max_s=int(timeout) + int(cfg["lane_tab_extra_s"]), linger_s=cfg["lane_tab_linger_s"])
+        argv = _fill(cfg["lane_tab_argv"], **values)
+        how = "tab"
+        if not (which or WHICH)(argv[0]):
+            argv = _fill(cfg["lane_tab_fallback_argv"], **values) if cfg["lane_tab_fallback_console"] else []
+            how = "console (no " + str(cfg["lane_tab_argv"][0]) + ")"
+            if not argv:
+                log(f"LANE tab not opened for {task.slug}: {cfg['lane_tab_argv'][0]} not found, no fallback")
+                return "failed"
+        pid = (spawn or SPAWN)(argv, {**os.environ})
+        log(f"LANE tab opened for {task.slug}: {title!r} ({how}) pid={pid}")
+        return "opened"
+    except Exception as e:  # noqa: BLE001
+        try:
+            log(f"LANE tab not opened for {task.slug} ({type(e).__name__}: {e})")
+        except Exception:  # noqa: BLE001
+            pass
+        return "failed"
+
+
+def lane_tab_done(done_path: Path, outcome: str, report: Path | None, log=None) -> None:
+    """Tell the tab the lane has exited: the outcome and the report's RESULT line, if any.
+    Written atomically, so the tab never reads half a file. Never raises."""
+    try:
+        result = ""
+        if report is not None and Path(report).exists():
+            first = (Path(report).read_text(encoding="utf-8", errors="replace").strip().splitlines() or [""])[0]
+            result = first.split(":", 1)[-1].strip() if first.upper().startswith("RESULT:") else ""
+        done_path = Path(done_path)
+        tmp = done_path.with_name(done_path.name + ".tmp")
+        tmp.write_text(json.dumps({"outcome": outcome, "result": result or outcome}), encoding="utf-8")
+        os.replace(tmp, done_path)
+    except Exception as e:  # noqa: BLE001
+        if log:
+            try:
+                log(f"LANE tab DONE not written ({type(e).__name__}: {e})")
+            except Exception:  # noqa: BLE001
+                pass
 
 
 def lane_started(task, cfg: dict, review: Path, repo: Path, log, spawn=None, alive=None, run=None) -> None:
