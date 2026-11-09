@@ -12,9 +12,9 @@
     "vault_excerpt_chars": 900
   },
   "chat": {
-    "_about": "Options on every ollama.chat call. temperature 0.2: Ollama's default (~0.8) answered the same question with a correct summary one run and a non-sequitur the next; 4/4 clean at 0.2 with no loss of personality on chat. keep_alive -1 keeps the model loaded (a cold reload is ~4-6 s).",
+    "_about": "Options on every ollama.chat call. temperature 0.2: Ollama's default (~0.8) answered the same question with a correct summary one run and a non-sequitur the next; 4/4 clean at 0.2 with no loss of personality on chat. keep_alive 10m: unloads after 10 idle minutes so the laptop GPU can sleep on battery (9 Nov 2026, battery drain); was -1 (always loaded, cold reload ~4-6 s).",
     "temperature": 0.2,
-    "keep_alive": -1,
+    "keep_alive": "10m",
     "_think": "Ollama's think flag on every chat call; null = leave it to the model. false: qwen3.5:9b thinks by default, which left empty replies after tool results and a 5x slower mean in the 6 Nov bake-off; a no-op for models that don't think.",
     "think": false
   },
