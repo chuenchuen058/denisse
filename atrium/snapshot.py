@@ -105,23 +105,30 @@ def _agents() -> list[dict]:
     return rows
 
 
-def _waiting(tasks: list[dict]) -> list[dict]:
+def waiting_items(tasks: list[dict]) -> list[dict]:
+    """What waits on Chuen, each tagged with its kind ("note" = the vault's list, "draft",
+    "parked"): the hub's waiting table without the tag, and the live page's Needs you."""
     w = _c()["waiting"]
     skip = {s.upper() for s in w["skip"]}
     rows = []
     for l in _bullets(_section(_read(w["from"]), w["section"])).splitlines():
         t = re.sub(r"^\s*[-*]\s*", "", l).strip()
         if t and t.upper() not in skip:
-            rows.append({"item": t[:w["item_chars"]], "from": w["from"]})
+            rows.append({"item": t[:w["item_chars"]], "from": w["from"], "kind": "note"})
     for t in tasks:
         if t["status"] == "draft":
-            rows.append({"item": w["draft"].format(task=t["task"]), "from": w["orchestra"]})
+            rows.append({"item": w["draft"].format(task=t["task"]), "from": w["orchestra"], "kind": "draft"})
         if t["status"] == "parked":
             why = REVIEW / "parked" / f"{t['id']}.why.txt"
             reason = (why.read_text(encoding="utf-8").split(" ", 1)[-1].splitlines()[0] if why.exists()
                       else w["parked_default"])
             rows.append({"item": w["parked"].format(task=t["task"], reason=reason[:w["reason_chars"]]),
-                         "from": w["orchestra"]})
+                         "from": w["orchestra"], "kind": "parked", "task": t["task"], "reason": reason})
+    return rows
+
+
+def _waiting(tasks: list[dict]) -> list[dict]:
+    rows = [{"item": r["item"], "from": r["from"]} for r in waiting_items(tasks)]
     for i, r in enumerate(rows):
         r["n"] = i + 1
     return rows
@@ -423,14 +430,34 @@ def _study() -> list[dict]:
         return []
 
 
+TABLES = ("agents", "tasks", "waiting", "log", "learner", "spend", "running", "usage",
+          "outputs", "activity", "study")
+
+
+def tables(names=TABLES) -> dict:
+    """The hub's tables by name, built from local state; reads only, writes nothing
+    (`write` saves them for the claude.ai hub, atrium/live.py serves them)."""
+    memo: dict = {}
+
+    def tasks():
+        if "tasks" not in memo:
+            memo["tasks"] = _task_rows()
+        return memo["tasks"]
+
+    def running():
+        if "running" not in memo:
+            memo["running"] = _running()
+        return memo["running"]
+
+    build = {"agents": _agents, "tasks": tasks, "waiting": lambda: _waiting(tasks()), "log": _log,
+             "learner": _learner, "spend": _spend, "running": running, "usage": lambda: _usage(running()),
+             "outputs": _outputs, "activity": _activity, "study": _study}
+    return {n: build[n]() for n in names}
+
+
 def write(out: Path | None = None) -> Path:
     out = out or REVIEW / _c()["paths"]["hub"]
     out.mkdir(parents=True, exist_ok=True)
-    tasks = _task_rows()
-    running = _running()
-    tables = {"agents": _agents(), "tasks": tasks, "waiting": _waiting(tasks), "log": _log(),
-              "learner": _learner(), "spend": _spend(), "running": running, "usage": _usage(running),
-              "outputs": _outputs(), "activity": _activity(), "study": _study()}
-    for name, rows in tables.items():
+    for name, rows in tables().items():
         (out / f"{name}.json").write_text(json.dumps(rows, indent=1, ensure_ascii=False), encoding="utf-8")
     return out
