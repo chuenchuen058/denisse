@@ -1,0 +1,104 @@
+{
+  "_help": "KEATS_CONFIG may name a replacement config. DENISSE_VAULT/settings.vault() locates the vault; no personal course list or captured filenames belong in this repository. DOM queries are OR lists; within each query tag/attrs are AND, attribute values are regexes.",
+  "paths": {
+    "manifest": "Atlas/Academic/SEM 1 Modules/.keats-manifest.json",
+    "profile": "%LOCALAPPDATA%/Denisse/keats/chrome",
+    "ready": "session.ready",
+    "lock": "pull.lock",
+    "never_write": [".obsidian", ".git"],
+    "week": "Week {week}",
+    "note": "{module} Week {week}.md"
+  },
+  "browser": {
+    "channel": "chrome",
+    "base_url": "https://keats.kcl.ac.uk/",
+    "landing": "my/",
+    "course": "course/view.php?id={course}",
+    "extra_download_origins": [],
+    "timeout_ms": 30000,
+    "download_timeout_ms": 120000,
+    "login_timeout_s": 600,
+    "login_poll_ms": 500,
+    "wait_until": "domcontentloaded",
+    "force_download": {"forcedownload": "1"},
+    "login_url": "(?i)/login/|login\\.microsoftonline\\.com|/adfs/|/saml/",
+    "login_dom": [{"tag": "input", "attrs": {"type": "(?i)^password$"}}, {"attrs": {"id": "^page-login-index$"}}],
+    "authenticated_dom": [{"tag": "a", "attrs": {"href": "/login/logout\\.php"}}]
+  },
+  "scan": {
+    "main": [{"attrs": {"id": "^region-main$"}}, {"attrs": {"role": "^main$"}}],
+    "sections": [{"tag": ["li", "section", "div"], "attrs": {"id": "^section-\\d+$"}}, {"attrs": {"data-for": "^section$"}}],
+    "headings": [{"attrs": {"class": "(?:^|\\s)(?:sectionname|section-title)(?:\\s|$)"}}, {"tag": ["h2", "h3"]}],
+    "week_pattern": "(?i)\\bWeek\\s+(\\d+)\\b",
+    "section_url": "/course/section\\.php\\?|/course/view\\.php\\?.*section=",
+    "resource_url": "/mod/(?:resource|folder)/view\\.php\\?",
+    "folder_url": "/mod/folder/view\\.php\\?",
+    "file_url": "/pluginfile\\.php/.*?/mod_(?:resource|folder)/content/",
+    "ignore_url": "(?i)setcheck|/theme/|favicon",
+    "file_nodes": [{"tag": ["a", "object", "iframe", "embed"]}],
+    "url_attributes": ["href", "data", "src"],
+    "html_content_types": ["text/html", "application/xhtml+xml"],
+    "take_extensions": ["*"],
+    "skip_extensions": [".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".html", ".htm"],
+    "skip_original_names": []
+  },
+  "naming": {
+    "title_remove": ["^[0-9A-Z]{5,}\\s+", "\\s*\\([^)]*\\)\\s*$"],
+    "preserve_extensions": [".m"],
+    "rules": [
+      {"pattern": "(?i)\\b(solutions?|answers?)\\b", "stem": "Tutorial - Solutions (official)"},
+      {"pattern": "(?i)\\b(tutorials?|problem\\s+(?:class|sheet)|questions?)\\b", "stem": "Tutorial - Questions"},
+      {"pattern": "(?i)\\bslides?\\b", "stem": "Lecture - Slides"},
+      {"pattern": "(?i)\\b(lectures?|notes?|handouts?)\\b", "stem": "Lecture - Notes"}
+    ],
+    "clean": [{"pattern": "[<>:\"/\\\\|?*\\x00-\\x1f\\[\\]#^]", "replacement": "-"}, {"pattern": "\\s+", "replacement": " "}],
+    "trim": " .",
+    "reserved": "(?i)^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\\.|$)",
+    "reserved_prefix": "_",
+    "collision": "{stem} ({number}){suffix}",
+    "collision_start": 2
+  },
+  "note": {
+    "link": "- [[{path}|{label}]]",
+    "template": "---\nname: {name_yaml}\ndescription: Files pulled from KEATS; lecture write-up pending.\nupdated: {date}\ntags: [academic]\nstatus: files-only\n---\n\n# {module} Week {week}\n\n[[{module} Week {previous}|Previous week]] · [[{module} notes|Module hub]] · [[{module} summary|Summary]] · [[{module} Week {next}|Next week]]\n\n## Files\n\n{links}\n\n> [!todo]\n> Files are available. Lecture write-up is still pending.\n"
+  },
+  "output": {
+    "login_required": "KEATS session needs sign-in: run `python -m keats login`",
+    "login_wait": "Sign in to KEATS in the Chrome window. This command continues when KEATS confirms your session.",
+    "login_ok": "KEATS session saved.",
+    "summary": "KEATS: {count} new files{dry}; {seconds:.2f}s",
+    "file": "  {path}",
+    "dry_suffix": " (dry run; nothing filed)",
+    "handoff_agent": "keats",
+    "handoff": "KEATS pull{dry}: {count} new files; {status}; {seconds:.2f}s",
+    "commit": "KEATS: {count} new files ({date})",
+    "toast_title": "Denisse",
+    "toast": "KEATS: {count} new files",
+    "error": "KEATS: {error}",
+    "missing_playwright": "Install the Python dependency: python -m pip install playwright (no browser download needed)."
+  },
+  "ingest": {
+    "enabled": false,
+    "worker_command": ["{python}", "-m", "keats.ingest", "--vault", "{vault}", "--modules", "{modules}"],
+    "cards": false,
+    "anki_sync": false,
+    "command": ["{python}", "-m", "tutor", "ingest", "--vault", "{vault}"],
+    "cards_command": ["{python}", "-m", "tutor", "cards", "{module}", "--vault", "{vault}"],
+    "anki_command": ["{python}", "-m", "tutor", "anki-sync", "--vault", "{vault}"],
+    "log": "ingest.log"
+  },
+  "schedule": {
+    "task_name": "Denisse KEATS Pull",
+    "time": "18:00",
+    "python": ".venv/Scripts/pythonw.exe",
+    "script": "keats/task.py",
+    "execution_limit": "PT1H",
+    "register_command": ["schtasks", "/Create", "/TN", "{name}", "/XML", "{xml}", "/F"],
+    "register_timeout_s": 30,
+    "xml_file": "task.xml",
+    "task_log": "scheduled.log",
+    "powershell": "powershell.exe",
+    "toast_script": "keats/toast.ps1",
+    "toast_timeout_s": 15
+  }
+}
