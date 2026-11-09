@@ -11,9 +11,13 @@ import io
 import os
 import re
 import sys
+from pathlib import Path
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-V = r"C:\Users\Xichu\OneDrive - King's College London\Denisse"
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import settings  # noqa: E402  (the vault: DENISSE_VAULT, config.json, or Obsidian's registry)
+
+V = settings.vault()
 WRITE = "--write" in sys.argv
 HEX = re.compile(r"(?<![\w`#])#([0-9a-fA-F]{6})\b(?!`)")
 

@@ -11,10 +11,14 @@ import io
 import os
 import re
 import sys
+from pathlib import Path
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-VAULT = r"C:\Users\Xichu\OneDrive - King's College London\Denisse"
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import settings  # noqa: E402  (the vault: DENISSE_VAULT, config.json, or Obsidian's registry)
+
+VAULT = settings.vault()
 EXT = "pdf|m|png|jpg|jpeg|svg|xlsx|docx|pptx|csv|zip"
 LINK = re.compile(r"\[\[((?:[^\]\|\\/]+)\.(?:" + EXT + r"))(?=[\\\]|])", re.I)
 WRITE = "--write" in sys.argv

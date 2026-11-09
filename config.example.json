@@ -8,6 +8,7 @@
     "user_about": "a second-year engineering student at Example University",
     "read_dirs": ["{vault}", "~/OneDrive/Documents", "~/GitHub"],
     "learning_note": "Atlas/Concepts/Learning/How-I-Learn.md",
+    "eval_dir": "{vault}/Denisse/Evals",
     "_runtime": "Overrides for runtime.defaults.json (runtime_config.py): standing-instruction jobs and limits, conversation replay word lists, runtime_status intervals and wording. Same nesting as that file; only the keys you change.",
     "runtime": {"runtime_status": {"write_every_seconds": 10}}
   }

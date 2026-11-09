@@ -52,7 +52,13 @@ def _constant(name):
     raise LookupError(f"vault_contract.py has no {name}")
 
 
-DEFAULT_VAULT = _constant("VAULT")
+def default_vault():
+    """The vault vault_contract itself would check (settings.vault())."""
+    sys.path.insert(0, os.path.dirname(HERE))
+    import settings
+    return settings.vault()
+
+
 GENERATED = tuple(_constant("GENERATED"))
 
 
@@ -224,9 +230,10 @@ def apply(vault, todo):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--vault", default=DEFAULT_VAULT)
+    ap.add_argument("--vault", default=None, help="default: settings.vault()")
     ap.add_argument("--apply", action="store_true", help="insert the lines (default: dry run)")
     a = ap.parse_args(argv)
+    a.vault = a.vault or default_vault()
     if not os.path.isdir(a.vault):
         print(f"no such vault: {a.vault}", file=sys.stderr)
         return 1
