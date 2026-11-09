@@ -1186,6 +1186,35 @@ def _study_context() -> str:
         return ""
 
 
+# The learner model (learner/) is the one record of how he learns, decides
+# and takes feedback; Don and Atrium read it too. Read through learner.core
+# on every turn (a small JSON file), so a new answer shows up without a
+# restart; never written from here. With no store, the turn runs as before
+# and this says so once per process.
+_LEARNER_WARNED = False
+
+
+def _learner_context() -> str:
+    global _LEARNER_WARNED
+    lc = CONFIG["learner"]
+    try:
+        from learner import core
+        if not core.STORE.exists():
+            raise FileNotFoundError(str(core.STORE))
+        data = core.load()
+    except Exception as exc:  # noqa: BLE001 -- no learner model is not a reason not to answer
+        if not _LEARNER_WARNED:
+            _LEARNER_WARNED = True
+            logging.info(lc["missing_log"].format(error=exc))
+        return lc["none"]
+    order = {a: i for i, a in enumerate(lc["areas"])}
+    beliefs = sorted((b for b in data.get("beliefs", [])
+                      if b.get("status") == lc["status"] and b.get("area") in order and b.get("claim")),
+                     key=lambda b: order[b["area"]])
+    lines = [lc["line"].format(claim=b["claim"]) for b in beliefs[:lc["max"]]]
+    return lc["block"].format(claims="\n".join(lines)) if lines else lc["none"]
+
+
 def _own_words(result: str, markers: int | None = None) -> str:
     """A tool's own sentence: its result up to the first of
     honesty.result_cut_markers (the first `markers` of them)."""
@@ -1487,7 +1516,8 @@ class Brain:
         # and the study clock's live state (study_mode.context_line): both
         # this call only, never in `messages`, so never persisted. The
         # study line is empty when nothing runs, so idle turns pay nothing.
-        for block in (reply_preferences.prompt_block(), _study_context()):
+        # How he works, from the learner model: also this call only.
+        for block in (reply_preferences.prompt_block(), _learner_context(), _study_context()):
             if block:
                 system_content += "\n\n" + block
         full_messages = ([{"role": "system", "content": system_content}]

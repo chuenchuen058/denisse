@@ -1575,6 +1575,24 @@
     "_about": "explicit_request_pattern: an instruction to retain a fact ('remember that...', 'save this as a fact', 'keep in mind'), not a question asking for recall ('remember what I said?'). While save_facts is 'explicit' (memory/brain_rules.json), the remember tool is offered only on a message matching this (tool_router.select via brain_rules.explicit_memory_request). It is a phrase match standing in for understanding him; dropping it would offer remember on every turn, which is an A/B to run, not a data edit.",
     "explicit_request_pattern": "^\\s*(?:(?:please|hey denisse)[,\\s]+|(?:can|could|would|will) you\\s+)?(?:remember\\b(?!\\s+(?:what|when|where|who|how)\\b)|(?:save|store)\\b.{0,40}\\b(?:fact|memory|preference)\\b|keep in mind\\b)"
   },
+  "learner": {
+    "_about": "His learner model (learner/core.py, the store Don and Atrium also read), quoted into the system context on every conversation turn, this call only, never saved. areas: which learner-model areas are quoted, in this order (the cap drops the later ones first). max: at most this many claims. status: which beliefs count. line: one claim. block: the labelled section, {claims} the lines joined by newlines. none: what goes in when nothing matches or there is no store (empty = nothing added, the turn runs as before). missing_log: the one log line per process when the store is missing or unreadable.",
+    "areas": [
+      "feedback",
+      "goals",
+      "study",
+      "attention",
+      "struggles",
+      "schedule",
+      "format"
+    ],
+    "max": 10,
+    "status": "current",
+    "line": "- {claim}",
+    "block": "How Chuen works (his learner model, the same one his tutor reads). Let these shape how you answer him and plan anything for him; don't recite them unless he asks:\n{claims}",
+    "none": "",
+    "missing_log": "Learner model not read, answering without it: {error}"
+  },
   "settings": {
     "_about": "His editable settings file (brain_rules.py): file is its path under the program folder (DENISSE_RULES_FILE overrides), read up to max_file_bytes. defaults are the values when the file is missing or invalid and the template for brain_rules.example.json; ranges are [low, high] for each whole-number setting; save_facts_values are the allowed save_facts words.",
     "file": "memory/brain_rules.json",
