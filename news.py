@@ -20,12 +20,24 @@ import os
 import urllib.request
 import xml.etree.ElementTree as ET
 
-CNA_RSS_URL = "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml"
+import json_config
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 BRIEFING_STATE_FILE = os.path.join(BASE_DIR, "memory", "daily_news_briefing.json")
+CONFIG_FILE = os.path.join(BASE_DIR, "news.json")
+DEFAULTS_FILE = os.path.join(BASE_DIR, "news.defaults.json")
+CONFIG_ENV_VAR = "DENISSE_NEWS_CONFIG"
+CONFIG: dict = {}
 
-DAILY_BRIEFING_EARLIEST_HOUR = 8  # don't proactively summarize before 8am local time
+
+def configure(path=None) -> dict:
+    """The feed, its timeout and the briefing's earliest hour (news.json; Rule 0)."""
+    global CONFIG
+    CONFIG = json_config.load("news", path or os.environ.get(CONFIG_ENV_VAR) or CONFIG_FILE, DEFAULTS_FILE)
+    return CONFIG
+
+
+configure()
 
 
 def fetch_headlines(topic: str = "", count: int = 5) -> list:
@@ -34,7 +46,7 @@ def fetch_headlines(topic: str = "", count: int = 5) -> list:
     article's title or CNA's own category tag. Returns a list of
     '<title> [<category>]' strings, or raises on a real fetch/parse
     failure -- caller (tools.get_news) turns that into an error string."""
-    with urllib.request.urlopen(CNA_RSS_URL, timeout=10) as resp:
+    with urllib.request.urlopen(CONFIG["rss_url"], timeout=CONFIG["fetch_timeout_s"]) as resp:
         xml_data = resp.read()
     root = ET.fromstring(xml_data)
 
@@ -63,11 +75,11 @@ def _load_briefing_state() -> dict:
 
 
 def is_daily_briefing_due() -> bool:
-    """True once per calendar day, and only from DAILY_BRIEFING_EARLIEST_HOUR
+    """True once per calendar day, and only from news.json briefing_earliest_hour
     onward -- so tray.py's background loop can poll this cheaply and only
     actually trigger a briefing once, whenever it first becomes true."""
     now = datetime.datetime.now()
-    if now.hour < DAILY_BRIEFING_EARLIEST_HOUR:
+    if now.hour < CONFIG["briefing_earliest_hour"]:
         return False
     state = _load_briefing_state()
     return state.get("last_briefing_date") != now.strftime("%Y-%m-%d")

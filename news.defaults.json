@@ -1,0 +1,6 @@
+{
+  "_about": "news.py (AGENTS.md Rule 0). Shipped defaults; news.json holds the live values (DENISSE_NEWS_CONFIG names another copy). rss_url: the feed headlines come from. fetch_timeout_s: how long one fetch may take. briefing_earliest_hour: the daily briefing is not offered before this local hour.",
+  "rss_url": "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml",
+  "fetch_timeout_s": 10,
+  "briefing_earliest_hour": 8
+}
