@@ -19,10 +19,21 @@ import datetime as dt
 import json
 import os
 import re
+import sys
 from pathlib import Path
 
-VAULT = Path(os.environ.get("DENISSE_VAULT",
-                            Path.home() / "OneDrive - King's College London" / "Denisse"))
+def _vault() -> Path:
+    """DENISSE_VAULT, else settings.vault() (config.json / Obsidian's own registry)."""
+    if os.environ.get("DENISSE_VAULT"):
+        return Path(os.environ["DENISSE_VAULT"])
+    repo = str(Path(__file__).resolve().parent.parent)
+    if repo not in sys.path:
+        sys.path.insert(0, repo)
+    import settings
+    return Path(settings.vault())
+
+
+VAULT = _vault()
 STORE = Path(os.environ.get("LEARNER_STORE", VAULT / "Dev" / "learner" / "model.json"))
 NOTE = VAULT / "Atlas" / "Concepts" / "Learning" / "Learner-Model.md"
 SOURCES = ("stated", "answered", "measured")

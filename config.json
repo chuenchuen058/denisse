@@ -36,6 +36,8 @@
       "~/GitHub",
       "~/OneDrive - King's College London/Documents"
     ],
-    "learning_note": "Atlas/Concepts/Learning/How-Chuen-Learns.md"
+    "learning_note": "Atlas/Concepts/Learning/How-Chuen-Learns.md",
+    "_eval_dir": "Where eval/run_eval.py files a full run's report (a subset or --out goes elsewhere).",
+    "eval_dir": "{vault}/Denisse/Evals"
   }
 }

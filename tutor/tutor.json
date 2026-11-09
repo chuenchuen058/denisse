@@ -712,7 +712,8 @@
     "text": "{tutor} says ({confidence} confidence, {who}): {answer}\nSources: {sources}\nCaveats: {caveats}",
     "text_no_sources": "none",
     "text_no_caveats": "none",
-    "question_chars": 160
+    "question_chars": 160,
+    "question_max_chars": 1000000
   },
 
   "_help_teach": [
@@ -1024,6 +1025,7 @@
       "wait_s": 900,
       "poll_s": 15,
       "stale_s": 21600,
+      "hash_chars": 12,
       "say_wait": "{tutor}: another local-model job ({command}, pid {pid}) is running; waiting up to {wait_s}s",
       "say_busy": "{tutor}: another local-model job ({command}, pid {pid}) is still running; {this} not started, run it again later"
     },

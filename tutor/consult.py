@@ -190,7 +190,7 @@ def _ground(paths: Paths, question: str, module_text: str, num_ctx: int | None, 
 
 def _blank(question: str, today: dt.date | None) -> dict:
     today = today or dt.date.today()
-    return {"question": _clip(question, 10 ** 6), "date": today.isoformat(), "answer": "",
+    return {"question": _clip(question, _K["question_max_chars"]), "date": today.isoformat(), "answer": "",
             "confidence": grade(0, 0), "sources": [], "caveats": [], "who": _K["who_none"], "module": "",
             "code": "", "notes": 0, "coverage": 0.0}
 

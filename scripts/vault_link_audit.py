@@ -15,7 +15,10 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-VAULT = Path(r"C:\Users\Xichu\OneDrive - King's College London\Denisse")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import settings  # noqa: E402  (the vault: DENISSE_VAULT, config.json, or Obsidian's registry)
+
+VAULT = Path(settings.vault())
 WIKILINK = re.compile(r"\[\[([^\]|#\r\n]+)")  # a newline breaks a wikilink
 MDLINK = re.compile(r"\[[^\]]*\]\(([^)]+?\.md)\)")
 FENCE = re.compile(r"```.*?```", re.DOTALL)

@@ -22,7 +22,14 @@ from datetime import date
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-VAULT = r"C:\Users\Xichu\OneDrive - King's College London\Denisse"
+def _vault():
+    """DENISSE_VAULT, config.json settings.vault, or Obsidian's own registry (settings.py)."""
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    import settings
+    return settings.vault()
+
+
+VAULT = _vault()  # vault_index_fix and its tests replace this one value to point at a fixture
 REPORT = os.path.join(VAULT, "Denisse", "Vault Health.md")
 REQUIRED = ("name", "description", "updated")  # tags are only a warning: Dev/Memory/ deliberately has none
 # Entry points: nothing needs to link to these for them to be found.

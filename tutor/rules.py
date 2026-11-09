@@ -316,7 +316,7 @@ class Busy(RuntimeError):
 
 def lock_path(paths: Paths) -> str:
     vault = os.path.normcase(os.path.abspath(paths.vault))
-    digest = hashlib.sha256(vault.encode("utf-8")).hexdigest()[:12]
+    digest = hashlib.sha256(vault.encode("utf-8")).hexdigest()[:_R["lock"]["hash_chars"]]
     return os.path.join(tempfile.gettempdir(), _R["lock"]["file"].format(vault_hash=digest))
 
 

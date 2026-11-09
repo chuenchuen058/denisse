@@ -1,0 +1,6 @@
+{
+  "_about": "Live values for news.py; every key and its meaning is in news.defaults.json.",
+  "rss_url": "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml",
+  "fetch_timeout_s": 10,
+  "briefing_earliest_hour": 8
+}

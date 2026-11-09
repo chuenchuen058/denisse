@@ -152,6 +152,7 @@
   "toast_finished": "Orchestra: {lane} finished: {result} {title}",
   "toast_argv": ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", "{script}", "-Text", "{text}"],
   "toast_timeout_s": 30,
+  "toast_error_chars": 200,
   "hub_queue_default_gate": [".venv\\Scripts\\python.exe scripts\\run_checks.py --fast"],
   "hub_queue_source": "agent hub",
 

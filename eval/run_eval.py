@@ -102,9 +102,12 @@ EVAL_VETO = {
 }
 
 
-VAULT_EVAL_DIR = Path(
-    r"C:\Users\Xichu\OneDrive - King's College London\Denisse\Denisse\Evals"
-)
+def vault_eval_dir() -> Path:
+    """config.json settings.eval_dir ('{vault}' = settings.vault()), read only when a full run files its report."""
+    import settings
+    return Path(settings.expand(settings.get("eval_dir", "{vault}/Denisse/Evals")))
+
+
 DATASET = ROOT / "eval" / "dataset.jsonl"
 
 
@@ -732,7 +735,7 @@ def main() -> int:
         for r in reasons:
             print(f"  {r}")
     out_dir = Path(args.out) if args.out else (
-        Path(tempfile.mkdtemp(prefix="denisse-eval-subset-")) if subset else VAULT_EVAL_DIR)
+        Path(tempfile.mkdtemp(prefix="denisse-eval-subset-")) if subset else vault_eval_dir())
 
     lease = _gpu_lease(wait_s=args.wait_gpu, on_busy="run" if args.force else "exit")
     try:
