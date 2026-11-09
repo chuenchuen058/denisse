@@ -231,6 +231,7 @@ class Soak:
         e = {k: v for k, v in os.environ.items()
              if not k.startswith("ORCHESTRA_") and k != "CLAUDECODE" and not k.startswith("CLAUDE_CODE_")}
         e.update(ORCHESTRA_REPO=str(self.repo), ORCHESTRA_AFTERCARE="1", ORCHESTRA_VAULT_DIR="",
+                 ORCHESTRA_LIVE_WINDOW="false", ORCHESTRA_TOASTS="false",
                  ORCHESTRA_LANE_SLOTS=json.dumps(SLOTS), ORCHESTRA_LANE_FALLBACK=json.dumps(FALLBACK),
                  ORCHESTRA_TIMEOUT_S=json.dumps(TIMEOUTS), ORCHESTRA_GATE_TIMEOUT_S="60",
                  # after 20 measured runs the timeout becomes max(floor, 3 x p95); the default floor

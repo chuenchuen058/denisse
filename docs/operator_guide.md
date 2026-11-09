@@ -62,7 +62,9 @@ What is happening now (read-only):
 
 `status.py` is the one screen: running tasks per lane slot, the queue and why each task
 is waiting, parked tasks and why, today's results and spend, the last log lines.
-`watch.py` follows the running sessions live. `runner.py --dry-run` shows what the next
+`watch.py` follows the running sessions live; the runner opens it itself, once, in a window
+titled "Orchestra live" when a lane starts, and toasts each start and finish (config
+`live_window`, `toasts`; orchestra/README.md, "Seeing it run"). `runner.py --dry-run` shows what the next
 tick would pick without running anything.
 
 Writing a task:

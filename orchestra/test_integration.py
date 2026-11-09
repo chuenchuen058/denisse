@@ -15,6 +15,9 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+# Never a real window or toast from a test (orchestra/visible.py: the live window and toasts).
+os.environ["ORCHESTRA_LIVE_WINDOW"] = "false"
+os.environ["ORCHESTRA_TOASTS"] = "false"
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))

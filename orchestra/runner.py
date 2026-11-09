@@ -75,6 +75,7 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 import campaign  # noqa: E402  deadline + pause/stop; reads .review/campaign.json and control.json
 import consult  # noqa: E402  the study tutor's opinion before a lane starts; data in consult.json, advisory
+import visible  # noqa: E402  the live window and toasts, so Chuen sees a lane run (config live_window, toasts)
 
 REPO = Path(os.environ.get("ORCHESTRA_REPO", HERE.parent))
 REVIEW = REPO / ".review"
@@ -199,8 +200,11 @@ def load_config(now_utc: dt.datetime | None = None, log_fn=None, path: Path | No
         if env is not None:
             # ("{", "[") not the string "{[": "" is in every string, and ORCHESTRA_VAULT_DIR="" (vault
             # notes off) then crashed every tick at import with json.loads("") (soak test, 3 Nov 2026)
+            # A switch reads its word: bool("false") is True, so ORCHESTRA_TOASTS=false used to turn it on.
             try:
-                cfg[k] = json.loads(env) if env[:1] in ("{", "[") else type(v)(env) if not isinstance(v, (dict, list)) else v
+                cfg[k] = (json.loads(env) if env[:1] in ("{", "[") else
+                          env.strip().lower() in ("1", "true", "yes", "on") if isinstance(v, bool) else
+                          type(v)(env) if not isinstance(v, (dict, list)) else v)
             except ValueError as e:
                 say(f"config: ORCHESTRA_{k.upper()} ignored ({e})")
     return validated(cfg, defaults, complete, say)
@@ -1544,10 +1548,11 @@ def run_lane(task: Task, wt: Path, report: Path, timeout: int, prov: dict | None
     env.update(ORCHESTRA_TASK=str(local / "task.md"), ORCHESTRA_REPORT=str(local_report),
                ORCHESTRA_WORKTREE=str(wt), ORCHESTRA_MAIN=str(REPO))
     prompt = build_prompt(".review/task.md", ".review/report.md")
-    # The study tutor's opinion (consult.json): a task about his study tooling or studies has the
-    # tutor asked first, `.review/don.md` written in the worktree and named in the prompt. Advisory:
+    # The study tutor's opinion (consult.py): which tasks is config consult_applies (default every
+    # task, any lane); the tutor is asked first, `.review/don.md` written in the worktree and named
+    # in the prompt; a busy GPU means the notes-only path, and the log line says which. Advisory:
     # a tutor that can't answer is a log line, and the prompt is exactly the one above.
-    prompt += consult.before_lane(task, wt, REPO, log)
+    prompt += consult.before_lane(task, wt, REPO, log, rule=C)
     if any(PROMPT_FILE_PLACEHOLDER in str(a) for a in argv):
         prompt_file = local / "prompt.md"
         prompt_file.write_text(prompt, encoding="utf-8")
@@ -2401,6 +2406,7 @@ def _tick(dry_run: bool = False) -> str:
             write_vault_note(task, ts, result)
             return result
         log(f"START {task.slug} lane={task.lane}{fb} weight={task.weight} timeout={timeout}s attempt={ts['attempts']}")
+        visible.lane_started(task, C, REVIEW, REPO, log, alive=proc_created)  # never raises
         try:
             wt, branch = fresh_worktree(task)
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
@@ -2409,6 +2415,7 @@ def _tick(dry_run: bool = False) -> str:
             if ts["attempts"] > C["infra_retries"]:
                 park(task, "could not create its worktree", None)
             save_state(state)
+            visible.lane_finished(task, "WORKTREE_FAILED", C, log)
             return "WORKTREE_FAILED"
         block = campaign.dispatch_block(REVIEW)  # paused while the worktree was being made
         if block:
@@ -2427,10 +2434,12 @@ def _tick(dry_run: bool = False) -> str:
             if ts["attempts"] > C["infra_retries"]:
                 park(task, outcome, None)
             save_state(state)
+            visible.lane_finished(task, "LANE_MISSING", C, log)
             return "LANE_MISSING"
         result = finish(task, state, wt, branch, outcome, seconds, before, prov, run)
         save_state(state)
         write_vault_note(task, ts, result)
+        visible.lane_finished(task, result, C, log)
         return result
     except Exception as e:
         if task is not None:  # dispatched, then the runner itself failed: count it, don't just re-dispatch

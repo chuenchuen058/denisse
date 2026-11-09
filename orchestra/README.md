@@ -107,22 +107,67 @@ registers it at 07:10 alongside the runner. Tests:
 
 ## The study tutor consulted before a lane (`consult.py`, `consult.json`)
 
-Chuen, 5 Nov 2026: "treat Don like a professional opinion on task". A task
-whose header says `Consult: don`, or whose text names `study_brief`,
-`study_mode`, `tutor` or `learner` as a file or folder, has `python -m tutor
-consult --json` run on its prompt in the main checkout before the lane starts.
-The opinion (answer, confidence, sources, caveats, who answered) goes into the
-worktree as `.review/don.md`; the lane prompt gets a paragraph naming it
-("weigh it as a subject expert's view: advisory, never an override; say under
-ODD where you go against it"); the reviewer prompt shows it (`{{DON}}`, marked
-advisory, never a reason to block). A tutor that can't answer, times out or
-isn't installed is one `CONSULT <slug>: ... could not answer` line in
-`runner.log` and the lane runs on the unchanged prompt. The switch
-(`enabled`), the header, the path patterns, the command, the timeout and every
-line of wording are in `consult.json`; `config.json` is untouched.
-`ORCHESTRA_CONSULT_FILE` points tests at another copy. Tests:
-`python -m unittest orchestra.test_consult` and the three `consult` tests in
+Chuen, 5 Nov 2026: "treat Don like a professional opinion on task"; 9 Nov:
+every agent goes through Don. Which tasks is the config rule
+`consult_applies` (`config.json` and `config_defaults.json`): `all` (the
+default) = every task, any lane; `named` = only a task whose header says
+`Consult: don` or whose text names `study_brief`, `study_mode`, `tutor` or
+`learner` as a file or folder (`consult.json` path_patterns); `off` = none.
+A consulted task has `python -m tutor consult --json` run on its prompt in the
+main checkout before the lane starts (a task about nothing study-related gets
+the general question, `question_general`).
+
+Quick, and never silently lost: a busy GPU (`.review/gpu.lease` held by
+another job, or nvidia-smi at least `consult_gpu_busy_pct` busy) is waited
+for, up to `consult_busy_wait_s`; the full consult then holds the lease and is
+capped at `consult_timeout_s` (180 s; it was 420 s, and on 8 Nov two consults
+timed out while the local model was busy). The tutor's local call is
+schema-constrained JSON (tutor.json `model.structured_output`). Still busy, or
+the full consult failed: `python -m tutor consult --notes-only --json`, no
+model at all, the matching lines of his notes (`consult_notes_fallback`,
+`consult_notes_timeout_s`). The `CONSULT <slug>:` line in `runner.log` says
+`path=model`, `path=notes` (and why) or, when neither answered, `could not
+answer (...)`; a checkout with no tutor is one `skipped` line.
+
+The opinion (answer, confidence, sources, caveats, who answered, which path)
+goes into the worktree as `.review/don.md`; the lane prompt gets a paragraph
+naming it ("weigh it as a subject expert's view: advisory, never an override;
+say under ODD where you go against it"); the reviewer prompt shows it
+(`{{DON}}`, marked advisory, never a reason to block). The switch (`enabled`),
+the header, the path patterns, the commands and every line of wording are in
+`consult.json`. `ORCHESTRA_CONSULT_FILE` points tests at another copy. Tests:
+`python -m unittest orchestra.test_consult` and the `consult` tests in
 `orchestra.test_runner`.
+
+## Seeing it run (`visible.py`, `toast.ps1`)
+
+Chuen, 9 Nov 2026: "I want to see Claude Code running". When a lane starts,
+the runner opens one console window titled "Orchestra live" running
+`watch.py`, unless the one it opened is still running (`.review/live_window.json`
+holds its pid and creation time); it is shown without taking the focus, and
+never twice. A Windows toast says "Orchestra: <lane> started <title>" and
+"Orchestra: <lane> finished: PASS|PARTIAL|... <title>". Switches and wording:
+`live_window`, `live_window_title`, `live_window_argv`, `toasts`,
+`toast_started`, `toast_finished`, `toast_argv`, `toast_timeout_s` in
+`config.json`. A window or toast that fails is one log line, never a stopped
+lane. If Task Scheduler runs the runner "whether the user is logged on or not",
+it has no desktop and neither can be seen: run it as the logged-on user.
+
+## Handing work to the queue (`new_task.py`)
+
+Every agent that has real work for a repo hands it to the queue rather than
+running a side job, so it shows in `runner.log`, STATE NOW and the hub
+snapshot: `from orchestra.new_task import create` (`create(title, body=...,
+gate=[...], lane=..., auto=True, source="<agent>")`, a `From:` header naming
+the agent), or the agent hub's `queue_task` tool (default gate and source:
+`hub_queue_default_gate`, `hub_queue_source`). The local team's planner
+already goes through `admission.py`, which alone writes its tasks into the
+queue. Not through the queue, on purpose: the hub's `ask_*` (a question
+answered in the chat within a minute, not work to merge), the local team's
+librarian and scout passes (read-only analysis whose output is admission's
+input), and the daily exams (a measurement of the agents: as queue tasks they
+would take lane slots and worktrees and be scored as work; they log
+`EXAMS started` in `runner.log` and keep their scores in `.review/exams/`).
 
 The agent hub does the same for chat work: `ask_don`, and `route_task` /
 `split_tasks` put study-category work (the exams' `rules.json` title routes

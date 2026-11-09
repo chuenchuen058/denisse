@@ -15,12 +15,16 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from unittest import mock
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE / "hooks"))
 import guard  # noqa: E402
+# Never a real window or toast from a test (orchestra/visible.py: the live window and toasts).
+os.environ["ORCHESTRA_LIVE_WINDOW"] = "false"
+os.environ["ORCHESTRA_TOASTS"] = "false"
 
 # Fake lane, steered by env vars: FAKE_RESULT (PASS/PARTIAL/FAIL/NONE), FAKE_HUMAN,
 # FAKE_SLEEP, FAKE_COMMIT, FAKE_STRAY (a path to write outside the worktree), FAKE_JUNK,
@@ -348,17 +352,31 @@ class RunnerTest(unittest.TestCase):
 
     # --- the study tutor consulted before the lane (orchestra/consult.py, advisory)
 
-    def consult_with(self, mode="ok"):
-        """A fake tutor command in a copy of consult.json, and the lane's prompt captured."""
+    def consult_with(self, mode="ok", notes="crash"):
+        """A fake tutor command in a copy of consult.json (a tutor installed in the repo, the GPU
+        free, short limits), and the lane's prompt captured."""
         import test_consult
         cfg = json.loads((HERE / "consult.json").read_text(encoding="utf-8"))
         cfg["command"] = [sys.executable, "-c", test_consult.FAKE_DON, "{question}"]
-        cfg["timeout_s"] = 5
+        cfg["notes_command"] = [sys.executable, "-c", test_consult.FAKE_DON, "{question}", "--notes-only"]
         f = self.tmp / "consult.json"
         f.write_text(json.dumps(cfg), encoding="utf-8")
         os.environ["ORCHESTRA_CONSULT_FILE"] = str(f)
+        self.addCleanup(os.environ.pop, "ORCHESTRA_CONSULT_FILE", None)
+        (self.repo / "tutor").mkdir(exist_ok=True)
+        (self.repo / "tutor" / "tutor.json").write_text(json.dumps({"name": "Don"}), encoding="utf-8")
+        subprocess.run(["git", "add", "tutor"], cwd=self.repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-qm", "tutor"], cwd=self.repo, check=True, capture_output=True)
+        os.environ["ORCHESTRA_GPU_LEASE"] = str(self.tmp / "gpu.lease")
+        self.addCleanup(os.environ.pop, "ORCHESTRA_GPU_LEASE", None)
+        busy = mock.patch.object(self.R.consult, "gpu_busy", return_value=None)
+        busy.start()
+        self.addCleanup(busy.stop)
+        self.R.C.update(consult_timeout_s=5, consult_notes_timeout_s=5, consult_busy_wait_s=0)
         os.environ["FAKE_DON"] = mode
+        os.environ["FAKE_NOTES"] = notes
         self.addCleanup(os.environ.pop, "FAKE_DON", None)
+        self.addCleanup(os.environ.pop, "FAKE_NOTES", None)
         prompt = self.tmp / "prompt.txt"
         os.environ["FAKE_PROMPT_OUT"] = str(prompt)
         return prompt
@@ -374,7 +392,7 @@ class RunnerTest(unittest.TestCase):
         self.assertIn("never an override", text)
         log = self.R.LOG_FILE.read_text(encoding="utf-8")
         self.assertIn("CONSULT study: ", log)
-        self.assertIn("-> high confidence by local", log)
+        self.assertIn("path=model -> high confidence by local", log)
         self.assertIn(".review/don.md written", log)
 
     def test_tutor_that_cannot_answer_never_stops_the_task(self):
@@ -386,12 +404,26 @@ class RunnerTest(unittest.TestCase):
         self.assertIn("CONSULT study2: ", log)
         self.assertIn("could not answer", log)
 
-    def test_plain_task_is_not_consulted(self):
+    def test_plain_task_is_consulted_by_default_and_not_under_the_named_rule(self):
         prompt = self.consult_with()
         self.add("plain")
         self.assertEqual(self.R.tick(), "PASS")
+        self.assertIn("`.review/don.md`", prompt.read_text(encoding="utf-8"), "every task, any lane")
+        self.assertIn("CONSULT plain: ", self.R.LOG_FILE.read_text(encoding="utf-8"))
+        self.R.C["consult_applies"] = "named"
+        self.add("plain2", extra=" A different plain task.")
+        self.assertEqual(self.R.tick(), "PASS")
         self.assertEqual(prompt.read_text(encoding="utf-8"), self.R.build_prompt(".review/task.md", ".review/report.md"))
-        self.assertNotIn("CONSULT", self.R.LOG_FILE.read_text(encoding="utf-8"))
+        self.assertNotIn("CONSULT plain2", self.R.LOG_FILE.read_text(encoding="utf-8"))
+
+    def test_busy_or_failed_tutor_gives_the_notes_only_opinion(self):
+        prompt = self.consult_with("crash", notes="ok")
+        self.add("busy")
+        self.assertEqual(self.R.tick(), "PASS")
+        self.assertIn("confidence: medium", prompt.read_text(encoding="utf-8"))
+        log = self.R.LOG_FILE.read_text(encoding="utf-8")
+        self.assertIn("CONSULT busy: ", log)
+        self.assertIn("path=notes", log)
 
     def test_claude_lane_gets_the_guard_settings(self):
         wt = self.tmp / "wt"

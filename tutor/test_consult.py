@@ -234,5 +234,37 @@ class ChatAndCliTests(ConsultFixture):
         self.assertEqual(json.loads(out.getvalue())["who"], _K["who_none"])
 
 
+class NotesOnlyTests(ConsultFixture):
+    """The quick path Orchestra takes when the GPU is busy: no engine is called at all."""
+
+    def test_from_notes_quotes_matching_lines_without_any_model(self):
+        boom = lambda *a, **k: (_ for _ in ()).throw(AssertionError("no model on the notes-only path"))
+        with unittest.mock.patch.object(consult, "ask", boom), unittest.mock.patch.object(consult.model, "ollama_call", boom):
+            out = consult.from_notes(self.paths, QUESTION, "signals", today=self.today)
+        self.assertTrue(consult.answered(out), out)
+        self.assertEqual(out["who"], _K["notes_only"]["who"])
+        self.assertIn("Laplace", out["answer"])
+        self.assertTrue(out["sources"])
+        self.assertEqual(out["caveats"], [_K["notes_only"]["caveat"]])
+        self.assertEqual(self.log, [], "no engine was asked")
+        full = self.ask()
+        self.assertEqual(out["sources"], full["sources"], "the same notes the model would have been given")
+
+    def test_from_notes_with_no_notes_is_no_answer(self):
+        out = consult.from_notes(self.paths, "gluon colour charge", today=self.today)
+        self.assertFalse(consult.answered(out))
+        self.assertEqual(out["who"], _K["who_none"])
+
+    def test_cli_notes_only_prints_json_and_records_nothing(self):
+        args = ["--vault", self.vault, "--state", self.state]
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            rc = cli.main(["consult", *QUESTION.split(), "--json", "--notes-only", *args], calls=chat.CALLS)
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(out.getvalue())["who"], _K["notes_only"]["who"])
+        self.assertEqual(self.log, [])
+        self.assertFalse(os.path.exists(self.paths.data(_K["sidecar"])), "a notes-only answer is not recorded")
+
+
 if __name__ == "__main__":
     unittest.main()

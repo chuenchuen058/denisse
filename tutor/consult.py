@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import re
 
 from . import cards, conf, don, model, sources, teach, topics
 from .conf import CONFIG, Module, Paths
@@ -159,20 +160,14 @@ def _resolve(paths: Paths, question: str, module_text: str) -> tuple:
     return conf.find_module(question, modules), modules, None
 
 
-def consult(paths: Paths, question: str, module_text: str = "", calls: dict | None = None,
-            today: dt.date | None = None, num_ctx: int | None = None) -> dict:
-    """The opinion. Never raises for a model that fails: that becomes a
-    caveat and, with no answer at all, `who` is none and `answer` empty."""
-    today = today or dt.date.today()
-    question = _clip(question, 10 ** 6)
+def _ground(paths: Paths, question: str, module_text: str, num_ctx: int | None, out: dict):
+    """(module, found) for the notes that bear on the question, or None when
+    there are none (`out` then already says why)."""
     c = don.ctx()
-    out = {"question": question, "date": today.isoformat(), "answer": "", "confidence": grade(0, 0),
-           "sources": [], "caveats": [], "who": _K["who_none"], "module": "", "code": "", "notes": 0,
-           "coverage": 0.0}
     module, modules, problem = _resolve(paths, question, module_text or "")
     if problem:
         out["caveats"].append(problem)
-        return out
+        return None
     found = None
     if module is not None:
         found = gather(paths, module, question, num_ctx)
@@ -187,9 +182,29 @@ def consult(paths: Paths, question: str, module_text: str = "", calls: dict | No
         out["caveats"].append(_K["caveat_no_notes"])
         if module is not None:
             out.update(module=module.title, code=module.code)
-        return out
+        return None
     out.update(module=module.title, code=module.code, notes=found["notes"],
                coverage=round(found["coverage"], 2), sources=list(found["links"]))
+    return module, found
+
+
+def _blank(question: str, today: dt.date | None) -> dict:
+    today = today or dt.date.today()
+    return {"question": _clip(question, 10 ** 6), "date": today.isoformat(), "answer": "",
+            "confidence": grade(0, 0), "sources": [], "caveats": [], "who": _K["who_none"], "module": "",
+            "code": "", "notes": 0, "coverage": 0.0}
+
+
+def consult(paths: Paths, question: str, module_text: str = "", calls: dict | None = None,
+            today: dt.date | None = None, num_ctx: int | None = None) -> dict:
+    """The opinion. Never raises for a model that fails: that becomes a
+    caveat and, with no answer at all, `who` is none and `answer` empty."""
+    out = _blank(question, today)
+    question = out["question"]
+    grounded = _ground(paths, question, module_text, num_ctx, out)
+    if grounded is None:
+        return out
+    module, found = grounded
     system, user = prompt(module, question, found)
     engines = _K["engines"]
     order = [engines["hard"]] if teach.is_hard(question) else [engines["local"], engines["fallback"]]
@@ -214,6 +229,36 @@ def consult(paths: Paths, question: str, module_text: str = "", calls: dict | No
         caveats.append(_K["caveat_not_confident"])
     out.update(answer=answer["answer"], who=_who(who), caveats=caveats + answer["caveats"],
                confidence=grade(found["coverage"], found["notes"], answer["confident"]))
+    return out
+
+
+def from_notes(paths: Paths, question: str, module_text: str = "", today: dt.date | None = None,
+               num_ctx: int | None = None) -> dict:
+    """The quick opinion: no model at all (not the local one, not Claude or
+    Codex), just the lines of the chosen notes that hold the question's words,
+    each under its note's name. For a caller that can't wait for the GPU
+    (Orchestra's consult when the local model is busy). Same shape as
+    consult(); `who` is who_notes, confidence one level down (no model weighed
+    it), and a caveat says so."""
+    out = _blank(question, today)
+    grounded = _ground(paths, out["question"], module_text, num_ctx, out)
+    if grounded is None:
+        return out
+    _module, found = grounded
+    n = _K["notes_only"]
+    qw = _words(out["question"])
+    parts = []
+    for src in found["picked"]:
+        lines = [ln.strip() for ln in src.text.splitlines() if ln.strip() and _words(ln) & qw
+                 and not any(re.search(pat, ln) for pat in n["skip_line_patterns"])]
+        excerpt = _clip(n["line_sep"].join(lines[:n["max_lines"]]), n["excerpt_chars"])
+        if excerpt:
+            parts.append(n["line"].format(name=src.stem, text=excerpt))
+    if not parts:
+        out["caveats"].append(_K["caveat_no_notes"])
+        return out
+    out.update(answer=n["sep"].join(parts)[:_K["answer_chars"]], who=n["who"], caveats=[n["caveat"]],
+               confidence=grade(found["coverage"], found["notes"], False))
     return out
 
 

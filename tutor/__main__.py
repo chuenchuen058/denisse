@@ -15,7 +15,8 @@
                           next -- into the vault's study progress note and the hub table
   consult QUESTION...     the tutor's opinion for another agent (part 5): answer, confidence,
   [--module M] [--json]   sources, caveats, who answered -- grounded in the vault, recorded in
-                          the Don area. --json prints the structured opinion. Exit 1 = no answer.
+  [--notes-only]          the Don area. --json prints the structured opinion. Exit 1 = no answer.
+                          --notes-only: no model call, the matching lines of the notes (not recorded).
 
 Every job first reads the rules note in the Don area (tutor/rules.py,
 tutor.json "rules"): its text goes into the model prompts, its Exams table
@@ -117,6 +118,7 @@ def main(argv=None, anki_client=None, calls=None, learner_core=None, checks=None
             s.add_argument("question", nargs="+")
             s.add_argument("--module", default="")
             s.add_argument("--json", action="store_true")
+            s.add_argument("--notes-only", action="store_true")
         elif name in ("anki-sync", "progress"):
             s.add_argument("module", nargs="?", default=None)
         else:
@@ -148,6 +150,10 @@ def _run(a, paths, anki_client, calls, learner_core, checks) -> int:
         # The specialist's opinion for another agent: synchronous, recorded in the vault,
         # never a failure for the caller -- an answer it couldn't give is said in the result.
         from . import consult
+        if a.notes_only:  # the quick path: no model, nothing recorded (it is not an opinion)
+            result = consult.from_notes(paths, " ".join(a.question), a.module)
+            print(json.dumps(result, ensure_ascii=False) if a.json else consult.render(result))
+            return 0 if consult.answered(result) else 1
         result = consult.consult(paths, " ".join(a.question), a.module, calls=calls)
         if consult.answered(result):
             try:
