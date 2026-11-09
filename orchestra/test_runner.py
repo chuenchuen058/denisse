@@ -22,6 +22,9 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE / "hooks"))
 import guard  # noqa: E402
+# Never a real window or toast from a test (orchestra/visible.py: the live window and toasts).
+os.environ["ORCHESTRA_LIVE_WINDOW"] = "false"
+os.environ["ORCHESTRA_TOASTS"] = "false"
 
 # Fake lane, steered by env vars: FAKE_RESULT (PASS/PARTIAL/FAIL/NONE), FAKE_HUMAN,
 # FAKE_SLEEP, FAKE_COMMIT, FAKE_STRAY (a path to write outside the worktree), FAKE_JUNK,

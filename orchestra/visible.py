@@ -1,0 +1,153 @@
+"""Visible runs: Chuen can see Orchestra working (9 Nov 2026: "I want to see Claude Code
+running, not just in the background, because I don't know if it's actually happening").
+
+    lane_started(task, cfg, review, log)           the live window (once) + a start toast
+    lane_finished(task, result, cfg, log)          a finish toast
+
+The live window is one console titled cfg["live_window_title"] running orchestra/watch.py.
+It is opened when a lane starts and no such window is open (its pid and creation time are
+kept in <review>/live_window.json), shown without taking focus, and never opened twice:
+one window, reused. Toasts go through orchestra/toast.ps1. Both are switches in
+config.json (live_window, toasts). Nothing here can stop a lane: every failure is one log
+line. Tests inject `spawn`, `alive` and `run`, so no real window or toast is ever made.
+"""
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+STATE_FILE = "live_window.json"
+CREATE_NEW_CONSOLE = 0x00000010
+CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+STARTF_USESHOWWINDOW = 0x00000001
+SW_SHOWNOACTIVATE = 4  # shown, but the window Chuen is typing in keeps the focus
+
+
+def console_python() -> str:
+    """The interpreter for a console child: python.exe beside a pythonw.exe runner."""
+    exe = Path(sys.executable)
+    if exe.stem.lower() == "pythonw":
+        twin = exe.with_name("python" + exe.suffix)
+        if twin.exists():
+            return str(twin)
+    return str(exe)
+
+
+def _fill(argv: list, **values) -> list[str]:
+    out = []
+    for a in argv:
+        a = str(a)
+        for k, v in values.items():
+            a = a.replace("{" + k + "}", str(v))
+        out.append(a)
+    return out
+
+
+def spawn_window(argv: list[str], env: dict) -> int:
+    """A new, visible console that does not take the focus, outside the runner's job (the
+    tick ending must not close it). Returns its pid."""
+    kw: dict = {"env": env, "stdin": subprocess.DEVNULL, "close_fds": True}
+    if os.name != "nt":
+        return subprocess.Popen(argv, start_new_session=True, **kw).pid
+    si = subprocess.STARTUPINFO()
+    si.dwFlags |= STARTF_USESHOWWINDOW
+    si.wShowWindow = SW_SHOWNOACTIVATE
+    try:
+        return subprocess.Popen(argv, creationflags=CREATE_NEW_CONSOLE | CREATE_BREAKAWAY_FROM_JOB,
+                                startupinfo=si, **kw).pid
+    except OSError:  # the job forbids breakaway
+        return subprocess.Popen(argv, creationflags=CREATE_NEW_CONSOLE, startupinfo=si, **kw).pid
+
+
+def _created(pid: int):
+    """0 if the process exists (creation time unknown), else None. The runner passes its own
+    proc_created instead, which also tells a reused pid apart."""
+    try:
+        from local_team.lease import pid_alive
+    except Exception:  # noqa: BLE001
+        return None
+    return 0 if pid_alive(pid) else None
+
+
+def window_open(review: Path, alive=None) -> bool:
+    """The window recorded in live_window.json is still running (same pid, same creation time)."""
+    alive = alive or _created
+    try:
+        data = json.loads((Path(review) / STATE_FILE).read_text(encoding="utf-8"))
+        pid, created = int(data["pid"]), data.get("created")
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    now = alive(pid)
+    if now is None:
+        return False
+    return created in (None, 0) or now in (0, created)  # 0: exists, creation time unreadable
+
+
+SPAWN = spawn_window   # what opens the window; tests replace it (never a real window in a test)
+RUN = subprocess.run   # what runs toast.ps1; tests replace it (never a real toast in a test)
+
+
+def ensure_window(cfg: dict, review: Path, repo: Path, log, spawn=None, alive=None) -> str:
+    """Open the live window unless it is off or already open. Returns opened / open / off /
+    failed. Never raises."""
+    try:
+        if not cfg.get("live_window"):
+            return "off"
+        if window_open(review, alive):
+            return "open"
+        argv = _fill(cfg["live_window_argv"], python=console_python(), watch=HERE / "watch.py",
+                     title=cfg["live_window_title"])
+        env = {**os.environ, "ORCHESTRA_REPO": str(repo)}
+        pid = (spawn or SPAWN)(argv, env)
+        created = (alive or _created)(pid)
+        Path(review).mkdir(parents=True, exist_ok=True)
+        (Path(review) / STATE_FILE).write_text(json.dumps({"pid": pid, "created": created}), encoding="utf-8")
+        log(f"LIVE window opened: {cfg['live_window_title']!r} pid={pid}")
+        return "opened"
+    except Exception as e:  # noqa: BLE001 -- seeing it is a convenience, never a reason to stop
+        try:
+            log(f"LIVE window not opened ({type(e).__name__}: {e})")
+        except Exception:  # noqa: BLE001
+            pass
+        return "failed"
+
+
+def toast(cfg: dict, text: str, log, run=None) -> bool:
+    """One Windows toast with `text`. False (and a log line) if it is off or fails. Never raises."""
+    if not cfg.get("toasts"):
+        return False
+    argv = _fill(cfg["toast_argv"], script=HERE / "toast.ps1", text=text)
+    try:
+        r = (run or RUN)(argv, capture_output=True, text=True, timeout=cfg["toast_timeout_s"],
+                                    stdin=subprocess.DEVNULL)
+        if r.returncode != 0:
+            log(f"TOAST failed (exit {r.returncode}): {' '.join((r.stderr or r.stdout or '').split())[-200:]}")
+            return False
+        return True
+    except Exception as e:  # noqa: BLE001
+        try:
+            log(f"TOAST failed ({type(e).__name__}: {e})")
+        except Exception:  # noqa: BLE001
+            pass
+        return False
+
+
+def lane_started(task, cfg: dict, review: Path, repo: Path, log, spawn=None, alive=None, run=None) -> None:
+    ensure_window(cfg, review, repo, log, spawn, alive)
+    try:
+        text = cfg["toast_started"].format(lane=task.lane, title=task.title, slug=task.slug)
+    except Exception:  # noqa: BLE001
+        return
+    toast(cfg, text, log, run)
+
+
+def lane_finished(task, result: str, cfg: dict, log, run=None) -> None:
+    try:
+        text = cfg["toast_finished"].format(lane=task.lane, title=task.title, slug=task.slug, result=result)
+    except Exception:  # noqa: BLE001
+        return
+    toast(cfg, text, log, run)
