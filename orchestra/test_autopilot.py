@@ -468,7 +468,17 @@ class PlannerTest(unittest.TestCase):
 
 class RunnerPartsTest(unittest.TestCase):
     """The runner side, in TR's throwaway git repo with its fake lane (no model calls)."""
-    setUp, tearDown, add, state = TR.RunnerTest.setUp, TR.RunnerTest.tearDown, TR.RunnerTest.add, TR.RunnerTest.state
+    add, state = TR.RunnerTest.add, TR.RunnerTest.state
+
+    def setUp(self):
+        # TR's setUp sets ORCHESTRA_* env vars for its own module; put them back afterwards, or
+        # test_config (which runs after this module) reads a 3 s timeout and 0 min backoff.
+        saved = dict(os.environ)
+        self.addCleanup(lambda: (os.environ.clear(), os.environ.update(saved)))
+        TR.RunnerTest.setUp(self)
+
+    def tearDown(self):
+        TR.RunnerTest.tearDown(self)
 
     def start_log(self):
         return [l for l in self.R.LOG_FILE.read_text(encoding="utf-8").splitlines() if " START " in l]
