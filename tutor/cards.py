@@ -13,6 +13,12 @@ Every card keeps the vault path of the note it came from, its module, week
 and topic, and a stable id built from (module, source, kind, position), so
 a re-sync to Anki updates a card instead of adding it twice.
 
+The writer also gives, per card, a quote from the note and the final
+answer (tutor.json cards.ground). A candidate of a grounded kind whose
+quote is not in the note, or of a kind with an answer_label that gives no
+answer, is dropped and counted before the check; a given answer is added
+to the back when the back leaves it out.
+
 Every card is then checked before it can reach Anki (tutor.json
 cards.check): the physics or maths right, the back answering the front,
 agreeing with the source note and belonging to the module. Topic maps and
@@ -143,9 +149,40 @@ def _other_topic(card: dict, scope: dict | None) -> bool:
     return bool(topic and topic in foreign and topic not in own)
 
 
+def _same(a, b) -> bool:
+    """`a` appears in `b`, ignoring case and spacing."""
+    def key(value):
+        return " ".join(str(value or "").casefold().split())
+    return bool(key(a)) and key(a) in key(b)
+
+
+def _screen(item: dict, kind: str, text: str) -> str:
+    """Why a written candidate is not worth checking ('' if it is): a
+    grounded kind must quote the note, a kind with an answer_label must
+    give its final answer. A field the writer left out entirely is not
+    screened (older replies and writers without the field)."""
+    spec, why = _C["kinds"][kind], _C["ground"]
+    if spec.get("ground") and "quote" in item and not backed_by(item.get("quote"), text):
+        return why["no_quote"]
+    if spec.get("answer_label") and "answer" in item and not _clip(item.get("answer"), _limit(kind, "back_chars")):
+        return why["no_answer"]
+    return ""
+
+
+def _with_answer(back: str, item: dict, kind: str) -> str:
+    """The back, ending with its final answer under the kind's label unless it already holds it."""
+    label = _C["kinds"][kind].get("answer_label")
+    answer = _clip(item.get("answer"), _limit(kind, "back_chars"))
+    if not label or not answer or _same(answer, back):
+        return back
+    return _clip(back + "\n" + label + answer, _limit(kind, "back_chars"))
+
+
 def generate(module: Module, src: sources.Source, calls: dict | None = None, num_ctx: int | None = None,
-             only: set | None = None, scope: dict | None = None) -> list:
-    """Candidates for one source; known foreign topics carry a held verdict for the sidecar."""
+             only: set | None = None, scope: dict | None = None, dropped: list | None = None) -> list:
+    """Candidates for one source; known foreign topics carry a held verdict for the sidecar.
+    Candidates screened out (no quote from the note, no final answer) go to
+    `dropped` as (kind, front, why) and are not returned."""
     by_engine = {}
     for kind, spec in _C["kinds"].items():
         if spec["count"] > 0 and (only is None or kind in only):
@@ -172,6 +209,12 @@ def generate(module: Module, src: sources.Source, calls: dict | None = None, num
             back = _clip(item.get("back"), _limit(kind, "back_chars"))
             if kind not in counts or not front or not back or counts[kind] >= _C["kinds"][kind]["count"]:
                 continue
+            why = _screen(item, kind, text)
+            if why:
+                if dropped is not None:
+                    dropped.append((kind, front, why))
+                continue
+            back = _with_answer(back, item, kind)
             counts[kind] += 1
             out.append({"id": card_id(module, src.rel, kind, counts[kind]), "kind": kind, "front": front,
                         "back": back,
@@ -420,6 +463,7 @@ def run(paths: Paths, module: Module, calls: dict | None = None, today: dt.date 
     made, kept, failed, held_all = [], [], [], []
     fresh = {}
     for src in found:
+        dropped = []
         digest = _hash(src.text)
         prev = deck["sources"].get(src.rel)
         earlier = (prev or {}).get("cards", []) + (prev or {}).get("held", [])
@@ -433,7 +477,7 @@ def run(paths: Paths, module: Module, calls: dict | None = None, today: dt.date 
             missing = [k for k in active_kinds() if k not in asked]
             if missing:
                 try:
-                    extra = generate(module, src, calls, num_ctx, only=set(missing), scope=scope)
+                    extra = generate(module, src, calls, num_ctx, only=set(missing), scope=scope, dropped=dropped)
                 except (model.ModelError, OSError) as exc:
                     failed.append((src.rel, str(exc)))
                     say(_SAY["cards_failed"].format(name=src.stem, why=exc))
@@ -444,7 +488,7 @@ def run(paths: Paths, module: Module, calls: dict | None = None, today: dt.date 
                     say(_SAY["cards_source"].format(status="made", name=src.stem, n=len(extra)))
         else:
             try:
-                written = generate(module, src, calls, num_ctx, scope=scope)
+                written = generate(module, src, calls, num_ctx, scope=scope, dropped=dropped)
             except (model.ModelError, OSError) as exc:
                 failed.append((src.rel, str(exc)))
                 say(_SAY["cards_failed"].format(name=src.stem, why=exc))
@@ -457,6 +501,10 @@ def run(paths: Paths, module: Module, calls: dict | None = None, today: dt.date 
                          "kinds_asked": active_kinds()}
                 made.append(src.rel)
                 say(_SAY["cards_source"].format(status="made", name=src.stem, n=len(written)))
+        if dropped:
+            whys = sorted({why for _k, _f, why in dropped})
+            say(_SAY["cards_dropped"].format(name=src.stem, n=len(dropped), why="; ".join(whys)))
+            entry["dropped"] = len(dropped)
         passed, held, counts = check(module, src, written, before, checks, num_ctx=num_ctx, scope=scope)
         if counts["reused"] < len(written):
             say(_SAY["cards_checked"].format(name=src.stem, **counts))
