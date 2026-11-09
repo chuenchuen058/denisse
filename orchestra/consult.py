@@ -180,10 +180,13 @@ def gpu_busy(repo: Path, rule: dict, cfg: dict) -> str | None:
     return None
 
 
-def wait_free(repo: Path, rule: dict, cfg: dict, busy=None, sleep=time.sleep, clock=time.monotonic) -> tuple:
+def wait_free(repo: Path, rule: dict, cfg: dict, busy=None, sleep=None, clock=None) -> tuple:
     """(why it is still busy, or None; seconds waited): poll until the GPU is free or
-    consult_busy_wait_s has passed."""
+    consult_busy_wait_s has passed. sleep/clock are looked up at call time, so a patched
+    time.monotonic is the clock this uses."""
     busy = busy or (lambda: gpu_busy(repo, rule, cfg))
+    sleep = sleep or time.sleep
+    clock = clock or time.monotonic
     start = clock()
     while True:
         why_busy = busy()

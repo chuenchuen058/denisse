@@ -1172,10 +1172,23 @@ SH = shutil.which("sh") or (r"C:\Program Files\Git\usr\bin\sh.exe" if os.name ==
 
 
 class PrePushTest(unittest.TestCase):
-    """orchestra/hooks/pre-push, installed by the runner into a temp main checkout."""
+    """orchestra/hooks/pre-push, installed by the runner into a temp main checkout.
+
+    Hermetic: the temp repos must not see the caller's git environment. A lane that runs this
+    suite can inherit GIT_DIR / GIT_INDEX_FILE (a hook, a sandboxed CLI), and a leaked
+    GIT_INDEX_FILE left `main` without a commit, so the push failed with "src refspec main does
+    not match any" (2026-11-09T1050, Copilot). Every GIT_* variable is dropped and the global and
+    system git config are ignored for the test, then restored."""
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
+        env = mock.patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        for k in [k for k in os.environ if k.upper().startswith("GIT_")]:
+            del os.environ[k]
+        (self.tmp / "gitconfig").write_text("", encoding="utf-8")
+        os.environ.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=str(self.tmp / "gitconfig"))
         self.repo = self.tmp / "repo"
         self.remote = self.tmp / "remote.git"
         self.wt = self.tmp / "repo-wt" / "task-1"
@@ -1234,9 +1247,11 @@ class PrePushTest(unittest.TestCase):
 
     def test_push_from_the_main_checkout_is_allowed(self):
         self.R.install_pre_push()
+        head = self.git(self.repo, "rev-parse", "main").stdout.strip()
         r = self.git(self.repo, "push", "origin", "main", env=self.env())
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("main", self.git(self.remote, "branch").stdout)
+        self.assertEqual(self.git(self.remote, "rev-parse", "--verify", "refs/heads/main").stdout.strip(), head,
+                         "the remote's main is the main checkout's commit")
 
     def test_main_checkout_with_the_env_var_set_is_refused(self):
         self.R.install_pre_push()

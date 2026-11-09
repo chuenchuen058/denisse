@@ -292,7 +292,8 @@ class LocalTeamTest(unittest.TestCase):
         self.assertEqual(self.fake.chats(), [])
 
     def test_skips_cleanly_when_ollama_is_down_or_model_missing_or_gpu_busy(self):
-        down = core.Ctx(self.repo, ollama="http://127.0.0.1:9")
+        # port 0: refused at once; a refused port (:9) costs ~2s per try on Windows
+        down = core.Ctx(self.repo, ollama="http://127.0.0.1:0")
         with self.assertRaises(core.Skip):
             core.ready(down)
         self.fake.models = ["qwen2.5:7b"]
@@ -316,7 +317,7 @@ class LocalTeamTest(unittest.TestCase):
                 with self.assertRaisesRegex(core.Skip, "GPU 90% busy"):
                     core.ready(self.ctx)
             self.assertEqual(slept.call_count, 2)
-        with mock.patch.dict(os.environ, {"OLLAMA_HOST_URL": "http://127.0.0.1:9"}):
+        with mock.patch.dict(os.environ, {"OLLAMA_HOST_URL": "http://127.0.0.1:0"}):
             self.assertEqual(cli.main(["scout", "--repo", str(self.repo)]), 0)
         self.assertIn("scout: skipped", (self.repo / ".review" / "local_team" / "producer.log").read_text("utf-8"))
         self.assertEqual(self.fake.chats(), [])
