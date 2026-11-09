@@ -44,6 +44,7 @@ FIXTURES = [
     (ROOT / "scripts", "test_nightly_chat_import.NightlyChatImportTest.test_commit_stages_only_new_notes_and_state"),
     (ROOT / "scripts", "test_standing_instructions.ToolTests.test_project_snapshot_is_read_only_in_a_real_temporary_repo"),
     (ROOT, "atrium.test_digest.DigestTest.test_only_the_two_notes_are_committed"),
+    (ROOT, "atrium.test_cursors.CursorsTest.test_nothing_is_written"),
     (ROOT, "keats.test_pull.PullTests.test_git_handoff_and_owned_files_preserve_staged_work"),
     (ROOT, "tutor.test_don.GitTests.test_every_write_committed_only_its_files"),
 ]
