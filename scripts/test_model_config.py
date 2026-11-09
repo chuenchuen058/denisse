@@ -113,7 +113,7 @@ class ConfigFile(unittest.TestCase):
     def test_demo_report_uses_reported_model_then_config(self):
         import report
         data = {"machine": {"model": "reported-by-run:2b"}, "git": {}, "parts": {}}
-        res = Path(tempfile.gettempdir()) / "results.json"
+        res = Path(tempfile.mkdtemp()) / "results.json"  # own folder: report.previous() reads its siblings
         with patch.dict(os.environ, self.env, clear=True):
             self.assertIn("ollama pull reported-by-run:2b", report.render(data, res))
             data["machine"] = {}
