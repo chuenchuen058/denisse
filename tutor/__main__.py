@@ -17,6 +17,12 @@
   [--module M] [--json]   sources, caveats, who answered -- grounded in the vault, recorded in
                           the Don area. --json prints the structured opinion. Exit 1 = no answer.
 
+Every job first reads the rules note in the Don area (tutor/rules.py,
+tutor.json "rules"): its text goes into the model prompts, its Exams table
+scopes Anki and the quizzes. A module whose cards never reached Anki is
+synced first; `cards` ends with an anki-sync; ingest and cards take the
+local-model lock; each batch job writes one line in the day's Handoff note.
+
 Every command takes --vault PATH and --state DIR (the old private state
 folder, read until its files are moved into the vault). Every vault write is
 committed in the vault's own git repo, only the files written.
@@ -28,7 +34,7 @@ import argparse
 import json
 import sys
 
-from . import anki, cards, conf, don, ingest, progress, topics
+from . import anki, cards, conf, don, ingest, progress, rules, topics
 from .conf import CONFIG
 
 CHAT_COMMANDS = ("explain", "quiz", "weak", "exam", "mark")
@@ -48,6 +54,53 @@ def _module(paths, text):
     if module is None:
         print(CONFIG["say"]["no_module"].format(text=text, modules=", ".join(m.title for m in modules) or "-"))
     return module
+
+
+def _anki_word(slug: str, out: dict) -> str:
+    h = CONFIG["rules"]["handoff"]
+    if not CONFIG["anki"]["connect"]["enabled"]:
+        return h["anki_off"]
+    return h["synced"] if slug in out.get("synced", {}) else h["unsynced"]
+
+
+def _sync(paths, modules, client, learner_core, say=print, commit=True) -> dict:
+    """anki-sync for `modules` (None: every one); a module whose cards
+    didn't reach Anki is recorded as unsynced, one that did is cleared.
+    commit=False leaves the files in out["touched"] for the caller's commit."""
+    out = anki.run(paths, modules, client=client, learner_core=learner_core, say=say)
+    touched = list(out["touched"])
+    if rules.on("sync_after_cards") and CONFIG["anki"]["connect"]["enabled"]:
+        missed = [slug for slug in out["decks"] if slug not in out["synced"]]
+        changed = rules.mark_synced(paths, list(out["synced"]), missed)
+        if changed:
+            touched.append(changed)
+    out["touched"] = touched
+    if commit:
+        don.commit(paths, touched, "anki", say=say)
+    return out
+
+
+def _sync_pending(paths, client, learner_core, say=print) -> None:
+    """The modules left unsynced last time, synced before this job when
+    AnkiConnect answers."""
+    c = CONFIG["rules"]["sync_after_cards"]
+    if not rules.on("sync_after_cards") or not CONFIG["anki"]["connect"]["enabled"]:
+        return
+    slugs = rules.pending(paths)
+    if not slugs:
+        return
+    client = client or anki.Connect()
+    ok, _why = client.reachable()
+    if not ok:
+        say(c["say_still"].format(n=len(slugs)))
+        return
+    say(c["say_pending"].format(n=len(slugs)))
+    mods = [m for m in conf.modules(paths) if m.slug in slugs]
+    gone = [s for s in slugs if s not in {m.slug for m in mods}]
+    if gone:
+        rules.mark_synced(paths, gone, [])
+    if mods:
+        _sync(paths, mods, client, learner_core, say=say)
 
 
 def main(argv=None, anki_client=None, calls=None, learner_core=None, checks=None) -> int:
@@ -78,6 +131,19 @@ def main(argv=None, anki_client=None, calls=None, learner_core=None, checks=None
     except (AttributeError, ValueError):
         pass
     paths = _paths(a)
+    rules.load(paths, say=lambda line: print(line, file=sys.stderr))  # a log line, never in the output
+    if a.cmd not in CONFIG["rules"]["sync_after_cards"]["not_before"] and not getattr(a, "dry", False):
+        _sync_pending(paths, anki_client, learner_core)
+    try:
+        with rules.batch_lock(paths, a.cmd):
+            return _run(a, paths, anki_client, calls, learner_core, checks)
+    except rules.Busy as busy:
+        print(busy.line)
+        rules.handoff(paths, "busy", command=a.cmd)
+        return 1
+
+
+def _run(a, paths, anki_client, calls, learner_core, checks) -> int:
     if a.cmd == "consult":
         # The specialist's opinion for another agent: synchronous, recorded in the vault,
         # never a failure for the caller -- an answer it couldn't give is said in the result.
@@ -110,6 +176,9 @@ def main(argv=None, anki_client=None, calls=None, learner_core=None, checks=None
             don.commit(paths, moved, "migrate")
         out = ingest.run(paths, call=(calls or {}).get("local"), apply=not a.dry)
         don.commit(paths, out["touched"], "ingest")
+        if not a.dry:
+            rules.handoff(paths, "ingest", notes=len(out["notes"]), incomplete=len(out["incomplete"]),
+                          unchanged=len(out["unchanged"]), failed=len(out["failed"]))
         return 1 if out["failed"] else 0
     if a.cmd == "topics":
         module = _module(paths, a.module)
@@ -128,8 +197,16 @@ def main(argv=None, anki_client=None, calls=None, learner_core=None, checks=None
         module = _module(paths, a.module)
         if module is None:
             return 1
+        rules.check_kinds()
         out = cards.run(paths, module, calls=calls, checks=checks)
-        don.commit(paths, out["touched"], "cards", module)
+        synced, touched = {}, list(out["touched"])
+        if rules.on("sync_after_cards") and out["cards"]:
+            synced = _sync(paths, [module], anki_client, learner_core, commit=False)
+            touched += [f for f in synced["touched"] if f not in touched]
+        don.commit(paths, touched, "cards", module)  # one job, one commit
+        rules.handoff(paths, "cards", module=module.title, cards=len(out["cards"]), made=len(out["made"]),
+                      held=len(out["held"]), synced=_anki_word(module.slug, synced) if synced
+                      else CONFIG["rules"]["handoff"]["not_synced"])
         return 1 if out["failed"] and not out["cards"] else 0
     modules = None
     if a.module:
@@ -140,9 +217,18 @@ def main(argv=None, anki_client=None, calls=None, learner_core=None, checks=None
     if a.cmd == "progress":
         out = progress.run(paths, modules, learner_core=learner_core)
         don.commit(paths, out["touched"], "progress")
+        rules.handoff(paths, "progress", n=len(out["records"]))
         return 0
-    out = anki.run(paths, modules, client=anki_client, learner_core=learner_core)
-    don.commit(paths, out["touched"], "anki")
+    out = _sync(paths, modules, anki_client, learner_core)
+    h = CONFIG["rules"]["handoff"]
+    rules.handoff(paths, "anki-sync",
+                  modules=CONFIG["note"]["list_sep"].join(m.title for m in modules) if modules else h["all_modules"],
+                  added=sum(v["added"] for v in out["synced"].values()),
+                  updated=sum(v["updated"] for v in out["synced"].values()),
+                  suspended=sum(v["suspended"] for v in out["scoped"].values()),
+                  unsuspended=sum(v["unsuspended"] for v in out["scoped"].values()),
+                  synced=h["anki_off"] if not CONFIG["anki"]["connect"]["enabled"]
+                  else h["synced"] if out["reachable"] else h["unsynced"])
     return 0
 
 

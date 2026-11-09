@@ -580,7 +580,11 @@
         "update_fields": "updateNoteFields",
         "find_cards": "findCards",
         "cards_info": "cardsInfo",
-        "are_due": "areDue"
+        "are_due": "areDue",
+        "suspend": "suspend",
+        "unsuspend": "unsuspend",
+        "add_tags": "addTags",
+        "remove_tags": "removeTags"
       }
     }
   },
@@ -953,5 +957,76 @@
       "unreviewed": "Start reviewing {n} topic(s) never reviewed in Anki: {topics}.",
       "uncarded": "Make cards for {n} topic(s) with none: {topics} -- `python -m tutor cards {module}`."
     }
+  },
+  "_help_rules": "rules (tutor/rules.py): Chuen's own rules note in the Don area (note, his to edit) is read at the start of every python -m tutor job and every chat tool call. Its judgement rules go into the model prompts as the note's own text: prompts maps a prompt (cards = card writing, check = card check, quiz = quiz marking, exam = exam questions and marking, explain = lessons) to the note's ## section headings it gets; a heading that isn't in the note gives the whole note instead, so a renamed section is never dropped silently. Its text is capped at prompt_chars, and the source text a card prompt carries is shortened by as much so the context still fits. No note, or one that can't be read: the defaults, said once. The machinery each rule needs has its own switch (enabled, default on): exam_scope parses the note's Exams table (the column whose header holds each word in columns; weeks like '1-5' or '1, 3'; a date in date_formats, else undated) -- while an exam is ahead (or undated, undated_active), its module's Anki cards from weeks outside its scope are suspended and tagged (tag, after-<exam slug>), quizzes and exam questions stay inside it, and once the date is past (or the row is gone) the cards Don suspended are unsuspended and untagged; cards he suspended himself have no such tag and are never touched. sync_after_cards: cards ends with an anki-sync of that module when AnkiConnect answers, else the module is written to file as unsynced and the next tutor job syncs it first (not before the commands in not_before: their output is read by other programs, or they sync anyway). exam_style_kinds: cards says once per run if a kind in kinds is off in cards.kinds. lock: commands that run the local model in batch take one lock per vault (file, in the system temp folder); a second waits up to wait_s, polling every poll_s, then exits with one line; a lock older than stale_s or whose process is gone is taken over. not_ours_once: a Don file that turns out to be his is said once per file, not every run. handoff: one line per job in commands, into the day's Handoff note through atrium.handoff (agent tag agent). weak_topics: explain and exam questions with no topic take the weakest Anki topic in scope.",
+  "rules": {
+    "note": "{tutor} - Rules.md",
+    "heading": "^##\\s+(.+?)\\s*#*\\s*$",
+    "table_row": "^\\s*\\|(.*)\\|\\s*$",
+    "table_rule": "^[\\s|:-]+$",
+    "prompts": {
+      "cards": ["Cards"],
+      "check": ["Cards"],
+      "quiz": ["Cards", "Reporting"],
+      "exam": ["Cards", "Reporting"],
+      "explain": ["Reporting"]
+    },
+    "prompt_chars": 2500,
+    "prompt_block": "\n\nCHUEN'S STANDING RULES (his own note '{note}'; follow every one that applies to this job, and where one conflicts with the instructions above, the rule wins):\n{rules}\n",
+    "missing": "{tutor}: no rules note read at {path} ({why}); running with the defaults",
+    "missing_why": "not there",
+    "exam_scope": {
+      "enabled": true,
+      "columns": {"exam": "exam", "module": "module", "weeks": "weeks", "date": "date"},
+      "week_range": "(\\d+)\\s*[-–—]\\s*(\\d+)",
+      "week_number": "\\d+",
+      "date_formats": ["%Y-%m-%d", "%d %B %Y", "%d %b %Y", "%A %d %B %Y", "%d/%m/%Y"],
+      "date_find": "\\d{4}-\\d{2}-\\d{2}|\\d{1,2}/\\d{1,2}/\\d{4}|(?:[A-Za-z]+\\s+)?\\d{1,2}\\s+[A-Za-z]+\\s+\\d{4}",
+      "undated_active": true,
+      "tag": "after-{exam_slug}",
+      "say_scope": "  exam scope   {deck}: {suspended} card(s) suspended outside {exams}, {unsuspended} back in",
+      "say_undated": "  exam scope   {exam} ({module}) has no date in the rules note yet: its out-of-scope cards stay suspended until one is added",
+      "say_unknown_module": "  exam scope   {exam}: no module called '{module}' in the vault; row ignored"
+    },
+    "sync_after_cards": {
+      "enabled": true,
+      "file": "unsynced.json",
+      "not_before": ["consult", "topics", "anki-sync"],
+      "say_pending": "  anki         {n} module(s) left unsynced last time: syncing them first",
+      "say_still": "  anki         {n} module(s) still unsynced (AnkiConnect not answering); tried again next run"
+    },
+    "exam_style_kinds": {
+      "enabled": true,
+      "kinds": ["problem", "tutorial"],
+      "say_off": "  rules        exam-style card kind '{kind}' is off in tutor.json cards.kinds; the rules note asks for it every week"
+    },
+    "lock": {
+      "enabled": true,
+      "commands": ["ingest", "cards"],
+      "file": "denisse-tutor-{vault_hash}.lock",
+      "wait_s": 900,
+      "poll_s": 15,
+      "stale_s": 21600,
+      "say_wait": "{tutor}: another local-model job ({command}, pid {pid}) is running; waiting up to {wait_s}s",
+      "say_busy": "{tutor}: another local-model job ({command}, pid {pid}) is still running; {this} not started, run it again later"
+    },
+    "not_ours_once": {"enabled": true, "state_key": "said_not_ours"},
+    "handoff": {
+      "enabled": true,
+      "agent": "{tutor_slug}",
+      "commands": {
+        "ingest": "ingest: {notes} lecture note(s) written ({incomplete} incomplete), {unchanged} unchanged, {failed} failed",
+        "cards": "cards {module}: {cards} checked card(s), {made} note(s) read, {held} held back; Anki: {synced}",
+        "anki-sync": "anki-sync {modules}: {added} added, {updated} updated; {suspended} suspended for the exam, {unsuspended} back; Anki: {synced}",
+        "progress": "progress: {n} module(s) updated",
+        "busy": "{command}: not started, another local-model job was running"
+      },
+      "synced": "synced",
+      "unsynced": "unsynced, synced next run",
+      "anki_off": "off",
+      "not_synced": "not synced (no checked cards, or sync_after_cards off)",
+      "all_modules": "all modules"
+    },
+    "weak_topics": {"enabled": true}
   }
 }

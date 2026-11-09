@@ -22,7 +22,7 @@ import logging
 import os
 import threading
 
-from . import conf, consult as consult_, don, exam, model, teach
+from . import conf, consult as consult_, don, exam, model, rules, teach
 from .conf import CONFIG, Module, Paths
 
 _C = CONFIG["chat"]
@@ -38,7 +38,13 @@ _jobs: list = []             # the threads started, so a test can join them
 
 
 def _paths() -> Paths:
-    return PATHS if PATHS is not None else conf.paths()
+    """The vault, with its rules note read (rules.load: again only when it changed)."""
+    paths = PATHS if PATHS is not None else conf.paths()
+    try:
+        rules.load(paths)
+    except Exception as exc:  # noqa: BLE001 -- no rules is the defaults, never a failed tool
+        _say(str(exc))
+    return paths
 
 
 def _say(line: str) -> None:
@@ -149,6 +155,7 @@ def explain(topic: str, module: str = "") -> str:
     mod, line = _resolve(paths, module, topic)
     if mod is None:
         return line
+    topic = topic or rules.weakest(paths, mod, today)  # no topic asked: the weakest one in Anki
     c = _ctx(mod, topic=topic)
     try:
         out = teach.explain(paths, mod, topic, calls=CALLS, core=CORE)

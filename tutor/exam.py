@@ -19,7 +19,7 @@ import glob
 import os
 import random
 
-from . import cards, don, extract, model, sources, teach
+from . import cards, don, extract, model, rules, sources, teach
 from .conf import CONFIG, Module, Paths
 
 _Q = CONFIG["quiz"]
@@ -65,7 +65,8 @@ def pick_quiz(paths: Paths, module: Module, topic: str = "", n: int | None = Non
     Anki stats, then due ones, then the rest), a random pick within each."""
     n = n or _Q["questions"]
     rng = rng or random.Random()
-    pool = cards.all_cards(cards.load(paths, module))
+    weeks = rules.scope_weeks(paths, module)  # an exam ahead: the quiz stays inside its weeks
+    pool = [c for c in cards.all_cards(cards.load(paths, module)) if rules.in_scope(c, weeks)]
     tw = teach._words(topic)
     if tw:
         pool = [c for c in pool if tw <= teach._words(c.get("topic", "")) or tw <= teach._words(c["front"])]
@@ -98,7 +99,7 @@ def mark_quiz(module: Module, item: dict, answer: str, calls: dict | None = None
     """{right, asked, results: [{n, front, back, correct|None, comment}]}."""
     c = don.ctx(module)
     items = "\n".join(_Q["mark_item"].format(**card) for card in item["cards"])
-    system = _Q["mark_system"].format(**c)
+    system = _Q["mark_system"].format(**c) + rules.block("quiz")
     user = _Q["mark_user"].format(items=items, answer=answer, schema=_Q["mark_schema"], **c)
     data = cards._ask(cards.engine_call(_Q["mark_engine"], calls), system, user, _Q["mark_schema"])
     verdicts = {}
@@ -162,6 +163,7 @@ def set_exam(paths: Paths, module: Module, topic: str = "", calls: dict | None =
     today = today or dt.date.today()
     c = don.ctx(module)
     style, names = style_text(module)
+    topic = topic or rules.weakest(paths, module, today)  # no topic asked: what Anki says he keeps losing
     if topic:
         found = teach.material(paths, module, topic, num_ctx)
         material = found["text"]
@@ -169,13 +171,15 @@ def set_exam(paths: Paths, module: Module, topic: str = "", calls: dict | None =
         found = {"text": "", "links": []}
         material = ""
         # No topic: the latest tutor note, so the problem is on what he is doing now.
-        tutor_notes = [s for s in sources.collect(paths, module) if s.kind == CONFIG["sources"]["tutor"] and s.week]
+        weeks = rules.scope_weeks(paths, module, today)
+        tutor_notes = [s for s in sources.collect(paths, module) if s.kind == CONFIG["sources"]["tutor"] and s.week
+                       and (weeks is None or s.week in weeks)]
         if tutor_notes:
             latest = max(tutor_notes, key=lambda s: s.week)
             material = latest.text[:CONFIG["teach"]["note_chars"]]
             found["links"] = [latest.link]
     limit = int(model.chunk_chars(num_ctx) * CONFIG["teach"]["material_share"])
-    system = _X["system"].format(**c)
+    system = _X["system"].format(**c) + rules.block("exam")
     user = _X["user"].format(topic=_X["topic_line"].format(topic=topic) if topic else "",
                              style=style or _X["style_none"], marks=_X["marks"], schema=_X["schema"],
                              material=material[:limit], **c)
@@ -192,7 +196,7 @@ def set_exam(paths: Paths, module: Module, topic: str = "", calls: dict | None =
 def mark_prompt(module: Module, item: dict, answer: str) -> tuple:
     c = don.ctx(module)
     scheme = "\n".join(_X["mark_scheme_line"].format(**s) for s in item["mark_scheme"])
-    system = _X["mark_system"].format(**c)
+    system = _X["mark_system"].format(**c) + rules.block("exam")
     user = _X["mark_user"].format(title=item["title"], total=item["marks"], question=item["question"],
                                   scheme=scheme, answer=answer, schema=_X["mark_schema"], **c)
     return system, user

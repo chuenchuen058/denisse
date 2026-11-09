@@ -21,7 +21,7 @@ from __future__ import annotations
 import datetime as dt
 import os
 
-from . import cards, conf, don, model, notes, sources, topics
+from . import cards, conf, don, model, notes, rules, sources, topics
 from .conf import CONFIG, Module, Paths
 
 _T = CONFIG["teach"]
@@ -151,7 +151,7 @@ def self_check(lesson: dict) -> bool:
 
 def prompt(module: Module, topic: str, found: dict, core=None) -> tuple:
     c = don.ctx(module)
-    system = _T["system"].format(**c)
+    system = _T["system"].format(**c) + rules.block("explain")
     weeks = _T["weeks"].format(weeks=_N["list_sep"].join(map(str, found["weeks"]))) if found["weeks"] else ""
     user = _T["user"].format(topic=topic, weeks=weeks, learner=learner_lines(core), schema=_T["schema"],
                              text=found["text"], **c)
