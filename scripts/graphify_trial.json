@@ -1,0 +1,12 @@
+{
+  "_about": "Classification data for scripts/graphify_trial.py (the Graphify re-read measurement). Edit here, not in the script.",
+  "code_extensions": [".py", ".js", ".ts", ".html", ".css", ".ps1", ".cmd", ".toml", ".cfg", ".ini"],
+  "non_code_dirs": [".review", "docs", "eval/fixtures"],
+  "read_tools": ["Read"],
+  "search_tools": ["Grep", "Glob"],
+  "edit_tools": ["Edit", "Write", "NotebookEdit"],
+  "shell_tools": ["Bash", "PowerShell"],
+  "shell_read_verbs": ["cat", "head", "tail", "sed", "grep", "rg", "find", "ls", "awk", "type", "Get-Content", "Select-String", "git show", "git grep", "wc"],
+  "shell_neutral_prefixes": ["cd ", "cd", "echo", "for ", "do ", "do", "done", "fi", "then", "else", "if ", "true", "printf"],
+  "chars_per_token": 4.0
+}
