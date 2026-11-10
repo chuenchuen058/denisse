@@ -355,10 +355,10 @@ def _real_ollama(fn) -> bool:
     return getattr(fn, "__self__", None) is getattr(ollama, "_client", object())
 
 
-def _call(kind: str, job: str | None, kw: dict, timeout: float | None):
+def _call(kind: str, job: str | None, kw: dict, timeout: float | None, api=None):
     import ollama
     cfg = config()
-    fn = getattr(ollama, kind)
+    fn = getattr(api if api is not None else ollama, kind)
     if kind != "embed" or "options" in kw:
         kw["options"] = options(kw.get("model"), kw.get("options"), kind, cfg)
     if kind != "embed":
@@ -376,17 +376,18 @@ def _call(kind: str, job: str | None, kw: dict, timeout: float | None):
     return _guarded(job, kind, t, lambda: getattr(client, kind)(**kw), cfg=cfg)
 
 
-def chat(*, job: str | None = None, timeout: float | None = None, **kw):
-    """ollama.chat, through the shared path."""
-    return _call("chat", job, kw, timeout)
+def chat(*, job: str | None = None, timeout: float | None = None, api=None, **kw):
+    """ollama.chat, through the shared path. `api`: the caller's own ollama (module or
+    stand-in), looked up at call time so a test that swaps it is still obeyed."""
+    return _call("chat", job, kw, timeout, api)
 
 
-def generate(*, job: str | None = None, timeout: float | None = None, **kw):
-    return _call("generate", job, kw, timeout)
+def generate(*, job: str | None = None, timeout: float | None = None, api=None, **kw):
+    return _call("generate", job, kw, timeout, api)
 
 
-def embed(*, job: str | None = None, timeout: float | None = None, **kw):
-    return _call("embed", job, kw, timeout)
+def embed(*, job: str | None = None, timeout: float | None = None, api=None, **kw):
+    return _call("embed", job, kw, timeout, api)
 
 
 def _real_urlopen(fn) -> bool:

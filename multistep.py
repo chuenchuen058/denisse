@@ -213,7 +213,7 @@ def make_plan(request: str, chat=None) -> list | None:
     None (answer as one turn) only if the model can't be reached or there
     are not 2-5 parts. Never raises."""
     import brain
-    chat = chat or functools.partial(brain.local_llm.chat, job=brain.LLM_JOB)
+    chat = chat or functools.partial(brain.local_llm.chat, job=brain.LLM_JOB, api=brain.ollama)
     parts = action_parts(request)
     numbered = "\n".join(f"{i}. {p}" for i, p in enumerate(parts, 1))
     try:
