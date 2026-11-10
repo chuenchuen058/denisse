@@ -33,7 +33,10 @@ PRIVATE_PATHS = re.compile(
     re.I)
 # Strings in added lines that look like keys or tokens.
 SECRET_TEXT = re.compile(
-    r"(sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AIza[0-9A-Za-z_-]{30,}"
+    # sk- only at the start of a word: "task-battery-override-on-request" (a task slug, in a
+    # worktree path) is not a key, yet it blocked a push-bound diff and was redacted from an
+    # imported chat (9 Nov 2026, atrium/test_import_chats.py failed in that task's worktree).
+    r"((?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AIza[0-9A-Za-z_-]{30,}"
     r"|xox[abp]-[A-Za-z0-9-]{20,}"
     # a PEM header only counts when real key material follows (on the next added line);
     # a bare header in a test fixture is not a key (false alarm on 2 Nov 2026).
