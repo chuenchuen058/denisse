@@ -264,6 +264,15 @@ After the runner's own gate re-run passes, two more steps stand between a PASS a
 
 State keeps per task `review` (verdict, reasons, why, seconds, spent) and `integration` (base, commit, checks, tries).
 
+## Master's own health (`master_health.py`)
+
+Every gate includes `run_checks.py --fast`, so one test red on master used to make every session PARTIAL whatever it worked on (4 Nov 2026: 6 tasks; 5 Nov: 7; audit 10 Nov, H1). The runner now keeps `.review/master_health.json`: per master commit, whether the baseline (`master_health_baseline`, default `hub_queue_default_gate`) is green, red (with the modules that did not pass, read from run_checks' own `--- <module> (FAIL, exit 1) ---` lines; the tail if none match) or broken (timed out: holds nothing).
+
+- **When it runs.** A tick that finds master at a commit with no record starts the baseline in a detached worktree `master-health-<commit>` (venv linked, removed after) as a hidden background process, like the exams: lock `.review/master_health.lock`, one at a time, never on battery or while paused, no lane slot, the tick never waits. Not checked yet counts as green. After a fast-forward, the commit the combined tree just tested is recorded green without a second run (its checks included `run_checks --fast: pass`). Log: `MASTER CHECK started ...` / `MASTER CHECK <commit>: red after 70s: <modules>`.
+- **While master is red.** Every task whose `Kind:` is not in `bugfix_kinds` waits with "master is red: <modules>"; one `MASTER RED` line per 30 min; STATE NOW says so. If no `Queue: auto` bug fix is queued, one urgent bug-fix task naming the commit and modules is written through `new_task.create()` (From: `master-health`), once per red commit.
+- **Park reasons.** A task parked from a branch whose base commit was red says so; if the runner's own gate failed only on those modules, it adds that the branch is not at fault.
+- Run by hand: `.venv\Scripts\python.exe orchestra\master_health.py --commit <sha>`. `master_health: false` turns it all off.
+
 ## Conflict-aware dispatch and merge follow-ups
 
 On 2 Nov 2026, with 3 Claude slots and Codex running at once, six PASSes could not be merged (merge conflicts, or a red combined tree because both sides had changed `eval/cases.py`, `orchestra/README.md`, `orchestra/config.json` ...) and each needed a person to queue a merge-only task. `orchestra/conflicts.py` now does three things, through small hooks in `runner.py`. Every value is a `conflict_*` key in `config.json`.

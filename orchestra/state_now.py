@@ -68,6 +68,10 @@ def build() -> str:
                            + (f" (tasks fall back to {fb} unless Lane-Fixed)" if fb else ""))
     out += ["**Limited lanes:** " + ("; ".join(limited) or "none"), ""]
 
+    master = R.master_health.state_line(R)  # red master holds every task but bug fixes (audit 10 Nov, H1)
+    if master:
+        out += [master, ""]
+
     try:
         import power
         out += ["**Power:** " + power.describe(power.power_status(), R.C), ""]
