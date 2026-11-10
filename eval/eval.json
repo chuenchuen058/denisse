@@ -1,0 +1,32 @@
+{
+  "_about": "Limits for eval/run_eval.py and eval/run_scheduled.ps1 (AGENTS.md Rule 0: no limits buried in code). Added 2026-11-10 after the 8 and 9 Nov nightly runs: the GPU was 98-100% busy before the first case (compare_tutor_models.py and other local jobs that don't take the gpu.lease), one case took 2763 s, and Task Scheduler killed the 9 Nov run at its 1-hour limit (result 267014, 0x41306).",
+  "gpu": {
+    "_about": "Before the first case: take the shared .review/gpu.lease (waiting lease_wait_s, polling lease_poll_s; held for at most lease_ttl_s), then wait up to quiet_wait_s for nvidia-smi to read under busy_pct on quiet_samples readings in a row, quiet_poll_s apart -- a job that doesn't take the lease still shows up there. Still busy (or the lease still held) means the run is deferred, not run noisy: exit_codes.deferred, and the scheduled script books a retry. --force runs anyway and the report is marked noisy. busy_pct is also the 'Noisy run' line's limit; DENISSE_EVAL_GPU_BUSY_PCT still overrides it.",
+    "busy_pct": 30,
+    "lease_wait_s": 300,
+    "lease_poll_s": 5,
+    "lease_ttl_s": 3600,
+    "quiet_wait_s": 600,
+    "quiet_poll_s": 10,
+    "quiet_samples": 2
+  },
+  "_case_timeout_s": "One case's whole model time. Every ollama.chat call in the case gets the time left as its HTTP timeout, and no new call starts past it, so a case stuck behind someone else's model job fails as 'timed out' instead of eating the night. The slowest case on a quiet GPU took 15 s (tutor_explain_convolution, 6-7 Nov).",
+  "case_timeout_s": 120,
+  "_run_budget_s": "The whole run, from process start, lease and quiet waits included. Cases not started by then are reported as not run. Must fit inside the scheduled task's limit (scheduled.task_limit_s) with ollama_wait_min on top; a quiet full run takes about 7 minutes (425-435 s wall, 6-7 Nov).",
+  "run_budget_s": 2700,
+  "exit_codes": {
+    "_about": "deferred: not a run -- the GPU stayed busy, the lease stayed held, or the laptop is on battery. Same code the lease gate always used, so run_pass_k and eval_time_parse read it the same way.",
+    "deferred": 3
+  },
+  "_run_on_battery": "The battery rule (9 Nov 2026): no eval on battery. The task is AC-only in Task Scheduler too; this also covers the logon trigger, retries and hand runs. --force overrides. Power is read by orchestra/power.py (ORCHESTRA_POWER overrides it in tests).",
+  "run_on_battery": false,
+  "scheduled": {
+    "_about": "run_scheduled.ps1. task_limit_s is the 'Denisse Eval' task's ExecutionTimeLimit as found on 2026-11-10 (PT1H); a retry task is registered with the same limit, AC only. ollama_wait_min + run_budget_s must stay under it. A deferred run books one retry retry_after_min later, at most max_retries_per_day a day (counted in retry_state, under the repo).",
+    "task_limit_s": 3600,
+    "ollama_wait_min": 10,
+    "retry_after_min": 60,
+    "max_retries_per_day": 3,
+    "retry_task_name": "Denisse Eval (retry)",
+    "retry_state": "eval/retry_state.json"
+  }
+}

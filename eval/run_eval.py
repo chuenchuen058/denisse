@@ -19,9 +19,13 @@ the thing it measures is worse than no eval.
     .venv\\Scripts\\python.exe eval\\run_eval.py --changed-only master   # quick check
 
 A run takes the shared GPU lease first and does not start while another
-local model job holds it (exit 3; --force overrides). The GPU's load is
-sampled before the first case and a busy GPU marks the report noisy. Every
-report ends with where the time went -- see eval/speed.py.
+local model job holds it; it then waits for nvidia-smi to read quiet, since
+not every job takes the lease. Still busy, or on battery, the run is
+deferred (exit 3, nothing filed; run_scheduled.ps1 books a retry) instead of
+producing a noisy report; --force runs anyway. Each case has a time limit
+and the run a budget, so one stuck case can't eat the night. The limits are
+eval/eval.json. Every report ends with where the time went -- see
+eval/speed.py.
 """
 
 import argparse
@@ -38,6 +42,9 @@ sys.path.insert(0, str(ROOT))
 
 from eval import speed  # noqa: E402
 from eval.cases import CASES, LEAKS, MISHEARD, POSIX_LEAKS, ROBOTIC  # noqa: E402
+
+CFG = speed.eval_config()  # eval/eval.json: the lease, quiet-GPU, timeout and budget limits
+DEFERRED = CFG["exit_codes"]["deferred"]
 
 
 def _tool_names() -> set:
@@ -419,11 +426,14 @@ def _run_case(brain, case: dict, history: list, mode) -> dict:
     out_msgs = []
     after = {}
     try:
-        with _fake_desktop(case.get("desktop")), _fixture_vault(case.get("vault")), \
+        with case_deadline(_case_limit()), _fake_desktop(case.get("desktop")), \
+                _fixture_vault(case.get("vault")), \
                 _case_preferences(case.get("preferences"), after), \
                 _case_tasks(case.get("tasks"), after):
             reply, out_msgs = brain.respond(messages, confirm=spy)
         error = None
+    except CaseTimeout as exc:
+        reply, error = "", f"timed out after {exc.args[0]:g}s (eval.json case_timeout_s)"
     except Exception as exc:
         reply, error = "", f"{type(exc).__name__}: {exc}"
     finally:
@@ -462,6 +472,53 @@ def _run_case(brain, case: dict, history: list, mode) -> dict:
         "robotic": robotic(reply),
         "follow_up": bool(case.get("before")),
     }
+
+
+class CaseTimeout(BaseException):
+    """A case ran past its time limit. A BaseException on purpose: the brain
+    catches Exception round its model calls and would carry on with a
+    fallback reply, and the case would be judged on that instead of failing
+    as what it is."""
+
+
+# Seconds the next case may take; _run lowers it near the end of the run
+# budget so the last case can't run far past it.
+_CASE_LIMIT = {"s": None}
+
+
+def _case_limit() -> float:
+    return CFG["case_timeout_s"] if _CASE_LIMIT["s"] is None else _CASE_LIMIT["s"]
+
+
+@contextlib.contextmanager
+def case_deadline(seconds: float):
+    """Every ollama.chat in the case shares one deadline `seconds` away.
+
+    Each call gets the time left as its HTTP timeout (a client of its own,
+    so the module-level one is untouched), and no call starts once it has
+    passed. On 9 Nov `time` waited 2763 s behind another job's model calls
+    and `tutor_explain_convolution` 3471 s; now they fail as timed out and
+    the run goes on. Model time only: a tool that hangs on its own is its
+    own timeout's business."""
+    import httpx
+    import ollama
+    real = ollama.chat
+    deadline = time.monotonic() + seconds
+
+    def chat(*a, **kw):
+        left = deadline - time.monotonic()
+        if left <= 0:
+            raise CaseTimeout(seconds)
+        try:
+            return ollama.Client(timeout=left).chat(*a, **kw)
+        except httpx.TimeoutException:
+            raise CaseTimeout(seconds) from None
+
+    ollama.chat = chat
+    try:
+        yield
+    finally:
+        ollama.chat = real
 
 
 @contextlib.contextmanager
@@ -572,6 +629,10 @@ def report(results: dict, added: int) -> str:
         lines += [f"    - {r}" for r in subset["reasons"]]
     if results.get("gpu"):
         lines += speed.gpu_lines(results["gpu"], results.get("lease"))
+    not_started = results.get("not_run") or []
+    if not_started:
+        lines.append(f"- cut short: {len(not_started)} case run(s) not started -- the run's "
+                     f"{results.get('budget_s')}s budget (eval.json run_budget_s) ran out")
     lines.append("")
 
     gap = results["clean_pass"] - results["live_pass"]
@@ -678,10 +739,12 @@ _T0 = time.monotonic()  # process start, near enough: imports above are the bulk
 
 def add_gpu_args(ap: argparse.ArgumentParser) -> None:
     """The lease flags, shared with run_pass_k."""
-    ap.add_argument("--wait-gpu", type=int, default=300, metavar="SECONDS",
-                    help="how long to wait for the shared GPU lease (default 300)")
+    g = CFG["gpu"]
+    ap.add_argument("--wait-gpu", type=int, default=g["lease_wait_s"], metavar="SECONDS",
+                    help=f"how long to wait for the shared GPU lease (default {g['lease_wait_s']}, eval.json)")
     ap.add_argument("--force", action="store_true",
-                    help="run even if another local model job holds the GPU lease")
+                    help="run even if another local model job holds the GPU lease, the GPU stays "
+                         "busy or the laptop is on battery")
 
 
 def main() -> int:
@@ -737,6 +800,10 @@ def main() -> int:
     out_dir = Path(args.out) if args.out else (
         Path(tempfile.mkdtemp(prefix="denisse-eval-subset-")) if subset else vault_eval_dir())
 
+    if not args.force and not CFG["run_on_battery"] and on_battery():
+        print("DEFERRED: on battery -- the eval runs on AC only (eval.json run_on_battery). "
+              "--force to run anyway.")
+        return DEFERRED
     lease = _gpu_lease(wait_s=args.wait_gpu, on_busy="run" if args.force else "exit")
     try:
         return _run(args, cases, subset, out_dir, lease)
@@ -765,11 +832,25 @@ def _run(args, cases, subset, out_dir, lease) -> int:
     # Sampled after the brain is up and before the first case: this is the
     # GPU the cases are about to share. A noisy start is flagged in the
     # report, not fatal -- the pass/fail still counts, the seconds don't.
-    results["gpu"] = speed.gpu_snapshot()
+    # Not every local job takes the lease (8-9 Nov: 98-100% busy with it
+    # held), so wait for the GPU itself to go quiet. Still busy: defer and
+    # file nothing -- a noisy report is the thing this exists to stop.
+    if args.force:
+        results["gpu"] = speed.gpu_snapshot()
+    else:
+        g = CFG["gpu"]
+        results["gpu"] = speed.wait_for_quiet(g["quiet_wait_s"], g["quiet_poll_s"], g["quiet_samples"])
+        if not results["gpu"]["quiet"]:
+            print(f"DEFERRED: GPU still {results['gpu']['util_pct']}% busy after waiting "
+                  f"{results['gpu']['waited_s']}s (eval.json gpu.quiet_wait_s; limit {speed.NOISY_PCT}%). "
+                  "Nothing filed -- --force to run anyway.")
+            return DEFERRED
     if results["gpu"]["noisy"]:
         print(f"note: GPU already {results['gpu']['util_pct']}% busy -- timings in this run are noisy")
     startup_s = time.monotonic() - _T0
     cases_t0 = time.monotonic()
+    budget = CFG["run_budget_s"]
+    results["budget_s"], results["not_run"] = budget, []
 
     conditions = {"clean": [], "live": conversation.replay()}
     for cond, history in conditions.items():
@@ -780,6 +861,12 @@ def _run(args, cases, subset, out_dir, lease) -> int:
             reseed_tasks(scratch)
         results[cond] = []
         for case in cases:
+            left = budget - (time.monotonic() - _T0)
+            if left <= 0:
+                results[cond].append(not_run(case, budget))
+                results["not_run"].append(f"{cond}:{case['id']}")
+                continue
+            _CASE_LIMIT["s"] = min(CFG["case_timeout_s"], left)
             before = prof.snapshot()
             r = run_case(brain, case, history)
             r["profile"] = speed.Profile.delta(before, prof.snapshot())
@@ -787,6 +874,7 @@ def _run(args, cases, subset, out_dir, lease) -> int:
             if not args.quiet:
                 print(f"[{'OK  ' if r['passed'] else 'FAIL'}] {cond:5} {r['id']:15} "
                       f"{r['seconds']:5}s  {r['failures'] or ''}")
+    _CASE_LIMIT["s"] = None
     cases_s = time.monotonic() - cases_t0
 
     n = len(cases)
@@ -844,6 +932,24 @@ def _run(args, cases, subset, out_dir, lease) -> int:
     return 0 if results["live_pass"] == n else 1
 
 
+def not_run(case: dict, budget: float) -> dict:
+    """The result for a case the run's budget left no time for: a failure,
+    since the run is incomplete, and said as such in the report."""
+    return {"id": case["id"], "prompt": case["prompt"], "reply": "", "tools": [], "seconds": 0.0,
+            "passed": False, "failures": [f"not run: the run's {budget}s budget (eval.json run_budget_s) ran out"],
+            "robotic": [], "follow_up": bool(case.get("before")), "not_run": True}
+
+
+def on_battery() -> bool:
+    """The battery rule. orchestra/power.py reads the power state
+    (ORCHESTRA_POWER overrides it); unknown counts as AC, as for the runner."""
+    try:
+        from orchestra import power
+        return power.on_battery(power.power_status())
+    except Exception:
+        return False
+
+
 def in_group(cases: list, name: str) -> list:
     """Cases whose `group` is `name` or sits under it (`name:<area>`)."""
     return [c for c in cases if c.get("group") == name or (c.get("group") or "").startswith(name + ":")]
@@ -872,14 +978,14 @@ def lease_info(lease) -> dict:
 _LAST_HOLDER = None
 
 
-def _gpu_lease(wait_s: int = 300, on_busy: str = "run"):
+def _gpu_lease(wait_s: int = CFG["gpu"]["lease_wait_s"], on_busy: str = "run"):
     """Take the shared local-inference lease (.review/gpu.lease in the main
     checkout) so Orchestra's local team doesn't start a model call mid-eval,
     and so the eval doesn't start mid-call. Waits `wait_s` for the holder to
     finish. Still held after that:
 
-        on_busy="exit"  print who holds it and exit 3 (the scheduled run's
-                        own "skipped, not a run" code). The eval's default:
+        on_busy="exit"  print who holds it and exit DEFERRED (3, eval.json
+                        exit_codes: not a run; run_scheduled.ps1 retries). The eval's default:
                         a round timed against someone else's model job is
                         the noise this exists to stop.
         on_busy="run"   note it and run anyway (--force; the bakeoff's old
@@ -890,14 +996,15 @@ def _gpu_lease(wait_s: int = 300, on_busy: str = "run"):
         from orchestra.local_team.lease import GpuLease
     except Exception:
         return None
-    lease = GpuLease.for_repo(ROOT, "eval/run_eval.py", ttl_s=3 * 3600)
-    if not lease.acquire(wait_s=wait_s, poll_s=5):
+    g = CFG["gpu"]
+    lease = GpuLease.for_repo(ROOT, "eval/run_eval.py", ttl_s=g["lease_ttl_s"])
+    if not lease.acquire(wait_s=wait_s, poll_s=g["lease_poll_s"]):
         held = lease.info() or {}
         _LAST_HOLDER = held.get("holder", "?")
         if on_busy == "exit":
             print(f"GPU busy: lease held by {_LAST_HOLDER} (pid {held.get('pid', '?')}) after "
                   f"waiting {wait_s}s. Not running -- --wait-gpu N to wait longer, --force to run anyway.")
-            raise SystemExit(3)
+            raise SystemExit(DEFERRED)
         print(f"note: GPU lease still held by {_LAST_HOLDER}; running anyway")
         return None
     return lease

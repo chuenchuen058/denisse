@@ -59,3 +59,5 @@ memory/invest-fixtures/
 
 # model_bakeoff.py raw results (per-case pass counts; regenerated each run)
 eval/bakeoff/
+# eval/run_scheduled.ps1's retry count (eval/eval.json scheduled.retry_state)
+eval/retry_state.json
