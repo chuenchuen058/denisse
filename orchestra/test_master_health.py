@@ -157,15 +157,35 @@ class MasterHealthTest(unittest.TestCase):
         self.assertFalse(any("Warning" in m for m in rec["modules"]))
         self.assertIn("MASTER CHECK", self.R.LOG_FILE.read_text(encoding="utf-8"))
 
-    def test_a_failure_with_no_module_lines_keeps_the_tail_and_says_unparsed(self):
+    def unparsed_commit(self):
         (self.repo / "fake_checks.py").write_text(UNPARSED_CHECKS)
         self.git("add", "fake_checks.py")
         self.git("commit", "-qm", "odd")
-        rec = self.M.run_check(self.R, self.head())
-        self.assertEqual(rec["status"], "red")
-        self.assertEqual(rec["modules"], [])
+        return self.head()
+
+    def test_a_failure_naming_no_module_is_broken_keeps_the_tail_and_holds_nothing(self):
+        # The soak, 10 Nov 2026: cmd.exe could not find the venv python (exit 1, no module lines)
+        # and master was held red on the environment. That is broken, not red.
+        rec = self.M.run_check(self.R, self.unparsed_commit())
+        self.assertEqual((rec["status"], rec["modules"]), ("broken", []))
         self.assertIn("something odd went wrong", rec["tail"])
+        self.assertIsNone(self.R.why_not_runnable(self.add("a-work"), self.R.load_state()))
+        self.assertEqual(self.step(), "broken", "not re-run at once")
+
+    def test_with_unparsed_holds_it_is_red_and_says_unparsed(self):
+        self.R.C["master_health_unparsed_holds"] = True
+        rec = self.M.run_check(self.R, self.unparsed_commit())
+        self.assertEqual(rec["status"], "red")
         self.assertEqual(self.M.describe_modules(self.R, rec), self.R.C["master_health_unparsed"])
+        self.assertEqual(self.R.why_not_runnable(self.add("a-work"), self.R.load_state()),
+                         "master is red: " + self.R.C["master_health_unparsed"])
+
+    def test_a_broken_record_is_checked_again_after_the_retry_window(self):
+        commit = self.head()
+        old = self.R.now() - dt.timedelta(minutes=self.R.C["master_health_broken_retry_min"] + 1)
+        self.M.save_record(self.R, commit, {"status": "broken", "modules": [], "tail": "timed out",
+                                            "checked": old.isoformat(), "how": "baseline"})
+        self.assertEqual(self.step(), "started 4242")
 
     def test_a_timed_out_or_broken_baseline_is_broken_not_red_and_holds_nothing(self):
         rec = self.M.judge(self.R, None, "slow...")
@@ -292,6 +312,13 @@ class MasterHealthTest(unittest.TestCase):
         self.assertEqual(len([t for t in self.R.load_queue() if self.R.is_bugfix(t)]), 0)
         self.assertEqual(self.R.LOG_FILE.read_text(encoding="utf-8").count("MASTER RED"), 2,
                          "one red line (throttled) and one for the task written")
+
+    def test_a_bugfix_task_that_cannot_be_written_is_tried_once_not_every_tick(self):
+        (self.R.REVIEW / "TEMPLATE.md").unlink()
+        self.red_master("scripts/test_bad.py")
+        self.assertIn("could not write", self.step())
+        self.assertIn("already written", self.step())
+        self.assertEqual(list(self.R.QUEUE.glob("*.md")), [])
 
     def test_a_queued_bugfix_task_means_none_is_written(self):
         self.add("someone-elses-fix", kind="bugfix")

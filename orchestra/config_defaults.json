@@ -224,6 +224,8 @@
   "master_health_module_patterns": ["^--- (?P<module>\\S+) \\((?P<status>[A-Z-]+), exit [^)]*\\) ---\\s*$"],
   "master_health_pass_statuses": ["PASS", "QUARANTINED", "SKIP-SLOW"],
   "master_health_tail_lines": 20,
+  "master_health_unparsed_holds": false,
+  "master_health_broken_retry_min": 60,
   "master_health_unparsed": "(failing modules not named in the output; see the tail in .review/master_health.json)",
   "master_health_hold": "master is red: {modules}",
   "master_health_log_every_s": 1800,

@@ -85,6 +85,18 @@ def record(R, commit: str) -> dict | None:
     return load(R)["records"].get(commit) if commit else None
 
 
+def due_again(R, rec: dict) -> bool:
+    """A broken record (timed out, or failed without naming a module) is checked again after
+    master_health_broken_retry_min: it may have been the machine, not master."""
+    if rec.get("status") != "broken":
+        return False
+    try:
+        when = dt.datetime.fromisoformat(rec.get("checked") or "")
+    except ValueError:
+        return True
+    return (R.now() - when).total_seconds() >= 60 * float(R.C["master_health_broken_retry_min"])
+
+
 def save_record(R, commit: str, rec: dict) -> None:
     def change(data):
         old = data["records"].get(commit) or {}
@@ -138,7 +150,12 @@ def judge(R, code: int | None, output: str) -> dict:
         return {"status": "broken", "modules": [], "tail": tail, "exit": code}
     if code == 0:
         return {"status": "green", "modules": [], "tail": "", "exit": 0}
-    return {"status": "red", "modules": failing_modules(R, output), "tail": tail, "exit": code}
+    mods = failing_modules(R, output)
+    # No module named: the check may not have run at all (a missing venv link, a bad path: cmd.exe
+    # says "The system cannot find the path specified" and exits 1). Holding every task on that
+    # would stall the queue on the environment, not on master: broken, unless config says hold.
+    status = "red" if mods or R.C["master_health_unparsed_holds"] else "broken"
+    return {"status": status, "modules": mods, "tail": tail, "exit": code}
 
 
 # ---------------------------------------------------------------- the baseline run (the child)
@@ -288,7 +305,7 @@ def step(R, state: dict, power_status=None, spawn_fn=None) -> str:
         if not commit:
             return "no master commit"
         rec = record(R, commit)
-        if rec is None:
+        if rec is None or due_again(R, rec):
             return _start(R, commit, spawn_fn)
         if rec.get("status") != "red":
             return rec.get("status", "?")
@@ -353,17 +370,22 @@ def _ensure_bugfix(R, commit: str, rec: dict) -> str:
     mods = describe_modules(R, rec)
     fill = {"commit": commit, "short": commit[:8], "modules": mods,
             "tail": rec.get("tail") or "(none)", "command": rec.get("command") or "; ".join(baseline(R))}
-    path = new_task.create(R.C["master_health_task_title"].format(**fill),
-                           body=R.C["master_health_task_body"].format(**fill), gate=baseline(R),
-                           priority=R.C["master_health_task_priority"], weight=R.C["master_health_task_weight"],
-                           kind=R.C["bugfix_kinds"][0], lane=R.C["bugfix_lane"] or None, auto=True,
-                           source=R.C["master_health_task_source"], review=R.REVIEW)
+    try:
+        path = new_task.create(R.C["master_health_task_title"].format(**fill),
+                               body=R.C["master_health_task_body"].format(**fill), gate=baseline(R),
+                               priority=R.C["master_health_task_priority"], weight=R.C["master_health_task_weight"],
+                               kind=R.C["bugfix_kinds"][0], lane=R.C["bugfix_lane"] or None, auto=True,
+                               source=R.C["master_health_task_source"], review=R.REVIEW)
+        written, out = path.stem, f"wrote {path.stem}"
+        R.log(R.C["master_health_task_log"].format(task=path.stem, commit=commit[:8], modules=mods))
+    except (OSError, ValueError, KeyError) as e:  # no TEMPLATE.md, a bad template: once, not every tick
+        written, out = f"not written: {e!r}", f"could not write a bug-fix task: {e!r}"
+        R.log(f"MASTER RED {commit[:8]}: {out}")
 
     def change(data):
-        data["records"].setdefault(commit, dict(rec))["bugfix_task"] = path.stem
+        data["records"].setdefault(commit, dict(rec))["bugfix_task"] = written
     _update(R, change)
-    R.log(R.C["master_health_task_log"].format(task=path.stem, commit=commit[:8], modules=mods))
-    return f"wrote {path.stem}"
+    return out
 
 
 def after_merge(R, commit: str, checks: list[str]) -> None:
