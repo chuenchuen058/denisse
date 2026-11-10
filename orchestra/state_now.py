@@ -73,6 +73,13 @@ def build() -> str:
         out += ["**Power:** " + power.describe(power.power_status(), R.C), ""]
     except Exception as e:  # a power reading must never break STATE NOW
         out += [f"**Power:** unknown ({e})", ""]
+    try:  # a one-task battery override, pending or just used (power.py allow-once)
+        import power
+        ov = power.override_line(R.REVIEW, R.C, now)
+        if ov:
+            out += [power.text(R.C, "state_now_label") + ov, ""]
+    except Exception as e:  # a bad grant file must never break STATE NOW
+        out += [f"**Battery override:** unreadable ({e})", ""]
 
     waiting = []
     for why in sorted(R.PARKED.glob("*.why.txt")) if R.PARKED.exists() else []:
