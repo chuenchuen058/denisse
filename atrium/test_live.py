@@ -12,6 +12,7 @@ import os
 import tempfile
 import threading
 import time
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -63,6 +64,22 @@ def fake_review(review: Path, vault: Path, now: dt.datetime) -> None:
     (vault / mod / "Week 3").mkdir(parents=True)
 
 
+def frozen_dt(now: dt.datetime):
+    """A stand-in for the `datetime` module whose clock reads `now` (naive, local), so what the
+    page shows cannot depend on the hour the tests run at (a run at 23:59 once failed)."""
+    class Clock(dt.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now if tz is None else now.astimezone(tz)
+
+    class Day(dt.date):
+        @classmethod
+        def today(cls):
+            return now.date()
+
+    return types.SimpleNamespace(**dict(vars(dt), datetime=Clock, date=Day))
+
+
 def tree(root: Path) -> dict:
     return {str(p): (p.stat().st_mtime_ns, p.stat().st_size) for p in sorted(root.rglob("*"))}
 
@@ -86,11 +103,17 @@ class LiveBase(unittest.TestCase):
             p.start()
             self.addCleanup(p.stop)  # cleanups run last-in first-out: after the servers are closed
         from atrium import context, snapshot, live
-        importlib.reload(context)
+        ctx = importlib.reload(context)
         self.snap = importlib.reload(snapshot)
         self.snap.REVIEW = self.review
         self.live = importlib.reload(live)
-        self.now = dt.datetime.now()
+        # a fixed clock, noon on a fixed day: nothing here may depend on when the tests run
+        self.now = dt.datetime(2026, 6, 15, 12, 0, 0)
+        clock = frozen_dt(self.now)
+        for m in (ctx, self.snap, self.live):
+            p = mock.patch.object(m, "dt", clock)
+            p.start()
+            self.addCleanup(p.stop)
 
     @staticmethod
     def _reload():
@@ -416,9 +439,7 @@ class LiveScenarioTest(LiveBase):
         self.assertEqual(self.agents()["codex"]["state"], "ok")
 
     def test_lane_limited_by_the_runner_log(self):
-        until = min(self.now + dt.timedelta(hours=2), self.now.replace(hour=23, minute=59)).strftime("%H:%M")
-        if until <= (self.now + dt.timedelta(minutes=1)).strftime("%H:%M"):
-            self.skipTest("a minute to midnight: no later time today for the log line to name")
+        until = (self.now + dt.timedelta(hours=2)).strftime("%H:%M")  # the fixed noon clock: still today
         w(self.review, "runner.log", f"{self.now.isoformat(timespec='seconds')} LIMITED t-x lane=codex until {until}\n")
         w(self.review, "queue/t-c.md", task("Codex job", lane="codex"))
         a = self.agents()["codex"]
