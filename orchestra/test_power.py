@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -142,6 +143,117 @@ class RunnerOnBatteryTest(unittest.TestCase):
         self.assertEqual(st["fin"]["merge"], "merged")
         self.assertEqual(st.get("next", {}).get("attempts", 0), 0, "no new dispatch")
         self.assertTrue((self.R.QUEUE / "next.md").exists())
+
+    # --- one-task override (power.py allow-once, 9 Nov 2026)
+
+    def grant(self, reading="battery:80", **kw):
+        os.environ["ORCHESTRA_POWER"] = reading
+        return power.allow_once(self.R.REVIEW, self.R.C, power.power_status(), self.R.now(), who="t", **kw)
+
+    def grant_file(self):
+        return power.grant_path(self.R.REVIEW, self.R.C)
+
+    def attempts(self, slug):
+        return self.R.load_state()["tasks"].get(slug, {}).get("attempts", 0)
+
+    def test_grant_on_battery_starts_one_lane_only_and_is_consumed(self):
+        self.add("one", title="one")
+        self.add("two", title="two")
+        ok, msg = self.grant()
+        self.assertTrue(ok, msg)
+        self.assertTrue(self.grant_file().exists())
+        self.assertIn("pending", power.override_line(self.R.REVIEW, self.R.C, self.R.now()))
+        self.assertEqual(self.R.tick(), "PASS")
+        self.assertFalse(self.grant_file().exists(), "consumed in the tick that used it")
+        self.assertIn("POWER: one-task override used for one (80%)", self.log_text())
+        self.assertEqual(self.R.tick(), "on battery", "the next tick waits again")
+        self.assertEqual(self.attempts("two"), 0, "only one lane started")
+        self.assertTrue((self.R.QUEUE / "two.md").exists())
+        self.assertIn("used for one", (self.R.REVIEW / "STATE_NOW.md").read_text(encoding="utf-8"))
+        self.assertFalse(self.R.C["dispatch_on_battery"], "the command never turns the switch on")
+
+    def test_named_task_and_lane(self):
+        self.add("aa", title="aa")
+        self.add("zz", title="zz")
+        self.assertTrue(self.grant(task="zz")[0])
+        self.assertEqual(self.R.tick(), "PASS")
+        self.assertEqual(self.attempts("zz"), 1)
+        self.assertEqual(self.attempts("aa"), 0, "the top task was not the one granted")
+        self.assertTrue(self.grant(lane="other")[0])
+        self.assertEqual(self.R.tick(), "idle", "no task on that lane: nothing starts")
+        self.assertTrue(self.grant_file().exists(), "an unused grant stays until it expires")
+        self.assertEqual(self.attempts("aa"), 0)
+
+    def test_expired_grant_is_ignored_and_cleared(self):
+        self.add("ex")
+        self.assertTrue(self.grant()[0])
+        g = json.loads(self.grant_file().read_text(encoding="utf-8"))
+        g["expires"] = (dt.datetime.now() - dt.timedelta(minutes=1)).isoformat()
+        self.grant_file().write_text(json.dumps(g), encoding="utf-8")
+        self.assertIn("expired", power.override_line(self.R.REVIEW, self.R.C, self.R.now()))
+        self.assertEqual(self.R.tick(), "on battery")
+        self.assertEqual(self.attempts("ex"), 0)
+        self.assertFalse(self.grant_file().exists())
+        self.assertIn("expired unused", self.log_text())
+
+    def test_expiry_minutes_come_from_config(self):
+        self.R.C["power_override_minutes"] = 7
+        self.assertTrue(self.grant()[0])
+        g = json.loads(self.grant_file().read_text(encoding="utf-8"))
+        span = dt.datetime.fromisoformat(g["expires"]) - dt.datetime.fromisoformat(g["created"])
+        self.assertEqual(span, dt.timedelta(minutes=7))
+        self.assertEqual((g["who"], g["task"], g["lane"]), ("t", None, None))
+
+    def test_below_the_floor_refused(self):
+        ok, msg = self.grant("battery:20")
+        self.assertFalse(ok)
+        self.assertIn("floor", msg)
+        self.assertFalse(self.grant_file().exists())
+        # granted above the floor, then the battery drops: the grant is not used
+        self.add("fl")
+        self.assertTrue(self.grant("battery:60")[0])
+        os.environ["ORCHESTRA_POWER"] = "battery:25"
+        self.assertEqual(self.R.tick(), "on battery")
+        self.assertEqual(self.attempts("fl"), 0)
+        self.assertTrue(self.grant_file().exists())
+
+    def test_on_ac_nothing_written_and_grant_not_used_up(self):
+        ok, msg = self.grant("ac")
+        self.assertFalse(ok)
+        self.assertIn("Nothing to override", msg)
+        self.assertFalse(self.grant_file().exists())
+        self.add("ac1")
+        self.assertTrue(self.grant()[0])
+        os.environ["ORCHESTRA_POWER"] = "ac"
+        self.assertEqual(self.R.tick(), "PASS")
+        self.assertTrue(self.grant_file().exists(), "on AC the grant is not used up")
+        self.assertNotIn("one-task override used", self.log_text())
+
+    def test_grant_used_by_another_tick_first(self):
+        self.add("ra")
+        self.assertTrue(self.grant()[0])
+        g = self.R.power_override()
+        self.assertIsNotNone(g)
+        power.drop_grant(self.R.REVIEW, self.R.C)  # another tick consumed it meanwhile
+        with unittest.mock.patch.object(self.R, "power_override", return_value=g):
+            self.assertEqual(self.R.tick(), "on battery", "re-checked under the dispatch lock")
+        self.assertEqual(self.attempts("ra"), 0)
+
+    def test_status_cli_and_watch_line(self):
+        import io, contextlib, watch
+        self.assertTrue(self.grant(task="x1")[0])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(power.main(["status"]), 0)
+        self.assertIn("pending for x1", out.getvalue())
+        with unittest.mock.patch.object(watch, "REPO", self.repo), \
+                unittest.mock.patch.object(watch, "REVIEW", self.R.REVIEW):
+            self.assertIn("pending for x1", watch.override_line())
+        os.environ["ORCHESTRA_POWER"] = "ac"
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(power.main(["allow-once"]), 1)
+        self.assertIn("Nothing to override", out.getvalue())
 
 
 if __name__ == "__main__":

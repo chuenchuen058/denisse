@@ -2316,6 +2316,27 @@ def battery_pause() -> str | None:
     return why
 
 
+def power_override() -> dict | None:
+    """Chuen's one-task grant (power.py allow-once) if it may be used now, else None. Only asked
+    while battery_pause() blocks dispatch, so on AC a grant is never used up. An expired grant is
+    cleared with a log line; at or under the floor a grant is ignored (it stays until it expires)."""
+    import power
+    g = power.read_grant(REVIEW, C)
+    if g is None:
+        return None
+    if power.is_expired(g, now()):
+        power.drop_grant(REVIEW, C)
+        log(power.text(C, "expired_log", target=power.target(C, g)))
+        return None
+    return power.usable_grant(REVIEW, C, power.power_status(), now())
+
+
+def granted_for(grant: dict, task) -> bool:
+    """Is `task` one the grant may start (its named task and/or lane; none named: any)?"""
+    return ((not grant.get("task") or task.slug == grant["task"])
+            and (not grant.get("lane") or task.lane == grant["lane"]))
+
+
 def write_state_now() -> None:
     try:
         import state_now
@@ -2450,15 +2471,22 @@ def _tick(dry_run: bool = False) -> str:
     # Reconcile before dispatching: a killed tick's orphaned lane or leftover report.
     # Allowed on battery: collecting a finished lane is short and saves its work.
     orphans = {s for s, r in reconcile(state).items() if r == "orphan running"}
+    # On battery a one-task grant (power.py allow-once) lets exactly one new lane start; it is
+    # re-checked and consumed under the dispatch lock below, so two ticks can't both use it.
+    grant = None
     if battery_pause():
-        save_state(state)
-        write_state_now()
-        return "on battery"
-    if exams_enabled():  # background; returns at once, holds no lane slot
+        grant = power_override()
+        if not grant:
+            save_state(state)
+            write_state_now()
+            return "on battery"
+    if not grant and exams_enabled():  # background; returns at once, holds no lane slot
         exams_step(state)
-    if autopilot_enabled() and not campaign.dispatch_block(REVIEW):  # queue empty: write the next tasks
+    if not grant and autopilot_enabled() and not campaign.dispatch_block(REVIEW):  # queue empty: write the next tasks
         autopilot_step(state)
     tasks =[t for t in route(load_queue(), state) if t.slug not in orphans]
+    if grant:
+        tasks = [t for t in tasks if granted_for(grant, t)]
     if parallel:
         # One runner per lane at a time (Chuen, 2 Nov 2026: use Claude and Codex together).
         # Each lane has its own lock; state saves merge, and merges are serialised.
@@ -2500,10 +2528,20 @@ def _tick(dry_run: bool = False) -> str:
             lane_of = {t.slug: t.lane for t in tasks}  # the lane this slot was taken for, after route()
             tasks = [t for t in route(load_queue(), state)
                      if lane_of.get(t.slug) == t.lane and t.slug not in running]
+            if grant:  # still there, unexpired, above the floor? Another tick may have used it.
+                import power
+                pst = power.power_status()
+                live = power.usable_grant(REVIEW, C, pst, now())
+                if live is None or live.get("created") != grant.get("created"):
+                    save_state(state)
+                    return "on battery"
+                tasks = [t for t in tasks if granted_for(live, t)]
             task = pick(tasks, state)
             if not task:
                 save_state(state)
                 return "idle"
+            if grant:
+                log(power.consume(REVIEW, C, live, task.slug, pst.get("battery_percent"), now()))
             timeout = timeout_for(task.weight, state)
             ts = task_state(state, task)
             ts["attempts"] += 1
