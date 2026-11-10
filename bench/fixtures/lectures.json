@@ -1,0 +1,11 @@
+{
+  "_about": "Synthetic lecture text for Don's extraction (written for the bench; no course material). expect_terms: words a correct reading must name somewhere in its outcomes, methods or topics.",
+  "cases": [
+    {"id": "gauss_law", "module": "Field Theory Basics", "code": "BENCH101", "week": 3, "sources": ["Lecture 3 - Gauss.pdf"],
+     "text": "Lecture 3: Gauss's law.\n\nElectric flux through a closed surface equals the enclosed charge divided by the permittivity of free space: Phi = Q_enc / epsilon_0.\n\nMethod: choose a Gaussian surface that matches the symmetry of the charge distribution (sphere for a point charge, cylinder for a line charge, pillbox for a plane). On that surface E is constant and parallel to the area vector, so the flux integral becomes E times the area.\n\nWorked example: a point charge q at the centre of a sphere of radius r. Flux = E * 4 pi r^2 = q / epsilon_0, so E = q / (4 pi epsilon_0 r^2), which is Coulomb's law.\n\nWorked example: an infinite line charge with density lambda. Use a cylinder of radius r and length L. E * 2 pi r L = lambda L / epsilon_0, so E = lambda / (2 pi epsilon_0 r).\n\nBy the end of this lecture you should be able to state Gauss's law, choose a suitable Gaussian surface, and derive the field of a point charge and of a line charge.",
+     "expect_terms": ["gauss", "flux", "surface"]},
+    {"id": "rc_circuit", "module": "Circuits Primer", "code": "BENCH102", "week": 5, "sources": ["Lecture 5 - RC.pdf"],
+     "text": "Lecture 5: RC circuits.\n\nA capacitor C charging through a resistor R from a source V0. Kirchhoff's voltage law gives V0 = I R + q / C. With I = dq/dt this is a first-order differential equation.\n\nSolution: q(t) = C V0 (1 - exp(-t / (R C))). The time constant tau = R C is the time to reach about 63 percent of the final charge.\n\nDischarging: q(t) = q0 exp(-t / (R C)).\n\nMethod: write Kirchhoff's voltage law around the loop, substitute I = dq/dt, separate variables and integrate with the initial condition.\n\nWorked example: R = 10 kilo-ohm, C = 100 microfarad gives tau = 1 second; after 3 seconds the capacitor holds about 95 percent of its final charge.\n\nOutcomes: derive the charging and discharging equations, compute the time constant, and sketch q(t).",
+     "expect_terms": ["time constant", "capacitor", "kirchhoff"]}
+  ]
+}
