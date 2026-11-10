@@ -290,7 +290,7 @@ def record(new_messages: list, source: str = "typed") -> bool:
         if first_user is not None and looks_like_noise(first_user.get("content") or ""):
             return False
 
-    with _lock:
+    with _lock, memory_store.locked():
         history = memory_store.load_history()
         # IDs are storage metadata only; _prose_only never sends them to
         # the model. They distinguish independent lessons from rereads.
@@ -319,7 +319,7 @@ def reset(archive: bool = True) -> str | None:
     import os
     import shutil
 
-    with _lock:
+    with _lock, memory_store.locked():
         if not os.path.exists(memory_store.MEMORY_FILE):
             return None
         dest = None

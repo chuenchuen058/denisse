@@ -53,6 +53,7 @@ import re
 from pathlib import Path
 
 import json_config
+import safe_json
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -264,9 +265,7 @@ def run(history: list | None = None, out_file: str | None = None) -> dict:
         history = memory_store.load_history()
     result = learn(history)
     result["updated"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    os.makedirs(os.path.dirname(out_file), exist_ok=True)
-    with open(out_file, "w", encoding="utf-8") as f:
-        json.dump(result, f, indent=2, ensure_ascii=False)
+    safe_json.write_json_atomic(out_file, result, indent=2, ensure_ascii=False)
     return result
 
 

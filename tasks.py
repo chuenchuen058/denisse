@@ -13,13 +13,13 @@ out of the way, but "what did I get done this week" stays answerable.
 """
 
 import calendar
-import json
 import os
 import re
 import uuid
 from datetime import datetime, timedelta
 
 import reminders_config as _cfg
+import safe_json
 
 # The file name, priorities, limits, word lists and wording are in
 # reminders.json (Rule 0): "files", "priorities" and "tasks".
@@ -199,19 +199,20 @@ def due_from_text(text: str, now: datetime | None = None) -> datetime | None:
 
 
 def _load() -> list:
-    if not os.path.exists(TASKS_FILE):
-        return []
-    try:
-        with open(TASKS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return []
+    """The stored tasks; [] if there are none. A file that won't parse is
+    copied aside by safe_json, so the next save can't erase his reminders."""
+    return safe_json.read_json(TASKS_FILE, [])
+
+
+def _locked():
+    """Hold across every _load() .. _save(): the chat thread, the reminder
+    loop and the vault tick-sync all read-modify-write this file, and
+    scripts/ask.py is another process."""
+    return safe_json.locked(TASKS_FILE)
 
 
 def _save(tasks: list) -> None:
-    os.makedirs(os.path.dirname(TASKS_FILE), exist_ok=True)
-    with open(TASKS_FILE, "w", encoding="utf-8") as f:
-        json.dump(tasks, f, indent=2, ensure_ascii=False)
+    safe_json.write_json_atomic(TASKS_FILE, tasks, indent=2, ensure_ascii=False)
     _mirror_to_vault()
 
 
@@ -281,9 +282,10 @@ def add_task(text: str, due: str = "", priority: str | None = None) -> dict:
         "reminded_on": None,   # date we last nagged, so login reminders don't repeat
         "priority": _norm_priority(priority),  # colours the reminder card
     }
-    tasks = _load()
-    tasks.append(task)
-    _save(tasks)
+    with _locked():
+        tasks = _load()
+        tasks.append(task)
+        _save(tasks)
     return task
 
 
@@ -344,23 +346,25 @@ def list_tasks(include_done: bool = False) -> list:
 
 def complete_task(needle: str) -> dict | None:
     """Mark done. Kept, not deleted -- see the module docstring."""
-    tasks = _load()
-    t = _match(tasks, needle)
-    if t is None:
-        return None
-    t["done_at"] = datetime.now().isoformat(timespec="minutes")
-    _save(tasks)
+    with _locked():
+        tasks = _load()
+        t = _match(tasks, needle)
+        if t is None:
+            return None
+        t["done_at"] = datetime.now().isoformat(timespec="minutes")
+        _save(tasks)
     return t
 
 
 def remove_task(needle: str) -> dict | None:
     """Delete outright -- for things added by mistake, not things done."""
-    tasks = _load()
-    t = _match(tasks, needle)
-    if t is None:
-        return None
-    tasks = [x for x in tasks if x["id"] != t["id"]]
-    _save(tasks)
+    with _locked():
+        tasks = _load()
+        t = _match(tasks, needle)
+        if t is None:
+            return None
+        tasks = [x for x in tasks if x["id"] != t["id"]]
+        _save(tasks)
     return t
 
 
@@ -375,23 +379,24 @@ def update_task(task_id: str, text: str | None = None, due: str | None = None,
     deadline also clears reminded_on, so a task moved to tomorrow can
     still nag tomorrow.
     """
-    tasks = _load()
-    for t in tasks:
-        if t["id"] != task_id or t["done_at"]:
-            continue
-        if text is not None and text.strip():
-            t["text"] = text.strip()
-        if due is not None:
-            due = due.strip()
-            when = parse_due(due) if due else None
-            t["due"] = when.isoformat(timespec="minutes") if when else None
-            t["due_text"] = due or None
-            t["due_inferred"] = False
-            t["reminded_on"] = None
-        if priority is not None:
-            t["priority"] = _norm_priority(priority)
-        _save(tasks)
-        return t
+    with _locked():
+        tasks = _load()
+        for t in tasks:
+            if t["id"] != task_id or t["done_at"]:
+                continue
+            if text is not None and text.strip():
+                t["text"] = text.strip()
+            if due is not None:
+                due = due.strip()
+                when = parse_due(due) if due else None
+                t["due"] = when.isoformat(timespec="minutes") if when else None
+                t["due_text"] = due or None
+                t["due_inferred"] = False
+                t["reminded_on"] = None
+            if priority is not None:
+                t["priority"] = _norm_priority(priority)
+            _save(tasks)
+            return t
     return None
 
 
@@ -418,11 +423,12 @@ def mark_reminded(ids: list) -> None:
     """Record that we nagged today, so a reminder fires once per day and
     not on every tray restart."""
     today = datetime.now().date().isoformat()
-    tasks = _load()
-    for t in tasks:
-        if t["id"] in ids:
-            t["reminded_on"] = today
-    _save(tasks)
+    with _locked():
+        tasks = _load()
+        for t in tasks:
+            if t["id"] in ids:
+                t["reminded_on"] = today
+        _save(tasks)
 
 
 def needs_reminder(hours: int | None = None) -> tuple:

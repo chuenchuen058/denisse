@@ -28,13 +28,13 @@ Run:
     python auto_organize.py
 """
 
-import json
 import os
 import shutil
 import time
 import threading
 
 import housekeeping
+import safe_json
 
 _organize_lock = threading.RLock()
 
@@ -74,18 +74,11 @@ def _category_for(filename: str) -> str:
 
 
 def _log_move(entry: dict) -> None:
-    os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
-    log = []
-    if os.path.exists(LOG_FILE):
-        try:
-            with open(LOG_FILE, "r", encoding="utf-8") as f:
-                log = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            log = []
-    log.append(entry)
-    log = log[-CONFIG["log_keep"]:]  # keep it bounded
-    with open(LOG_FILE, "w", encoding="utf-8") as f:
-        json.dump(log, f, indent=2)
+    with safe_json.locked(LOG_FILE):
+        log = safe_json.read_json(LOG_FILE, [])
+        log.append(entry)
+        log = log[-CONFIG["log_keep"]:]  # keep it bounded
+        safe_json.write_json_atomic(LOG_FILE, log, indent=2)
 
 
 def _unique_destination(dest_dir: str, name: str) -> str:

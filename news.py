@@ -15,12 +15,12 @@ Run standalone:
 """
 
 import datetime
-import json
 import os
 import urllib.request
 import xml.etree.ElementTree as ET
 
 import json_config
+import safe_json
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 BRIEFING_STATE_FILE = os.path.join(BASE_DIR, "memory", "daily_news_briefing.json")
@@ -65,13 +65,7 @@ def fetch_headlines(topic: str = "", count: int = 5) -> list:
 
 
 def _load_briefing_state() -> dict:
-    if not os.path.exists(BRIEFING_STATE_FILE):
-        return {}
-    try:
-        with open(BRIEFING_STATE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return {}
+    return safe_json.read_json(BRIEFING_STATE_FILE, {})
 
 
 def is_daily_briefing_due() -> bool:
@@ -89,11 +83,10 @@ def _save_briefing_state(**changes) -> None:
     # Merge, never overwrite: this file now holds the on/off switch as well
     # as the last date, and rewriting it with only the date would silently
     # turn a briefing he switched off back on the next day.
-    state = _load_briefing_state()
-    state.update(changes)
-    os.makedirs(os.path.dirname(BRIEFING_STATE_FILE), exist_ok=True)
-    with open(BRIEFING_STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2)
+    with safe_json.locked(BRIEFING_STATE_FILE):
+        state = _load_briefing_state()
+        state.update(changes)
+        safe_json.write_json_atomic(BRIEFING_STATE_FILE, state, indent=2)
 
 
 def mark_daily_briefing_done() -> None:

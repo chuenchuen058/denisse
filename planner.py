@@ -23,6 +23,7 @@ import json
 import os
 import re
 
+import safe_json
 import tasks
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -213,19 +214,17 @@ def offer(steps: list, now: dt.datetime | None = None) -> str:
     if not steps:
         return ""
     now = now or dt.datetime.now()
-    os.makedirs(os.path.dirname(PENDING_FILE), exist_ok=True)
-    with open(PENDING_FILE, "w", encoding="utf-8") as f:
-        json.dump({"created": now.isoformat(timespec="seconds"), "steps": steps}, f, indent=2)
+    safe_json.write_json_atomic(PENDING_FILE, {"created": now.isoformat(timespec="seconds"), "steps": steps},
+                                indent=2)
     return CONFIG["offer"].format(n=len(steps))
 
 
 def pending(now: dt.datetime | None = None) -> list:
     now = now or dt.datetime.now()
     try:
-        with open(PENDING_FILE, encoding="utf-8") as f:
-            data = json.load(f)
+        data = safe_json.read_json(PENDING_FILE, None)
         made = dt.datetime.fromisoformat(data["created"])
-    except (OSError, ValueError, KeyError):
+    except (OSError, ValueError, KeyError, TypeError):
         return []
     if now - made > dt.timedelta(minutes=CONFIG["pending_minutes"]):
         return []

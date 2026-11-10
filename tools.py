@@ -21,6 +21,7 @@ import threading
 import news
 import obsidian_sync
 import optimize
+import safe_json
 import spotify_control
 import tasks
 import timers
@@ -571,27 +572,22 @@ def clean_temp_files() -> str:
 
 
 def _load_facts() -> dict:
-    if not os.path.exists(FACTS_FILE):
-        return {}
-    try:
-        with open(FACTS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return {}
+    """The stored facts; {} if none. A file that won't parse is copied
+    aside by safe_json, so remember() can't save over everything else."""
+    return safe_json.read_json(FACTS_FILE, {})
 
 
 def _save_facts(facts: dict) -> None:
-    os.makedirs(os.path.dirname(FACTS_FILE), exist_ok=True)
-    with open(FACTS_FILE, "w", encoding="utf-8") as f:
-        json.dump(facts, f, indent=2)
+    safe_json.write_json_atomic(FACTS_FILE, facts, indent=2)
     obsidian_sync.sync_facts(facts)
 
 
 def remember(key: str, value: str) -> str:
     """Save a fact about the user for later recall (e.g. key='favorite_coffee', value='flat white')."""
-    facts = _load_facts()
-    facts[key] = value
-    _save_facts(facts)
+    with safe_json.locked(FACTS_FILE):
+        facts = _load_facts()
+        facts[key] = value
+        _save_facts(facts)
     return _say("facts", "remembered", key=key, value=value)
 
 

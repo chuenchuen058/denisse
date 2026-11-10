@@ -17,7 +17,6 @@ Run:
     python optimize.py
 """
 
-import json
 import os
 import shutil
 import time
@@ -30,6 +29,7 @@ except ImportError:  # non-Windows -- startup-program management just no-ops
     winreg = None
 
 import housekeeping
+import safe_json
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG = {}
@@ -71,18 +71,11 @@ configure()
 
 
 def _log(log_file: str, entry: dict) -> None:
-    os.makedirs(os.path.dirname(log_file), exist_ok=True)
-    log = []
-    if os.path.exists(log_file):
-        try:
-            with open(log_file, "r", encoding="utf-8") as f:
-                log = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            log = []
-    log.append(entry)
-    log = log[-CONFIG["log_keep"]:]  # keep it bounded
-    with open(log_file, "w", encoding="utf-8") as f:
-        json.dump(log, f, indent=2)
+    with safe_json.locked(log_file):
+        log = safe_json.read_json(log_file, [])
+        log.append(entry)
+        log = log[-CONFIG["log_keep"]:]  # keep it bounded
+        safe_json.write_json_atomic(log_file, log, indent=2)
 
 
 def clean_temp_files() -> list:
@@ -199,19 +192,13 @@ def list_startup_programs() -> str:
 
 
 def _load_registry_backup() -> dict:
-    if not os.path.exists(DISABLED_REGISTRY_FILE):
-        return {}
-    try:
-        with open(DISABLED_REGISTRY_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return {}
+    """The saved Run-key values; {} if none. A damaged file is copied aside
+    by safe_json -- it is the only record of how to restore a program."""
+    return safe_json.read_json(DISABLED_REGISTRY_FILE, {})
 
 
 def _save_registry_backup(backup: dict) -> None:
-    os.makedirs(os.path.dirname(DISABLED_REGISTRY_FILE), exist_ok=True)
-    with open(DISABLED_REGISTRY_FILE, "w", encoding="utf-8") as f:
-        json.dump(backup, f, indent=2)
+    safe_json.write_json_atomic(DISABLED_REGISTRY_FILE, backup, indent=2)
 
 
 def disable_startup_program(name: str) -> str:
@@ -236,9 +223,10 @@ def disable_startup_program(name: str) -> str:
                     value, _ = winreg.QueryValueEx(key, name)
                 except OSError:
                     continue
-                backup = _load_registry_backup()
-                backup[name] = {"hive": "HKCU" if hive == winreg.HKEY_CURRENT_USER else "HKLM", "value": value}
-                _save_registry_backup(backup)
+                with safe_json.locked(DISABLED_REGISTRY_FILE):
+                    backup = _load_registry_backup()
+                    backup[name] = {"hive": "HKCU" if hive == winreg.HKEY_CURRENT_USER else "HKLM", "value": value}
+                    _save_registry_backup(backup)
                 winreg.DeleteValue(key, name)
                 return _text("disabled_registry", name=name)
         except OSError:
@@ -261,20 +249,21 @@ def restore_startup_program(name: str) -> str:
         except OSError as e:
             return _text("restore_error", name=name, error=e)
 
-    backup = _load_registry_backup()
-    if name in backup:
-        entry = backup.pop(name)
-        hive = winreg.HKEY_CURRENT_USER if entry["hive"] == "HKCU" else winreg.HKEY_LOCAL_MACHINE
-        for h, subkey in STARTUP_RUN_KEYS:
-            if h != hive:
-                continue
-            try:
-                with winreg.OpenKey(h, subkey, 0, winreg.KEY_ALL_ACCESS) as key:
-                    winreg.SetValueEx(key, name, 0, winreg.REG_SZ, entry["value"])
-                _save_registry_backup(backup)
-                return _text("restored_registry", name=name)
-            except OSError as e:
-                return _text("restore_error", name=name, error=e)
+    with safe_json.locked(DISABLED_REGISTRY_FILE):
+        backup = _load_registry_backup()
+        if name in backup:
+            entry = backup.pop(name)
+            hive = winreg.HKEY_CURRENT_USER if entry["hive"] == "HKCU" else winreg.HKEY_LOCAL_MACHINE
+            for h, subkey in STARTUP_RUN_KEYS:
+                if h != hive:
+                    continue
+                try:
+                    with winreg.OpenKey(h, subkey, 0, winreg.KEY_ALL_ACCESS) as key:
+                        winreg.SetValueEx(key, name, 0, winreg.REG_SZ, entry["value"])
+                    _save_registry_backup(backup)
+                    return _text("restored_registry", name=name)
+                except OSError as e:
+                    return _text("restore_error", name=name, error=e)
 
     return _text("restore_not_found", name=name)
 

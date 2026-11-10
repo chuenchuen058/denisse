@@ -1,0 +1,19 @@
+{
+  "_about": "Defaults for safe_json.py (AGENTS.md Rule 0): how Denisse's own data files are read, written and locked. Change a value in safe_json.json (same keys); json_config checks it against this file.",
+  "_replace": "Windows refuses os.replace while another process has the target open (a reader, an antivirus scan). Retry this many times, this many seconds apart, before giving up.",
+  "replace_attempts": 20,
+  "replace_retry_seconds": 0.05,
+  "_read": "The same for a read that hits PermissionError mid-replace. A file that stays unreadable raises; it is never read as empty.",
+  "read_attempts": 20,
+  "read_retry_seconds": 0.05,
+  "_lock": "with locked(path): takes an OS lock on <path><lock_suffix>. The OS drops it when its holder dies, so a lock file left by a dead process never blocks. A live holder is waited on for lock_wait_seconds (polled every lock_poll_seconds); after that the caller goes ahead with one log line rather than lose the save.",
+  "lock_suffix": ".lock",
+  "lock_wait_seconds": 15,
+  "lock_poll_seconds": 0.02,
+  "_temp": "The temp file a save writes before os.replace: same folder, {name} is the data file's name.",
+  "temp_prefix": ".{name}.",
+  "temp_suffix": ".tmp",
+  "_corrupt": "A file that exists but won't parse is copied aside before its default is returned. {stem} and {ext} are the file's name split at the extension; {stamp} is UTC time in corrupt_stamp_format.",
+  "corrupt_name": "{stem}.corrupt-{stamp}{ext}",
+  "corrupt_stamp_format": "%Y%m%dT%H%M%SZ"
+}
