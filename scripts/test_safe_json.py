@@ -17,6 +17,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+# Run on its own (not through run_checks, which sets a temp vault), the
+# history and facts cases must still never reach the real vault.
+os.environ.setdefault("DENISSE_VAULT", tempfile.mkdtemp(prefix="safe_json_vault_"))
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 import safe_json
@@ -231,6 +234,86 @@ class Locking(Base):
         for t in ts:
             t.join()
         self.assertEqual(len(safe_json.read_json(self.path, [])), 150)
+
+
+class Callers(Base):
+    """memory_store (the history) and tools (facts) through safe_json.
+    test_conversation.py guards record()/replay() and is left as it is."""
+
+    def setUp(self):
+        super().setUp()
+        import memory_store
+        import obsidian_sync
+        import tools
+        self.ms, self.tools, self.sync = memory_store, tools, obsidian_sync
+        self._saved = (memory_store.MEMORY_DIR, memory_store.MEMORY_FILE, tools.FACTS_FILE,
+                       obsidian_sync.sync_conversation, obsidian_sync.sync_facts)
+        memory_store.MEMORY_DIR = self.dir
+        memory_store.MEMORY_FILE = os.path.join(self.dir, "conversation.json")
+        tools.FACTS_FILE = os.path.join(self.dir, "facts.json")
+        obsidian_sync.sync_conversation = lambda *a, **k: None
+        obsidian_sync.sync_facts = lambda *a, **k: None
+        import instincts
+        self.instincts, self._rebuild = instincts, instincts.rebuild
+        instincts.rebuild = lambda *a, **k: None  # it writes the vault's Brain folder
+
+    def tearDown(self):
+        (self.ms.MEMORY_DIR, self.ms.MEMORY_FILE, self.tools.FACTS_FILE,
+         self.sync.sync_conversation, self.sync.sync_facts) = self._saved
+        self.instincts.rebuild = self._rebuild
+        super().tearDown()
+
+    def test_history_round_trips_unchanged(self):
+        history = [{"role": "user", "content": "hey", "turn_id": "t1"},
+                   {"role": "assistant", "content": "Doing alright, you?"}]
+        with open(self.ms.MEMORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(history, f, indent=2)
+        with open(self.ms.MEMORY_FILE, "rb") as f:
+            before = f.read()
+        self.assertEqual(self.ms.load_history(), history)
+        self.ms.save_history(self.ms.load_history())
+        with open(self.ms.MEMORY_FILE, "rb") as f:
+            self.assertEqual(f.read(), before)
+
+    def test_torn_history_kept_aside_and_next_record_proceeds(self):
+        import conversation
+        torn = '[{"role": "user", "content": "remember the supervisor meeting"}, {"role": "assis'
+        with open(self.ms.MEMORY_FILE, "w", encoding="utf-8") as f:
+            f.write(torn)
+        self.assertEqual(self.ms.load_history(), [])
+        self.assertTrue(conversation.record([{"role": "user", "content": "hi"},
+                                             {"role": "assistant", "content": "hello"}]))
+        self.assertEqual([m["content"] for m in self.ms.load_history()], ["hi", "hello"])
+        with open(safe_json.corrupt_copies(self.ms.MEMORY_FILE)[0], encoding="utf-8") as f:
+            self.assertEqual(f.read(), torn)
+
+    def test_history_appends_from_two_processes_lose_none(self):
+        code = """
+            import sys
+            sys.path.insert(0, sys.argv[1])
+            import memory_store, obsidian_sync, os
+            obsidian_sync.sync_conversation = lambda *a, **k: None
+            memory_store.MEMORY_DIR = os.path.dirname(sys.argv[2])
+            memory_store.MEMORY_FILE = sys.argv[2]
+            for i in range(int(sys.argv[4])):
+                with memory_store.locked():
+                    h = memory_store.load_history()
+                    h.append({"role": "user", "content": f"{sys.argv[3]}{i}"})
+                    memory_store.save_history(h)
+        """
+        n = 60  # under MAX_STORED_MESSAGES, so trimming can't hide a loss
+        procs = [_run(code, self.ms.MEMORY_FILE, tag, n, wait=False) for tag in "ab"]
+        for p in procs:
+            _, err = p.communicate(timeout=300)
+            self.assertEqual(p.returncode, 0, err)
+        self.assertEqual(len(self.ms.load_history()), 2 * n)
+
+    def test_torn_facts_kept_aside(self):
+        with open(self.tools.FACTS_FILE, "w", encoding="utf-8") as f:
+            f.write('{"favorite_coffee": "flat wh')
+        self.tools.remember("editor", "vscode")
+        self.assertEqual(self.tools._load_facts(), {"editor": "vscode"})
+        self.assertEqual(len(safe_json.corrupt_copies(self.tools.FACTS_FILE)), 1)
 
 
 class Config(unittest.TestCase):

@@ -29,6 +29,7 @@ from brain import MODEL, TOOL_DEFINITIONS, _get
 load_dotenv()
 
 import housekeeping
+import safe_json
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PYTHON_EXE = sys.executable
@@ -63,16 +64,13 @@ def load_shortcuts():
         save_shortcuts(DEFAULT_SHORTCUTS)
         return DEFAULT_SHORTCUTS
     try:
-        with open(SHORTCUTS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
+        return safe_json.read_json(SHORTCUTS_FILE, DEFAULT_SHORTCUTS)
+    except OSError:
         return DEFAULT_SHORTCUTS
 
 
 def save_shortcuts(shortcuts):
-    os.makedirs(os.path.dirname(SHORTCUTS_FILE), exist_ok=True)
-    with open(SHORTCUTS_FILE, "w", encoding="utf-8") as f:
-        json.dump(shortcuts, f, indent=2)
+    safe_json.write_json_atomic(SHORTCUTS_FILE, shortcuts, indent=2)
 
 
 def get_status():
@@ -96,12 +94,9 @@ def get_facts():
 
 def get_history(limit=None):
     limit = CONFIG["history_limit"] if limit is None else limit
-    if not os.path.exists(CONVERSATION_FILE):
-        return []
-    try:
-        with open(CONVERSATION_FILE, "r", encoding="utf-8") as f:
-            messages = json.load(f)
-    except (json.JSONDecodeError, OSError):
+    try:  # read-only: nothing is saved back from here
+        messages = safe_json.read_json(CONVERSATION_FILE, [])
+    except OSError:
         return []
     visible = [
         m for m in messages

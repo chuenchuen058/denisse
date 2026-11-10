@@ -5,10 +5,10 @@ Stores the running message history as JSON on disk so Denisse remembers
 context across restarts, without needing a database for v1.
 """
 
-import json
 import os
 
 import obsidian_sync
+import safe_json
 
 MEMORY_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "memory")
 MEMORY_FILE = os.path.join(MEMORY_DIR, "conversation.json")
@@ -17,13 +17,16 @@ MAX_STORED_MESSAGES = 200  # keep the file bounded
 
 
 def load_history() -> list:
-    if not os.path.exists(MEMORY_FILE):
-        return []
-    try:
-        with open(MEMORY_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return []
+    """The stored history; [] if there is none. A file that won't parse is
+    copied aside by safe_json (never silently replaced by the next save)."""
+    return safe_json.read_json(MEMORY_FILE, [])
+
+
+def locked():
+    """The cross-process lock for a read-modify-write of the history: the
+    tray, scripts/ask.py, the eval and the agent loop are separate
+    processes. conversation.record() holds it."""
+    return safe_json.locked(MEMORY_FILE)
 
 
 def save_history(messages: list) -> None:
@@ -34,8 +37,7 @@ def save_history(messages: list) -> None:
     # history stays valid to replay.
     while trimmed and trimmed[0].get("role") == "tool":
         trimmed = trimmed[1:]
-    with open(MEMORY_FILE, "w", encoding="utf-8") as f:
-        json.dump(trimmed, f, indent=2)
+    safe_json.write_json_atomic(MEMORY_FILE, trimmed, indent=2)
     obsidian_sync.sync_conversation(trimmed)
 
 

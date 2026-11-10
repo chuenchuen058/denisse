@@ -107,6 +107,34 @@ class TaskStore(unittest.TestCase):
     def tearDown(self):
         tasks.TASKS_FILE, tasks._mirror_to_vault = self._file, self._mirror
 
+    def test_good_file_round_trips_unchanged(self):
+        import json
+        stored = [{"id": "abc12345", "text": "café run", "due": None, "due_text": None,
+                   "created": "2026-11-10T09:00", "done_at": None, "due_inferred": False,
+                   "event_id": None, "reminded_on": None, "priority": "normal"}]
+        with open(tasks.TASKS_FILE, "w", encoding="utf-8") as f:
+            json.dump(stored, f, indent=2, ensure_ascii=False)
+        with open(tasks.TASKS_FILE, "rb") as f:
+            before = f.read()
+        tasks._save(tasks._load())
+        with open(tasks.TASKS_FILE, "rb") as f:
+            self.assertEqual(f.read(), before)
+
+    def test_torn_file_is_kept_aside_not_erased(self):
+        import logging
+        import safe_json
+        logging.getLogger("denisse.safe_json").setLevel(logging.ERROR)
+        torn = '[{"id": "abc12345", "text": "email Sunway", "done_'
+        with open(tasks.TASKS_FILE, "w", encoding="utf-8") as f:
+            f.write(torn)
+        self.assertEqual(tasks.list_tasks(), [])
+        tasks.add_task("buy a new soldering tip")  # the tray keeps working
+        self.assertEqual([t["text"] for t in tasks.list_tasks()], ["buy a new soldering tip"])
+        copies = safe_json.corrupt_copies(tasks.TASKS_FILE)
+        self.assertEqual(len(copies), 1)
+        with open(copies[0], encoding="utf-8") as f:
+            self.assertEqual(f.read(), torn)
+
     def test_store_and_matching(self):
         tasks.add_task("email Sunway about the firm visit", "before friday")
         tasks.add_task("submit the EE problem set", "tomorrow 5pm")
