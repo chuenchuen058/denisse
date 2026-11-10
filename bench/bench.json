@@ -1,0 +1,59 @@
+{
+  "_about": "Local model bench: one score per job, per model (python -m bench). Every model name, threshold, fixture path and limit lives here (AGENTS.md Rule 0). Results go to out_dir/<date>.json and <date>.md under the checkout it runs in; a rerun on the same date skips the (model, job) cells already done, so a run stopped by the lease or the battery picks up where it left off.",
+  "models": ["llama3.1:8b", "qwen3.5:9b"],
+  "_models": "Default for --models. Installed models only: the bench never pulls one. A model worth trying goes in suggest with its exact pull line for Chuen to approve.",
+  "suggest": [],
+  "out_dir": ".review/bench",
+  "lease": {
+    "holder": "bench",
+    "ttl_s": 10800,
+    "wait_s": 300,
+    "poll_s": 5,
+    "_about": "The shared GPU lease (orchestra/local_team/lease.py). In-process jobs run under the bench's own hold; jobs marked lease \"own\" take it themselves per call (eval/run_eval.py, the local team), so the bench releases it first. Still busy after wait_s: the run stops and is resumable."
+  },
+  "battery": {
+    "_about": "No local batch job on battery (9 Nov 2026). Checked before every cell with orchestra/power.py; unknown counts as AC, as for dispatch. ORCHESTRA_POWER overrides the reading.",
+    "refuse_on_battery": true
+  },
+  "ollama": {
+    "ps_url": "http://127.0.0.1:11434/api/ps",
+    "chat_path": "/api/chat",
+    "tags_path": "api/tags",
+    "timeout_s": 3
+  },
+  "score": {
+    "_about": "A case's score is the share of its checks that passed (0-1); a job's score is the mean over its cases. ok = every check passed.",
+    "min_word_chars": 4,
+    "ground_min_share": 0.6,
+    "error_chars": 300,
+    "_ground_min_share": "Factual check: at least this share of an answer's words (min_word_chars or longer) must appear in the case's source text."
+  },
+  "pick": {
+    "_about": "bench pick: per job, the model with the highest score; models within quality_margin of the best are tied and the faster (lower median seconds per case) wins. A job needs min_cases scored cases, with no errors, for a model to count.",
+    "quality_margin": 0.05,
+    "min_cases": 1
+  },
+  "routing_file": "model_routing.json",
+  "_today": "Per job: where its model comes from when model_routing.json leaves it null. entry = a config.json models entry; orchestra = a key of orchestra/models.json or config.json.",
+  "jobs": {
+    "don_extract": {"today": {"entry": "chat"}, "kind": "don_extract", "fixtures": "bench/fixtures/lectures.json", "lease": "bench",
+                    "required": ["outcomes", "methods"], "min_items": 1},
+    "don_cards": {"today": {"entry": "chat"}, "kind": "don_cards", "fixtures": "bench/fixtures/notes.json", "lease": "bench",
+                  "engine": "local", "min_cards": 1},
+    "don_card_check": {"today": {"entry": "chat"}, "kind": "don_card_check", "fixtures": "bench/fixtures/card_checks.json", "lease": "bench",
+                       "engine": "local"},
+    "don_teach": {"today": {"entry": "chat"}, "kind": "don_teach", "fixtures": "bench/fixtures/lessons.json", "lease": "bench",
+                  "engine": "local"},
+    "don_consult": {"today": {"entry": "chat"}, "kind": "don_consult", "fixtures": "bench/fixtures/consults.json", "lease": "bench",
+                    "engine": "local"},
+    "denisse_brain": {"today": {"entry": "chat"}, "kind": "denisse_eval", "lease": "own", "group": "",
+                      "only": ["greet_hey", "identity", "small_talk", "math", "task_add", "task_list", "find_file", "vault_week_topic"],
+                      "timeout_s": 1800,
+                      "_about": "eval/run_eval.py --only these cases (clean and live) in a subprocess with the model set; its pass/fail is the score. Ids must be in eval/cases.py. group, if set, is used instead of only."},
+    "orchestra_local_team": {"today": {"orchestra": "local_team_model"}, "kind": "local_team", "lease": "own", "rounds": 1,
+                             "only": ["01-parked-generic-why", "05-failing-atrium-suite", "10-human-only"],
+                             "_about": "orchestra/local_team/baseline.py on these fixtures; the scout's yes/no per fixture is the score, plans and admission are reported alongside."},
+    "atrium_autopilot": {"today": {"orchestra": "autopilot_model"}, "kind": "atrium_autopilot", "fixtures": "bench/fixtures/autopilot.json", "lease": "bench",
+                         "_about": "atrium/autopilot.py model_classify on synthetic candidates, labelled by hand."}
+  }
+}

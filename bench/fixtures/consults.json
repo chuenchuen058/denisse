@@ -1,0 +1,13 @@
+{
+  "_about": "A question and the notes that answer it, for Don's consult. The bench hands the text to consult.prompt as the gathered notes.",
+  "cases": [
+    {"id": "which_surface", "module": "Field Theory Basics", "code": "BENCH101",
+     "question": "Which Gaussian surface should I use for an infinite line of charge?",
+     "text": "Choose a Gaussian surface that matches the symmetry: a sphere for a point charge, a cylinder coaxial with the line for a line charge, a pillbox for an infinite plane. On a cylinder of radius r and length L around a line charge with density lambda, E * 2 pi r L = lambda L / epsilon_0.",
+     "expect_terms": ["cylinder"]},
+    {"id": "tau_meaning", "module": "Circuits Primer", "code": "BENCH102",
+     "question": "What does the time constant of an RC circuit tell me?",
+     "text": "The time constant tau = R C is the time for a charging capacitor to reach about 63 percent of its final charge; after five time constants it is effectively full.",
+     "expect_terms": ["63"]}
+  ]
+}

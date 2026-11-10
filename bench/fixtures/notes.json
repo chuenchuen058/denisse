@@ -1,0 +1,11 @@
+{
+  "_about": "Synthetic study notes for Don's card writer. expect_terms: what the cards, taken together, should cover.",
+  "cases": [
+    {"id": "ohms_law", "module": "Circuits Primer", "code": "BENCH102", "week": 1, "topic": "Ohm's law",
+     "text": "Ohm's law: the voltage across a resistor equals the current through it times its resistance, V = I R. Resistance is measured in ohms. Resistors in series add: R_total = R1 + R2. Resistors in parallel combine as 1 / R_total = 1 / R1 + 1 / R2. Power dissipated in a resistor is P = I V = I^2 R = V^2 / R. To find the current in a series circuit, add the resistances and divide the source voltage by the total. Example: a 12 volt source across 4 ohm and 2 ohm in series gives a current of 2 amperes.",
+     "expect_terms": ["resistance", "current", "voltage"]},
+    {"id": "simple_harmonic", "module": "Mechanics Primer", "code": "BENCH103", "week": 4, "topic": "Simple harmonic motion",
+     "text": "Simple harmonic motion: a mass m on a spring of stiffness k obeys m x'' = -k x. The solution is x(t) = A cos(omega t + phi) with angular frequency omega = sqrt(k / m). The period is T = 2 pi / omega = 2 pi sqrt(m / k). The total energy (1/2) k A^2 is constant: kinetic and potential energy exchange during each cycle. To find the period of a spring system, compute omega from k and m, then T = 2 pi / omega. Example: m = 0.5 kg, k = 50 N/m gives omega = 10 rad/s and T = 0.63 s.",
+     "expect_terms": ["period", "spring", "frequency"]}
+  ]
+}
