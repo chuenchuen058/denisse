@@ -31,6 +31,7 @@ FIXTURES = [
     (HERE, "test_runner.RunnerTest.test_task_without_sidecar_is_not_premise_checked"),
     (HERE, "test_runner.PrePushTest.test_push_from_the_main_checkout_is_allowed"),
     (HERE, "test_integration.IntegrationTest.test_master_is_fast_forwarded_to_the_tested_merge_commit"),
+    (HERE, "test_master_health.MasterHealthTest.test_green_record_from_a_baseline_run_and_its_worktree_is_gone"),
     (HERE, "test_crash_recovery.CrashRecoveryTest.test_git_output_is_utf8_whatever_the_console_code_page"),
     (HERE, "test_conflicts.ConflictsTest.test_paths_in_text"),
     (HERE, "test_campaign.RunnerCampaignTest.test_runner_config_follows_the_fake_clock"),
