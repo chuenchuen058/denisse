@@ -126,7 +126,8 @@ def collect() -> dict:
     state = snapshot._state()
     pw = _power()
     usage = {u["lane"]: u for u in t["usage"]}
-    limits = {lane: _iso(v.get("limited_until") or "") for lane, v in (state.get("lanes") or {}).items()}
+    lanes = state.get("lanes") if isinstance(state.get("lanes"), dict) else {}
+    limits = {lane: _iso(v.get("limited_until") or "") for lane, v in lanes.items() if isinstance(v, dict)}
     queued: dict[str, int] = {}
     held = {r["id"] for r in t["running"] if r["task"]}  # a running task's file stays in queue/
     for r in t["tasks"]:
