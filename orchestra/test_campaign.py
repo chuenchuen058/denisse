@@ -200,23 +200,26 @@ class ControlTest(unittest.TestCase):
         self.assertTrue(campaign.resume(self.review, AFTER)[0])
 
 
+def build_campaign_repo(repo):
+    """The repo every RunnerCampaignTest starts from (built once per class, copied per test)."""
+    g = lambda *a: subprocess.run(["git", *a], cwd=repo, check=True, capture_output=True)
+    g("init", "-q", "-b", "main")
+    g("config", "user.name", "t"); g("config", "user.email", "t@t")
+    (repo / ".gitignore").write_text(".review/*\n.venv\n")
+    (repo / "orchestra").mkdir()
+    shutil.copy(HERE / "review_prompt.md", repo / "orchestra" / "review_prompt.md")
+    g("add", "."); g("commit", "-qm", "init")
+    (repo / ".review").mkdir()
+    (repo / ".review" / "lanes.json").write_text(json.dumps({"fake": [sys.executable, "-c", TR.FAKE]}))
+
+
 class RunnerCampaignTest(unittest.TestCase):
     """The runner honours the controls: a throwaway git repo and the fake lane from test_runner."""
 
     def setUp(self):
         testing_git.hermetic_git(self)  # first: no inherited GIT_* reaches a real repo
         self.tmp = Path(tempfile.mkdtemp())
-        self.repo = self.tmp / "repo"
-        self.repo.mkdir()
-        g = lambda *a: subprocess.run(["git", *a], cwd=self.repo, check=True, capture_output=True)
-        g("init", "-q", "-b", "main")
-        g("config", "user.name", "t"); g("config", "user.email", "t@t")
-        (self.repo / ".gitignore").write_text(".review/*\n.venv\n")
-        (self.repo / "orchestra").mkdir()
-        shutil.copy(HERE / "review_prompt.md", self.repo / "orchestra" / "review_prompt.md")
-        g("add", "."); g("commit", "-qm", "init")
-        (self.repo / ".review").mkdir()
-        (self.repo / ".review" / "lanes.json").write_text(json.dumps({"fake": [sys.executable, "-c", TR.FAKE]}))
+        self.repo = testing_git.from_template(self, self.tmp / "repo", build_campaign_repo)
         self.saved_env = {k: os.environ.get(k) for k in ("ORCHESTRA_REPO", "ORCHESTRA_BACKOFF_MIN",
                                                           "ORCHESTRA_DAILY_SPEND_CAP_USD", "ORCHESTRA_TIMEOUT_S",
                                                           "ORCHESTRA_POWER", *TR.FAKE_ENV)}

@@ -72,26 +72,30 @@ Do {slug}.
 ENV = ("FAKE_FILE", "FAKE_TEXT", "FAKE_SLEEP", "FAKE_REVIEW_FLAG", "FAKE_NO_REPORT")
 
 
+def build_crash_repo(repo):
+    """The repo every CrashRecoveryTest starts from (built once per class, copied per test)."""
+    g = lambda *a: subprocess.run(["git", *a], cwd=repo, check=True, capture_output=True)
+    g("init", "-q", "-b", "main")
+    g("config", "user.name", "t")
+    g("config", "user.email", "t@t")
+    (repo / ".gitignore").write_text(".review/*\n.venv\n")
+    (repo / "orchestra").mkdir()
+    shutil.copy(HERE / "review_prompt.md", repo / "orchestra" / "review_prompt.md")
+    (repo / "orchestra" / "notes.txt").write_text("notes\n", encoding="utf-8")
+    g("add", ".")
+    g("commit", "-qm", "init")
+    (repo / ".venv").mkdir()
+    (repo / ".review").mkdir()
+    (repo / ".review" / "lanes.json").write_text(json.dumps({
+        "fake": [sys.executable, "-c", FAKE], "reviewer": [sys.executable, "-c", FAKE_REVIEWER]}))
+
+
 class CrashRecoveryTest(unittest.TestCase):
     def setUp(self):
         testing_git.hermetic_git(self)  # first: no inherited GIT_* reaches a real repo
         self.tmp = Path(tempfile.mkdtemp())
-        self.repo = self.tmp / "repo"
-        self.repo.mkdir()
-        self.git("init", "-q", "-b", "main")
-        self.git("config", "user.name", "t")
-        self.git("config", "user.email", "t@t")
-        (self.repo / ".gitignore").write_text(".review/*\n.venv\n")
-        (self.repo / "orchestra").mkdir()
-        shutil.copy(HERE / "review_prompt.md", self.repo / "orchestra" / "review_prompt.md")
-        (self.repo / "orchestra" / "notes.txt").write_text("notes\n", encoding="utf-8")
-        self.git("add", ".")
-        self.git("commit", "-qm", "init")
-        (self.repo / ".venv").mkdir()
-        (self.repo / ".review").mkdir()
+        self.repo = testing_git.from_template(self, self.tmp / "repo", build_crash_repo)
         self.flag = self.tmp / "reviewed.txt"
-        (self.repo / ".review" / "lanes.json").write_text(json.dumps({
-            "fake": [sys.executable, "-c", FAKE], "reviewer": [sys.executable, "-c", FAKE_REVIEWER]}))
         os.environ["ORCHESTRA_REPO"] = str(self.repo)
         os.environ["ORCHESTRA_BACKOFF_MIN"] = "0"
         os.environ["ORCHESTRA_DAILY_SPEND_CAP_USD"] = "50"

@@ -68,6 +68,11 @@ class FixtureSetTest(unittest.TestCase):
 
 
 class HarnessTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # The tracked-file list is read-only input to build_repo: list it once, not per test.
+        cls.tracked = tuple(baseline.tracked_files(baseline.SRC_REPO))
+
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         self.fake = FakeOllama()
@@ -76,7 +81,7 @@ class HarnessTest(unittest.TestCase):
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
-        self.files = baseline.tracked_files(baseline.SRC_REPO)
+        self.files = list(self.tracked)
 
     def tearDown(self):
         self.fake.close()
