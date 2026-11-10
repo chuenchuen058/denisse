@@ -29,7 +29,7 @@
     "leading_fillers": ["the"],
     "follow_up_timeout_s": 6,
     "wake_detected_window_s": 3.0,
-    "wake_ack": "Yes Chuen? How can I help you?",
+    "wake_ack": "Yes Chuen? I can update the config voice line to match the task wording.",
     "recent_context_seconds": 30,
     "recent_context_prompt": "For background only (not an instruction): the last {seconds}s of speech picked up near the microphone, which may include the current request too: \"{recent}\"",
     "events_poll_s": 0.5,
