@@ -137,9 +137,24 @@ def write() -> str:
     (R.REVIEW / "STATE_NOW.md").write_text(text, encoding="utf-8")
     vault = _vault()
     if not os.environ.get("ORCHESTRA_REPO") and vault and Path(vault).is_dir():  # tests never touch the real vault
-        (Path(vault) / "STATE NOW.md").write_text(HEADER.format(date=R.now().date().isoformat()) + text,
-                                                  encoding="utf-8")
+        write_vault(Path(vault), HEADER.format(date=R.now().date().isoformat()) + text)
     return text
+
+
+def write_vault(vault: Path, text: str) -> bool:
+    """<vault>/STATE NOW.md under the vault lock (vaultlock.py), via a temp file + os.replace, and
+    only if nobody saved it since it was read (else False; the next tick writes it). Line ends
+    follow the file already there, else the platform's, as write_text gave before."""
+    import vaultlock
+
+    def render(old: str) -> str:
+        nl = "\r\n" if "\r\n" in old else ("\n" if old else os.linesep)
+        return text.replace("\r\n", "\n").replace("\n", nl)
+    try:
+        with vaultlock.VaultLock():
+            return vaultlock.replace_if_unchanged(vault / "STATE NOW.md", render)
+    except TimeoutError:
+        return False
 
 
 if __name__ == "__main__":
