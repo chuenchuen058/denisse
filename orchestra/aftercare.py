@@ -194,10 +194,16 @@ WAIT_OPEN, WAIT_CLOSE = "<!-- orchestra:waiting -->", "<!-- /orchestra:waiting -
 WAIT_HEADING = "## Waiting on Chuen"
 
 
-def waiting_lines(*, queue_dir: Path, parked_dir: Path, state: dict, now: dt.datetime) -> list[str]:
+def waiting_lines(*, queue_dir: Path, parked_dir: Path, state: dict, now: dt.datetime,
+                  drop_landed=None, merge_waiting=None) -> list[str]:
     """What Orchestra has waiting on Chuen, one markdown bullet each, from the runner's own files:
     draft tasks to approve, parked tasks (first line of the why file), PASSes that didn't merge,
-    and lanes limited until a time."""
+    and lanes limited until a time. `drop_landed(state)` (runner.drop_landed) first marks the
+    PASSes whose branch has since landed on master; `merge_waiting(note)` (runner.merge_waiting)
+    says which merge notes still wait. Without them: every note but merged / no commits waits."""
+    if drop_landed:
+        drop_landed(state)
+    waits = merge_waiting or (lambda m: bool(m) and m not in ("merged", "no commits"))
     def title(p: Path) -> str:
         try:
             first = next((l for l in p.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -225,7 +231,7 @@ def waiting_lines(*, queue_dir: Path, parked_dir: Path, state: dict, now: dt.dat
         out.append(f"- Parked \"{title(parked_dir / (slug + '.md'))}\" (`{slug}`): {reason or '(no reason given)'}")
     for slug, ts in sorted((state.get("tasks") or {}).items()):
         m = ts.get("merge", "")
-        if m and m not in ("merged", "no commits"):
+        if waits(m):
             out.append(f"- PASS not merged: `review/{slug}` — {m}")
     for lane, info in sorted((state.get("lanes") or {}).items()):
         until = (info or {}).get("limited_until")

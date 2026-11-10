@@ -86,9 +86,13 @@ def build() -> str:
         slug = why.name[: -len(".why.txt")]
         reason = why.read_text(encoding="utf-8").strip().split(" ", 1)[-1]
         waiting.append(f"- {_title(R.PARKED / (slug + '.md'))} — {reason}")
+    try:
+        R.drop_landed(state)  # a branch since merged (or gone) leaves the list
+    except Exception as e:  # git trouble must not take STATE NOW down; list them as before
+        waiting.append(f"- (could not check which branches have landed: {e})")
     for slug, ts in state.get("tasks", {}).items():
         m = ts.get("merge", "")
-        if m and m not in ("merged", "no commits"):
+        if R.merge_waiting(m):
             waiting.append(f"- merge `review/{slug}` — {m}")
     for slug, ts in state.get("tasks", {}).items():
         last = (ts.get("history") or [{}])[-1]
