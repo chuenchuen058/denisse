@@ -434,6 +434,112 @@ class IntegrationTest(unittest.TestCase):
         self.assertTrue((self.R.PARKED / "clash.md").exists())
         self.assertIn("merge conflict", (self.R.PARKED / "clash.why.txt").read_text(encoding="utf-8"))
 
+    def parked_branch(self, slug, files):
+        """A PASSed branch left behind (worktree gone, branch kept, no report): what a merge-only
+        re-queue finds."""
+        task, wt, branch = self.worked(slug, files)
+        self.R.remove_worktree(wt, branch, delete_branch=False)
+        (self.R.REPORTS / f"{slug}.md").unlink()
+        return branch
+
+    def test_merge_only_gates_the_merged_tree_not_the_stale_branch(self):
+        # Master has a red test when the branch is cut; master fixes it later (9 Nov 2026: 3cab947).
+        broken = "import unittest\n\nclass T(unittest.TestCase):\n    def test(self):\n        self.assertTrue(%s)\n"
+        (self.repo / "check_model.py").write_text(broken % "False")
+        self.git("add", "check_model.py")
+        self.git("commit", "-qm", "a red test")
+        branch = self.parked_branch("stale", {"done.txt": "reviewed work"})
+        tip = self.git("rev-parse", branch)
+        (self.repo / "check_model.py").write_text(broken % "True")
+        self.git("commit", "-qam", "master fixes the test")
+        alone = subprocess.run(["git", "worktree", "add", "--detach", str(self.tmp / "alone"), branch],
+                               cwd=self.repo, capture_output=True)
+        self.assertEqual(alone.returncode, 0)
+        self.assertNotEqual(subprocess.run(GATE, cwd=self.tmp / "alone", shell=True, capture_output=True).returncode,
+                            0, "the branch alone fails the gate")
+        self.git("worktree", "remove", "--force", str(self.tmp / "alone"))
+        self.merge_only_task("stale")
+        self.assertEqual(self.run_tick({}), "PASS")
+        self.assertFalse((self.R.REPORTS / "stale.lane.log").exists(), "no lane ran")
+        self.assertEqual(self.git("rev-parse", "HEAD^2"), tip, "the branch merged")
+        self.assertEqual((self.repo / "done.txt").read_text(), "reviewed work")
+        self.assertTrue(self.master_green())
+        ts = self.state()["tasks"]["stale"]
+        self.assertEqual(ts["merge"], "merged")
+        self.assertIn("skipped", ts["history"][-1]["runner_gate"])
+        self.assertTrue(ts["integration"]["checks"][0].startswith("gate: pass"), ts["integration"]["checks"])
+
+    def test_merge_only_whose_merged_tree_fails_parks_with_the_combined_reason(self):
+        branch = self.parked_branch("caller", {
+            "feature.py": "import lib\n\ndef shout():\n    return lib.greet().upper()\n",
+            "check_feature.py": "import unittest, feature\n\nclass T(unittest.TestCase):\n"
+                                "    def test(self):\n        self.assertEqual(feature.shout(), 'HI')\n"})
+        (self.repo / "lib.py").write_text('def hello():\n    return "hi"\n')
+        (self.repo / "check_lib.py").write_text(CHECK_LIB.replace("greet", "hello"))
+        self.git("commit", "-qam", "master renames greet")
+        before = self.head()
+        self.merge_only_task("caller")
+        self.assertEqual(self.run_tick({}), "INTEGRATION-REJECTED")
+        self.assertEqual(self.head(), before, "master untouched")
+        self.assertTrue(self.git("rev-parse", "--verify", branch), "branch kept")
+        why = (self.R.PARKED / "caller.why.txt").read_text(encoding="utf-8")
+        self.assertIn("combined tree", why)
+        self.assertNotIn("runner's own gate check", why)
+        self.assertNotIn("merge", self.state()["tasks"]["caller"])
+
+    def test_merge_only_branch_already_on_master_is_archived_without_a_gate(self):
+        branch = self.parked_branch("landed", {"done.txt": "x"})
+        self.git("merge", "-q", "--no-ff", "-m", "landed another way", branch)  # not the runner's merge
+        before = self.head()
+
+        def no_gate(*a, **k):
+            raise AssertionError("no gate may run for work already on master")
+        self.R.run_gate = self.R.check_combined = no_gate
+        self.merge_only_task("landed")
+        self.assertEqual(self.run_tick({}), "PASS")
+        self.assertEqual(self.head(), before, "nothing merged")
+        day = self.R.ARCHIVE / dt.date.today().isoformat()
+        self.assertTrue((day / "landed.md").exists(), "archived as done")
+        self.assertFalse((self.R.QUEUE / "landed.md").exists())
+        self.assertFalse((self.R.PARKED / "landed.why.txt").exists())
+        ts = self.state()["tasks"]["landed"]
+        self.assertIn("already on master", ts["history"][-1]["note"])
+        self.assertEqual(ts["last_result"], "PASS")
+        self.assertEqual(ts["merge"], self.R.C["merge_landed"])
+        self.assertIn("already on master", self.runner_log())
+        self.assertTrue(self.git("rev-parse", "--verify", branch), "branch not deleted")
+
+    def test_landed_branch_leaves_the_waiting_lists(self):
+        import aftercare
+        import state_now
+        landed = self.parked_branch("by-hand", {"a.txt": "a"})
+        waiting = self.parked_branch("still-waiting", {"b.txt": "b"})
+        self.parked_branch("gone", {"c.txt": "c"})
+        self.git("merge", "-q", "--no-ff", "-m", "Chuen merged it", landed)
+        self.git("branch", "-D", "review/gone")
+        st = self.R.load_state()
+        for slug in ("by-hand", "still-waiting", "gone"):
+            self.R.task_state(st, next(t for t in self.R.load_queue() if t.slug == slug))["merge"] = \
+                "merge conflict; merge by hand"
+        self.R.save_state(st)
+
+        lines = aftercare.waiting_lines(queue_dir=self.R.QUEUE, parked_dir=self.R.PARKED,
+                                        state=self.R.load_state(), now=dt.datetime.now(),
+                                        drop_landed=self.R.drop_landed, merge_waiting=self.R.merge_waiting)
+        merges = [l for l in lines if "PASS not merged" in l]
+        self.assertEqual(merges, ["- PASS not merged: `review/still-waiting` — merge conflict; merge by hand"])
+        tasks = self.state()["tasks"]
+        self.assertEqual(tasks["by-hand"]["merge"], self.R.C["merge_landed"], "state says it landed")
+        self.assertEqual(tasks["gone"]["merge"], self.R.C["merge_landed"])
+        self.assertEqual(tasks["still-waiting"]["merge"], "merge conflict; merge by hand")
+        self.assertTrue(self.git("rev-parse", "--verify", landed), "no branch deleted")
+        self.assertTrue(self.git("rev-parse", "--verify", waiting))
+
+        text = state_now.build()
+        self.assertIn("merge `review/still-waiting`", text)
+        self.assertNotIn("review/by-hand", text)
+        self.assertNotIn("review/gone", text)
+
     def test_parse_verdict(self):
         P = self.R.parse_verdict
         self.assertEqual(P(json.dumps({"type": "result", "result": "VERDICT: ok\n- fine"}))[0], "ok")

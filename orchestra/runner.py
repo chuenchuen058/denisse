@@ -1852,20 +1852,27 @@ def _after_pass(task: Task, state: dict, ts: dict, entry: dict, wt: Path, branch
                 stray: list[str], hooks_loaded: bool, progress: dict, park_unmerged: bool = False) -> str:
     """Gate re-run, reviewer, combined-tree integration, archive. `progress["stage"]` names the
     step under way, for the crash log if one of them raises. `park_unmerged` (a merge-only run):
-    a merge that needs doing by hand parks the task instead of archiving it."""
-    problems = []
-    if stray:
-        problems.append(f"files changed in the main checkout during the run: {', '.join(stray)}")
-    if not hooks_loaded:
-        problems.append("the guard hook never fired, so its limits weren't enforced")
-    verdict, detail = run_gate(task, wt)
-    entry["runner_gate"] = f"{verdict}: {detail}"
-    log(f"runner gate {task.slug}: {verdict}: {detail}")
-    if verdict != "pass":
-        problems.append(f"runner's own gate check: {verdict}: {detail}")
-    if problems:
-        park(task, "session said PASS, but " + "; ".join(problems) + f". Branch {branch} kept.", report)
-        return "PASS-REJECTED"
+    a merge that needs doing by hand parks the task instead of archiving it, and the gate is not
+    re-run on the branch alone -- it can be days behind master (9 Nov 2026: four re-queues failed a
+    test master had fixed), so only integration's combined-tree gate (branch + current master) counts.
+    No lane ran, so the stray-file and guard-hook checks don't apply either."""
+    if park_unmerged:
+        entry["runner_gate"] = C["merge_only_gate_skipped"].format(branch=branch)
+        log(f"runner gate {task.slug}: {entry['runner_gate']}")
+    else:
+        problems = []
+        if stray:
+            problems.append(f"files changed in the main checkout during the run: {', '.join(stray)}")
+        if not hooks_loaded:
+            problems.append("the guard hook never fired, so its limits weren't enforced")
+        verdict, detail = run_gate(task, wt)
+        entry["runner_gate"] = f"{verdict}: {detail}"
+        log(f"runner gate {task.slug}: {verdict}: {detail}")
+        if verdict != "pass":
+            problems.append(f"runner's own gate check: {verdict}: {detail}")
+        if problems:
+            park(task, "session said PASS, but " + "; ".join(problems) + f". Branch {branch} kept.", report)
+            return "PASS-REJECTED"
 
     # Reviewer lane: risky diffs get a fresh read-only reviewer before integration.
     progress["stage"] = "review"
@@ -1944,6 +1951,50 @@ def _after_pass(task: Task, state: dict, ts: dict, entry: dict, wt: Path, branch
     return "PASS"
 
 
+def merge_waiting(merge: str) -> bool:
+    """Is this state `merge` note a PASS still waiting to be merged (by hand)?"""
+    return bool(merge) and merge not in ("merged", "no commits", C["merge_landed"])
+
+
+def branch_landed(branch: str) -> bool:
+    """The branch is gone, or its tip is on the main checkout's HEAD: nothing left to merge."""
+    if git("rev-parse", "--verify", "--quiet", f"refs/heads/{branch}", check=False).returncode:
+        return True
+    return git("merge-base", "--is-ancestor", branch, "HEAD", check=False).returncode == 0
+
+
+def drop_landed(state: dict) -> list[str]:
+    """Every 'PASS not merged' task whose review/<slug> has landed (branch_landed) gets the merge
+    note C["merge_landed"], in `state` and in the state file, so the waiting lists (STATE_NOW,
+    hot.md) stop listing it. 10 Nov 2026: five branches all on master were still listed as
+    "merge conflict; merge by hand". Returns the slugs changed. Deletes no branch or worktree.
+    The file is updated under the state lock for just these fields, never by saving `state`
+    (a copy a tick may hold, whose save would undo another runner's changes)."""
+    found = [slug for slug, ts in sorted((state.get("tasks") or {}).items())
+             if merge_waiting(ts.get("merge", "")) and branch_landed(f"review/{slug}")]
+    if not found:
+        return []
+    for slug in found:
+        state["tasks"][slug]["merge"] = C["merge_landed"]
+        log(f"landed {slug}: review/{slug} {C['merge_landed']}; off the waiting list")
+    try:
+        with _FileLock(REVIEW / "state.lock", wait=60, stale=120):
+            fresh = load_state()
+            changed = False
+            for slug in found:
+                fts = fresh["tasks"].get(slug)
+                if fts and merge_waiting(fts.get("merge", "")):
+                    fts["merge"] = C["merge_landed"]
+                    changed = True
+            if changed:
+                tmp = STATE_FILE.with_suffix(".landed.tmp")
+                tmp.write_text(json.dumps(fresh, indent=2), encoding="utf-8")
+                _io_retry(lambda: os.replace(tmp, STATE_FILE))
+    except Exception as e:  # the list still drops them; the note is written next time
+        log(f"landed: state not updated ({e!r})")
+    return found
+
+
 def _archive_pass(task: Task, wt: Path, branch: str, report: Path, merge: str) -> None:
     """A passed task's last step: task file and report to today's archive, worktree removed if merged."""
     day = ARCHIVE / now().date().isoformat()
@@ -1985,6 +2036,25 @@ def merge_only(task: Task, state: dict, ts: dict) -> str:
     if git("rev-parse", "--verify", "--quiet", f"refs/heads/{branch}", check=False).returncode:
         return stop(f"branch {branch} does not exist, so there is nothing to merge; "
                     f"a plain requeue.py {task.slug} redoes the work")
+    # Every commit already on master (the work landed another way): nothing to gate or merge.
+    # 9 Nov 2026 two such branches were gated anyway, failed on a stale test and were parked.
+    # Not when the runner's own merge of this tip is on master: that is a tick killed after its
+    # fast-forward, and integrate() records and pushes it.
+    if (git("merge-base", "--is-ancestor", branch, "HEAD", check=False).returncode == 0
+            and not merged_already(branch)):
+        note = C["merge_only_on_master"].format(branch=branch)
+        entry.update(note=note, runner_gate=note)
+        ts["history"].append(entry)
+        ts.update(last_end=entry["end"], last_result="PASS", merge=C["merge_landed"])
+        state["done"][task.digest] = now().isoformat()
+        log(f"MERGE-ONLY {task.slug}: {note}; archived")
+        REPORTS.mkdir(parents=True, exist_ok=True)
+        if not report.exists():
+            report.write_text(C["merge_only_report"].format(branch=branch) + f"- {note}\n", encoding="utf-8")
+        day = ARCHIVE / now().date().isoformat()
+        move(task.path, day)
+        move(report, day, f"{task.slug}.report.md")
+        return "PASS"
     wt = WORKTREES / task.slug
     try:
         if wt.exists():
@@ -2113,7 +2183,8 @@ def _autopilot_step(state: dict, classify=None, power_status=None) -> list:
         classify=classify, at=now())
     if made and vault and aftercare_on():  # a new draft is listed in hot.md "Waiting on Chuen"
         import aftercare
-        lines = aftercare.waiting_lines(queue_dir=QUEUE, parked_dir=PARKED, state=load_state(), now=now())
+        lines = aftercare.waiting_lines(queue_dir=QUEUE, parked_dir=PARKED, state=load_state(), now=now(),
+                                         drop_landed=drop_landed, merge_waiting=merge_waiting)
         if aftercare.update_waiting(vault, lines):
             log(f"hot.md waiting list updated ({len(lines)} item(s))")
     return made
@@ -2154,7 +2225,8 @@ def write_vault_note(task: Task, ts: dict, result: str) -> None:
         log(f"vault note failed for {task.slug}: {e}")
     try:  # hot.md "Waiting on Chuen": Orchestra's own block, regenerated after every task
         import aftercare
-        lines = aftercare.waiting_lines(queue_dir=QUEUE, parked_dir=PARKED, state=load_state(), now=now())
+        lines = aftercare.waiting_lines(queue_dir=QUEUE, parked_dir=PARKED, state=load_state(), now=now(),
+                                         drop_landed=drop_landed, merge_waiting=merge_waiting)
         if aftercare.update_waiting(vault, lines):
             log(f"hot.md waiting list updated ({len(lines)} item(s))")
     except Exception as e:  # nor must the waiting list
