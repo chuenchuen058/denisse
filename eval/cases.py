@@ -687,8 +687,10 @@ CASES = [
         "id": "multi_weather_umbrella",
         "prompt": "check the weather in London and remind me to take an umbrella tomorrow",
         "fixtures": {"get_weather": "London: light rain, 11°C, wind 14 km/h."},
+        # "drizzl" since 2026-11-10: on 9 Nov "a bit drizzly in London" for
+        # the fixture's "light rain" failed -- a right report in other words.
         "expect": {"all_tools_of": {"get_weather", "add_task"},
-                   "must_contain": ["umbrella"], "contains_any": ["rain"]},
+                   "must_contain": ["umbrella"], "contains_any": ["rain", "drizzl"]},
         "why": "A read and a write in one request: both must happen, both must be reported.",
     },
     {
