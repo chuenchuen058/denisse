@@ -1,0 +1,26 @@
+{
+  "_help": "The few-shot bench for scripts/eval_local_learning.py: cases the local model answers with and without Claude's earlier corrections in its prompt; a case passes by the job's own check (teach: teach.self_check; consult: a non-empty, confident answer). 'seed' are the corrections the 'with' run draws from (unless --store uses the real private store). Synthetic textbook material only -- this file is in the public repo; never paste Chuen's notes here.",
+  "module": {"code": "BENCH01", "title": "Bench Physics"},
+  "seed": [
+    {"when": "2026-11-01T10:00:00", "job": "teach", "model": "bench", "input": "Gauss's law for a charged sphere",
+     "local": "{\"summary\": \"Gauss's law\", \"steps\": [\"Use Gauss.\"], \"question\": \"\", \"answer\": \"\", \"confident\": false}",
+     "why": "few_steps",
+     "accepted": "{\"summary\": \"The flux of E through a closed surface equals the enclosed charge over epsilon_0; for a sphere the symmetry makes E constant on a concentric Gaussian surface.\", \"steps\": [\"Pick a spherical Gaussian surface of radius r, concentric with the charge, so E is radial and equal in size everywhere on it.\", \"The flux is then E times 4 pi r^2, and Gauss's law sets it equal to Q_enc / epsilon_0.\", \"Solve for E: outside the sphere E = Q / (4 pi epsilon_0 r^2), the same as a point charge.\"], \"question\": \"What is E at r = 2R outside a sphere of charge Q?\", \"answer\": \"Q / (16 pi epsilon_0 R^2)\", \"confident\": true}"},
+    {"when": "2026-11-02T10:00:00", "job": "teach", "model": "bench", "input": "Laplace transform of a unit step",
+     "local": "{\"summary\": \"\", \"steps\": [], \"question\": \"\", \"answer\": \"\", \"confident\": false}",
+     "why": "no_summary",
+     "accepted": "{\"summary\": \"The Laplace transform turns u(t) into 1/s for Re(s) > 0, by integrating e^{-st} from 0 to infinity.\", \"steps\": [\"Write the definition: F(s) is the integral from 0 to infinity of f(t) e^{-st} dt.\", \"For the unit step f(t) = 1 when t >= 0, so the integral is of e^{-st} alone, which gives 1/s.\", \"The integral only converges when Re(s) > 0: that half-plane is the region of convergence.\"], \"question\": \"What is the Laplace transform of 3u(t)?\", \"answer\": \"3/s\", \"confident\": true}"},
+    {"when": "2026-11-03T10:00:00", "job": "consult", "model": "bench", "input": "Which topics on electric flux should I revise before the test?",
+     "local": "{\"answer\": \"\", \"caveats\": [], \"confident\": false}",
+     "why": "empty",
+     "accepted": "{\"answer\": \"The notes cover electric flux through open and closed surfaces and Gauss's law for spheres and lines of charge; revise the symmetry arguments first.\", \"caveats\": [\"The notes do not cover flux through moving surfaces.\"], \"confident\": true}"}
+  ],
+  "cases": [
+    {"job": "teach", "query": "Gauss's law for a charged shell",
+     "material": "Gauss's law: the electric flux through any closed surface equals the enclosed charge divided by epsilon_0. For a thin spherical shell of charge Q and radius R, a concentric Gaussian surface inside the shell encloses no charge, so E = 0 inside; outside, E = Q / (4 pi epsilon_0 r^2). Worked example: a shell with Q = 2 nC and R = 0.1 m; find E at r = 0.2 m."},
+    {"job": "teach", "query": "Laplace transform of an exponential",
+     "material": "The Laplace transform of e^{-at} u(t) is 1/(s + a), with region of convergence Re(s) > -a. It follows from the definition by combining the exponents: the integrand is e^{-(s+a)t}. Worked example: transform 5 e^{-2t} u(t)."},
+    {"job": "consult", "query": "What should I revise on Gauss's law and electric flux?",
+     "material": "Week 2 notes: electric flux, Gauss's law in integral form, Gaussian surfaces for a sphere, an infinite line and an infinite plane. Tutorial 2 questions apply Gauss's law to a charged shell and a long wire."}
+  ]
+}

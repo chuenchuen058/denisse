@@ -184,7 +184,9 @@ def explain(topic: str, module: str = "") -> str:
             try:
                 lesson = teach.explain_with(paths, mod, topic, engine, calls=CALLS, core=CORE, found=found)
             except model.ModelError as exc:
+                teach.learn_from(paths, mod, topic, out, None, engine)  # still a failure worth counting
                 return _C["claude_failed"].format(why=exc, **c)
+            teach.learn_from(paths, mod, topic, out, lesson, engine)
             rec = teach.record(paths, mod, topic, lesson, engine, found["links"], today, say=_say)
             _commit(paths, rec["touched"], "teach", mod)
             return _C["claude_done"].format(summary=lesson["summary"], steps=_steps(lesson),

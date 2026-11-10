@@ -46,7 +46,7 @@ import json
 import os
 import re
 
-from . import conf, don, ingest, model, rules, sources, topics
+from . import conf, don, ingest, learn, model, rules, sources, topics
 from .conf import CONFIG, Module, Paths
 
 _C = CONFIG["cards"]
@@ -55,6 +55,7 @@ _V = _K["verdicts"]
 _PASS = (_V["right"], _V["fixed"])
 _D = CONFIG["don"]
 _SAY = CONFIG["say"]
+JOB = "cards"  # the learn store's name for this job (tutor.json learn.shots.jobs)
 
 
 def _clip(text, limit: int) -> str:
@@ -179,10 +180,13 @@ def _with_answer(back: str, item: dict, kind: str) -> str:
 
 
 def generate(module: Module, src: sources.Source, calls: dict | None = None, num_ctx: int | None = None,
-             only: set | None = None, scope: dict | None = None, dropped: list | None = None) -> list:
+             only: set | None = None, scope: dict | None = None, dropped: list | None = None,
+             paths: Paths | None = None) -> list:
     """Candidates for one source; known foreign topics carry a held verdict for the sidecar.
     Candidates screened out (no quote from the note, no final answer) go to
-    `dropped` as (kind, front, why) and are not returned."""
+    `dropped` as (kind, front, why) and are not returned. With `paths`, a
+    local writer is shown the checker's earlier corrections of cards like
+    these (learn.shots)."""
     by_engine = {}
     for kind, spec in _C["kinds"].items():
         if spec["count"] > 0 and (only is None or kind in only):
@@ -199,7 +203,8 @@ def generate(module: Module, src: sources.Source, calls: dict | None = None, num
                                  scope=_scope_context(module, src, scope), **c)
         if any(_C["kinds"][k].get("style") for k in kinds):
             user += style_example(module, src)
-        data = _ask(engine_call(engine, calls), system, user, _C["schema"])
+        shots = learn.shots(paths, JOB, _learn_query(src)) if is_local(engine) else ""
+        data = _ask(engine_call(engine, calls), system + shots, user, _C["schema"])
         counts = {k: 0 for k in kinds}
         for item in data.get("cards") or []:
             if not isinstance(item, dict):
@@ -224,6 +229,33 @@ def generate(module: Module, src: sources.Source, calls: dict | None = None, num
                 _verdict(out[-1], _C["scope"]["checker"], _V["wrong"], _K["reasons"]["other_module"],
                          dt.datetime.now().isoformat(timespec="seconds"))
     return out
+
+
+def is_local(engine: str) -> bool:
+    """The engine runs on the local model (not handed to Claude through delegate.py)."""
+    return _C["engines"].get(engine, {}).get("via") != "delegate"
+
+
+def _learn_query(src: sources.Source) -> str:
+    return " ".join(x for x in (src.topic, src.stem) if x)
+
+
+def _learn_input(card: dict) -> str:
+    return _C["learn_input"].format(topic=card.get("topic", ""), kind=card.get("kind", ""), front=card.get("front", ""))
+
+
+def _learn(paths: Paths | None, module: Module, written: dict, judged: dict, engine: str) -> None:
+    """A card the local model wrote that the (Claude) checker corrected or
+    rejected: keep the pair for the local writer to learn from. A scope
+    rejection is not a correction of the card."""
+    if (paths is None or is_local(engine) or not is_local(written.get("engine", ""))
+            or judged["check"]["verdict"] not in (_V["fixed"], _V["wrong"])
+            or judged["check"]["reason"] == _K["reasons"]["other_module"]):
+        return
+    accepted = ({"front": judged["front"], "back": judged["back"]}
+                if judged["check"]["verdict"] == _V["fixed"] else None)
+    learn.capture(paths, JOB, _learn_input(written), {"front": written["front"], "back": written["back"]},
+                  judged["check"]["reason"], accepted, engine=engine, module=module.title)
 
 
 def _hash(text: str) -> str:
@@ -343,7 +375,8 @@ def _ask_checks(call, system: str, user: str) -> list:
 
 
 def check(module: Module, src: sources.Source, written: list, before: dict, checks: dict | None = None,
-          when: str | None = None, num_ctx: int | None = None, scope: dict | None = None) -> tuple:
+          when: str | None = None, num_ctx: int | None = None, scope: dict | None = None,
+          paths: Paths | None = None) -> tuple:
     """Check `written` (cards as their writer gave them) against `src`.
     `before`: check key -> the card as it stood after an earlier check,
     reused only with the same checker, source and module scope. `checks` (tests)
@@ -394,7 +427,10 @@ def check(module: Module, src: sources.Source, written: list, before: dict, chec
                 answers.setdefault(int(item.get("n")), item)
             except (AttributeError, TypeError, ValueError):
                 continue
-        done += [(i, _judge(card, answers.get(n), engine, text, when)) for n, (i, card) in enumerate(batch, 1)]
+        for n, (i, card) in enumerate(batch, 1):
+            as_given = dict(card)
+            done.append((i, _judge(card, answers.get(n), engine, text, when)))
+            _learn(paths, module, as_given, done[-1][1], engine)  # with paths: corrections kept (learn.py)
     done.sort(key=lambda pair: pair[0])
     for _i, card in done:
         card["check"]["scope"] = scope_key
@@ -477,7 +513,8 @@ def run(paths: Paths, module: Module, calls: dict | None = None, today: dt.date 
             missing = [k for k in active_kinds() if k not in asked]
             if missing:
                 try:
-                    extra = generate(module, src, calls, num_ctx, only=set(missing), scope=scope, dropped=dropped)
+                    extra = generate(module, src, calls, num_ctx, only=set(missing), scope=scope, dropped=dropped,
+                                     paths=paths)
                 except (model.ModelError, OSError) as exc:
                     failed.append((src.rel, str(exc)))
                     say(_SAY["cards_failed"].format(name=src.stem, why=exc))
@@ -488,7 +525,7 @@ def run(paths: Paths, module: Module, calls: dict | None = None, today: dt.date 
                     say(_SAY["cards_source"].format(status="made", name=src.stem, n=len(extra)))
         else:
             try:
-                written = generate(module, src, calls, num_ctx, scope=scope, dropped=dropped)
+                written = generate(module, src, calls, num_ctx, scope=scope, dropped=dropped, paths=paths)
             except (model.ModelError, OSError) as exc:
                 failed.append((src.rel, str(exc)))
                 say(_SAY["cards_failed"].format(name=src.stem, why=exc))
@@ -505,7 +542,7 @@ def run(paths: Paths, module: Module, calls: dict | None = None, today: dt.date 
             whys = sorted({why for _k, _f, why in dropped})
             say(_SAY["cards_dropped"].format(name=src.stem, n=len(dropped), why="; ".join(whys)))
             entry["dropped"] = len(dropped)
-        passed, held, counts = check(module, src, written, before, checks, num_ctx=num_ctx, scope=scope)
+        passed, held, counts = check(module, src, written, before, checks, num_ctx=num_ctx, scope=scope, paths=paths)
         if counts["reused"] < len(written):
             say(_SAY["cards_checked"].format(name=src.stem, **counts))
         entry["cards"], entry["held"] = passed, held
