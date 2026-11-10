@@ -74,6 +74,11 @@ How to operate it (schedule, commands, results, safety layers, troubleshooting):
   2026-09-05 after measuring. Headroom on the 8GB GPU is ~2GB — don't raise
   it further without re-running `eval/run_eval.py`; a spill to CPU makes
   every reply dramatically slower.
+- **Every local model call goes through `local_llm.py`** (`local_llm.chat` /
+  `embed` / `http`): the GPU lease, one `num_ctx` per model, a `num_predict`
+  cap, a timeout, and the wedged-server check. Policy is `local_llm.json`.
+  A direct `ollama.chat` or `/api/*` POST with its own options is what left
+  Ollama "Stopping..." on 10 Nov 2026: a reload under a runaway reply.
 - **Test before claiming a fix.** `scripts/ask.py` runs one prompt through
   the real brain; `scripts/healthcheck.py --ask` checks every moving part;
   `eval/run_eval.py` scores the prompt suite; `scripts/test_conversation.py`

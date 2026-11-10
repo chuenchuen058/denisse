@@ -1,0 +1,53 @@
+{
+  "_about": "The one path every local (Ollama) model call takes: local_llm.py. Found 10 Nov 2026 in Ollama's server.log: one tutor call sent an 8555-token prompt, which the server cut to 4098 tokens, system prompt included. With no num_predict and no client timeout the model then generated ~78,000 tokens over 20 minutes; a later call ran for 1h3m. Ollama has one slot per model, so every other caller queued behind it, and a caller with a different num_ctx left the model 'Stopping...' until that finished: the wedge. So here, for every real call: the GPU lease, ONE num_ctx per model, a cap on generated tokens, a timeout, and a check for a wedged server.",
+
+  "host_env": "OLLAMA_HOST",
+  "host": "http://127.0.0.1:11434",
+  "_host": "Base URL when host_env is unset. A bare host:port in the env gets http:// put in front.",
+
+  "context": {"env": "DENISSE_NUM_CTX", "file": "brain.json", "key": ["limits", "num_ctx"]},
+  "num_ctx_by_model": {},
+  "_num_ctx": "ONE context per model: a call's own num_ctx is ignored, because a model asked for a different num_ctx is unloaded and reloaded, and a reload queued behind a running request is what sticks in 'Stopping'. A model not named in num_ctx_by_model gets the brain's context (context: env wins, then file's key path: AGENTS.md, 8192, measured). A job that needs less context trims its prompt. Embedding calls are left alone: their model has its own single context.",
+
+  "num_predict": 2048,
+  "num_predict_max": 4096,
+  "_num_predict": "Most tokens one reply may generate. A call that names none gets num_predict; one that asks for more is capped at num_predict_max. Without a cap, a model whose prompt was cut short can generate until the call is killed (10 Nov: 78k tokens).",
+
+  "chars_per_token": 2.5,
+  "_chars_per_token": "Rough chars per token for warning about a prompt too long for num_ctx less num_predict. Measured 10 Nov: a tutor chunk of lecture text came to about 2.6 chars per token; 2.5 errs on the long side. A prompt over the limit is logged, not refused: Ollama would cut it from the front.",
+
+  "timeout_s": 300,
+  "timeout_s_by_kind": {"embed": 60},
+  "timeout_s_by_job": {},
+  "_timeout_s": "Every real call has a client timeout: by job, else by kind (chat, generate, embed), else timeout_s. A call that names its own timeout keeps the shorter of the two.",
+
+  "lease": {
+    "wait_s": 300,
+    "poll_s": 1,
+    "on_busy": "raise",
+    "by_job": {"denisse_brain": {"wait_s": 60, "on_busy": "run"}, "atrium_autopilot": {"wait_s": 10}},
+    "owner_env": "DENISSE_GPU_LEASE_OWNER",
+    "ttl_margin_s": 30
+  },
+  "_lease": "Every real call holds .review/gpu.lease in the main checkout (orchestra/local_team/lease.py), waiting up to wait_s for it. Re-entrant: a lease this process holds, or one the parent process holds and names in owner_env (orchestra/consult.py sets it for the tutor it runs), counts as held. Still busy after the wait: on_busy raise = the call fails with LeaseBusy (a TimeoutError, so callers' error handling classes it as the server's fault), run = the call goes ahead anyway with a log line. Denisse's own replies (denisse_brain) wait a short while and then run, so a long eval never leaves Chuen without an answer; the autopilot (atrium_autopilot) waits briefly and then uses its fallback rule rather than stall the runner. A streamed call (stream=True) is not supported: the lease would end before the stream. Calls in one process are also serialised by a lock. The lease ttl is the call's timeout plus ttl_margin_s.",
+
+  "wedge": {
+    "stopping_s": 300,
+    "ps_timeout_s": 5,
+    "auto_restart": true,
+    "min_restart_interval_s": 600,
+    "up_wait_s": 60,
+    "up_poll_s": 2,
+    "log": ".review/ollama_watchdog.log",
+    "state": ".review/ollama_watchdog.json",
+    "restart": {
+      "win32": {
+        "kill": [["taskkill", "/F", "/T", "/IM", "ollama app.exe"],
+                 ["taskkill", "/F", "/T", "/IM", "ollama.exe"],
+                 ["taskkill", "/F", "/T", "/IM", "llama-server.exe"]],
+        "start": ["%LOCALAPPDATA%\\Programs\\Ollama\\ollama app.exe"]
+      }
+    }
+  },
+  "_wedge": "Before each real call, and after one that timed out or lost its connection, /api/ps is read (ps_timeout_s). Wedged = a model whose expiry passed more than stopping_s ago (what `ollama ps` shows as 'Stopping...'), or /api/ps itself timing out. A refused connection (Ollama not running) is not a wedge: nothing is started that Chuen quit. With auto_restart, a wedged server is restarted: the kill commands for this platform, then start (detached, env vars expanded), then up to up_wait_s for it to answer. At most once per min_restart_interval_s (state file). Every check that finds a wedge, and every restart, is a line in log (main checkout). No restart commands for a platform = log only."
+}
