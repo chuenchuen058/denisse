@@ -52,7 +52,7 @@ Priority: normal
 Weight: light
 Kind: work
 Lane: fake
-Written: 2026-11-02T20:00
+Written: {written}
 
 Do the thing.
 
@@ -130,7 +130,7 @@ class SupervisionTest(unittest.TestCase):
 
     def tick_with_timeout(self):
         (self.R.QUEUE).mkdir(parents=True, exist_ok=True)
-        (self.R.QUEUE / "sup.md").write_text(TASK.format(py=sys.executable))
+        (self.R.QUEUE / "sup.md").write_text(TASK.format(py=sys.executable, written=time.strftime("%Y-%m-%dT%H:%M")))
         self.assertEqual(self.R.tick(), "TIMEOUT")
         self.gc_pid = wait_for_pid(self.pidfile)
         return self.gc_pid
