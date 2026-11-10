@@ -485,6 +485,7 @@
       }
     },
     "style": {"_help": "Kinds with style: true get the module's own problem-class sheet as a style example. globs are relative to the module folder; {week_dir} is the note's week folder; first readable hit wins.", "globs": ["{week_dir}/Tutorial - Questions.*", "*/Tutorial - Questions.*", "**/*Tutorial*Questions*.*"], "chars": 3000, "text": "\n\nSTYLE: the module's own problem-class sheet ({name}). Match its format, difficulty and wording; write new problems from the NOTE, never copy these:\n{style}"},
+    "learn_input": "{kind} card on {topic}: {front}",
     "delegate_task": "{system}\n\n{user}",
     "front_chars": 400,
     "back_chars": 1200,
@@ -1047,5 +1048,55 @@
       "all_modules": "all modules"
     },
     "weak_topics": {"enabled": true}
+  },
+  "_help_learn": "learn.py: corrections the local model learns from. When a local answer fails its check and Claude's is taken (teach self-check, consult fallback, card check), the pair goes into store_file in Don's data folder (private, outside the public repo), newest keep_per_job per job. shots: before a local call, up to max accepted examples whose input is like the query (embed.model's cosine >= embed.min_score when set and answering; else word overlap >= shots.min_score), within budget_chars, appended to the system prompt. embed.model empty = no GPU for similarity. report: python -m tutor learned [--days N]. docs/local_learning.md.",
+  "learn": {
+    "enabled": true,
+    "store_file": "corrections.jsonl",
+    "keep_per_job": 200,
+    "input_chars": 600,
+    "output_chars": 1500,
+    "why_chars": 300,
+    "embed": {"model": "", "keep_alive": "5m", "min_score": 0.6, "digits": 4},
+    "shots": {
+      "enabled": true,
+      "jobs": ["teach", "consult", "cards"],
+      "max": 3,
+      "budget_chars": 2400,
+      "min_score": 0.2,
+      "intro": "\n\nEARLIER CORRECTIONS. These requests were like this one; a first answer was not good enough and the answer below was accepted instead. Match the accepted answers' depth, shape and care. Take facts only from the material you are given now, never from these examples.\n",
+      "shot": "- Request: {input}\n  Why the first answer failed: {why}\n  Accepted answer: {accepted}\n"
+    },
+    "reasons": {
+      "teach": {"no_summary": "no summary", "few_steps": "too few real steps", "no_question": "no check question", "not_confident": "the model said it was not confident"},
+      "consult": {"engine_failed": "the local model gave no JSON or failed", "empty": "an empty answer", "not_confident": "the model said it was not confident"}
+    },
+    "report": {
+      "days": 7,
+      "top": 5,
+      "no_model": "unknown model",
+      "no_reason": "no reason given",
+      "heading": "Local corrections {since} to {until} ({days} days):",
+      "none": "- none: no local answer was corrected in this window.",
+      "job_line": "- {job} on {model}: {total} failed, {accepted} with an accepted answer",
+      "reason_line": "    {n} x {why}"
+    },
+    "say_store_failed": "learn: corrections store not used ({why})",
+    "say_embed_failed": "learn: embeddings off for this call ({why})",
+    "bench": {
+      "_help": "scripts/eval_local_learning.py: pass rate with vs without few-shot on file's cases. --real calls the local model (on AC only, under the GPU lease); without it the shot blocks are only shown.",
+      "file": "tutor/learning_bench.json",
+      "lease_holder": "scripts/eval_local_learning.py",
+      "lease_ttl_s": 3600,
+      "wait_gpu_s": 300,
+      "say_battery": "On battery: the bench calls the local model, so it runs on AC only (battery rule, 9 Nov).",
+      "say_busy": "GPU busy: lease held by {holder} after {wait}s; try again later.",
+      "say_dry": "Dry run (no model call; --real to run it). {n} case(s); the 'with' prompts would get:",
+      "say_dry_case": "- {job}: {query}: {chars} chars of few-shot from {shots} example(s)",
+      "say_case": "{model} {mode:<7} {job:<8} {result:<4} {query}",
+      "say_total": "{model} {mode:<7} {passed}/{cases} passed ({rate:.0%})",
+      "pass": "ok",
+      "fail": "FAIL"
+    }
   }
 }

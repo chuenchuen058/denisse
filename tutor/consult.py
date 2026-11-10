@@ -26,12 +26,13 @@ import datetime as dt
 import os
 import re
 
-from . import cards, conf, don, model, sources, teach, topics
+from . import cards, conf, don, learn, model, sources, teach, topics
 from .conf import CONFIG, Module, Paths
 
 _K = CONFIG["consult"]
 _N = CONFIG["note"]
 _SAY = CONFIG["say"]
+JOB = "consult"  # the learn store's name for this job (tutor.json learn.shots.jobs)
 
 
 def _words(text: str) -> set:
@@ -209,12 +210,14 @@ def consult(paths: Paths, question: str, module_text: str = "", calls: dict | No
     engines = _K["engines"]
     order = [engines["hard"]] if teach.is_hard(question) else [engines["local"], engines["fallback"]]
     answer, who, caveats = None, None, []
+    first_system = system + learn.shots(paths, JOB, question) if order[0] == engines["local"] else system
     try:
-        answer, who = ask(order[0], system, user, calls), order[0]
+        answer, who = ask(order[0], first_system, user, calls), order[0]
     except model.ModelError as exc:
         caveats.append(_K["caveat_engine_failed"].format(engine=who_label(order[0]), why=exc))
     if len(order) > 1 and (answer is None or not answer["answer"] or not answer["confident"]):
-        fallback = order[1]
+        fallback, local = order[1], answer
+        failure = "engine_failed" if local is None else "empty" if not local["answer"] else "not_confident"
         if _hand_offs_off(fallback, calls):
             caveats.append(_K["caveat_fallback_off"].format(engine=who_label(fallback)))
         else:
@@ -222,6 +225,9 @@ def consult(paths: Paths, question: str, module_text: str = "", calls: dict | No
                 answer, who = ask(fallback, system, user, calls), fallback
             except model.ModelError as exc:
                 caveats.append(_K["caveat_fallback_failed"].format(engine=who_label(fallback), why=exc))
+            # The pair for the local model to learn from (learn.capture); no accepted answer is still counted.
+            accepted = answer if who == fallback and answer and answer["answer"] else None
+            learn.capture(paths, JOB, question, local, failure, accepted, engine=fallback, module=module.title)
     if answer is None or not answer["answer"]:
         out["caveats"] = caveats
         return out

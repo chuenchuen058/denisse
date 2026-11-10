@@ -21,13 +21,14 @@ from __future__ import annotations
 import datetime as dt
 import os
 
-from . import cards, conf, don, model, notes, rules, sources, topics
+from . import cards, conf, don, learn, model, notes, rules, sources, topics
 from .conf import CONFIG, Module, Paths
 
 _T = CONFIG["teach"]
 _N = CONFIG["note"]
 _D = CONFIG["don"]
 _SAY = CONFIG["say"]
+JOB = "teach"  # the learn store's name for this job (tutor.json learn.shots.jobs)
 
 
 class Hard(Exception):
@@ -135,18 +136,26 @@ def normalise(data: dict) -> dict:
             "confident": bool(data.get("confident", True))}
 
 
+def check_failure(lesson: dict) -> str | None:
+    """Why a local lesson fails its self-check (a tutor.json learn.reasons.teach
+    key), or None when it stands."""
+    c = _T["self_check"]
+    if not lesson["summary"]:
+        return "no_summary"
+    steps = [s for s in lesson["steps"] if len(s) >= c["min_step_chars"]]
+    if len(steps) < c["min_steps"]:
+        return "few_steps"
+    if c["needs_question"] and not lesson["question"]:
+        return "no_question"
+    if c["needs_confident"] and not lesson["confident"]:
+        return "not_confident"
+    return None
+
+
 def self_check(lesson: dict) -> bool:
     """A local answer stands when it has enough real steps, a question, and
     the model itself was confident (teach.self_check)."""
-    c = _T["self_check"]
-    steps = [s for s in lesson["steps"] if len(s) >= c["min_step_chars"]]
-    if len(steps) < c["min_steps"] or not lesson["summary"]:
-        return False
-    if c["needs_question"] and not lesson["question"]:
-        return False
-    if c["needs_confident"] and not lesson["confident"]:
-        return False
-    return True
+    return check_failure(lesson) is None
 
 
 def prompt(module: Module, topic: str, found: dict, core=None) -> tuple:
@@ -179,11 +188,22 @@ def explain(paths: Paths, module: Module, topic: str, calls: dict | None = None,
         out.update(escalate=_T["engines"]["hard"], why="hard")
         return out
     system, user = prompt(module, topic, found, core)
+    system += learn.shots(paths, JOB, topic)  # Claude's earlier corrections of lessons like this one
     lesson = ask(_T["engines"]["local"], system, user, calls)
     out.update(lesson=lesson, engine=_T["engines"]["local"])
     if not self_check(lesson):
-        out.update(escalate=_T["engines"]["fallback"], why="check")
+        out.update(escalate=_T["engines"]["fallback"], why="check", failure=check_failure(lesson))
     return out
+
+
+def learn_from(paths: Paths, module: Module, topic: str, out: dict, lesson: dict | None, engine: str) -> None:
+    """After the fallback engine answered for a local lesson that failed its
+    check: keep the pair for the local model to learn from (learn.capture).
+    A hard topic (the local model never asked) is not a correction."""
+    if out.get("why") != "check" or out.get("lesson") is None:
+        return
+    learn.capture(paths, JOB, topic, out["lesson"], out.get("failure") or check_failure(out["lesson"]) or "",
+                  lesson, engine=engine, module=module.title)
 
 
 def explain_with(paths: Paths, module: Module, topic: str, engine: str, calls: dict | None = None,

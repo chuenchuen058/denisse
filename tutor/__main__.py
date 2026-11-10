@@ -17,6 +17,8 @@
   [--module M] [--json]   sources, caveats, who answered -- grounded in the vault, recorded in
   [--notes-only]          the Don area. --json prints the structured opinion. Exit 1 = no answer.
                           --notes-only: no model call, the matching lines of the notes (not recorded).
+  learned [--days N]      the weekly report of the local model's corrected answers: top failure
+                          reasons per job and model (tutor/learn.py). Reads only, no model call.
 
 Every job first reads the rules note in the Don area (tutor/rules.py,
 tutor.json "rules"): its text goes into the model prompts, its Exams table
@@ -108,7 +110,7 @@ def main(argv=None, anki_client=None, calls=None, learner_core=None, checks=None
     ap = argparse.ArgumentParser(prog="python -m tutor", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("ingest", "topics", "cards", "anki-sync", "progress", "consult") + CHAT_COMMANDS:
+    for name in ("ingest", "topics", "cards", "anki-sync", "progress", "consult", "learned") + CHAT_COMMANDS:
         s = sub.add_parser(name)
         s.add_argument("--vault", default=None)
         s.add_argument("--state", default=None)
@@ -119,6 +121,8 @@ def main(argv=None, anki_client=None, calls=None, learner_core=None, checks=None
             s.add_argument("--module", default="")
             s.add_argument("--json", action="store_true")
             s.add_argument("--notes-only", action="store_true")
+        elif name == "learned":
+            s.add_argument("--days", type=int, default=None)
         elif name in ("anki-sync", "progress"):
             s.add_argument("module", nargs="?", default=None)
         else:
@@ -133,6 +137,10 @@ def main(argv=None, anki_client=None, calls=None, learner_core=None, checks=None
     except (AttributeError, ValueError):
         pass
     paths = _paths(a)
+    if a.cmd == "learned":  # a read of the corrections store: no rules, no sync, no lock
+        from . import learn
+        print(learn.render_report(learn.report(paths, a.days)))
+        return 0
     rules.load(paths, say=lambda line: print(line, file=sys.stderr))  # a log line, never in the output
     if a.cmd not in CONFIG["rules"]["sync_after_cards"]["not_before"] and not getattr(a, "dry", False):
         _sync_pending(paths, anki_client, learner_core)
