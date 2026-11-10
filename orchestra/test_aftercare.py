@@ -1,15 +1,21 @@
-"""Tests for aftercare.py: the vault note and the push's privacy check. Temp dirs only."""
+"""Tests for aftercare.py: the vault note, the vault lock and the push's privacy check. Temp dirs only."""
+import json
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.append(str(Path(__file__).resolve().parents[1]))  # testing_git; appended, never shadows
 import aftercare  # noqa: E402
 import testing_git  # noqa: E402
+import vaultlock  # noqa: E402
 
 REPORT = """RESULT: PASS
 GATE: tests -> OK
@@ -35,6 +41,9 @@ class TestAftercare(unittest.TestCase):
     def setUp(self):
         testing_git.hermetic_git(self)  # first: no inherited GIT_* reaches a real repo
         self.tmp = Path(tempfile.mkdtemp())
+        p = mock.patch.object(vaultlock, "REPO", self.tmp)  # the vault lock goes in the temp dir too
+        p.start()
+        self.addCleanup(p.stop)
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -99,6 +108,9 @@ class TestWaitingList(unittest.TestCase):
     def setUp(self):
         testing_git.hermetic_git(self)  # first: no inherited GIT_* reaches a real repo
         self.tmp = Path(tempfile.mkdtemp())
+        p = mock.patch.object(vaultlock, "REPO", self.tmp)  # the vault lock goes in the temp dir too
+        p.start()
+        self.addCleanup(p.stop)
         self.v = self.tmp / "vault"
         self.v.mkdir()
         g(self.v, "init", "-q")
@@ -194,6 +206,186 @@ class TestWaitingList(unittest.TestCase):
         self.assertEqual(out[3], "- Lane claude limited until 2026-11-03 00:20")
         self.assertEqual(aftercare.waiting_lines(queue_dir=self.tmp / "nope", parked_dir=self.tmp / "nope",
                                                  state={}, now=dt.datetime(2026, 11, 2)), [])
+
+
+class LockedVault(unittest.TestCase):
+    """A temp vault and a temp lock dir: no test here touches the repo's own .review/."""
+    WAIT = 5.0
+
+    def setUp(self):
+        testing_git.hermetic_git(self)
+        self.tmp = Path(tempfile.mkdtemp())
+        self.v = self.tmp / "vault"
+        self.v.mkdir()
+        (self.tmp / ".review").mkdir()
+        cfg = {"vault_lock_name": "vault.lock", "vault_lock_wait_s": self.WAIT,
+               "vault_lock_stale_s": 300, "vault_lock_poll_s": 0.02}
+        for p in (mock.patch.object(vaultlock, "REPO", self.tmp),
+                  mock.patch.object(vaultlock, "settings", lambda: dict(cfg))):
+            p.start()
+            self.addCleanup(p.stop)
+        self.lock = self.tmp / ".review" / "vault.lock"
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def dead_pid(self) -> int:
+        p = subprocess.Popen([sys.executable, "-c", "pass"])
+        p.wait()
+        return p.pid
+
+    def held_by(self, pid: int) -> None:
+        self.lock.write_text(json.dumps({"pid": pid, "since": time.time()}), encoding="utf-8")
+
+
+class TestVaultLock(LockedVault):
+    def test_config_has_the_lock_keys_in_both_files(self):
+        for name in ("config.json", "config_defaults.json"):
+            data = json.loads((Path(aftercare.__file__).parent / name).read_text(encoding="utf-8"))
+            for k in vaultlock.KEYS:
+                self.assertIn(k, data, f"{k} missing from {name}")
+
+    def test_aftercare_imports_without_runner(self):
+        code = ("import sys; sys.path.insert(0, sys.argv[1]); import aftercare; "
+                "sys.exit(1 if 'runner' in sys.modules else 0)")
+        r = subprocess.run([sys.executable, "-c", code, str(Path(aftercare.__file__).parent)],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_parallel_writers_lose_no_section(self):
+        n = 8
+        start = threading.Barrier(n)
+        errors = []
+
+        def one(i):
+            try:
+                start.wait()
+                if i % 2:
+                    aftercare.exam_note(self.v, f"exam line {i}")
+                else:
+                    aftercare.vault_note(self.v, slug=f"s{i}", title=f"Task {i}", result="PASS", lane="claude",
+                                         seconds=60, spent="$0", report_text=REPORT)
+            except Exception as e:  # pragma: no cover - reported below
+                errors.append(e)
+        threads = [threading.Thread(target=one, args=(i,)) for i in range(n)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(errors, [])
+        text = next((self.v / "Calendar" / "Orchestra").glob("*.md")).read_text(encoding="utf-8")
+        self.assertEqual(text.count("\n## "), n, text)
+        for i in range(n):
+            self.assertIn(f"exam line {i}" if i % 2 else f"Task {i}", text)
+        self.assertEqual(text.count("---\nname: Orchestra"), 1)
+        self.assertFalse(self.lock.exists())
+
+    def test_day_note_is_appended_and_updated_line_fixed_only_when_wrong(self):
+        note = aftercare.exam_note(self.v, "first")
+        before = note.read_bytes()
+        aftercare.exam_note(self.v, "second")
+        after = note.read_bytes()
+        self.assertTrue(after.startswith(before))  # appended: nothing before it was rewritten
+        self.assertIn(b"- second", after[len(before):])
+        day = note.stem
+        note.write_bytes(after.replace(f"updated: {day}".encode(), b"updated: 2000-01-01"))
+        aftercare.exam_note(self.v, "third")
+        self.assertIn(f"updated: {day}".encode(), note.read_bytes())
+        self.assertNotIn(b"2000-01-01", note.read_bytes())
+
+    def test_day_note_keeps_its_line_ends(self):
+        note = aftercare.exam_note(self.v, "first")
+        crlf = note.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+        note.write_bytes(crlf)
+        aftercare.exam_note(self.v, "second")
+        raw = note.read_bytes()
+        self.assertTrue(raw.startswith(crlf))
+        self.assertEqual(raw.count(b"\n"), raw.count(b"\r\n"))
+
+    def test_hot_changed_between_read_and_write_is_left_alone(self):
+        hot = self.v / "hot.md"
+        hot.write_bytes(HOT.encode("utf-8"))
+        his = HOT.replace("- careful\r\n", "- careful\r\n- saved in Obsidian just now\r\n").encode("utf-8")
+        real = aftercare._render_hot
+
+        def chuen_saves_meanwhile(text, lines):
+            hot.write_bytes(his)  # Chuen's save lands after the tick read hot.md
+            return real(text, lines)
+        with mock.patch.object(aftercare, "_render_hot", chuen_saves_meanwhile):
+            self.assertFalse(aftercare.update_waiting(self.v, ["- one"]))
+        self.assertEqual(hot.read_bytes(), his)
+        self.assertFalse(self.lock.exists())
+        # the next tick sees his text and puts the block in around it
+        self.assertTrue(aftercare.update_waiting(self.v, ["- one"]))
+        raw = hot.read_bytes()
+        self.assertIn(b"- saved in Obsidian just now\r\n", raw)
+        self.assertIn(b"<!-- orchestra:waiting -->\r\n- one\r\n<!-- /orchestra:waiting -->", raw)
+
+    def test_unchanged_hot_is_updated_crlf_kept_no_temp_left(self):
+        hot = self.v / "hot.md"
+        hot.write_bytes(HOT.encode("utf-8"))
+        self.assertTrue(aftercare.update_waiting(self.v, ["- one", "- two"]))
+        raw = hot.read_bytes()
+        self.assertIn(b"<!-- orchestra:waiting -->\r\n- one\r\n- two\r\n<!-- /orchestra:waiting -->\r\n", raw)
+        self.assertEqual(raw.count(b"\n"), raw.count(b"\r\n"))  # every line end still CRLF
+        self.assertIn("- Chuen's line — é\r\n".encode("utf-8"), raw)
+        self.assertEqual(sorted(p.name for p in self.v.iterdir()), ["hot.md"])
+
+    def test_stale_lock_from_dead_pid_is_taken_over(self):
+        (self.v / "hot.md").write_bytes(HOT.encode("utf-8"))
+        self.held_by(self.dead_pid())
+        t0 = time.monotonic()
+        self.assertTrue(aftercare.update_waiting(self.v, ["- x"]))
+        self.assertLess(time.monotonic() - t0, self.WAIT)
+        self.assertFalse(self.lock.exists())
+        self.held_by(self.dead_pid())
+        aftercare.exam_note(self.v, "after a dead holder")
+        self.assertFalse(self.lock.exists())
+
+    def test_live_holder_is_waited_for_then_given_up(self):
+        hot = self.v / "hot.md"
+        hot.write_bytes(HOT.encode("utf-8"))
+        holder = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            self.held_by(holder.pid)
+            with mock.patch.object(vaultlock, "settings",
+                                   lambda: {"vault_lock_name": "vault.lock", "vault_lock_wait_s": 0.3,
+                                            "vault_lock_stale_s": 300, "vault_lock_poll_s": 0.02}):
+                self.assertFalse(aftercare.update_waiting(self.v, ["- x"]))
+                self.assertEqual(hot.read_bytes(), HOT.encode("utf-8"))
+                self.assertTrue(self.lock.exists())  # someone else's lock is never removed
+                import state_now
+                self.assertFalse(state_now.write_vault(self.v, "## STATE NOW\n"))
+                self.assertFalse((self.v / "STATE NOW.md").exists())
+        finally:
+            holder.kill()
+            holder.wait()
+
+    def test_old_lock_is_stale_even_with_a_live_pid(self):
+        (self.v / "hot.md").write_bytes(HOT.encode("utf-8"))
+        self.held_by(os.getppid() or 1)
+        old = time.time() - 10_000
+        os.utime(self.lock, (old, old))
+        self.assertTrue(aftercare.update_waiting(self.v, ["- x"]))
+
+    def test_state_now_write_vault(self):
+        import state_now
+        target = self.v / "STATE NOW.md"
+        self.assertTrue(state_now.write_vault(self.v, "---\nname: STATE NOW\n---\n\n## STATE NOW\n- a\n"))
+        target.write_bytes(target.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+        self.assertTrue(state_now.write_vault(self.v, "---\nname: STATE NOW\n---\n\n## STATE NOW\n- b\n"))
+        raw = target.read_bytes()
+        self.assertIn(b"- b\r\n", raw)
+        self.assertEqual(raw.count(b"\n"), raw.count(b"\r\n"))
+        self.assertFalse(state_now.write_vault(self.v, "---\nname: STATE NOW\n---\n\n## STATE NOW\n- b\n"))
+
+        def meanwhile(old):
+            target.write_bytes(b"someone else's\r\n")
+            return "new\n"
+        with vaultlock.VaultLock():
+            self.assertFalse(vaultlock.replace_if_unchanged(target, meanwhile))
+        self.assertEqual(target.read_bytes(), b"someone else's\r\n")
+        self.assertEqual(sorted(p.name for p in self.v.iterdir()), ["STATE NOW.md"])
 
 
 class TestParallelState(unittest.TestCase):

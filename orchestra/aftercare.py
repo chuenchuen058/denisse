@@ -12,13 +12,19 @@ not at the 21:40 night review, and merged work should reach GitHub without him.
 The task sessions themselves still can't push (guard hook + .git/hooks/pre-push);
 only this runner step does, after the runner's own gate passed.
 Everything here is best-effort: a failure is logged and never fails the task.
+Every vault write and its git add/commit happen under one lock (vaultlock.py, audit 10 Nov 2026 O6).
 """
 from __future__ import annotations
 
 import datetime as dt
 import re
 import subprocess
+import sys
 from pathlib import Path
+
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+import vaultlock  # noqa: E402  the vault-write lock; never imports runner.py
 
 # Paths that must never go public. The repo is public; the vault and memory are not.
 PRIVATE_PATHS = re.compile(
@@ -115,7 +121,7 @@ def _tokens(tokens: dict | None) -> str:
 
 
 def _day_note(vault: Path, day: str) -> Path:
-    """<vault>/Calendar/Orchestra/<day>.md, created with its frontmatter if missing."""
+    """<vault>/Calendar/Orchestra/<day>.md, created with its frontmatter if missing. Under the lock."""
     note = vault / "Calendar" / "Orchestra" / f"{day}.md"
     note.parent.mkdir(parents=True, exist_ok=True)
     if not note.exists():
@@ -134,12 +140,35 @@ def _day_note(vault: Path, day: str) -> Path:
     return note
 
 
+def _append_section(vault: Path, section: str, message: str) -> Path:
+    """Append one section to today's day note and commit only that file, all under the vault
+    lock. The section goes on with one append-mode write, so a section another tick wrote a
+    moment ago is never read-and-rewritten away. Only the frontmatter `updated:` line is ever
+    rewritten, and only when it isn't today's date already (the note is created with it)."""
+    day = dt.date.today().isoformat()
+    with vaultlock.VaultLock():
+        note = _day_note(vault, day)
+        raw = note.read_bytes()
+        nl = "\r\n" if b"\r\n" in raw else "\n"  # the note's own line ends, kept as they are
+        text = raw.decode("utf-8")
+        m = re.search(r"^updated: [^\r\n]*", text, flags=re.M)
+        if m and m.group(0) != f"updated: {day}":
+            raw = (text[:m.start()] + f"updated: {day}" + text[m.end():]).encode("utf-8")
+            vaultlock.write_atomic(note, raw)
+        lead = "" if raw.endswith(b"\n") else nl
+        with open(note, "ab") as f:  # one append: nothing already in the note is rewritten
+            f.write((lead + section.replace("\r\n", "\n").replace("\n", nl)).encode("utf-8"))
+        rel = note.relative_to(vault).as_posix()
+        if (vault / ".git").exists():  # best-effort, and inside the lock: one tick at a time on the index
+            _git(vault, "add", "--", rel)
+            _git(vault, "commit", "-q", "-m", message, "--", rel)
+    return note
+
+
 def vault_note(vault: Path, *, slug: str, title: str, result: str, lane: str, seconds: int,
                spent: str, merge: str = "", pushed: str = "", why: str = "",
                task_text: str = "", report_text: str = "", report_path: str = "",
                prompt: str = "", tokens: dict | None = None) -> Path:
-    day = dt.date.today().isoformat()
-    note = _day_note(vault, day)
     sec = _sections(report_text)
     status = result + (f", {merge}" if merge else "") + (f", {pushed}" if pushed else "")
     lines = [f"\n## {dt.datetime.now():%H:%M} {title}",
@@ -154,14 +183,7 @@ def vault_note(vault: Path, *, slug: str, title: str, result: str, lane: str, se
             lines.append(f"\n**{k.capitalize()}**\n{sec[k]}")
     if report_path:
         lines.append(f"\nFull report: `{report_path}`")
-    text = note.read_text(encoding="utf-8")
-    text = re.sub(r"^updated: .*$", f"updated: {day}", text, count=1, flags=re.M)
-    note.write_text(text.rstrip("\n") + "\n" + "\n".join(lines) + "\n", encoding="utf-8")
-    rel = note.relative_to(vault).as_posix()
-    if (vault / ".git").exists():
-        _git(vault, "add", "--", rel)
-        _git(vault, "commit", "-q", "-m", f"Orchestra: {slug} {result}", "--", rel)
-    return note
+    return _append_section(vault, "\n".join(lines) + "\n", f"Orchestra: {slug} {result}")
 
 
 # ---------------------------------------------------------------- hot.md "Waiting on Chuen"
@@ -236,28 +258,24 @@ def _render_hot(text: str, lines: list[str]) -> str:
 
 def update_waiting(vault: Path, lines: list[str]) -> bool:
     """Rewrite hot.md's Orchestra waiting block; commit only hot.md, only when the block changed.
-    Returns True when hot.md was changed."""
+    Returns True when hot.md was changed. hot.md is Chuen's own working note: under the vault
+    lock it is read, the new text built, and written (temp file + os.replace, bytes so CRLF stays
+    exactly as it was) only if it is still what was read. If he saved it in between, his text is
+    left alone and this returns False; the next tick tries again. A lock held past the wait time
+    is the same: False, next tick."""
     hot = vault / "hot.md"
-    old = hot.read_bytes().decode("utf-8") if hot.exists() else ""
-    new = _render_hot(old, lines)
-    if new == old:
+    try:
+        with vaultlock.VaultLock():
+            if not vaultlock.replace_if_unchanged(hot, lambda old: _render_hot(old, lines)):
+                return False
+            if (vault / ".git").exists():  # best-effort, inside the lock
+                _git(vault, "add", "--", "hot.md")
+                _git(vault, "commit", "-q", "-m", "Orchestra: waiting list", "--", "hot.md")
+    except TimeoutError:
         return False
-    hot.write_bytes(new.encode("utf-8"))  # bytes: keep CRLF exactly as it was
-    if (vault / ".git").exists():
-        _git(vault, "add", "--", "hot.md")
-        _git(vault, "commit", "-q", "-m", "Orchestra: waiting list", "--", "hot.md")
     return True
 
 
 def exam_note(vault: Path, line: str) -> Path:
     """One line for the daily exam run (orchestra/exams/daily.py): agents and pass rates."""
-    day = dt.date.today().isoformat()
-    note = _day_note(vault, day)
-    text = note.read_text(encoding="utf-8")
-    text = re.sub(r"^updated: .*$", f"updated: {day}", text, count=1, flags=re.M)
-    note.write_text(text.rstrip("\n") + f"\n\n## {dt.datetime.now():%H:%M} Exams\n- {line}\n", encoding="utf-8")
-    rel = note.relative_to(vault).as_posix()
-    if (vault / ".git").exists():
-        _git(vault, "add", "--", rel)
-        _git(vault, "commit", "-q", "-m", "Orchestra: daily exams", "--", rel)
-    return note
+    return _append_section(vault, f"\n## {dt.datetime.now():%H:%M} Exams\n- {line}\n", "Orchestra: daily exams")
