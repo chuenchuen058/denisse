@@ -123,9 +123,11 @@ def read_json(path, default):
         with open(path, "rb") as f:
             return f.read()
 
+    if not os.path.exists(path):
+        return default
     try:
         raw = _retry(_raw, "read_attempts", "read_retry_seconds")
-    except FileNotFoundError:
+    except FileNotFoundError:  # removed between the check and the open
         return default
     try:
         return json.loads(raw.decode("utf-8-sig"))

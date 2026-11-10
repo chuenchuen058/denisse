@@ -1,4 +1,5 @@
 """Adaptive-brain acceptance tests. No model, real memory or real vault writes."""
+import contextlib
 import json
 import tempfile
 import unittest
@@ -214,7 +215,7 @@ class AdaptiveTests(unittest.TestCase):
 
     def test_record_assigns_ids_and_observes_without_mutating_input(self):
         messages=[{'role':'user','content':'hello'},{'role':'assistant','content':'hey'}]
-        with patch.object(memory_store,'load_history',return_value=[]),patch.object(memory_store,'save_history') as save,patch.object(instincts,'rebuild') as observe:
+        with patch.object(memory_store,'load_history',return_value=[]),patch.object(memory_store,'save_history') as save,patch.object(memory_store,'locked',contextlib.nullcontext),patch.object(instincts,'rebuild') as observe:
             conversation.record(messages)
         self.assertIn('turn_id',save.call_args.args[0][0]);self.assertNotIn('turn_id',messages[0])
         observe.assert_called_once()
