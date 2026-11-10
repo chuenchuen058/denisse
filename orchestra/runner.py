@@ -948,8 +948,17 @@ def take_lock(state: dict) -> bool:
                 return False
             if status == "dead":
                 # e.g. Task Scheduler killed the tick when the laptop went onto battery (2 Nov).
-                # reconcile() has already collected a task the lock named.
-                log(f"RECONCILE dead owner {info['pid']} for {info.get('task') or '-'} ({LOCK_FILE.name})")
+                if info.get("task"):
+                    # The lock is the only record of that run (its run id, lane, what the main
+                    # checkout looked like before). This tick's reconcile() collected every dead
+                    # lock it saw; this owner died after that. Deleting the lock here stranded
+                    # the task: a PASS merged but never archived stayed in the queue for good, and
+                    # a finished lane not yet merged was run again from scratch (soak, 10 Nov 2026:
+                    # "worktree soak-2-03 for a queued task that won't run again"). The slot stays
+                    # taken until the next tick's reconcile() collects it.
+                    log(C["dead_lock_task_log"].format(pid=info["pid"], task=info["task"], lock=LOCK_FILE.name))
+                    return False
+                log(f"RECONCILE dead owner {info['pid']} for - ({LOCK_FILE.name})")
                 unlink_retry(LOCK_FILE)
                 continue
             try:

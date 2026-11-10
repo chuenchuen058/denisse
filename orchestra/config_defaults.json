@@ -136,6 +136,7 @@
   "taskkill_timeout_s": 60,
   "process_exit_wait_timeout_s": 30,
   "tick_watchdog_extra_s": 900,
+  "dead_lock_task_log": "RECONCILE dead owner {pid} for {task} ({lock}): left for the next tick to collect",
   "keep_ref_prefix": "refs/keep/",
   "keep_ref_log": "KEPT {branch}: {count} commit(s) not on master saved as {ref} before {why}; recover with `git branch <name> {ref}`",
   "merge_only_mark": "Merge-only re-queue:",
