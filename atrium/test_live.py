@@ -9,6 +9,7 @@ import http.client
 import importlib
 import json
 import os
+import socket
 import tempfile
 import threading
 import time
@@ -203,6 +204,13 @@ class LiveTest(LiveBase):
             with self.assertRaises(ValueError):
                 self.live.make_server(host=host or "0.0.0.0")
 
+    def test_busy_port_is_rejected(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+            with self.assertRaises(OSError):
+                self.live.make_server(port=port)
+
     def test_serves_page_and_data_and_refuses_writes(self):
         srv = self.serve()
         code, ctype, body = self.get(srv, "/")
@@ -332,6 +340,14 @@ class LiveScenarioTest(LiveBase):
     def test_empty_review(self):
         self.assert_empty_page(self.live.collect())
         self.assertEqual(self.live.fingerprint(), ())
+
+    def test_study_count_uses_week_note_status_when_present(self):
+        mod = "Atlas/Academic/SEM 1 Modules/Mod A"
+        w(self.vault, f"{mod}/Week 1/Mod A Week 1.md", "---\nstatus: done\n---\n" + ("x" * 2000))
+        w(self.vault, f"{mod}/Week 2/Mod A Week 2.md", "---\nstatus: blocked\n---\n" + ("x" * 2000))
+        w(self.vault, f"{mod}/Week 3/Mod A Week 3.md", "---\nstatus: unknown\n---\n" + ("x" * 2000))
+        d = self.live.collect()
+        self.assertEqual({p["key"]: p["text"] for p in d["progress"]}["study"], "1 of 3 weeks")
 
     def test_review_folder_absent(self):
         import shutil
@@ -604,6 +620,12 @@ class InstallLiveTest(unittest.TestCase):
         for sc in self.cfg["shortcuts"]:
             self.assertIn(f"GetFolderPath({self.inst._q(sc['folder'])})", s)
         self.assertEqual(s.count("URL="), sum(not x.get("run") for x in self.cfg["shortcuts"]))
+
+    def test_browser_override_is_used_in_script(self):
+        browser = "C:/Programs/Opera GX/opera.exe"
+        s = self.inst.script(browser=browser)
+        self.assertIn(self.inst._q(browser), s)
+        self.assertIn(self.inst.live.url(), s)
 
     def test_default_repo_is_this_checkout(self):
         here = Path(__file__).resolve().parents[1]
