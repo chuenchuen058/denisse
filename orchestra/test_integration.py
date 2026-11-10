@@ -545,6 +545,10 @@ class IntegrationTest(unittest.TestCase):
         self.assertEqual(P(json.dumps({"type": "result", "result": "VERDICT: ok\n- fine"}))[0], "ok")
         self.assertEqual(P("**VERDICT: block**\n- bad")[0], "block")
         self.assertIsNone(P("I think it is fine")[0])
+        # a hook's error line after the JSON must not hide the verdict (10 Nov)
+        noisy = json.dumps({"result": "VERDICT: ok\n- fine"}) + "\nSessionEnd hook [x.exe] failed: No such file"
+        self.assertEqual(P(noisy)[0], "ok")
+        self.assertEqual(P("warning: something\n" + json.dumps({"result": "VERDICT: block\n- no"}))[0], "block")
 
 
 if __name__ == "__main__":

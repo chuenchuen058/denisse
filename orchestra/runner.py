@@ -1262,12 +1262,18 @@ def risk(branch: str) -> str | None:
 def parse_verdict(text: str) -> tuple[str | None, str]:
     """('ok'|'block'|None, reasons) from the reviewer's output (claude json or plain text)."""
     s = text.strip()
-    try:
-        data = json.loads(s if s.startswith("{") else s[s.rfind("\n{") + 1:])
+    # The JSON result can be followed (or preceded) by stray lines, e.g. a failing hook's message
+    # (10 Nov: a Coucou SessionEnd error after the JSON made a reviewer "ok" park as "block").
+    # Decode the first JSON object that starts a line and ignore whatever trails it.
+    starts = ([0] if s.startswith("{") else []) + [i + 1 for i in range(len(s)) if s.startswith("\n{", i)]
+    for i in starts:
+        try:
+            data, _end = json.JSONDecoder().raw_decode(s[i:])
+        except ValueError:
+            continue
         if isinstance(data, dict) and isinstance(data.get("result"), str):
             s = data["result"]
-    except ValueError:
-        pass
+            break
     m = re.search(r"^\W*VERDICT:\W*(ok|block)\b(.*)", s, re.I | re.M | re.S)
     if not m:
         return None, s[-500:]
