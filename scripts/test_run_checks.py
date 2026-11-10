@@ -91,6 +91,29 @@ class GitHubSummary(unittest.TestCase):
             with self.subTest(output=output):
                 self.assertEqual(run_checks.test_count(output), expected)
 
+    def test_a_red_run_ends_by_naming_the_modules_that_did_not_pass(self):
+        rows = [row("a_pass.py"), row("m_fail.py", "FAIL"), row("skip.py", "SKIP-SLOW"),
+                row("t_timeout.py", "TIMEOUT"), row("z_pass.py")]
+        self.assertEqual(run_checks.failed_line(rows), "not passed: m_fail.py (FAIL), t_timeout.py (TIMEOUT)")
+        self.assertEqual(run_checks.failed_line([row("a_pass.py"), row("skip.py", "SKIP-SLOW")]), "")
+        module = run_checks.ROOT / "scripts" / "test_fixture.py"
+        for status, last in (("FAIL", "not passed: scripts/test_fixture.py (FAIL)"), ("PASS", None)):
+            out = io.StringIO()
+            with self.subTest(status=status), \
+                 patch.object(sys, "argv", ["run_checks.py"]), \
+                 patch.object(sys, "platform", "win32"), \
+                 patch.object(run_checks, "discover", return_value=[module, module]), \
+                 patch.object(run_checks, "markers", return_value={}), \
+                 patch.object(run_checks, "run_one", side_effect=[row("scripts/test_fixture.py", status),
+                                                                  row("scripts/test_zzz.py")]), \
+                 redirect_stdout(out):
+                run_checks.main()
+            lines = out.getvalue().strip().splitlines()
+            if last:  # the runner's park reason is the tail of this output: the name must be in it
+                self.assertEqual(lines[-1], last)
+            else:
+                self.assertNotIn("not passed", out.getvalue())
+
     def test_main_writes_summary_on_pass_and_failure_and_keeps_json_transcript_free(self):
         report = Path(self.tmp.name) / "checks.json"
         module = run_checks.ROOT / "scripts" / "test_fixture.py"

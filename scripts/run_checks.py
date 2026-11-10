@@ -104,6 +104,15 @@ def test_count(out):
     return int(tally[-1]) if tally else None
 
 
+def failed_line(rows):
+    """The last line of a red run: which modules did not pass, and how. Orchestra's runner
+    keeps only the last lines of a gate's output for its park reason and STATE_NOW, and the
+    table above is sorted by name, so without this the reason quoted a passing module and
+    the count, never the module that failed (4 tasks parked that way on 9 Nov 2026)."""
+    bad = [f"{r['suite']} ({r['status']})" for r in rows if not r["passed"]]
+    return "not passed: " + ", ".join(bad) if bad else ""
+
+
 def github_summary(rows):
     """Append a failures-first summary when running inside GitHub Actions."""
     path = os.environ.get("GITHUB_STEP_SUMMARY")
@@ -257,6 +266,9 @@ def main():
     failed = [r for r in rows if not r["passed"]]
     print(f"\n{len(rows)} modules: " + ", ".join(f"{n} {k.lower()}" for k, n in sorted(counts.items()))
           + f" -- {wall}s wall, {args.jobs} at a time", flush=True)
+    line = failed_line(rows)
+    if line:
+        print(line, flush=True)
 
     github_summary(rows)
     if args.report:
