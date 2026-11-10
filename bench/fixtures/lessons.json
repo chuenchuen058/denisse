@@ -1,0 +1,11 @@
+{
+  "_about": "Synthetic material for Don's local lesson. The bench hands it to teach.prompt as the found material, so no vault is read.",
+  "cases": [
+    {"id": "time_constant", "module": "Circuits Primer", "code": "BENCH102", "topic": "RC time constant", "weeks": [5],
+     "text": "An RC circuit charges as q(t) = C V0 (1 - exp(-t / (R C))). The time constant tau = R C is the time to reach about 63 percent of the final charge. After five time constants the capacitor is effectively full. Discharging follows q(t) = q0 exp(-t / (R C)). Example: R = 10 kilo-ohm and C = 100 microfarad give tau = 1 second.",
+     "expect_terms": ["time constant", "capacitor"]},
+    {"id": "series_parallel", "module": "Circuits Primer", "code": "BENCH102", "topic": "Series and parallel resistors", "weeks": [1],
+     "text": "Resistors in series carry the same current and their resistances add: R_total = R1 + R2. Resistors in parallel share the same voltage and combine as 1 / R_total = 1 / R1 + 1 / R2, so the total is smaller than either. Example: 6 ohm and 3 ohm in parallel give 2 ohm.",
+     "expect_terms": ["series", "parallel"]}
+  ]
+}

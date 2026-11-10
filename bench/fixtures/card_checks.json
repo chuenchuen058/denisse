@@ -1,0 +1,18 @@
+{
+  "_about": "Cards with known truth for Don's card checker, against synthetic notes. truth right = the note supports the card as written; wrong = it contradicts it. The checker agrees when it says right for a right card, or wrong or fixed for a wrong one.",
+  "cases": [
+    {"id": "ohms_law_check", "module": "Circuits Primer", "code": "BENCH102", "week": 1, "topic": "Ohm's law",
+     "text": "Ohm's law: the voltage across a resistor equals the current through it times its resistance, V = I R. Resistors in series add: R_total = R1 + R2. Resistors in parallel combine as 1 / R_total = 1 / R1 + 1 / R2. Power dissipated in a resistor is P = I^2 R.",
+     "cards": [
+       {"kind": "recall", "front": "State Ohm's law.", "back": "V = I R: voltage equals current times resistance.", "topic": "Ohm's law", "truth": "right"},
+       {"kind": "recall", "front": "How do resistors in series combine?", "back": "1 / R_total = 1 / R1 + 1 / R2.", "topic": "Ohm's law", "truth": "wrong"},
+       {"kind": "recall", "front": "Power dissipated in a resistor?", "back": "P = I^2 R.", "topic": "Ohm's law", "truth": "right"}
+     ]},
+    {"id": "shm_check", "module": "Mechanics Primer", "code": "BENCH103", "week": 4, "topic": "Simple harmonic motion",
+     "text": "A mass m on a spring of stiffness k has angular frequency omega = sqrt(k / m) and period T = 2 pi sqrt(m / k). The total energy (1/2) k A^2 is constant.",
+     "cards": [
+       {"kind": "recall", "front": "Angular frequency of a mass on a spring?", "back": "omega = sqrt(m / k).", "topic": "Simple harmonic motion", "truth": "wrong"},
+       {"kind": "recall", "front": "Period of a mass on a spring?", "back": "T = 2 pi sqrt(m / k).", "topic": "Simple harmonic motion", "truth": "right"}
+     ]}
+  ]
+}

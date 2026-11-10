@@ -12,6 +12,8 @@ Nothing here composes prose: the model's lists are kept as lists, capped
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import json
 import re
 
@@ -101,17 +103,37 @@ def _lines(para: str, limit: int) -> list:
 
 # -- the call ----------------------------------------------------------------
 
+# Which operation the current call belongs to (a model.route_jobs key), so each
+# can be routed to its own model (model_routing.json). Unset: config_entry's model.
+_JOB = contextvars.ContextVar("tutor_job", default=None)
+
+
+@contextlib.contextmanager
+def job(name: str):
+    """Calls made inside belong to operation `name` (model.route_jobs)."""
+    token = _JOB.set(name)
+    try:
+        yield
+    finally:
+        _JOB.reset(token)
+
+
+def model_name() -> str:
+    """The Ollama model for the operation in progress."""
+    import model_routing
+    return model_routing.model_for(_M["route_jobs"].get(_JOB.get()), entry=_M["config_entry"])
+
+
 def ollama_call(system: str, user: str, options: dict | None = None, *, schema: str | None = None) -> str:
     """One chat call. `options` are laid over the defaults (a retry's
     tweaks, tutor.json model.retry_options). `schema` is the same JSON
     example used in this operation's prompt, converted to types for format."""
     import ollama
-    import model_config
     extra = {} if _M.get("think") is None else {"think": _M["think"]}
     shape = schema_from_example(json.loads(schema)) if schema is not None else None
     r = call_with_schema(
         ollama.chat, schema=shape, enabled=_M["structured_output"], **extra,
-        model=model_config.model(_M["config_entry"]), keep_alive=_M["keep_alive"],
+        model=model_name(), keep_alive=_M["keep_alive"],
         options={"temperature": _M["temperature"], "num_ctx": conf.num_ctx(), **(options or {})},
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user}])
     msg = r["message"] if isinstance(r, dict) else getattr(r, "message", None)
@@ -259,6 +281,11 @@ def extract_lecture(module: str, code: str, week: int, sources: list, text: str,
     not the lecture's. A chunk that never answers is skipped and recorded in
     `failed` as (chunk number, why); the rest are merged. Raises ModelError
     only when every chunk failed, so a note is never written from nothing."""
+    with job("extract"):
+        return _extract_lecture(module, code, week, sources, text, call, num_ctx, say, failed)
+
+
+def _extract_lecture(module, code, week, sources, text, call, num_ctx, say, failed) -> tuple:
     call = call or ollama_call
     errors = model_errors()
     pieces = chunks(text, chunk_chars(num_ctx))

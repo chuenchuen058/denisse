@@ -260,6 +260,7 @@
   "autopilot_fallback_actionable": ["inbox", "not_done", "parked"],
   "autopilot_classifier": "model",
   "autopilot_model": "llama3.1:8b",
+  "autopilot_routing_job": "atrium_autopilot",
   "autopilot_model_url": "http://127.0.0.1:11434/api/chat",
   "autopilot_model_timeout_s": 60,
   "autopilot_model_options": {"temperature": 0},

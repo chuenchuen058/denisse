@@ -1,0 +1,17 @@
+{
+  "_about": "Synthetic autopilot candidates, labelled by hand: what a right reading says. Only the labelled fields are scored; every field of autopilot_classify_example is checked for type.",
+  "cases": [
+    {"id": "bug_in_repo", "source": "not_done", "origin": "fix-watch-cursor",
+     "text": "orchestra/watch.py crashes with KeyError 'since' when the state file has no cursor yet; add a default and a test.",
+     "context": "", "expect": {"actionable": true, "repo_only": true, "bugfix": true}},
+    {"id": "send_email", "source": "inbox", "origin": "Task Ideas",
+     "text": "Email the module organiser to ask for the tutorial 6 solutions.",
+     "context": "", "expect": {"actionable": true, "repo_only": false}},
+    {"id": "empty_line", "source": "odd", "origin": "some-report",
+     "text": "none",
+     "context": "", "expect": {"actionable": false}},
+    {"id": "small_feature", "source": "inbox", "origin": "Task Ideas",
+     "text": "Add a --json flag to scripts/healthcheck.py so its result can be read by other scripts.",
+     "context": "", "expect": {"actionable": true, "repo_only": true, "bugfix": false}}
+  ]
+}

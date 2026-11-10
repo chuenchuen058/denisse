@@ -1,4 +1,6 @@
 {
+  "_routing_job": "The model_routing.json job the local team's calls belong to; a null model there keeps local_team_model.",
+  "routing_job": "orchestra_local_team",
   "defaults": {
     "local_team_structured_output": true,
     "local_team_think": false,
