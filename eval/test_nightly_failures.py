@@ -56,8 +56,12 @@ _SCRATCH = {}
 
 
 def setUpModule():
-    # Every store a case can write goes to scratch, as in a real run.
-    _SCRATCH["dir"] = run_eval.isolate_state()
+    # Every store a case can write goes to scratch, as in a real run. isolate_state() seeds the
+    # scratch facts from the REAL memory/facts.json (right for the nightly eval, wrong in a test:
+    # the checks guard refuses it, 10 Nov), so the seed is an empty fact store here.
+    import tools
+    with patch.object(tools, "_load_facts", return_value={}):
+        _SCRATCH["dir"] = run_eval.isolate_state()
 
 
 class ReplayedFailures(unittest.TestCase):
