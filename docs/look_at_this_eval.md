@@ -103,3 +103,17 @@ calls the tool 6/6.
   Environment, unrelated.
 
 Raw per-case logs were in `logs/look_eval/` (git-ignored).
+
+## 2026-11-10: the answer-quality failures
+
+Still failing every night 3-9 Nov (look_rewrite_this, look_summarise_copied,
+look_what_does_that_mean). The eval's fake desktop was not the cause: the
+tool returns the selection/clipboard text in full under it. The model read
+the text and then only described it ("It looks like you copied some text
+about photosynthesis", "you're looking at a document called Algorithms
+notes.pdf"), or went for the window title's file with read_file. Fix:
+brain.json `looked_text` -- a reply that shares fewer than
+`min_shared_words` of the text's words gets one tool-less retry with a
+nudge carrying the text, kept only if it then works on it.
+`eval/test_nightly_failures.py` replays the 9 Nov replies. Not yet
+measured live (the GPU was taken by another job on 10 Nov).

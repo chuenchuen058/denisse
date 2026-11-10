@@ -164,7 +164,17 @@ def timing_lines(s: dict) -> list:
 # job. Same knob the local team uses (orchestra/config.json
 # local_team_gpu_busy_pct is 60 for "skip the call"); the eval is stricter
 # because it reports timings, not just pass/fail.
-NOISY_PCT = int(os.environ.get("DENISSE_EVAL_GPU_BUSY_PCT", "30"))
+# The limit is eval/eval.json gpu.busy_pct; the env var still overrides it.
+EVAL_CONFIG_FILE = Path(__file__).resolve().parent / "eval.json"
+
+
+def eval_config() -> dict:
+    """eval/eval.json -- the eval's limits (AGENTS.md Rule 0)."""
+    import json
+    return json.loads(EVAL_CONFIG_FILE.read_text(encoding="utf-8"))
+
+
+NOISY_PCT = int(os.environ.get("DENISSE_EVAL_GPU_BUSY_PCT", eval_config()["gpu"]["busy_pct"]))
 
 
 def parse_gpu_csv(text: str) -> dict | None:
@@ -225,6 +235,29 @@ def gpu_snapshot(samples: int = 2, gap_s: float = 0.5) -> dict:
 def is_noisy(snap: dict, limit: int = NOISY_PCT) -> bool:
     util = snap.get("util_pct")
     return util is not None and util >= limit
+
+
+def wait_for_quiet(wait_s: float, poll_s: float, samples: int, limit: int = NOISY_PCT,
+                   snapshot=None, sleep=time.sleep, clock=time.monotonic) -> dict:
+    """Wait up to `wait_s` for `samples` GPU readings in a row under `limit`.
+
+    The gpu.lease only keeps out jobs that take it; on 8 and 9 Nov the GPU
+    was 98-100% busy with the lease held, because compare_tutor_models.py
+    and friends don't. nvidia-smi sees every job. Returns the last snapshot
+    with "quiet": True/False and "waited_s". No reading at all (no
+    nvidia-smi) counts as quiet: the run goes ahead, as it always did."""
+    snapshot = snapshot or gpu_snapshot
+    t0 = clock()
+    run = 0
+    while True:
+        snap = snapshot()
+        busy = is_noisy(snap, limit)
+        run = 0 if busy else run + 1
+        if snap.get("util_pct") is None or run >= max(1, samples):
+            return {**snap, "quiet": True, "waited_s": round(clock() - t0, 1)}
+        if clock() - t0 + poll_s > wait_s:
+            return {**snap, "quiet": False, "waited_s": round(clock() - t0, 1)}
+        sleep(poll_s)
 
 
 def gpu_lines(snap: dict, lease: dict | None) -> list:

@@ -862,6 +862,12 @@
     ],
     "fallback": "Done."
   },
+  "looked_text": {
+    "_about": "After look_at_this returned text (between desktop_context.json wording open/close), the reply has to work on it: at least min_shared_words of the text's words (min_word_letters letters or more; fewer if the text has fewer) must be in it. Otherwise one retry, no tools, with nudge ({text} = the text); kept only if it does. Eval 3-9 Nov, every night: 'It looks like you copied some text about photosynthesis' (no summary), 'you're looking at a document called Algorithms notes.pdf' (no explanation), read_file on the window title's Cover letter.docx (no rewrite).",
+    "min_shared_words": 2,
+    "min_word_letters": 4,
+    "nudge": "You read the text he means, but your reply only described it. Do what he asked with that text now -- summarise it, explain it, rewrite it, translate it -- and answer him directly with the result. No tools, and don't describe the window or the file. The text: {text}"
+  },
   "reply_nets": {
     "_about": "Nets under the model's reply. tool_narration: a reply made ENTIRELY of commentary on her own tool use ('No tool call needed for that.'); one retry with plain_reply_nudge. tool_talk: narration wrapped round a real answer ('I called the get_weather tool...'); any tool name containing _ counts too. tool_lead_in: lead-ins cut from the front of such a sentence; if fewer than min_words_kept survive the cut, the original stands. didnt_catch: 'I didn't catch that' to a message of at least clear_message_min_words words (word_pattern) gets one retry without the history. role_prefix: the chat template's role marker emitted as text ('assistant\\n\\nNo worries.'), lowercase as observed.",
     "tool_narration_pattern": "^\\s*(?:no|none|there(?:'s| is) no|i don'?t need)\\b[^.!?\\n]*\\b(?:tools?|functions?|json)(?:\\s+(?:calls?|responses?))?\\b[^.!?\\n]*[.!]?\\s*$",
