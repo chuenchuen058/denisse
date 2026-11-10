@@ -115,7 +115,7 @@ class SupervisionTest(unittest.TestCase):
             subprocess.run(["taskkill", "/PID", str(self.gc_pid), "/F"], capture_output=True)
         for wt in (self.R.WORKTREES.glob("*") if self.R.WORKTREES.exists() else []):
             self.R.unlink_link(wt / ".venv")
-        subprocess.run(["git", "worktree", "prune"], cwd=self.repo, capture_output=True)
+        # No `git worktree prune`: the worktrees (R.WORKTREES) and the repo both live in self.tmp.
         for k, v in self.saved.items():
             if v is None:
                 os.environ.pop(k, None)

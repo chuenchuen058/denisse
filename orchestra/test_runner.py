@@ -121,7 +121,7 @@ class RunnerTest(unittest.TestCase):
     def tearDown(self):
         for wt in (self.R.WORKTREES.glob("*") if self.R.WORKTREES.exists() else []):
             self.R.unlink_link(wt / ".venv")
-        subprocess.run(["git", "worktree", "prune"], cwd=self.repo, capture_output=True)
+        # No `git worktree prune`: the worktrees (R.WORKTREES) and the repo both live in self.tmp.
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def add(self, slug, title="t", queue="auto", priority="normal", kind="work", written=None,
