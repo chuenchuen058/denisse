@@ -1,0 +1,215 @@
+<!-- Reference layout for the Atrium live page (approved 10 Nov 2026). All text and numbers are SAMPLE data: never copy them into the live page; render real data in this layout. -->
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Atrium hub (reference design)</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22g%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%220%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%22%20stop-color%3D%22%232c2c2e%22/%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%230b0b0d%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2215%22%20fill%3D%22url%28%23g%29%22/%3E%3Cg%20fill%3D%22none%22%20stroke-width%3D%226%22%20stroke-linecap%3D%22round%22%3E%3Cpath%20d%3D%22M32%2013a19%2019%200%200%201%2019%2019%22%20stroke%3D%22%23d97757%22/%3E%3Cpath%20d%3D%22M51%2032a19%2019%200%200%201-19%2019%22%20stroke%3D%22%230a84ff%22/%3E%3Cpath%20d%3D%22M32%2051a19%2019%200%200%201-19-19%22%20stroke%3D%22%238e5cf7%22/%3E%3Cpath%20d%3D%22M13%2032a19%2019%200%200%201%2019-19%22%20stroke%3D%22%2330b0c7%22/%3E%3C/g%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%226%22%20fill%3D%22%2334c759%22/%3E%3C/svg%3E">
+<style>
+:root{--bg:#f2f2f7;--card:#ffffff;--text:#1c1c1e;--sub:#6e6e73;--line:#e5e5ea;--ok:#34c759;--warn:#ff9f0a;--bad:#ff3b30;
+--claude:#d97757;--codex:#0a84ff;--copilot:#8e5cf7;--don:#30b0c7;--r:22px;--font:-apple-system,"SF Pro Display","Segoe UI Variable","Segoe UI",system-ui,sans-serif}
+@media (prefers-color-scheme:dark){:root{--bg:#000;--card:#1c1c1e;--text:#f5f5f7;--sub:#98989d;--line:#2c2c2e}}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--text);font:15px/1.35 var(--font);padding:28px;max-width:1280px;margin:auto}
+.top{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:22px}
+.date{color:var(--sub);font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+h1{font-size:34px;font-weight:700;letter-spacing:-.5px;margin-top:2px}
+.pill{display:inline-flex;align-items:center;gap:8px;background:var(--card);border-radius:999px;padding:8px 14px;font-weight:600;font-size:14px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--ok)}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
+.w{background:var(--card);border-radius:var(--r);padding:18px 20px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.w h3{font-size:13px;color:var(--sub);font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.span2{grid-column:span 2}.span4{grid-column:span 4}.tall{grid-row:span 2}
+.agent{display:flex;flex-direction:column;gap:8px;min-height:150px}
+.agent .name{font-size:20px;font-weight:700;display:flex;align-items:center;gap:8px}
+.badge{font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:color-mix(in srgb,var(--c) 14%,transparent);color:var(--c)}
+.task{font-size:14px;color:var(--text)}
+.file{font:12.5px ui-monospace,"SF Mono",Consolas,monospace;color:var(--sub)}
+.meta{margin-top:auto;font-size:12.5px;color:var(--sub)}
+.idle .name{color:var(--sub)}
+.ws{position:relative}
+.row{display:flex;justify-content:space-between;align-items:center;padding:12px 4px;border-top:1px solid var(--line);font:13.5px ui-monospace,"SF Mono",Consolas,monospace;position:relative}
+.row:first-of-type{border-top:0}
+.cur{position:absolute;right:8px;display:flex;align-items:center;gap:4px;font:600 11.5px var(--font);color:#fff}
+.cur svg{width:16px;height:16px}
+.cur span{background:var(--c);padding:2px 8px;border-radius:8px}
+.big{font-size:44px;font-weight:700;letter-spacing:-1px}
+.q li{list-style:none;display:flex;justify-content:space-between;padding:9px 0;border-top:1px solid var(--line);font-size:14px}
+.q li:first-child{border-top:0}.q ul{padding:0}
+.why{color:var(--sub);font-size:12.5px}
+.alert{background:color-mix(in srgb,var(--warn) 12%,var(--card))}
+.ring{display:flex;gap:16px;align-items:center}
+.today li{list-style:none;display:flex;gap:12px;padding:7px 0;font-size:14px}.today ul{padding:0}
+.today b{width:48px;color:var(--sub);font-weight:600}
+.tree{display:flex;flex-wrap:wrap;gap:22px 36px;padding:6px 2px 4px}
+.tree ul{list-style:none;padding-left:18px;margin:0;position:relative}
+.tree>ul{padding-left:0}
+.tree li{position:relative;padding:5px 0 5px 16px;font-size:13.5px;white-space:nowrap}
+.tree li::before{content:"";position:absolute;left:0;top:0;bottom:0;border-left:1.5px solid var(--line)}
+.tree li:last-child::before{bottom:auto;height:16px}
+.tree li::after{content:"";position:absolute;left:0;top:16px;width:12px;border-top:1.5px solid var(--line)}
+.tree>ul>li{padding-left:0;font-weight:700;font-size:15px}
+.tree>ul>li::before,.tree>ul>li::after{display:none}
+.nd{display:inline-flex;align-items:center;gap:7px;padding:4px 10px;border-radius:10px;background:var(--bg)}
+.nd i{width:8px;height:8px;border-radius:50%;flex:none}
+.u i{background:var(--bad)}.s i{background:var(--warn)}.l i{background:#c7c7cc}.d i{background:var(--ok)}.d{color:var(--sub);text-decoration:line-through}
+.nd small{color:var(--sub);font-weight:500}
+.leg{display:flex;gap:14px;font-size:12px;color:var(--sub);margin-top:10px}.leg .nd{padding:0;background:none}
+.tree{}
+.local{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+.lt{border:1px solid var(--line);border-radius:16px;padding:12px 14px;display:flex;flex-direction:column;gap:4px;min-height:118px}
+.lt .n{font-weight:700;font-size:15px;display:flex;align-items:center;gap:7px}
+.lt .s{font-size:13px}.lt .m{font:12px ui-monospace,"SF Mono",Consolas,monospace;color:var(--sub)}
+.lt .f{margin-top:auto;font-size:12px;color:var(--sub)}
+.sd{width:8px;height:8px;border-radius:50%;background:var(--ok)}.sd.idle{background:var(--line)}.sd.run{background:var(--ok);box-shadow:0 0 0 0 var(--ok);animation:pulse 1.8s infinite}
+@keyframes pulse{70%{box-shadow:0 0 0 7px transparent}}
+.gpu{display:flex;gap:22px;align-items:center;font-size:13px;color:var(--sub);margin-bottom:12px;flex-wrap:wrap}
+.gpu b{color:var(--text)}
+.gb{width:160px;height:8px;border-radius:8px;background:var(--line);overflow:hidden;display:inline-block;vertical-align:middle;margin-left:6px}.gb i{display:block;height:100%;background:var(--don);border-radius:8px;transition:width 1s}
+.rings{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
+.rg{display:flex;align-items:center;gap:14px}
+.rg svg{width:64px;height:64px;transform:rotate(-90deg)}
+.rg .v{font-size:22px;font-weight:700}.rg .l{font-size:12.5px;color:var(--sub)}
+.reset{display:grid;grid-template-columns:90px 1fr 92px;align-items:center;gap:12px;padding:9px 0;border-top:1px solid var(--line);font-size:14px}
+.reset:first-of-type{border-top:0}
+.bar{height:8px;border-radius:8px;background:var(--line);overflow:hidden}.bar i{display:block;height:100%;border-radius:8px;background:var(--c)}
+.cd{font-variant-numeric:tabular-nums;font-weight:600;text-align:right}
+.feed li{list-style:none;display:flex;gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:13.5px;animation:in .5s ease}
+.feed li:first-child{border-top:0}.feed ul{padding:0}
+.feed .t{color:var(--sub);width:42px;font-variant-numeric:tabular-nums}
+@keyframes in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+.prog{height:4px;border-radius:4px;background:var(--line);margin-top:4px;overflow:hidden}.prog i{display:block;height:100%;background:var(--c);transition:width 1s linear}
+.cur{transition:top .8s cubic-bezier(.2,.8,.2,1)}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+@media(max-width:900px){.grid{grid-template-columns:1fr 1fr}.span4{grid-column:span 2}}
+</style></head><body>
+<div class="top"><div><div class="date">Tuesday 10 November · 12:40 · Agents OK</div><h1>Atrium hub</h1></div>
+<div class="pill"><span class="dot"></span>3 working · 0 stuck · 🔋 68%</div></div>
+
+<div class="rings" style="margin-bottom:18px">
+  <div class="w rg"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15" fill="none" stroke="var(--line)" stroke-width="4"/><circle cx="18" cy="18" r="15" fill="none" stroke="var(--ok)" stroke-width="4" stroke-linecap="round" stroke-dasharray="65 95"/></svg><div><div class="v">69%</div><div class="l">pass rate today · 11 of 16</div></div></div>
+  <div class="w rg"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15" fill="none" stroke="var(--line)" stroke-width="4"/><circle cx="18" cy="18" r="15" fill="none" stroke="var(--codex)" stroke-width="4" stroke-linecap="round" stroke-dasharray="47 95"/></svg><div><div class="v">2 of 4</div><div class="l">slots in use</div></div></div>
+  <div class="w rg"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15" fill="none" stroke="var(--line)" stroke-width="4"/><circle cx="18" cy="18" r="15" fill="none" stroke="var(--copilot)" stroke-width="4" stroke-linecap="round" stroke-dasharray="71 95"/></svg><div><div class="v">3 of 4</div><div class="l">agents ready</div></div></div>
+  <div class="w rg"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15" fill="none" stroke="var(--line)" stroke-width="4"/><circle cx="18" cy="18" r="15" fill="none" stroke="var(--claude)" stroke-width="4" stroke-linecap="round" stroke-dasharray="40 95"/></svg><div><div class="v">$25</div><div class="l">of $60 today · notional</div></div></div>
+</div>
+<div class="grid">
+  <div class="w agent" style="--c:var(--claude)"><h3>CLAUDE CODE</h3>
+    <div class="name">Working <span class="badge">Fable</span></div>
+    <div class="task">Fix broken tasks: landing model-per-task</div><div class="file">orchestra/runner.py</div>
+    <div class="prog"><i id="p1" style="width:30%"></i></div><div class="meta"><span id="e1">18:04</span> elapsed · of 45 min limit</div></div>
+  <div class="w agent" style="--c:var(--copilot)"><h3>COPILOT</h3>
+    <div class="name">Working</div>
+    <div class="task">Example task</div><div class="file">tools/email.py</div>
+    <div class="prog"><i id="p2" style="width:8%"></i></div><div class="meta"><span id="e2">4:12</span> elapsed</div></div>
+  <div class="w agent idle" style="--c:var(--codex)"><h3>CODEX</h3>
+    <div class="name">Held</div><div class="task">Saving its last 10% until near reset</div>
+    <div class="meta">resets Wed 12:08</div></div>
+  <div class="w agent" style="--c:var(--don)"><h3>DON · LOCAL</h3>
+    <div class="name">Working</div><div class="task">Anki cards: Research project</div><div class="file">qwen3.5:9b · GPU 41%</div>
+    <div class="meta">Ollama healthy</div></div>
+
+  <div class="w span4"><h3>WHAT TO WORK ON</h3><div class="tree">
+  <ul><li><span class="nd">Study</span><ul>
+    <li><span class="nd u"><i></i>Module A mock prep <small>Day 1, not started</small></span><ul>
+      <li><span class="nd u"><i></i>20 Anki cards <small>today</small></span></li>
+      <li><span class="nd u"><i></i>Q1 (b)–(d)</span></li>
+      <li><span class="nd l"><i></i>Find out exam date</span></li></ul></li>
+    <li><span class="nd s"><i></i>Write up week notes <small>Module A · B · C</small></span></li>
+    <li><span class="nd s"><i></i>Module D week 7 <small>not in vault</small></span></li></ul></li></ul>
+  <ul><li><span class="nd">Research</span><ul>
+    <li><span class="nd s"><i></i>Research project <small>for a supervisor</small></span><ul>
+      <li><span class="nd s"><i></i>Say yes to data download</span></li>
+      <li><span class="nd l"><i></i>Baseline → pre-training</span></li>
+      <li><span class="nd l"><i></i>Study LEARN.md + cards <small>Dec</small></span></li></ul></li>
+    <li><span class="nd l"><i></i>Applications <small>waiting</small></span></li>
+    <li><span class="nd d"><i></i>Talk to supervisor</span></li></ul></li></ul>
+  <ul><li><span class="nd">Hackathon</span><ul>
+    <li><span class="nd s"><i></i>Apply <small>by 22 Nov</small></span></li>
+    <li><span class="nd s"><i></i>Agree idea with teammate <small>idea chosen</small></span></li>
+    <li><span class="nd u"><i></i>Sort date clash</span></li></ul></li></ul>
+  <ul><li><span class="nd">Robotic tail</span><ul>
+    <li><span class="nd s"><i></i>Start TailBridge in Fusion</span><ul>
+      <li><span class="nd l"><i></i>v5 rebuild + renders</span></li>
+      <li><span class="nd l"><i></i>Test print</span></li></ul></li>
+    <li><span class="nd d"><i></i>PCB v1 · firmware</span></li></ul></li></ul>
+  <ul><li><span class="nd">Setup</span><ul>
+    <li><span class="nd s"><i></i>Save 3 skills</span></li>
+    <li><span class="nd s"><i></i>Sign in to a tool</span></li>
+    <li><span class="nd l"><i></i>Timetable link (ICS)</span></li>
+    <li><span class="nd d"><i></i>Clear old to-dos</span></li></ul></li></ul>
+  </div>
+  <div class="leg"><span class="nd u"><i></i>today / urgent</span><span class="nd s"><i></i>this week</span><span class="nd l"><i></i>later</span><span class="nd d"><i></i>done</span></div></div>
+  <div class="w span4"><h3>LOCAL AGENTS · ON THIS LAPTOP</h3>
+    <div class="gpu"><span>Ollama <b>healthy</b></span><span>Loaded <b>qwen3.5:9b</b></span><span>GPU <b id="gp">41%</b><span class="gb"><i id="gpb" style="width:41%"></i></span></span><span>VRAM <b>6.1 / 8 GB</b></span><span>Power <b>battery 68%</b> · local batch jobs paused</span></div>
+    <div class="local">
+      <div class="lt"><div class="n"><span class="sd run"></span>Don</div><div class="s">Making Anki cards · Research</div><div class="m">qwen3.5:9b</div><div class="f">14 of ~40 cards · 3 consults today</div></div>
+      <div class="lt"><div class="n"><span class="sd"></span>Denisse</div><div class="s">Listening (tray)</div><div class="m">llama3.1:8b · Whisper · Kokoro</div><div class="f">last asked 11:52 · reminders 2</div></div>
+      <div class="lt"><div class="n"><span class="sd idle"></span>Local team</div><div class="s">Idle</div><div class="m">llama3.1:8b</div><div class="f">canary exam 90% · last 08:00</div></div>
+      <div class="lt"><div class="n"><span class="sd idle"></span>Evals</div><div class="s">130 / 134 last night</div><div class="m">nightly 19:00</div><div class="f">next run in <span class="cd">6h 20m</span></div></div>
+      <div class="lt"><div class="n"><span class="sd"></span>Atrium digest</div><div class="s">Hourly, on mains</div><div class="m">last 11:00 · 21 lines</div><div class="f">next <span class="cd">20m</span></div></div>
+    </div></div>
+  <div class="w span2 tall ws"><h3>LIVE · WHO'S EDITING WHAT</h3>
+    <div class="row">orchestra/runner.py<div class="cur" style="--c:var(--claude)"><svg viewBox="0 0 16 16"><path d="M1 1l5 14 2-6 6-2z" fill="var(--claude)"/></svg><span>Claude</span></div></div>
+    <div class="row">orchestra/test_runner.py</div>
+    <div class="row">tools/email.py<div class="cur" style="--c:var(--copilot)"><svg viewBox="0 0 16 16"><path d="M1 1l5 14 2-6 6-2z" fill="var(--copilot)"/></svg><span>Copilot</span></div></div>
+    <div class="row">tutor/cards.py<div class="cur" style="--c:var(--don)"><svg viewBox="0 0 16 16"><path d="M1 1l5 14 2-6 6-2z" fill="var(--don)"/></svg><span>Don</span></div></div>
+    <div class="row">atrium/live.py</div>
+  </div>
+  <div class="w"><h3>MERGED TODAY</h3><div class="big">11</div><div class="why">of 16 finished</div></div>
+  <div class="w alert"><h3>⚠︎ NEEDS A LOOK</h3><div class="big">5</div><div class="why">parked · Fable is fixing them</div></div>
+  <div class="w span2 q"><h3>UP NEXT</h3><ul>
+    <li>Ollama hang fix (merge) <span class="why">after current</span></li>
+    <li>Don: cards from any note <span class="why">on mains power</span></li>
+    <li>Reviewer limit fix <span class="why">slot full</span></li></ul></div>
+
+  <div class="w span4"><h3>TOKENS SPENT</h3>
+    <div class="rings" style="grid-template-columns:repeat(4,1fr);gap:14px">
+      <div><div class="big" style="font-size:30px">41.2M</div><div class="why">today · 2.1M fresh</div></div>
+      <div><div class="big" style="font-size:30px">186M</div><div class="why">this week</div></div>
+      <div><div class="big" style="font-size:30px">512M</div><div class="why">this month</div></div>
+      <div><div class="big" style="font-size:30px">875M</div><div class="why">all time · since 7 Oct</div></div>
+    </div>
+    <div class="why" style="margin-top:10px">Claude Code 801M · Codex 87M · Copilot n/a · Local 3.4M · most is cached re-reads; "fresh" = new tokens</div></div>
+  <div class="w span4 q"><h3>CREDITS PER TASK · TODAY</h3><ul>
+    <li><span>Fix broken tasks</span><span class="why">Claude · 1.9M tokens · ~6% of week · $5.37</span></li>
+    <li><span>Denisse eval fix</span><span class="why">Claude · 2.3M tokens · ~4% of week · $6.47</span></li>
+    <li><span>Small runner fix</span><span class="why">Claude · 0.4M tokens · ~1% of week · $0.43</span></li>
+    <li><span>Example task</span><span class="why">Copilot · 1 premium request</span></li>
+    <li><span>Anki cards: Research</span><span class="why">Local · 0 credits · 4 min GPU</span></li>
+    <li><b>Today</b><span><b>Claude ~11% of week · Copilot 4 requests · Codex 0</b></span></li></ul></div>
+  <div class="w span2"><h3>LIMITS &amp; RESETS</h3>
+    <div class="reset" style="--c:var(--claude)"><b>Claude</b><div class="bar"><i style="width:55%"></i></div><span class="cd">55% · 15:20</span></div>
+    <div class="reset" style="--c:var(--claude)"><b class="why">weekly</b><div class="bar"><i style="width:12%;background:var(--bad)"></i></div><span class="cd" style="color:var(--bad)">12% · Wed 18:00</span></div>
+    <div class="reset" style="--c:var(--codex)"><b>Codex</b><div class="bar"><i style="width:10%"></i></div><span class="cd" data-to="w">23h 28m</span></div>
+    <div class="reset" style="--c:var(--copilot)"><b>Copilot</b><div class="bar"><i style="width:81%"></i></div><span class="cd">1 Dec</span></div>
+    <div class="reset" style="--c:var(--don)"><b>Local</b><div class="bar"><i style="width:100%"></i></div><span class="cd">no limit</span></div>
+  </div>
+  <div class="w span2 feed"><h3>LIVE ACTIVITY · <span style="color:var(--warn)">SAMPLE DATA, MOCK ONLY</span></h3><ul id="feed">
+    <li><span class="t">12:39</span>Claude edited orchestra/runner.py</li>
+    <li><span class="t">12:37</span>✓ Merged: battery allow-once grant</li>
+    <li><span class="t">12:31</span>Copilot started: example task</li>
+    <li><span class="t">12:24</span>Don consulted · high confidence</li></ul></div>
+  <div class="w span2 today"><h3>TODAY</h3><ul>
+    <li><b>14:00</b>Study block · 20 cards, then Q1 (b)–(d)</li>
+    <li><b>17:00</b>Weekly lesson</li>
+    <li><b>22 Nov</b>Application deadline</li></ul></div>
+  <div class="w span2"><h3>PROJECTS</h3>
+    <div class="today"><ul>
+    <li><b>Tail</b>v5 designed · PCB routed · firmware built · <span class="why">next: Fusion rebuild</span></li>
+    <li><b>Research</b>set-up · <span class="why">next: download data</span></li>
+    <li><b>Hack</b>idea chosen · <span class="why">next: apply</span></li></ul></div></div>
+</div>
+<script>
+// Mock motion only: in the real page these come from live data, nothing moves unless an agent does.
+const files=[...document.querySelectorAll('.ws .row')];
+function moveCursor(cls,i){const c=document.querySelector('.cur'+cls);if(!c)return;files[i].appendChild(c)}
+let s1=18*60+4,s2=4*60+12;
+setInterval(()=>{s1++;s2++;
+ document.getElementById('e1').textContent=Math.floor(s1/60)+':'+String(s1%60).padStart(2,'0');
+ document.getElementById('e2').textContent=Math.floor(s2/60)+':'+String(s2%60).padStart(2,'0');
+ document.getElementById('p1').style.width=(s1/2700*100)+'%';document.getElementById('p2').style.width=(s2/2700*100)+'%';document.getElementById('gp').textContent=(35+Math.round(Math.random()*15))+'%';document.getElementById('gpb').style.width=document.getElementById('gp').textContent;},1000);
+const events=[['Claude edited orchestra/test_runner.py',0,1],['Copilot edited tools/email.py',1,2],['Don wrote 12 cards',2,3],['Claude ran the tests · 435 passed',0,1],['Claude edited orchestra/runner.py',0,0]];
+let k=0;setInterval(()=>{const [txt,who,row]=events[k++%events.length];
+ const li=document.createElement('li');const d=new Date();li.innerHTML='<span class="t">'+d.toTimeString().slice(0,5)+'</span>'+txt;
+ const f=document.getElementById('feed');f.prepend(li);while(f.children.length>5)f.lastChild.remove();
+ const cs=document.querySelectorAll('.ws .cur');if(cs[who])files[row].appendChild(cs[who]);
+ files[row].animate([{background:'color-mix(in srgb,#0a84ff 10%,transparent)'},{background:'transparent'}],{duration:1200});},3500);
+</script></body></html>
