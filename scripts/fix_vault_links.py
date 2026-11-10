@@ -18,9 +18,11 @@ Two causes, both found by scripts/vault_link_audit.py on 2026-09-05:
    session; most likely the Linter plugin re-wrapping paragraphs at a
    fixed width without knowing not to split a wikilink.
 
-Idempotent. Prints what it changed.
+Idempotent. Prints what it would change; writes only with --apply (it edits notes
+across the real vault, so a bare run must not: before 10 Nov 2026 it did).
 """
 
+import argparse
 import re
 import sys
 from pathlib import Path
@@ -33,7 +35,10 @@ RENAMES = {"memory_bank_vault": "vault_setup", "denisse_vault": "README"}
 WRAPPED = re.compile(r"\[\[([^\]\r\n]*)[\r\n]+[ \t]*([^\]\r\n]*?)\]\]")
 
 
-def main() -> int:
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--apply", action="store_true", help="write the changes (default: only list them)")
+    apply = ap.parse_args(argv).apply
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     changed = 0
 
@@ -53,11 +58,13 @@ def main() -> int:
         )
 
         if text != original:
-            path.write_text(text, encoding="utf-8")
+            if apply:
+                path.write_text(text, encoding="utf-8")
             changed += 1
-            print(f"fixed  {path.relative_to(VAULT)}")
+            print(f"{'fixed ' if apply else 'would fix'} {path.relative_to(VAULT)}")
 
-    print(f"\n{changed} file(s) changed")
+    print(f"\n{changed} file(s) changed" if apply else
+          f"\n{changed} file(s) would change; nothing written. Re-run with --apply to write.")
     return 0
 
 
