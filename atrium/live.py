@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
+import re
 import select
 import socket
 import sys
@@ -86,6 +88,42 @@ def _timeline(state: dict, running: list[dict], now: dt.datetime) -> list[dict]:
     return rows
 
 
+def _note_status(note: Path) -> bool | None:
+    """Status from the week note itself, if present; a missing or undecodable status stays unknown."""
+    try:
+        text = note.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+    def parse(value: str | None) -> bool | None:
+        if value is None:
+            return None
+        value = value.strip().strip("\"'")
+        if not value:
+            return None
+        lower = re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+        if any(token in lower for token in ("done", "complete", "finished", "written", "checked", "ready")):
+            return True
+        if any(token in lower for token in ("not done", "pending", "todo", "draft", "partial", "blocked", "unknown", "in progress")):
+            return False
+        return None
+
+    m = re.match(r"^---\s*\n(.*?)\n---\s*(?:\n|$)", text, flags=re.DOTALL)
+    if m:
+        for status_re in (r"(?m)^\s*status\s*:\s*(.+?)\s*$", r"(?m)^\s*Status\s*:\s*(.+?)\s*$"):
+            sm = re.search(status_re, m.group(1))
+            if sm:
+                outcome = parse(sm.group(1))
+                if outcome is not None:
+                    return outcome
+    match = re.search(r"(?im)^\s*(?:status|Status)\s*[:=]\s*(.+?)\s*$", text)
+    if match:
+        outcome = parse(match.group(1))
+        if outcome is not None:
+            return outcome
+    return None
+
+
 def _study_weeks() -> dict:
     """Week notes written of weeks filed, from the vault's module folders."""
     c = _c()["study"]
@@ -97,13 +135,22 @@ def _study_weeks() -> dict:
         weeks = []
     for w in weeks:
         filed += 1
+        status = None
         for note in w.glob(c["note_glob"]):
-            try:
-                if len(note.read_text(encoding="utf-8", errors="replace")) >= c["written_min_chars"]:
-                    written += 1
-                    break
-            except OSError:
-                pass
+            status = _note_status(note)
+            if status is not None:
+                break
+        if status is True:
+            written += 1
+            continue
+        if status is None:
+            for note in w.glob(c["note_glob"]):
+                try:
+                    if len(note.read_text(encoding="utf-8", errors="replace")) >= c["written_min_chars"]:
+                        written += 1
+                        break
+                except OSError:
+                    pass
     return {"v": written, "m": filed}
 
 
@@ -336,14 +383,34 @@ class LiveServer(ThreadingHTTPServer):
         super().server_close()
 
 
+def _port_busy(host: str, port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind((host, port))
+        except OSError:
+            return True
+        return False
+
+
 def make_server(host: str | None = None, port: int | None = None) -> "LiveServer":
     c = _c()
     host = host or c["host"]
     if host not in c["loopback"]:
         raise ValueError(f"atrium live binds loopback only, not {host!r}")
-    port = c["port"] if port is None else port
+    chosen = c["port"] if port is None else port
+    if chosen is not None and chosen != 0 and _port_busy(host, chosen):
+        if port is None:
+            for candidate in range(chosen + 1, chosen + 128):
+                if not _port_busy(host, candidate):
+                    chosen = candidate
+                    break
+            else:
+                raise OSError(f"address in use on loopback: {host}:{chosen}")
+        else:
+            raise OSError(f"address in use on loopback: {host}:{chosen}")
     handler = type("LiveHandler", (Handler,), {"hub": Hub()})
-    return LiveServer((host, port), handler)
+    return LiveServer((host, chosen), handler)
 
 
 def url(port: int | None = None) -> str:
@@ -351,13 +418,19 @@ def url(port: int | None = None) -> str:
     return f"http://{c['host']}:{c['port'] if port is None else port}/"
 
 
-def serve(port: int | None = None, open_browser: bool = False) -> int:
+def serve(port: int | None = None, open_browser: bool = False, browser: str | None = None) -> int:
     srv = make_server(port=port)
     where = url(srv.server_address[1])
     print(where, flush=True)
     if open_browser:
         import webbrowser
-        webbrowser.open(where)
+        target = browser or conf.section("install_live").get("browser")
+        if target:
+            cmd = os.path.expandvars(os.path.expanduser(str(target)))
+            webbrowser.register("atrium-browser", None, webbrowser.BackgroundBrowser(cmd))
+            webbrowser.get("atrium-browser").open(where)
+        else:
+            webbrowser.open(where)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

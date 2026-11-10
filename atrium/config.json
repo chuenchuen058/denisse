@@ -234,7 +234,7 @@
   "live": {
     "_note": "python -m atrium live: the laptop's own live Atrium page (atrium/live.py, page in atrium/live_page/). Read-only: it serves what atrium/snapshot.py collects and never writes. host must be one of loopback. Work happens only while a browser tab holds the event stream open: every poll_s the watched files are stat'ed and the data rebuilt when one changed (or refresh_s passed, for limits that lift with the clock).",
     "host": "127.0.0.1",
-    "port": 8765,
+    "port": 8777,
     "loopback": [
       "127.0.0.1",
       "::1",
@@ -402,6 +402,7 @@
     "_note": "atrium/install_live.py: starts the live page hidden at logon and adds shortcuts that open it. schtasks ONLOGON needs admin on this laptop (9 Nov 2026: Access is denied), so it uses the per-user Startup folder. folder = a .NET Environment.SpecialFolder name. Prints the PowerShell only; --register runs it. python and script are repo-relative.",
     "python": ".venv/Scripts/pythonw.exe",
     "script": "atrium/live_task.py",
+    "browser": "%LOCALAPPDATA%\\Programs\\Opera GX\\opera.exe",
     "powershell": [
       "powershell",
       "-NoProfile",
@@ -417,11 +418,11 @@
       },
       {
         "folder": "Desktop",
-        "name": "Atrium Live.url"
+        "name": "Atrium.url"
       },
       {
         "folder": "Programs",
-        "name": "Atrium Live.url"
+        "name": "Atrium.url"
       }
     ],
     "log_file": "Dev/atrium-live.log"
