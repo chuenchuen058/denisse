@@ -1952,8 +1952,10 @@ def _after_pass(task: Task, state: dict, ts: dict, entry: dict, wt: Path, branch
 
 
 def merge_waiting(merge: str) -> bool:
-    """Is this state `merge` note a PASS still waiting to be merged (by hand)?"""
-    return bool(merge) and merge not in ("merged", "no commits", C["merge_landed"])
+    """Is this state `merge` note a PASS still waiting to be merged (by hand)? "merged by <slug>"
+    (conflicts.close_original: a follow-up merged its work) is settled too, and is left as it is."""
+    return (bool(merge) and merge not in ("merged", "no commits", C["merge_landed"])
+            and not merge.startswith("merged by "))
 
 
 def branch_landed(branch: str) -> bool:
