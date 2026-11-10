@@ -75,6 +75,7 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 import campaign  # noqa: E402  deadline + pause/stop; reads .review/campaign.json and control.json
 import consult  # noqa: E402  the study tutor's opinion before a lane starts; data in consult.json, advisory
+import master_health  # noqa: E402  master's own baseline check; while it is red only bug fixes run (audit 10 Nov, H1)
 import visible  # noqa: E402  the live window and toasts, so Chuen sees a lane run (config live_window, toasts)
 
 REPO = Path(os.environ.get("ORCHESTRA_REPO", HERE.parent))
@@ -783,6 +784,9 @@ def why_not_runnable(task: Task, state: dict) -> str | None:
         return block
     if not task.auto:
         return "Queue is not auto"
+    held = master_health.hold(sys.modules[__name__], task)  # master is red: only bug fixes run
+    if held:
+        return held
     moved = premise_moved(task)
     if moved:
         return moved
@@ -1224,6 +1228,7 @@ def integrate(task: Task, branch: str, rec: dict, on_merged=None) -> str:
             r = git("merge", "--ff-only", commit, check=False)
             if r.returncode != 0:
                 return f"fast-forward to the tested merge failed: {(r.stderr or r.stdout).strip()[:200]}; merge by hand"
+            master_health.after_merge(sys.modules[__name__], commit, rec["checks"])  # tested: no second run
             if on_merged:
                 on_merged()
             return "merged"
@@ -1787,6 +1792,7 @@ def move(src: Path, dest_dir: Path, name: str | None = None) -> Path:
 
 
 def park(task: Task, reason: str, report: Path | None) -> None:
+    reason += master_health.park_note(sys.modules[__name__], task, report)  # "" unless the base was red
     move(task.path, PARKED)
     if report and report.exists():
         move(report, PARKED, f"{task.slug}.report.md")
@@ -2594,6 +2600,7 @@ def _tick(dry_run: bool = False) -> str:
             return "on battery"
     if not grant and exams_enabled():  # background; returns at once, holds no lane slot
         exams_step(state)
+    master_health.step(sys.modules[__name__], state)  # background baseline run; never raises, never waits
     if not grant and autopilot_enabled() and not campaign.dispatch_block(REVIEW):  # queue empty: write the next tasks
         autopilot_step(state)
     tasks =[t for t in route(load_queue(), state) if t.slug not in orphans]
