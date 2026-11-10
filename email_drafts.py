@@ -192,9 +192,9 @@ def _preferences() -> str:
 
 
 def _ollama_writer(system: str, user: str) -> str:
-    import ollama
+    import local_llm
     import model_config
-    r = ollama.chat(model=model_config.model("chat"),
+    r = local_llm.chat(job="email_drafts", model=model_config.model("chat"),
                     messages=[{"role": "system", "content": system},
                               {"role": "user", "content": user}])
     return r["message"]["content"]

@@ -229,10 +229,12 @@ def model_classify(c: Candidate, cfg: dict) -> dict:
     model = model_routing.model_for(cfg.get("autopilot_routing_job"), cfg["autopilot_model"])
     body = {"model": model, "stream": False, "format": ollama_output.schema_from_example(example),
             "messages": [{"role": "user", "content": prompt}], "options": cfg["autopilot_model_options"]}
-    req = urllib.request.Request(cfg["autopilot_model_url"], data=json.dumps(body).encode("utf-8"),
-                                 headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=float(cfg["autopilot_model_timeout_s"])) as r:
-        data = json.loads(r.read().decode("utf-8"))
+    # local_llm: the GPU lease, the model's one num_ctx (these options name none, so Ollama
+    # used to reload the model at its 4096 default), a reply cap, the wedge check.
+    import local_llm
+    base, _, rest = cfg["autopilot_model_url"].partition("/api/")
+    data = local_llm.http(base, "/api/" + rest, body, job=cfg.get("autopilot_routing_job"),
+                          timeout=float(cfg["autopilot_model_timeout_s"]))
     out = json.loads((data.get("message") or {}).get("content") or "")
     for k, v in example.items():
         if not isinstance(out.get(k), type(v)):

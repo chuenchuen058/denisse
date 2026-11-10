@@ -154,7 +154,11 @@ class Ollama:
         return parse_ps(_run(["ollama", "ps"]))
 
     def stop(self, name: str) -> None:
-        _run(["ollama", "stop", name], timeout=60)
+        # Not `ollama stop`: that unloads under whatever request another caller has in
+        # flight (10 Nov 2026 wedge). local_llm.unload waits for the GPU lease first.
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        import local_llm
+        local_llm.unload(name, job="model_bakeoff")
 
     def gpu(self) -> dict | None:
         return parse_nvidia_smi(_run(["nvidia-smi", "--query-gpu=memory.used,memory.total",

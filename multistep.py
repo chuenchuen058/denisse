@@ -60,6 +60,7 @@ tool_router's cues, and the steps themselves with the model.
 """
 import calendar
 import copy
+import functools
 import json
 import logging
 import os
@@ -212,7 +213,7 @@ def make_plan(request: str, chat=None) -> list | None:
     None (answer as one turn) only if the model can't be reached or there
     are not 2-5 parts. Never raises."""
     import brain
-    chat = chat or brain.ollama.chat
+    chat = chat or functools.partial(brain.local_llm.chat, job=brain.LLM_JOB)
     parts = action_parts(request)
     numbered = "\n".join(f"{i}. {p}" for i, p in enumerate(parts, 1))
     try:
