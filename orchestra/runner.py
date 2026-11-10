@@ -552,12 +552,16 @@ def spend_left(state: dict) -> float:
 
 
 def timeout_for(weight: str, state: dict) -> int:
-    """Starting guess from config; from measured durations once there are enough."""
+    """Starting guess from config; from measured durations once there are enough. Never over
+    timeout_ceiling_s (slow runs raised their own limit with no bound: 10,221 s heavy on 10 Nov
+    2026, past the scheduler's own limit) and, from durations, never under timeout_floor_s."""
     runs = state["durations"].get(weight, [])[-200:]
     if len(runs) >= C["timeout_min_runs"]:
         p95 = statistics.quantiles(runs, n=20)[-1]
-        return int(max(C["timeout_floor_s"], C["timeout_p95_factor"] * p95))
-    return int(C["timeout_s"][weight])
+        t = max(C["timeout_floor_s"], C["timeout_p95_factor"] * p95)
+    else:
+        t = C["timeout_s"][weight]
+    return int(min(C["timeout_ceiling_s"], t))
 
 
 def task_state(state: dict, task: Task) -> dict:
@@ -1106,9 +1110,10 @@ def dirty_clash(branch: str) -> list[str]:
     return sorted(dirty & touched)
 
 
-def fast_checks(wt: Path) -> tuple[str, str]:
+def fast_checks(wt: Path, log_name: str = "fast_checks") -> tuple[str, str]:
     """scripts/run_checks.py --fast in the integration tree, if the script supports it.
-    Returns (verdict, detail) like run_gate; 'skipped' when there is nothing to run."""
+    Returns (verdict, detail) like run_gate; 'skipped' when there is nothing to run.
+    Output goes to REPORTS/<log_name>.fast.log (run_bounded: the timeout holds)."""
     script = wt / "scripts" / "run_checks.py"
     if not script.exists():
         return "skipped", "no scripts/run_checks.py"
@@ -1116,14 +1121,15 @@ def fast_checks(wt: Path) -> tuple[str, str]:
         return "skipped", "scripts/run_checks.py has no --fast option"
     venv_py = wt / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     py = str(venv_py) if venv_py.exists() else sys.executable
-    try:
-        r = subprocess.run([py, str(script), "--fast"], cwd=wt, capture_output=True, text=True,
-                           timeout=C["gate_timeout_s"], encoding="utf-8", errors="replace")
-    except subprocess.TimeoutExpired:
+    fast_log = REPORTS / f"{log_name}.fast.log"
+    fast_log.parent.mkdir(parents=True, exist_ok=True)
+    fast_log.write_text("", encoding="utf-8")
+    code, output = run_bounded([py, str(script), "--fast"], wt, fast_log, C["gate_timeout_s"])
+    if code is None:
         return "broken", f"run_checks.py --fast timed out after {C['gate_timeout_s']}s"
-    if r.returncode != 0:
-        tail = (r.stdout + r.stderr).strip().splitlines()[-3:]
-        return "fail", f"run_checks.py --fast exited {r.returncode}: {' | '.join(tail)}"
+    if code != 0:
+        tail = output.strip().splitlines()[-3:]
+        return "fail", f"run_checks.py --fast exited {code}: {' | '.join(tail)} (full output: {fast_log.name})"
     return "pass", "run_checks.py --fast exited 0"
 
 
@@ -1133,7 +1139,7 @@ def check_combined(task: Task, wt: Path) -> tuple[bool, list[str]]:
     checks = [f"gate: {verdict}: {detail}"]
     if verdict != "pass":
         return False, checks
-    verdict, detail = fast_checks(wt)
+    verdict, detail = fast_checks(wt, task.slug)
     checks.append(f"run_checks --fast: {verdict}: {detail}")
     return verdict in ("pass", "skipped"), checks
 
@@ -1623,6 +1629,42 @@ def run_lane(task: Task, wt: Path, report: Path, timeout: int, prov: dict | None
     return outcome, int(time.time() - start)
 
 
+def run_bounded(cmd, cwd: Path, log_path: Path, timeout: float) -> tuple[int | None, str]:
+    """Run one check command with a timeout that holds: inside a kill-on-close job
+    (spawn_lane), output appended to `log_path`, never a pipe. Returns (exit code, or None if it
+    timed out and its whole tree was killed; this command's output, as written to the log).
+    subprocess.run(shell=True, capture_output=True, timeout=...) killed only cmd.exe on Windows,
+    then waited on pipes the gate's children still held: a 2 s timeout on a 20 s child returned
+    after 20.1 s, and runner.log has a gate that ran 30 minutes (audit 10 Nov 2026, O2).
+    A str `cmd` runs through the shell, a list without one. The job is in _JOBS while it runs,
+    so the tick watchdog's close_all_jobs() takes the gate's tree with it too."""
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as f:
+        f.write(f"$ {cmd if isinstance(cmd, str) else subprocess.list2cmdline(cmd)}\n")
+    start = log_path.stat().st_size
+    with log_path.open("ab") as out:
+        proc, _job = spawn_lane(cmd, cwd=cwd, shell=isinstance(cmd, str), stdin=subprocess.DEVNULL,
+                                stdout=out, stderr=subprocess.STDOUT)
+        try:
+            code = proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            kill_tree(proc)
+            try:
+                proc.wait(timeout=C["process_exit_wait_timeout_s"])
+            except subprocess.TimeoutExpired:
+                pass
+            code = None
+        close_job(proc)  # an exited command's background children go too
+    with log_path.open("rb") as f:
+        f.seek(start)
+        output = f.read().decode("utf-8", errors="replace")
+    with log_path.open("a", encoding="utf-8") as f:
+        f.write(("" if output.endswith("\n") or not output else "\n")
+                + (f"(timed out after {timeout}s; process tree killed)\n" if code is None else f"(exit {code})\n")
+                + "\n")
+    return code, output
+
+
 def run_gate(task: Task, wt: Path) -> tuple[str, str]:
     """The runner's own check before any merge. Returns (verdict, detail);
     verdict is 'pass', 'fail', 'broken' or 'none'."""
@@ -1635,18 +1677,14 @@ def run_gate(task: Task, wt: Path) -> tuple[str, str]:
     gate_log.parent.mkdir(parents=True, exist_ok=True)
     gate_log.write_text("", encoding="utf-8")
     for cmd in cmds:
-        try:
-            r = subprocess.run(cmd, cwd=wt, shell=True, capture_output=True, text=True,
-                               timeout=C["gate_timeout_s"], encoding="utf-8", errors="replace")
-        except subprocess.TimeoutExpired:
+        code, output = run_bounded(cmd, wt, gate_log, C["gate_timeout_s"])
+        if code is None:
             return "broken", f"`{cmd}` timed out after {C['gate_timeout_s']}s"
-        with gate_log.open("a", encoding="utf-8") as f:
-            f.write(f"$ {cmd}\n(exit {r.returncode})\n{r.stdout}{r.stderr}\n")
-        if r.returncode in C["broken_gate_codes"]:
-            return "broken", f"`{cmd}` exited {r.returncode} (no tests found / command not found)"
-        if r.returncode != 0:
-            tail = (r.stdout + r.stderr).strip().splitlines()[-3:]
-            return "fail", f"`{cmd}` exited {r.returncode}: {' | '.join(tail)} (full output: {gate_log.name})"
+        if code in C["broken_gate_codes"]:
+            return "broken", f"`{cmd}` exited {code} (no tests found / command not found)"
+        if code != 0:
+            tail = output.strip().splitlines()[-3:]
+            return "fail", f"`{cmd}` exited {code}: {' | '.join(tail)} (full output: {gate_log.name})"
     return "pass", f"{len(cmds)} command(s) exited 0"
 
 

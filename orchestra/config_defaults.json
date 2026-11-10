@@ -9,6 +9,7 @@
   "timeout_min_runs": 20,
   "timeout_p95_factor": 3,
   "timeout_floor_s": 300,
+  "timeout_ceiling_s": 3600,
   "gate_timeout_s": 600,
   "broken_gate_codes": [5, 127, 9009],
   "maint_share": 0.20,

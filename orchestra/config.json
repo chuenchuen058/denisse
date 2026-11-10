@@ -12,6 +12,8 @@
   "timeout_min_runs": 20,
   "timeout_p95_factor": 3,
   "timeout_floor_s": 300,
+  "timeout_ceiling_s": 3600,
+  "_timeout_ceiling_s": "Upper bound on the computed lane timeout (timeout_for: the starting guess and timeout_p95_factor x p95 alike). Without it slow runs raised their own limit: heavy was 10,221 s on 10 Nov 2026 (p95 3,407 s), past the scheduler's 2 h ExecutionTimeLimit, so Windows ended the tick first and the run came back NO_REPORT (audit 10 Nov 2026, O3). Chosen so one tick fits inside $ExecutionTimeLimitMinutes in orchestra/install_task.ps1 (120 min = 7200 s): 3600 ceiling + 900 tick_watchdog_extra_s + 600 gate_timeout_s (gate) + 900 review_timeout_s (reviewer) + 600 gate_timeout_s (run_checks --fast in the integration tree) + 360 worst-case Don consult (consult_busy_wait_s 120 + consult_timeout_s 180 + consult_notes_timeout_s 60) = 6960 s, 240 s spare. 3600 is also the heavy starting guess, and 90 of the last 92 heavy runs finished inside it. orchestra/test_gate_timeout.py fails if ceiling + watchdog extra no longer fits that limit.",
 
   "gate_timeout_s": 600,
   "_gate_timeout_s": "The runner re-runs the task's gate before merging. A gate that times out is broken, not passed.",
