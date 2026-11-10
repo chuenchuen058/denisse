@@ -405,10 +405,9 @@
       "fallback_reply": "Don here."
     },
     "tutor_quiz": {
-      "_note": "must_mention_replaces: a reply that doesn't speak as the tutor is replaced by the result itself, up to its ' Tell him' (brain.json result_cut_markers) -- the questions, verbatim. Eval 2026-11-05: the model worked the exam question itself instead of setting it. reply_must_also (2026-11-10): the reply must also put a question to him, same replacement -- on 9 Nov 'Thanks for the practice quiz, Don.' named the tutor, so it stood, and no question was ever asked.",
+      "_note": "must_mention_replaces: a reply that doesn't speak as the tutor is replaced by the result itself, up to its ' Tell him' (brain.json result_cut_markers) -- the questions, verbatim. Eval 2026-11-05: the model worked the exam question itself instead of setting it. The same replacement when the model then tried to mark it in the same turn (tutor_mark_answer not_after, 2026-11-10): on 9 Nov 'Thanks for the practice quiz, Don.' named the tutor, so it stood, and no question was ever asked.",
       "side_effect": "read",
       "reply_must_mention": "\\bDon\\b",
-      "reply_must_also": "\\?",
       "must_mention_replaces": true
     },
     "tutor_weak_topics": {
@@ -422,7 +421,7 @@
       "must_mention_replaces": true
     },
     "tutor_mark_answer": {
-      "_note": "not_after: marking in the same turn as the question was set is the model answering for him -- he hasn't seen the questions yet (eval 9 Nov, tutor_quiz_signals both conditions: tutor_quiz then tutor_mark_answer, 'You got 3 out of 5').",
+      "_note": "not_after: marking in the same turn as the question was set is the model answering for him -- he hasn't seen the questions yet (eval 9 Nov, tutor_quiz_signals both conditions: tutor_quiz then tutor_mark_answer, 'You got 3 out of 5'). The refused call also takes the reply away from the model: the tool it tried to follow speaks for itself (brain.py blocked_after) -- the quiz's own questions.",
       "side_effect": "write",
       "once_per_turn": true,
       "not_after": ["tutor_quiz", "tutor_exam_question"],

@@ -1871,6 +1871,7 @@ class Brain:
         turn_results = []      # every tool result this turn, for the _CLAIMS_DONE check
         successful_tools = set()  # attempts and successful actions are different
         tool_outputs = {}
+        blocked_after = set()  # tools a refused not_after call tried to follow (tool_policy.refuse_after)
         news_result = ""       # for _has_news_content
         honesty_nudged = False # that check sends her back at most once per turn
         catch_retried = False  # the "didn't catch that" retry, also once
@@ -1917,6 +1918,7 @@ class Brain:
                 result = err["retry_repeated"].format(name=name)
             elif refusal := tool_policy.refuse_after(name, tool_outputs):
                 result = refusal
+                blocked_after.update(set(tool_policy.tool(name).get("not_after", ())) & set(tool_outputs))
             elif (refusal := tool_policy.refuse(
                     name, args, program_folder=_REPO_DIR,
                     verified_path=lambda p: _known_document_path(p, messages, tool_outputs),
@@ -2197,17 +2199,17 @@ class Brain:
                         if not res:
                             continue
                         if name in successful_tools:
-                            # reply_must_also: a second pattern with the same
-                            # stand-in -- a quiz reply has to name the tutor AND
-                            # ask something (9 Nov: "Thanks for the practice
-                            # quiz, Don." stood, with no question in it).
-                            rules = [meta.get("reply_must_mention"), meta.get("reply_must_also")]
-                            own = meta.get("fallback_reply") or _own_words(res, 1)
+                            rule, own = meta.get("reply_must_mention"), meta.get("fallback_reply") or _own_words(res, 1)
                         elif _confirms_nothing(res):
-                            rules, own = [meta.get("nothing_must_mention")], _own_words(res)
+                            rule, own = meta.get("nothing_must_mention"), _own_words(res)
                         else:
                             continue
-                        if all(not r or re.search(r, final_text, re.IGNORECASE) for r in rules):
+                        # A tool the model tried to follow with a refused
+                        # not_after call (marking the quiz it had just set)
+                        # gets no say in the reply: 9 Nov, "Thanks for the
+                        # practice quiz, Don." named the tutor and stood, and
+                        # no question ever reached him.
+                        if name not in blocked_after and (not rule or re.search(rule, final_text, re.IGNORECASE)):
                             continue
                         if (tool_policy.side_effect(name) == "read" and final_text.strip()
                                 and name in successful_tools and not meta.get("must_mention_replaces")):
