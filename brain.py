@@ -505,6 +505,29 @@ def _has_news_content(reply: str, result: str) -> bool:
     return len(words & said) >= CONFIG["news"]["min_shared_words"]
 
 
+def _looked_text(result: str) -> str:
+    """The text look_at_this quoted (between its wording open/close marks,
+    desktop_context.json), or "" when it quoted nothing."""
+    import desktop_context
+    say = desktop_context.CONFIG["wording"]
+    head, sep, rest = (result or "").partition(say["open"])
+    body, end, _ = rest.partition(say["close"])
+    return body.strip() if sep and end else ""
+
+
+def _uses_looked_text(reply: str, text: str) -> bool:
+    """Did the reply work on the looked-at text, or only describe it? At
+    least looked_text.min_shared_words of its words (min_word_letters long
+    or more) in the reply -- fewer when the text itself has fewer."""
+    cfg = CONFIG["looked_text"]
+    word = re.compile(r"[^\W\d_]{%d,}" % int(cfg["min_word_letters"]))
+    words = set(word.findall((text or "").lower()))
+    if not words:
+        return True  # nothing to compare against; leave it alone
+    said = set(word.findall((reply or "").lower()))
+    return len(words & said) >= min(int(cfg["min_shared_words"]), len(words))
+
+
 def _speak_headlines(result: str, n: int | None = None) -> str:
     news = CONFIG["news"]
     heads = _headlines(result)[:news["max_headlines"] if n is None else n]
@@ -1892,6 +1915,8 @@ class Brain:
                 # Naming alternatives here was tried live on 2026-10-30: 0/5
                 # found the answer (she offered to search instead), ~2x slower.
                 result = err["retry_repeated"].format(name=name)
+            elif refusal := tool_policy.refuse_after(name, tool_outputs):
+                result = refusal
             elif (refusal := tool_policy.refuse(
                     name, args, program_folder=_REPO_DIR,
                     verified_path=lambda p: _known_document_path(p, messages, tool_outputs),
@@ -2054,6 +2079,25 @@ class Brain:
                     final_text = _strip_tool_talk(final_text)
                 if news_result and fake_call is None and not _has_news_content(final_text, news_result):
                     final_text = _speak_headlines(news_result) or final_text
+                looked = (_looked_text(tool_outputs.get("look_at_this", ""))
+                          if "look_at_this" in successful_tools else "")
+                if fake_call is None and looked and not _uses_looked_text(final_text, looked):
+                    # She read the selection and then only described it --
+                    # "It looks like you copied some text about
+                    # photosynthesis", every night 3-9 Nov. One retry, no
+                    # tools, nudge in this call only; kept only if it works
+                    # on the text this time (brain.json looked_text).
+                    retry = ollama.chat(**_chat_extra(),
+                        model=MODEL,
+                        messages=full_messages + [{"role": "system", "content":
+                                                   CONFIG["looked_text"]["nudge"].format(text=looked)}],
+                        keep_alive=CONFIG["chat"]["keep_alive"],
+                        options=_chat_options(),
+                    )
+                    retry_text = _strip_role_prefix(
+                        (_get(_get(retry, "message"), "content", "") or "").strip())
+                    if retry_text and _uses_looked_text(retry_text, looked):
+                        final_text = retry_text
                 # A clock lookup or calculation is not evidence that an
                 # action happened. A failed timer call isn't evidence either.
                 unconfirmed = not (successful_tools & tool_router.MUTATING_TOOLS)
@@ -2153,12 +2197,17 @@ class Brain:
                         if not res:
                             continue
                         if name in successful_tools:
-                            rule, own = meta.get("reply_must_mention"), meta.get("fallback_reply") or _own_words(res, 1)
+                            # reply_must_also: a second pattern with the same
+                            # stand-in -- a quiz reply has to name the tutor AND
+                            # ask something (9 Nov: "Thanks for the practice
+                            # quiz, Don." stood, with no question in it).
+                            rules = [meta.get("reply_must_mention"), meta.get("reply_must_also")]
+                            own = meta.get("fallback_reply") or _own_words(res, 1)
                         elif _confirms_nothing(res):
-                            rule, own = meta.get("nothing_must_mention"), _own_words(res)
+                            rules, own = [meta.get("nothing_must_mention")], _own_words(res)
                         else:
                             continue
-                        if not rule or re.search(rule, final_text, re.IGNORECASE):
+                        if all(not r or re.search(r, final_text, re.IGNORECASE) for r in rules):
                             continue
                         if (tool_policy.side_effect(name) == "read" and final_text.strip()
                                 and name in successful_tools and not meta.get("must_mention_replaces")):

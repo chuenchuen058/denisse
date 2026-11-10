@@ -57,6 +57,8 @@ def _validate(data) -> dict:
     for name, meta in data["tools"].items():
         if meta.get("side_effect") not in ("read", "write"):
             raise ValueError(f"tools.{name}.side_effect must be 'read' or 'write'")
+        if meta.get("not_after") and not meta.get("not_after_refusal"):
+            raise ValueError(f"tools.{name}: not_after needs a not_after_refusal")
         for chk in meta.get("checks", []):
             if "kind" not in chk or "argument" not in chk or "refusal" not in chk:
                 raise ValueError(f"tools.{name}: every check needs kind, argument and refusal")
@@ -151,6 +153,17 @@ def mutating() -> frozenset:
 
 def once_per_turn() -> frozenset:
     return frozenset(n for n, m in load()["tools"].items() if m.get("once_per_turn"))
+
+
+def refuse_after(name: str, ran) -> str | None:
+    """The refusal when `name` may not follow a tool that already ran this
+    turn (`not_after`), else None. tutor_mark_answer after tutor_quiz in the
+    same turn is the model answering its own quiz: no answer of his exists
+    yet (eval 9 Nov: "Thanks for the practice quiz, Don", no questions)."""
+    meta = tool(name)
+    if set(meta.get("not_after", ())) & set(ran):
+        return meta["not_after_refusal"]
+    return None
 
 
 def allowed_unoffered(name: str) -> bool:
