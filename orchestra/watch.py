@@ -36,6 +36,19 @@ def running() -> dict[str, str]:
     return out
 
 
+def override_line() -> str | None:
+    """One line on a pending or just-used battery override (power.py allow-once), or None.
+    Read-only; any problem reading it just leaves the line out."""
+    try:
+        import datetime as dt
+        import power
+        cfg = power.file_config(REPO)
+        line = power.override_line(REVIEW, cfg, dt.datetime.now())
+        return power.text(cfg, "watch_label") + line if line else None
+    except Exception:
+        return None
+
+
 def short(s: str, n: int = 160) -> str:
     s = " ".join(str(s).split())
     return s if len(s) <= n else s[: n - 1] + "…"
@@ -112,6 +125,9 @@ def poll_once(state: WatchState) -> None:
     """Print new lane events, remembering offsets and display state for the next poll."""
     now = running()
     banner = ", ".join(f"{s}: {t}" for s, t in now.items()) or "nothing running"
+    ov = override_line()
+    if ov:
+        banner += f"\n{ov}"
     if banner != state.last_banner:
         print(f"\n{DIM}{time.strftime('%H:%M:%S')}  running → {banner}{RESET}")
         state.last_banner = banner
