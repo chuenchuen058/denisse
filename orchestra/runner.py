@@ -111,6 +111,29 @@ def log(msg: str) -> None:
         f.write(line + "\n")
 
 
+def append_ledger_entry(slug: str, agent: str | None, seconds: int, attempt: int | None,
+                       model: str | None = None, tokens: dict | None = None,
+                       cost_usd: float | None = None) -> None:
+    """One JSON line per completed run in the ledger under .review/; unknown values stay null."""
+    review = REVIEW
+    if not review.exists():
+        review.mkdir(parents=True, exist_ok=True)
+    ledger = review / str(C.get("credits_ledger_file", "credits.jsonl"))
+    entry = {"time": now().isoformat(), "slug": slug, "agent": agent or None,
+             "model": model,
+             "attempt": attempt if attempt is not None else None,
+             "duration_s": int(seconds),
+             "tokens": {k: (tokens or {}).get(k) for k in C.get("credits_usage_keys", ["in", "out", "cache_read", "cache_write"])},
+             "cost_usd": float(cost_usd) if cost_usd is not None else None,
+             "unit": None}
+    if agent in C.get("unpriced_lanes", []):
+        entry["unit"] = "1 run"
+    elif cost_usd is None and agent not in (None, "review"):
+        entry["unit"] = "1 run"
+    with ledger.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, sort_keys=True, separators=(",", ":")) + "\n")
+
+
 def _read_json_object(path: Path, say) -> dict | None:
     """The file's top-level object, or None (with a log line) if it is unreadable or not an object."""
     try:
@@ -1858,6 +1881,9 @@ def finish(task: Task, state: dict, wt: Path, branch: str, outcome: str, seconds
     ts.update(last_end=entry["end"], last_result=info["result"])
     log(f"{info['result']} {task.slug} after {seconds}s (attempt {ts['attempts']}, {spent}) "
         f"prompt {entry['prompt_sha'] or '?'} {fmt_tokens(entry['tokens'])} {info['note']}".rstrip())
+    append_ledger_entry(task.slug, task.lane, seconds, ts.get("attempts"),
+                       lane_info.get("model"), lane_info.get("tokens"),
+                       lane_info.get("cost_usd"))
 
     if info["result"] == "PASS":
         # Everything after the session's PASS runs inside one try: a runner bug here (2 Nov 2026,
