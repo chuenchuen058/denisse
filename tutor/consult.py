@@ -122,7 +122,8 @@ def normalise(data: dict) -> dict:
 
 def ask(engine: str, system: str, user: str, calls: dict | None = None) -> dict:
     """One engine's opinion, normalised. Raises model.ModelError when it never gives JSON."""
-    return normalise(cards._ask(cards.engine_call(engine, calls), system, user, _K["schema"]))
+    with model.job("consult"):
+        return normalise(cards._ask(cards.engine_call(engine, calls), system, user, _K["schema"]))
 
 
 def _hand_offs_off(engine: str, calls: dict | None) -> bool:

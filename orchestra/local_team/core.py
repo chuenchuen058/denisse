@@ -184,10 +184,19 @@ def gpu_utilisation() -> int | None:
         return None
 
 
+def model_name(ctx: Ctx) -> str:
+    """local_team_model, unless model_routing.json routes orchestra_local_team elsewhere."""
+    try:
+        import model_routing
+    except ImportError:  # run from outside the repo root: today's model
+        return ctx.cfg["local_team_model"]
+    return model_routing.model_for(load()["routing_job"], ctx.cfg["local_team_model"])
+
+
 def ready(ctx: Ctx) -> str:
     """Raise Skip unless Ollama is up, the model is installed (never pulled), no other model
     is loaded (ours would evict it), and the GPU isn't busy. Returns the model name."""
-    model = ctx.cfg["local_team_model"]
+    model = model_name(ctx)
     try:
         tags = _get(ctx, "/api/tags")
     except (OSError, ValueError) as e:

@@ -1,0 +1,14 @@
+{
+  "_about": "Which local model each local-model job uses (AGENTS.md Rule 0). model null = today's model, from where that job always read it (\"today\" says where). To switch a job, put an installed Ollama model name in its model field: `python -m bench pick` proposes one from the latest bench results, but nothing here changes on its own. Order of precedence for one call: override_env (set only by `python -m bench run`, for the model it is measuring), then the job's own env override where it has one (DENISSE_MODEL for the chat entry), then model here, then today's.",
+  "override_env": "DENISSE_JOB_MODEL",
+  "jobs": {
+    "don_extract": {"model": null, "today": "config.json models.chat", "what": "Don reads a lecture into outcomes, methods, examples, checks, topics (tutor/model.py extract_lecture)"},
+    "don_cards": {"model": null, "today": "config.json models.chat", "what": "Don writes the local kinds of flashcard from a note (tutor/cards.py generate)"},
+    "don_card_check": {"model": null, "today": "config.json models.chat", "what": "Don checks written cards against their note (tutor/cards.py check)"},
+    "don_teach": {"model": null, "today": "config.json models.chat", "what": "Don's local lesson on one topic (tutor/teach.py)"},
+    "don_consult": {"model": null, "today": "config.json models.chat", "what": "Don's opinion from Chuen's notes (tutor/consult.py)"},
+    "denisse_brain": {"model": null, "today": "config.json models.chat", "what": "Denisse's replies and tool choice (brain.py; scored by eval/run_eval.py)"},
+    "orchestra_local_team": {"model": null, "today": "orchestra/models.json local_team_model", "what": "Orchestra's scout, planner and librarian (orchestra/local_team/core.py)"},
+    "atrium_autopilot": {"model": null, "today": "orchestra/config.json autopilot_model", "what": "Atrium's autopilot classifier: is a candidate actionable, repo-only, a bug fix (atrium/autopilot.py)"}
+  }
+}

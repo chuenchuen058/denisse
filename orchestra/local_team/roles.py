@@ -184,7 +184,7 @@ def plan(ctx: Ctx, candidate: dict, *, admit_it: bool = False, lane: str | None 
     ans = core.ask(ctx, role, payload)
     packet = {**ans, "evidence": [{"path": e["source"], "quote": e["text"]} for e in candidate["evidence_items"]],
               "source": "local-team", "candidate_id": candidate.get("id", ""),
-              "model": ctx.cfg["local_team_model"],
+              "model": core.model_name(ctx),
               "roles": {"scout": core.load_role("scout").version, "planner": role.version}}
     result = admission.admit(packet, ctx.repo, lane=lane) if admit_it else None
     d = ctx.home / "plans"
@@ -224,7 +224,7 @@ def librarian(ctx: Ctx, report: Path) -> dict:
     d = ctx.home / "memory"
     d.mkdir(parents=True, exist_ok=True)
     out = {"made": core.now().isoformat(), "report": rel, "result": result, "version": role.version,
-           "model": ctx.cfg["local_team_model"], "lines": lines}
+           "model": core.model_name(ctx), "lines": lines}
     (d / f"{slug}.json").write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8")
     ctx.log(f"librarian: {rel} -> {len(lines)} FOR MEMORY line(s)")
     return out

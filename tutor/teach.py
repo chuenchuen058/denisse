@@ -160,7 +160,8 @@ def prompt(module: Module, topic: str, found: dict, core=None) -> tuple:
 
 def ask(engine: str, system: str, user: str, calls: dict | None = None) -> dict:
     """One engine's lesson, normalised. Raises model.ModelError when it never gives JSON."""
-    return normalise(cards._ask(cards.engine_call(engine, calls), system, user, _T["schema"]))
+    with model.job("teach"):
+        return normalise(cards._ask(cards.engine_call(engine, calls), system, user, _T["schema"]))
 
 
 def explain(paths: Paths, module: Module, topic: str, calls: dict | None = None, core=None,

@@ -24,6 +24,7 @@ import learning
 import brain_rules
 import desktop_context
 import model_config
+import model_routing
 import reply_preferences
 import settings
 import speech_control
@@ -36,8 +37,9 @@ import tools
 
 load_dotenv()
 
-# config.json's "chat" model; DENISSE_MODEL still wins (model_config.py).
-MODEL = model_config.model("chat")
+# config.json's "chat" model; DENISSE_MODEL still wins (model_config.py), and
+# model_routing.json's denisse_brain entry, when set, picks another one.
+MODEL = model_routing.model_for("denisse_brain", entry="chat")
 
 # What this module says, matches and limits -- the reply nets, the requests
 # answered before the model, her fixed wording, every threshold -- is data

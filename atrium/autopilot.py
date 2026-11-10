@@ -222,7 +222,9 @@ def model_classify(c: Candidate, cfg: dict) -> dict:
     example = cfg["autopilot_classify_example"]
     prompt = cfg["autopilot_classify_prompt"].format(source=cfg["autopilot_source_names"].get(c.source, c.source),
                                                      origin=c.origin, text=c.text, context=c.context or "-")
-    body = {"model": cfg["autopilot_model"], "stream": False, "format": ollama_output.schema_from_example(example),
+    import model_routing
+    model = model_routing.model_for(cfg.get("autopilot_routing_job"), cfg["autopilot_model"])
+    body = {"model": model, "stream": False, "format": ollama_output.schema_from_example(example),
             "messages": [{"role": "user", "content": prompt}], "options": cfg["autopilot_model_options"]}
     req = urllib.request.Request(cfg["autopilot_model_url"], data=json.dumps(body).encode("utf-8"),
                                  headers={"Content-Type": "application/json"})

@@ -183,6 +183,11 @@ def generate(module: Module, src: sources.Source, calls: dict | None = None, num
     """Candidates for one source; known foreign topics carry a held verdict for the sidecar.
     Candidates screened out (no quote from the note, no final answer) go to
     `dropped` as (kind, front, why) and are not returned."""
+    with model.job("cards"):
+        return _generate(module, src, calls, num_ctx, only, scope, dropped)
+
+
+def _generate(module, src, calls, num_ctx, only, scope, dropped) -> list:
     by_engine = {}
     for kind, spec in _C["kinds"].items():
         if spec["count"] > 0 and (only is None or kind in only):
@@ -348,6 +353,11 @@ def check(module: Module, src: sources.Source, written: list, before: dict, chec
     `before`: check key -> the card as it stood after an earlier check,
     reused only with the same checker, source and module scope. `checks` (tests)
     overrides checker engines by name. Returns (passed, held, counts)."""
+    with model.job("check"):
+        return _check(module, src, written, before, checks, when, num_ctx, scope)
+
+
+def _check(module, src, written, before, checks, when, num_ctx, scope) -> tuple:
     when = when or dt.datetime.now().isoformat(timespec="seconds")
     standing = rules.block("check")
     text = src.text[:max(0, model.chunk_chars(num_ctx) - len(standing))]
