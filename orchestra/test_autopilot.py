@@ -499,6 +499,34 @@ class RunnerPartsTest(unittest.TestCase):
         self.assertEqual(h["lane"], "fake2")
         self.assertEqual(h["spent"], "$0.25")
 
+    def test_lane_auto_is_picked_at_dispatch_and_recorded(self):
+        import contextlib
+        import io
+        self.lanes()
+        # fake2 fits by far the best, so no real lane (claude, codex, ...) can win and run
+        self.R.C["lane_strengths"] = {**self.R.C["lane_strengths"], "fake2": {self.R.C["lane_work_default"]: 9.0}}
+        auto = self.R.C["lane_auto_word"]
+        slug = "2026-11-11T1700-auto"
+        self.add(slug, lane=auto)
+        t = self.R.load_queue()[0]
+        self.assertIsNone(self.R.header_problem(t))
+        self.assertIsNone(self.R.why_not_runnable(t, self.R.load_state()))
+        self.assertEqual(t.lane, "fake2")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.R.tick(dry_run=True)
+        self.assertIn("-> fake2:", out.getvalue(), "dry-run prints the winner")
+        self.assertRegex(out.getvalue(), r"fake2\s+score 9\.")
+        self.assertEqual(self.R.tick(), "PASS")
+        self.assertIn(f"PICK {slug} -> fake2: ", self.R.LOG_FILE.read_text(encoding="utf-8"))
+        h = self.state()["tasks"][slug]["history"][-1]
+        self.assertEqual((h["lane"], h["lane_asked"]), ("fake2", auto))
+        self.assertIn("fake2", h["pick_why"])
+        names = self.R.C["lane_pick_headers"]
+        done = next(self.R.ARCHIVE.rglob(f"{slug}.md")).read_text(encoding="utf-8")
+        self.assertIn(f"\n{names['picked']}: fake2\n", done)
+        self.assertIn(f"\n{names['why']}: ", done)
+
     def test_a_bugfix_stays_put_when_the_bug_lane_is_limited_or_the_lane_is_fixed(self):
         self.lanes()
         self.R.C["bugfix_lane"] = "fake2"

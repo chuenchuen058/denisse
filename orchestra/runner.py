@@ -75,6 +75,7 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 import campaign  # noqa: E402  deadline + pause/stop; reads .review/campaign.json and control.json
 import consult  # noqa: E402  the study tutor's opinion before a lane starts; data in consult.json, advisory
+import lane_pick  # noqa: E402  the lane (and reviewer) chosen at dispatch from config + live state (11 Nov 2026)
 import master_health  # noqa: E402  master's own baseline check; while it is red only bug fixes run (audit 10 Nov, H1)
 import visible  # noqa: E402  the live window and toasts, so Chuen sees a lane run (config live_window, toasts)
 
@@ -370,8 +371,22 @@ def parse_task(path: Path) -> Task:
             fields.setdefault(m.group(1).lower(), m.group(2))
     m = re.search(r"^##\s*Gate\s*$(.*?)(?=^##\s|\Z)", text, re.M | re.S | re.I)
     gate = m.group(1).strip() if m else ""
-    digest = hashlib.sha1(text.replace("\r\n", "\n").strip().encode("utf-8")).hexdigest()
+    digest = hashlib.sha1(_without_pick_headers(text).replace("\r\n", "\n").strip().encode("utf-8")).hexdigest()
     return Task(path, title, fields, gate, digest)
+
+
+def _pick_header_names() -> list[str]:
+    return [str(v) for v in (C.get("lane_pick_headers") or {}).values() if v]
+
+
+def _without_pick_headers(text: str) -> str:
+    """The task text minus the Lane-Picked / Pick-Why lines the runner writes at dispatch, so
+    recording a pick doesn't change the task's content hash (done_window_days)."""
+    names = _pick_header_names()
+    if not names:
+        return text
+    pat = re.compile(r"^(?:" + "|".join(re.escape(n) for n in names) + r"):.*(?:\r?\n|$)", re.M | re.I)
+    return pat.sub("", text)
 
 
 def load_queue() -> list[Task]:
@@ -699,31 +714,110 @@ def is_bugfix(task: Task) -> bool:
     return task.kind in [k.lower() for k in C["bugfix_kinds"]]
 
 
-def bugfix_lane(task: Task, state: dict) -> str | None:
-    """The lane a bug fix goes to (config bugfix_lane; Chuen, 9 Nov 2026: "whenever there's bugs
-    and errors use Claude Code"), whatever balancing chose, unless that lane is limited or not
-    configured (then the normal fallback rule applies) or the header says Lane-Fixed: yes."""
-    want = str(C["bugfix_lane"] or "")
-    if (not want or not is_bugfix(task) or task.lane == want or want not in lanes() or lane_limited(state, want)
-            or task.fields.get("lane-fixed", "").lower() in ("yes", "true", "1")):
+def lane_usage() -> dict:
+    """.review/<lane_usage_file>: what is known of each lane's allowance ({lane: {used|left,
+    reset, at}}). Missing or unreadable: {} = unknown, never 'used up'."""
+    name = str(C.get("lane_usage_file") or "")
+    if not name:
+        return {}
+    try:
+        data = json.loads((REVIEW / name).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def lane_busy() -> dict[str, int]:
+    """Running tasks per lane, from the slot locks that name a task."""
+    out: dict[str, int] = {}
+    for lf in REVIEW.glob("runner*.lock"):
+        info = read_lock(lf)
+        if info and info.get("task") and info.get("lane"):
+            out[info["lane"]] = out.get(info["lane"], 0) + 1
+    return out
+
+
+def lane_live(state: dict) -> "lane_pick.Live":
+    names = list(lanes())
+    return lane_pick.Live(now=now(), lanes=names,
+                          limited={l: u for l in names if (u := lane_limited(state, l))},
+                          busy=lane_busy(), slots=dict(C.get("lane_slots") or {}),
+                          spend_left=spend_left(state) if isinstance(state.get("days"), dict) else None,
+                          usage=lane_usage())
+
+
+def _title_category():
+    """exams' title -> work category rules (orchestra/exams/rules.json), or None if unavailable."""
+    try:
+        from exams.lane_for import category_for
+    except Exception:
         return None
-    return want
+    return lambda title: category_for(None, title)
+
+
+def lane_ask(task: Task) -> "lane_pick.Ask":
+    asked = task.fields.get("lane-asked") or task.fields.get("lane", "") or task.lane
+    return lane_pick.Ask(slug=task.slug, asked=asked.lower(),
+                         work=lane_pick.work_kind(task.fields, task.title, task.kind, C, _title_category()),
+                         bugfix=is_bugfix(task), fixed=lane_pick.is_yes(task.fields.get("lane-fixed"), C))
+
+
+def lane_pick_for(task: Task, state: dict, live=None) -> "lane_pick.Pick":
+    return lane_pick.choose(lane_ask(task), C, live or lane_live(state))
 
 
 def route(tasks: list[Task], state: dict) -> list[Task]:
-    """Bug fixes onto bugfix_lane (header lane kept as lane-routed, why as route-why); then
-    tasks off a limited lane onto its fallback (header lane kept as lane-from)."""
+    """Each task's lane, picked now by orchestra/lane_pick.py from config and live state: Lane:
+    auto is scored over every lane; an explicit Lane: is a strong preference that only leaves for
+    the bug-fix lane (bugfix_lane_bonus) or, while it can't run, its lane_fallback hint;
+    Lane-Fixed: yes never moves. The header lane is kept as lane-asked; a move off a limited lane
+    as lane-from (fallback), any other move off an explicit lane as lane-routed + route-why."""
+    live = None
     for t in tasks:
-        if "lane-routed" not in t.fields:
-            want = bugfix_lane(t, state)
-            if want:
-                t.fields["lane-routed"], t.fields["lane"] = t.lane, want
-                t.fields["route-why"] = C["bugfix_route_note"].format(lane=want)
-        if "lane-from" not in t.fields and lane_limited(state, t.lane):
-            fb = fallback_lane(t, state)
-            if fb:
-                t.fields["lane-from"], t.fields["lane"] = t.lane, fb
+        if "lane-asked" in t.fields:
+            continue
+        live = live or lane_live(state)
+        asked = t.fields.get("lane", t.lane).lower()
+        p = lane_pick_for(t, state, live)
+        t.fields["lane-asked"], t.fields["pick-why"] = asked, p.why
+        t.pick = p  # the scores, for --dry-run and explain
+        if not p.available and lane_pick.is_auto(asked, C):
+            t.fields["pick-none"] = p.why
+        if not p.lane or p.lane == asked:
+            continue
+        t.fields["lane"] = t.fields["lane-picked"] = p.lane
+        if p.moved == "fallback":
+            t.fields["lane-from"] = asked
+        elif p.moved == "bugfix":
+            t.fields["lane-routed"], t.fields["route-why"] = asked, C["bugfix_route_note"].format(lane=p.lane)
+        elif not lane_pick.is_auto(asked, C):
+            t.fields["lane-routed"], t.fields["route-why"] = asked, p.why
     return tasks
+
+
+def record_pick(task: Task) -> None:
+    """A dispatched task whose lane was picked (Lane: auto, or moved off its header lane): the
+    choice goes in the task file's header (lane_pick_headers), and a PICK line in runner.log."""
+    if "lane-picked" not in task.fields:
+        return
+    why = " ".join(str(task.fields.get("pick-why", "")).split())
+    log(f"PICK {task.slug} -> {task.lane}: {why}")
+    names = C.get("lane_pick_headers") or {}
+    picked, because = names.get("picked"), names.get("why")
+    if not picked or not because:
+        return
+    try:
+        with task.path.open(encoding="utf-8", newline="") as f:  # keep its line endings as they are
+            text = _without_pick_headers(f.read())
+        nl = "\r\n" if "\r\n" in text else "\n"
+        lines = text.split(nl)
+        at = next((i for i, l in enumerate(lines[:20]) if re.match(r"^Lane:", l, re.I)), None)
+        at = at if at is not None else next((i for i, l in enumerate(lines[:20]) if HEADER.match(l)), 0)
+        lines[at + 1:at + 1] = [f"{picked}: {task.lane}", f"{because}: {why}"]
+        with task.path.open("w", encoding="utf-8", newline="") as f:
+            f.write(nl.join(lines))
+    except OSError as e:  # the pick still runs; only the record is lost
+        log(f"PICK {task.slug}: could not write the header ({e.__class__.__name__})")
 
 
 # ---------------------------------------------------------------- picking
@@ -743,7 +837,7 @@ def header_problem(task: Task) -> str | None:
             allowed = (*allowed, *(k.lower() for k in C["bugfix_kinds"]))
         if key in task.fields and task.fields[key].lower() not in allowed:
             return f"{key.title()}: {task.fields[key]!r} is not one of {'/'.join(allowed)}"
-    if task.lane not in lanes():
+    if task.lane not in lanes() and not lane_pick.is_auto(task.lane, C):
         return f"Lane: {task.lane!r} is not a configured lane"
     try:
         dt.datetime.fromisoformat(task.fields.get("written", ""))
@@ -806,8 +900,13 @@ def why_not_runnable(task: Task, state: dict) -> str | None:
     if ts.get("last_end") and ts.get("last_result") in INFRA:
         if now() < dt.datetime.fromisoformat(ts["last_end"]) + dt.timedelta(minutes=C["backoff_min"]):
             return "waiting before its retry"
+    if lane_pick.is_auto(task.lane, C) and "lane-asked" not in task.fields:
+        route([task], state)  # Lane: auto, not routed by the caller: pick it now
+    if task.fields.get("pick-none"):
+        return task.fields["pick-none"]
     until = lane_limited(state, task.lane)
-    if until and not fallback_lane(task, state):
+    # A routed task already had its fallback considered by the scorer (lane_pick).
+    if until and ("lane-asked" in task.fields or not fallback_lane(task, state)):
         return f"lane {task.lane} limited until {until:%H:%M}"
     if task.kind == "maintenance" and not maintenance_allowed(state):
         return f"maintenance cap ({int(C['maint_share'] * 100)}%) reached today"
@@ -1266,28 +1365,63 @@ def parse_verdict(text: str) -> tuple[str | None, str]:
     # (10 Nov: a Coucou SessionEnd error after the JSON made a reviewer "ok" park as "block").
     # Decode the first JSON object that starts a line and ignore whatever trails it.
     starts = ([0] if s.startswith("{") else []) + [i + 1 for i in range(len(s)) if s.startswith("\n{", i)]
+    plain = True
     for i in starts:
         try:
             data, _end = json.JSONDecoder().raw_decode(s[i:])
         except ValueError:
             continue
         if isinstance(data, dict) and isinstance(data.get("result"), str):
-            s = data["result"]
+            s, plain = data["result"], False
             break
+    if plain:
+        # Plain-text reviewers (codex exec) echo the prompt, whose template shows both VERDICT
+        # lines, before their answer: the answer is the last VERDICT line, not the first.
+        last = None
+        for last in re.finditer(r"^\W*VERDICT:\W*(?:ok|block)\b", s, re.I | re.M):
+            pass
+        s = s[last.start():] if last else s
     m = re.search(r"^\W*VERDICT:\W*(ok|block)\b(.*)", s, re.I | re.M | re.S)
     if not m:
         return None, s[-500:]
     return m.group(1).lower(), m.group(2).strip()[:2000]
 
 
-def run_reviewer(task: Task, wt: Path, branch: str, report: Path, why: str) -> dict:
+def pick_reviewer(task: Task, state: dict | None = None) -> dict:
+    """{lane, argv, why} of the reviewer for this task's change: .review/lanes.json's
+    reviewer_override_lane entry if there is one, else the best lane of reviewer_lanes by
+    orchestra/lane_pick.py (strengths for reviewer_work, pacing, cost, limits), never the lane
+    that wrote the change. An empty argv in reviewer_lanes means reviewer_argv. lane None: no
+    independent reviewer can run now (why says which and why not)."""
+    name = str(C.get("reviewer_override_lane") or "")
+    custom = lanes().get(name) if name else None
+    if custom:
+        return {"lane": name, "argv": list(custom), "why": f".review/lanes.json {name!r}"}
+    table = C.get("reviewer_lanes") or {}
+    live = lane_live(state if state is not None else load_state())
+    ask = lane_pick.Ask(slug=task.slug, asked="", work=str(C.get("reviewer_work") or ""),
+                        author=task.lane)
+    p = lane_pick.choose(ask, C, live, pool=[l for l in table if l in live.lanes])
+    if not p.lane or not p.available:
+        return {"lane": None, "argv": None, "why": p.why}
+    argv = resolve_argv(table[p.lane] or C["reviewer_argv"])
+    return {"lane": p.lane, "argv": list(argv) if argv else None, "why": p.why}
+
+
+def run_reviewer(task: Task, wt: Path, branch: str, report: Path, why: str, state: dict | None = None) -> dict:
     """A fresh read-only reviewer lane on the actual diff. Returns {verdict, reasons, seconds,
-    cost_usd, log}. Fails closed: no verdict, a timeout or a missing lane is a block."""
-    argv = list(lanes().get("reviewer") or resolve_argv(C["reviewer_argv"]) or ["(reviewer_argv unresolved)"])
+    cost_usd, lane, pick}. Fails closed: no verdict, a timeout or a missing lane is a block; no
+    independent reviewer available now is 'unavailable' (the PASS is kept for --merge-only)."""
+    rp = pick_reviewer(task, state)
+    rlane = rp["lane"]
+    if rlane is None:
+        return {"verdict": "unavailable", "reasons": f"no reviewer lane available: {rp['why']}"[:300],
+                "seconds": 0, "cost_usd": None, "lane": None, "pick": rp["why"]}
+    argv = rp["argv"] or [f"(reviewer {rlane} argv unresolved)"]
     exe = shutil.which(argv[0]) or argv[0]
     if not Path(exe).exists() and not shutil.which(exe):
         return {"verdict": "block", "reasons": f"reviewer lane missing: {argv[0]} not on PATH",
-                "seconds": 0, "cost_usd": None}
+                "seconds": 0, "cost_usd": None, "lane": rlane, "pick": rp["why"]}
     base = git("merge-base", "HEAD", branch, check=False).stdout.strip() or "HEAD"
     diff = git("diff", f"{base}...{branch}", check=False).stdout
     cut = int(C["review_diff_max_chars"])
@@ -1328,19 +1462,19 @@ def run_reviewer(task: Task, wt: Path, branch: str, report: Path, why: str) -> d
     cost = lane_result(log_path).get("cost_usd")
     if timed_out:
         return {"verdict": "block", "reasons": f"reviewer timed out after {timeout}s", "seconds": seconds,
-                "cost_usd": cost}
+                "cost_usd": cost, "lane": rlane, "pick": rp["why"]}
     verdict, reasons = parse_verdict(text)
-    if verdict is None and detect_auth("claude", log_path):
-        return {"verdict": "unavailable", "reasons": auth_hit(detect_auth("claude", log_path)),
-                "seconds": seconds, "cost_usd": cost}
-    if verdict is None and detect_limit("claude", log_path):
+    if verdict is None and detect_auth(rlane, log_path):
+        return {"verdict": "unavailable", "reasons": auth_hit(detect_auth(rlane, log_path)),
+                "seconds": seconds, "cost_usd": cost, "lane": rlane, "pick": rp["why"]}
+    if verdict is None and detect_limit(rlane, log_path):
         # 4 Nov 00:30: the reviewer hit the 5-hour limit and a good PASS was parked as "blocked"
-        return {"verdict": "unavailable", "reasons": detect_limit("claude", log_path)[:300],
-                "seconds": seconds, "cost_usd": cost}
+        return {"verdict": "unavailable", "reasons": detect_limit(rlane, log_path)[:300],
+                "seconds": seconds, "cost_usd": cost, "lane": rlane, "pick": rp["why"]}
     if verdict is None:
         return {"verdict": "block", "reasons": "reviewer gave no VERDICT line: " + reasons[-300:],
-                "seconds": seconds, "cost_usd": cost}
-    return {"verdict": verdict, "reasons": reasons, "seconds": seconds, "cost_usd": cost}
+                "seconds": seconds, "cost_usd": cost, "lane": rlane, "pick": rp["why"]}
+    return {"verdict": verdict, "reasons": reasons, "seconds": seconds, "cost_usd": cost, "lane": rlane, "pick": rp["why"]}
 
 
 # ---------------------------------------------------------------- lanes
@@ -1858,6 +1992,8 @@ def finish(task: Task, state: dict, wt: Path, branch: str, outcome: str, seconds
              "hooks_loaded": hooks_loaded, **provenance}
     if task.fields.get("lane-from"):
         entry["fallback_from"] = task.fields["lane-from"]
+    if task.fields.get("lane-picked"):  # lane_pick chose it (Lane: auto, or moved off the header lane)
+        entry["lane_asked"], entry["pick_why"] = task.fields.get("lane-asked", ""), task.fields.get("pick-why", "")
     if run:
         entry["run"] = run
     ts["history"].append(entry)
@@ -1929,10 +2065,11 @@ def _after_pass(task: Task, state: dict, ts: dict, entry: dict, wt: Path, branch
     why_risky = risk(branch) if C.get("review_risky", True) else None
     if why_risky:
         log(f"review {task.slug}: {why_risky}")
-        rv = run_reviewer(task, wt, branch, report, why_risky)
-        rv["spent"] = charge(state, task, rv["seconds"], rv.pop("cost_usd", None), lane="claude")
+        rv = run_reviewer(task, wt, branch, report, why_risky, state)
+        rv["spent"] = charge(state, task, rv["seconds"], rv.pop("cost_usd", None), lane=rv.get("lane") or task.lane)
         rv["why"] = why_risky
-        log(f"review {task.slug}: {rv['verdict']} after {rv['seconds']}s ({rv['spent']})")
+        log(f"review {task.slug}: {rv['verdict']} by {rv.get('lane') or 'no lane'} after {rv['seconds']}s "
+            f"({rv['spent']}); reviewer pick: {rv.get('pick', '')}")
     else:
         rv = {"verdict": "skipped", "why": "review_risky is off" if not C.get("review_risky", True)
               else "not risky"}
@@ -2342,7 +2479,10 @@ def _collect(state: dict, info: dict, slug: str) -> str:
         log(f"RECONCILE {slug}: task no longer in the queue; nothing to collect, worktree kept")
         return "not queued"
     task = parse_task(path)
-    if info.get("lane") and info["lane"] != task.lane:  # it ran on a fallback lane
+    if info.get("lane") and info["lane"] != task.lane and lane_pick.is_auto(task.lane, C):  # picked
+        task.fields["lane-asked"], task.fields["lane"] = task.lane, info["lane"]
+        task.fields["lane-picked"] = info["lane"]
+    elif info.get("lane") and info["lane"] != task.lane:  # it ran on a fallback lane
         task.fields["lane-from"], task.fields["lane"] = task.lane, info["lane"]
     wt, branch = WORKTREES / slug, f"review/{slug}"
     local_report, report = wt / ".review" / "report.md", REPORTS / f"{slug}.md"
@@ -2581,8 +2721,13 @@ def _tick(dry_run: bool = False) -> str:
     if dry_run:
         import power
         for t in tasks:
-            print(f"{t.slug}: {why_not_runnable(t, state) or 'runnable'}"
+            why = why_not_runnable(t, state)
+            print(f"{t.slug}: {why or 'runnable'}"
                   f" [{t.priority}/{t.weight}/{t.kind}/{t.lane}, gate commands: {len(t.gate_commands)}]")
+            p = getattr(t, "pick", None)
+            if why is None and p is not None:  # the scores per lane and the winner (lane_pick)
+                print(lane_pick.table(p.scores))
+                print(f"    -> {p.lane}: {p.why}")
         t = pick(tasks, state, dry_run=True)
         print(f"would run: {t.slug if t else 'nothing'}; spend left today ${spend_left(state):.2f}; "
               f"power: {power.describe(power.power_status(), C)}")
@@ -2676,8 +2821,10 @@ def _tick(dry_run: bool = False) -> str:
         start_watchdog(timeout + C["tick_watchdog_extra_s"])
         fb = ""
         if task.fields.get("lane-from"):
+            was = lane_limited(state, task.fields["lane-from"])
             fb = (f" (fallback: lane {task.fields['lane-from']} limited until "
-                  f"{lane_limited(state, task.fields['lane-from']):%H:%M})")
+                  f"{was:%H:%M})" if was else f" (fallback: lane {task.fields['lane-from']} was limited)")
+        record_pick(task)
         if is_merge_only(task):  # before fresh_worktree: that would replace the branch to merge
             result = merge_only(task, state, ts)
             save_state(state)

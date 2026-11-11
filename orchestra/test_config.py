@@ -212,11 +212,15 @@ class ConfigTest(unittest.TestCase):
         report = self.tmp / "r.md"
         report.write_text("RESULT: PASS\n")
         self.use({"reviewer_argv": argv, "review_diff_max_chars": 50})
-        rv = self.R.run_reviewer(self.task(), self.repo, branch, report, "test")
+        # The reviewer is never the lane that wrote the change (lane_pick, 11 Nov 2026): a
+        # change written on codex gets claude's reviewer_argv; one written on claude does not.
+        self.assertNotEqual(self.R.pick_reviewer(self.task("claude"))["lane"], "claude")
+        self.assertEqual(self.R.pick_reviewer(self.task("codex"))["lane"], "claude")
+        rv = self.R.run_reviewer(self.task("codex"), self.repo, branch, report, "test")
         self.assertEqual(rv["verdict"], "ok")
         self.assertIn("diff cut at 50 chars", out.read_text(encoding="utf-8"))
         self.use({"reviewer_argv": ["surely-no-such-reviewer-cli"]})
-        rv = self.R.run_reviewer(self.task(), self.repo, branch, report, "test")
+        rv = self.R.run_reviewer(self.task("codex"), self.repo, branch, report, "test")
         self.assertEqual(rv["verdict"], "block")
         self.assertIn("surely-no-such-reviewer-cli", rv["reasons"])
 
@@ -227,7 +231,7 @@ class ConfigTest(unittest.TestCase):
         report = self.tmp / "r.md"
         report.write_text("RESULT: PASS\n")
         self.use({"reviewer_argv": argv, "review_timeout_s": 1})
-        rv = self.R.run_reviewer(self.task(), self.repo, branch, report, "test")
+        rv = self.R.run_reviewer(self.task("codex"), self.repo, branch, report, "test")
         self.assertEqual(rv["verdict"], "block")
         self.assertIn("timed out after 1s", rv["reasons"])
 

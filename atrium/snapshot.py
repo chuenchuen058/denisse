@@ -56,6 +56,13 @@ def _task_rows() -> list[dict]:
     except (OSError, ValueError):
         state = {"tasks": {}}
     rows = []
+    # The lane the runner picked at dispatch (orchestra lane_pick.py writes these header names,
+    # orchestra config lane_pick_headers) is the lane shown; the header's own Lane: is lane_asked.
+    heads = _config().get("lane_pick_headers") or {}
+
+    def header(text: str, name) -> str:
+        m = re.search(rf"^{re.escape(name)}:\s*(.*?)\s*$", text, re.M | re.I) if name else None
+        return m.group(1) if m else ""
 
     def add(p: Path, where: str):
         text = p.read_text(encoding="utf-8", errors="replace")
@@ -63,8 +70,11 @@ def _task_rows() -> list[dict]:
         f = dict(re.findall(r"^(Queue|Kind|Lane|Priority):\s*(\S+)", text, re.M))
         ts = state.get("tasks", {}).get(p.stem, {})
         status = where if where != "queue" else ("draft" if f.get("Queue", "").lower() != "auto" else "queued")
+        asked = f.get("Lane", dflt["lane"])
+        picked = header(text, heads.get("picked"))
         rows.append({"task": title[:n], "status": status, "priority": f.get("Priority", dflt["priority"]),
-                     "lane": f.get("Lane", dflt["lane"]), "attempts": ts.get("attempts", 0),
+                     "lane": picked or asked, "lane_asked": asked, "pick_why": header(text, heads.get("why")),
+                     "attempts": ts.get("attempts", 0),
                      "last_result": ts.get("last_result") or "", "id": p.stem})
 
     for p in sorted((REVIEW / "queue").glob("*.md")):

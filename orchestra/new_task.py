@@ -24,17 +24,34 @@ from pathlib import Path
 REVIEW = Path(os.environ.get("ORCHESTRA_REPO") or Path(__file__).resolve().parent.parent) / ".review"
 PRIORITIES = ("urgent", "normal")
 WEIGHTS = ("light", "heavy")
-def _bugfix_kinds() -> tuple[str, ...]:
-    """Kinds that mean a bug or error fix (config bugfix_kinds; the runner routes them to bugfix_lane)."""
+def _config_value(key: str, ok):
+    """orchestra/config.json's value for key, else config_defaults.json's, if ok(value); else None."""
     here = Path(__file__).resolve().parent
     for name in ("config.json", "config_defaults.json"):
         try:
-            kinds = json.loads((here / name).read_text(encoding="utf-8")).get("bugfix_kinds")
-        except (OSError, ValueError):
+            value = json.loads((here / name).read_text(encoding="utf-8")).get(key)
+        except (OSError, ValueError, AttributeError):
             continue
-        if isinstance(kinds, list) and all(isinstance(k, str) for k in kinds):
-            return tuple(k.lower() for k in kinds)
-    return ()
+        if ok(value):
+            return value
+    return None
+
+
+def _bugfix_kinds() -> tuple[str, ...]:
+    """Kinds that mean a bug or error fix (config bugfix_kinds; the runner weighs them toward bugfix_lane)."""
+    kinds = _config_value("bugfix_kinds", lambda v: isinstance(v, list) and all(isinstance(k, str) for k in v))
+    return tuple(k.lower() for k in kinds) if kinds else ()
+
+
+def auto_lane() -> str | None:
+    """The Lane: word that has the runner pick the lane at dispatch (config lane_auto_word), or None."""
+    word = _config_value("lane_auto_word", lambda v: isinstance(v, str) and v.strip())
+    return word.strip().lower() if word else None
+
+
+def work_header() -> str | None:
+    """The header naming the work kind for the runner's lane pick (config lane_work_header)."""
+    return _config_value("lane_work_header", lambda v: isinstance(v, str) and v.strip())
 
 
 KINDS = ("work", "maintenance", *_bugfix_kinds())
@@ -70,8 +87,20 @@ def same_title(title: str, review: Path | None = None) -> list[Path]:
     return out
 
 
+def work_category(work: str | None) -> str | None:
+    """The exam category for a work kind (code-edit, debug, ...; hub kinds like code_change map)."""
+    if not work:
+        return None
+    root = str(Path(__file__).resolve().parent.parent)
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from orchestra.exams.lane_for import category_for
+    return category_for(work)
+
+
 def default_lane(work: str | None, title: str) -> str:
-    """The best-scoring working lane for the work (orchestra/exams), else claude."""
+    """The best-scoring working lane for the work (orchestra/exams), else claude. Used only when
+    config has no lane_auto_word; otherwise new tasks are Lane: auto and the runner picks."""
     root = str(Path(__file__).resolve().parent.parent)
     if root not in sys.path:
         sys.path.insert(0, root)
@@ -81,7 +110,8 @@ def default_lane(work: str | None, title: str) -> str:
 
 def render(title: str, *, body: str | None = None, gate: list[str] | None = None, priority: str = "normal",
            weight: str = "light", kind: str = "work", lane: str = "claude", auto: bool = False,
-           source: str | None = None, review: Path | None = None, when: dt.datetime | None = None) -> str:
+           source: str | None = None, review: Path | None = None, when: dt.datetime | None = None,
+           work: str | None = None) -> str:
     """The task file's text: the template with the title, headers, and (if given) the body and
     the gate commands filled in."""
     for value, allowed, what in ((priority, PRIORITIES, "priority"), (weight, WEIGHTS, "weight"),
@@ -102,6 +132,10 @@ def render(title: str, *, body: str | None = None, gate: list[str] | None = None
     if source:
         text = re.sub(r"^(Written:.*)$", lambda m: f"{m.group(1)}\nFrom: {' '.join(source.split())}", text,
                       count=1, flags=re.M)
+    name = work_header() if work else None
+    if name:  # the work kind the runner's lane pick scores by (orchestra/lane_pick.py)
+        text = re.sub(r"^(Lane:.*)$", lambda m: f"{m.group(1)}\n{name}: {' '.join(work.split())}", text,
+                      count=1, flags=re.M)
     head, sep, gate_part = text.partition("\n## Gate")
     if body is not None:
         # The template's placeholder paragraph (<...>) after the headers is the body.
@@ -115,18 +149,23 @@ def create(title: str, *, body: str | None = None, gate: list[str] | None = None
            weight: str = "light", kind: str = "work", lane: str | None = None, work: str | None = None,
            auto: bool = False, source: str | None = None, review: Path | None = None, say=None) -> Path:
     """Write a new task into <review>/queue and return its path. Never overwrites a task
-    someone else wrote. `lane` None: the best-scoring lane for `work` (exam scores).
+    someone else wrote. `lane` None: Lane: auto (config lane_auto_word: the runner picks the
+    lane at dispatch, scored by `work`), else the best-scoring lane for `work` (exam scores).
     `source` names the agent that handed the work over (a From: header)."""
     say = say or (lambda _s: None)
     review = Path(review) if review else REVIEW
-    if lane is None:
+    work_kind = None
+    if lane is None and auto_lane():
+        lane, work_kind = auto_lane(), work_category(work)
+        say(f"lane: {lane} (the runner picks it at dispatch; --lane to choose)")
+    elif lane is None:
         lane = default_lane(work, title)
         say(f"lane: {lane} (from exam scores; --lane to choose)")
     for p in same_title(title, review):
         say(f"note: same title as {p}; fine if this is a follow-up")
     when = dt.datetime.now()
     text = render(title, body=body, gate=gate, priority=priority, weight=weight, kind=kind, lane=lane,
-                  auto=auto, source=source, review=review, when=when)
+                  auto=auto, source=source, review=review, when=when, work=work_kind)
     stamp = when.strftime("%Y-%m-%dT%H%M")
     slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:50]
     queue = review / "queue"
@@ -150,7 +189,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--weight", choices=WEIGHTS, default="light")
     ap.add_argument("--kind", choices=KINDS, default="work")
     ap.add_argument("--lane", default=None,
-                    help="Default: the best-scoring working lane for the work (orchestra/exams), else claude")
+                    help="Default: auto (config lane_auto_word: the runner picks the lane at dispatch)")
     ap.add_argument("--work", default=None,
                     help="Kind of work for the lane choice: code-edit, debug, writing, study, extract "
                          "(or a hub kind like code_change). Default: guessed from the title")
