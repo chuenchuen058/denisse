@@ -114,7 +114,15 @@ def waiting_items(tasks: list[dict]) -> list[dict]:
     for l in _bullets(_section(_read(w["from"]), w["section"])).splitlines():
         t = re.sub(r"^\s*[-*]\s*", "", l).strip()
         if t and t.upper() not in skip:
-            rows.append({"item": t[:w["item_chars"]], "from": w["from"], "kind": "note"})
+            row = {"item": t[:w["item_chars"]], "from": w["from"], "kind": "note"}
+            m = re.match(w["limit_line"], t, re.I)
+            if m:  # aftercare's "Lane codex limited until 2026-11-11 12:08": gone once it lifts
+                until = _local_dt(m.group(1))
+                if until and until <= dt.datetime.now():
+                    continue
+                if until:
+                    row["until"] = _iso_local(until)
+            rows.append(row)
     for t in tasks:
         if t["status"] == "draft":
             rows.append({"item": w["draft"].format(task=t["task"]), "from": w["orchestra"], "kind": "draft"})
@@ -128,7 +136,7 @@ def waiting_items(tasks: list[dict]) -> list[dict]:
 
 
 def _waiting(tasks: list[dict]) -> list[dict]:
-    rows = [{"item": r["item"], "from": r["from"]} for r in waiting_items(tasks)]
+    rows = [{"item": r["item"], "from": r["from"], "until": r.get("until", "")} for r in waiting_items(tasks)]
     for i, r in enumerate(rows):
         r["n"] = i + 1
     return rows
@@ -181,6 +189,35 @@ def _spend() -> list[dict]:
     return [{"day": dt.date.today().isoformat(), "cost_usd": round(u.get("cost_usd", 0), 2),
              "cap_usd": cap, "work_min": round(u.get("work_s", 0) / 60),
              "maint_min": round(u.get("maint_s", 0) / 60)}]
+
+
+def _local_dt(text: str) -> dt.datetime | None:
+    """A runner time ("2026-11-11T12:08:00", "2026-11-11 12:08", with or without an offset) as
+    naive local time, the runner's own clock; None if it isn't one."""
+    try:
+        when = dt.datetime.fromisoformat(str(text).strip())
+    except ValueError:
+        return None
+    return when.astimezone().replace(tzinfo=None) if when.tzinfo else when
+
+
+def _iso_local(when: dt.datetime) -> str:
+    """Naive local time as ISO with this laptop's UTC offset, so the hub page (any viewer's
+    clock and zone) can tell when it has passed."""
+    return when.astimezone().isoformat(timespec="minutes")
+
+
+def lane_limits(st: dict, now: dt.datetime | None = None) -> dict[str, dt.datetime]:
+    """lane -> when it may run again, from the runner's own record (state.json lanes.<lane>.
+    limited_until, written by orchestra runner._limited and read by its lane_limited). Only
+    limits still in force; this record carries a reset past midnight, unlike runner.log."""
+    now = now or dt.datetime.now()
+    out = {}
+    for lane, v in (st.get("lanes") or {}).items():
+        until = _local_dt(v.get("limited_until") or "") if isinstance(v, dict) else None
+        if until and until > now:
+            out[lane] = until
+    return out
 
 
 def _state() -> dict:
@@ -325,6 +362,12 @@ def _usage(running: list[dict]) -> list[dict]:
                 limits[m.group(2)] = words["until"].format(time=m.group(4))
     except OSError:
         pass
+    # the runner's own record wins: it is what dispatch obeys (11 Nov 2026: a Codex limit hit
+    # on 10 Nov until 12:08 on the 11th showed "available", as runner.log was read for today only)
+    resets = lane_limits(st)
+    for lane, until in resets.items():
+        fmt = c["until_format"] if until.date() == dt.date.today() else c["until_day_format"]
+        limits[lane] = words["until"].format(time=until.strftime(fmt))
     busy = {}
     for r in running:
         if r["task"]:  # idle slot rows don't count
@@ -359,6 +402,7 @@ def _usage(running: list[dict]) -> list[dict]:
                      "passed_today": p["pass"], "minutes_today": round(p["minutes"]),
                      "est_cost_today": round(p["cost"], 2), "last_run": p["last"],
                      "exam_pass_rate": exam_rates.get(lane),
+                     "limited_until": _iso_local(resets[lane]) if lane in resets and not u.get("status") else "",
                      "state": ("bad" if status.startswith(bad)
                                else "busy" if busy.get(lane) else "ok")})
     return rows

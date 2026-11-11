@@ -115,6 +115,44 @@ class AtriumTest(unittest.TestCase):
             offline.stop()
             snapshot.REVIEW = old
 
+    def test_usage_takes_lane_limits_from_the_runner_record_across_midnight(self):
+        # 11 Nov 2026: a Codex limit hit the day before (until 12:08 next day) showed "available"
+        from atrium import snapshot
+        from unittest import mock
+        review = Path(tempfile.mkdtemp())
+        old = snapshot.REVIEW
+        snapshot.REVIEW = review
+        now = dt.datetime.now().replace(second=0, microsecond=0)
+        later, past = now + dt.timedelta(days=1, hours=2), now - dt.timedelta(minutes=5)
+        w(review, "state.json", json.dumps({"tasks": {}, "lanes": {
+            "codex": {"limited_until": later.isoformat(), "since": (now - dt.timedelta(hours=20)).isoformat()},
+            "claude": {"limited_until": past.isoformat()}}}))
+        offline = mock.patch("urllib.request.urlopen", side_effect=OSError("no Ollama in tests"))
+        offline.start()
+        try:
+            rows = {r["lane"]: r for r in snapshot._usage([])}
+        finally:
+            offline.stop()
+            snapshot.REVIEW = old
+        self.assertTrue(rows["codex"]["status"].startswith("limited until "), rows["codex"]["status"])
+        self.assertIn(later.strftime("%H:%M"), rows["codex"]["status"])
+        self.assertEqual(rows["codex"]["state"], "bad")
+        self.assertEqual(dt.datetime.fromisoformat(rows["codex"]["limited_until"]).astimezone().replace(tzinfo=None), later)
+        self.assertEqual(rows["claude"]["status"], "available")  # that limit has lifted
+        self.assertEqual(rows["claude"]["limited_until"], "")
+        self.assertEqual(rows["gemini"]["limited_until"], "")  # a fixed status never counts down
+
+    def test_waiting_drops_a_lane_limit_line_once_it_has_lifted(self):
+        from atrium import snapshot
+        now = dt.datetime.now().replace(second=0, microsecond=0)
+        soon, gone = now + dt.timedelta(hours=3), now - dt.timedelta(hours=1)
+        w(self.v, "hot.md", "## Waiting on Chuen\n"
+          f"- Lane codex limited until {soon:%Y-%m-%d %H:%M}\n- Lane claude limited until {gone:%Y-%m-%d %H:%M}\n- reply to Terry\n")
+        rows = snapshot.waiting_items([])
+        self.assertEqual([r["item"] for r in rows], [f"Lane codex limited until {soon:%Y-%m-%d %H:%M}", "reply to Terry"])
+        self.assertEqual(dt.datetime.fromisoformat(rows[0]["until"]).astimezone().replace(tzinfo=None), soon)
+        self.assertNotIn("until", rows[1])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

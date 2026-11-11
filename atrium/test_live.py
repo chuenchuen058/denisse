@@ -188,7 +188,8 @@ class LiveTest(LiveBase):
 
     def test_snapshot_hub_tables_unchanged(self):
         t = self.snap.tables(["tasks", "waiting"])
-        self.assertTrue(all(set(r) == {"item", "from", "n"} for r in t["waiting"]))  # no live-only keys
+        # no live-only keys; until = a lane-limit note's reset, for the hub page to drop it live
+        self.assertTrue(all(set(r) == {"item", "from", "until", "n"} for r in t["waiting"]))
         out = self.tmp / "hub"
         with mock.patch.object(self.snap, "_agents", return_value=[]), \
                 mock.patch.object(self.snap, "_learner", return_value=[]), \

@@ -189,7 +189,8 @@ def collect() -> dict:
         n = queued.get(a["lane"], 0)
         why = (words["why_limited"] if limited else words["why_full"] if slots and busy >= slots
                else words["why_battery"] if pw.get("ac") is False else words["why_none"]) if n else ""
-        if lim and lim > now and u.get("state") != "bad":  # only the runner's record knows this limit
+        # the runner's record: the usage row marks it (limited_until) or, older rows, doesn't know it
+        if lim and lim > now and (u.get("state") != "bad" or u.get("limited_until")):
             status = words["until"].format(time=lim.strftime(words["until_format"]))
         else:
             status = (u.get("status") or "") if limited else words["working"] if busy else words["free"]
