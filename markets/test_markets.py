@@ -1,9 +1,12 @@
 import json
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
+from markets import core
 from markets.core import build_snapshot_data, collect_alerts, render_weekly_note
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -11,10 +14,21 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class MarketsTests(unittest.TestCase):
     def setUp(self):
-        self.alert_state = Path(".review/markets_alert_state.json")
-        self.alert_state.parent.mkdir(parents=True, exist_ok=True)
-        if self.alert_state.exists():
-            self.alert_state.unlink()
+        # Every state/output path points into a temp dir: a test must never touch the real
+        # .review/ (reviewer, 10 Nov: setUp deleted Chuen's real alert state).
+        self.tmp = Path(tempfile.mkdtemp(prefix="markets-test-"))
+        self._saved = {k: core.CONFIG.get(k) for k in ("alert_state_path", "markets_path")}
+        core.CONFIG["alert_state_path"] = str(self.tmp / "markets_alert_state.json")
+        core.CONFIG["markets_path"] = str(self.tmp / "markets.json")
+        self.alert_state = Path(core.CONFIG["alert_state_path"])
+
+    def tearDown(self):
+        for k, v in self._saved.items():
+            if v is None:
+                core.CONFIG.pop(k, None)
+            else:
+                core.CONFIG[k] = v
+        shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_snapshot_dry_run_prints_json_shape(self):
         proc = subprocess.run([sys.executable, "-m", "markets", "snapshot", "--dry-run"], cwd=str(ROOT), capture_output=True, text=True, check=False)
