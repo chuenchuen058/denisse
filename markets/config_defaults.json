@@ -1,0 +1,35 @@
+{
+  "watchlist": {
+    "groups": {
+      "AI & chips": ["NVDA", "AMD", "AVGO", "TSM", "ASML"],
+      "Indexes & ETFs": ["^IXIC", "^GSPC", "^FTSE", "VWRL.L", "CSPX.L"]
+    },
+    "symbol_map": {
+      "NVDA": "NASDAQ:NVDA",
+      "AMD": "NASDAQ:AMD",
+      "AVGO": "NASDAQ:AVGO",
+      "TSM": "TSE:TSM",
+      "ASML": "AMS:ASML",
+      "^IXIC": "INDEXNASDAQ:IXIC",
+      "^GSPC": "INDEXSP:INX",
+      "^FTSE": "INDEXFTSE:UKX",
+      "VWRL.L": "LSE:VWRL",
+      "CSPX.L": "LSE:CSPX"
+    },
+    "etf_holdings": [],
+    "followed_managers": [
+      {"name": "Berkshire Hathaway", "cik": "0001067983"},
+      {"name": "Pershing Square", "cik": "0001526283"},
+      {"name": "Bridgewater", "cik": "0001406079"},
+      {"name": "Renaissance Technologies", "cik": "0000916064"}
+    ],
+    "edgar_user_agent": "",
+    "weekly_note_day": "Sunday"
+  },
+  "alert_move_pct": 5.0,
+  "refresh_minutes": 15,
+  "markets_path": ".review/hub/markets.json",
+  "alert_state_path": ".review/markets_alert_state.json",
+  "vault_root": "Atlas/Money/Markets",
+  "scope": "offline fixture"
+}
