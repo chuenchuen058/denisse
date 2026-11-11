@@ -136,6 +136,19 @@ class PacingTest(unittest.TestCase):
         self.assertEqual(LP.choose(ask(work="writing"), c, early).lane, "alpha")
         self.assertEqual(LP.choose(ask(work="writing"), c, late).lane, "beta")
 
+    def test_free_above_left_means_no_hold_until_under_it(self):
+        # Chuen, 11 Nov 2026: hold back only when under 20% of the weekly allowance is left
+        c = self.pacing_cfg(window=12, reserve=1.0)
+        c["lane_free_above_left"] = 0.2
+        early = live(now=NOW)
+        self.assertEqual(LP.pacing("beta", c, early)[:2], (0.0, False), "unknown usage is not low")
+        plenty = live(usage={"beta": {"left": 0.6, "at": NOW.isoformat()}})
+        self.assertEqual(LP.pacing("beta", c, plenty)[:2], (0.0, False))
+        low = live(usage={"beta": {"left": 0.15, "at": NOW.isoformat()}})
+        self.assertTrue(LP.pacing("beta", c, low)[1], "under 20% the reserve rule holds it")
+        c["lane_pacing"]["beta"]["free_above_left"] = 0.1
+        self.assertEqual(LP.pacing("beta", c, low)[:2], (0.0, False), "a lane's own value wins")
+
     def test_at_the_reserve_a_lane_is_held_and_unknown_usage_is_not_used_up(self):
         c = self.pacing_cfg(reserve=0.2)
         at_reserve = live(usage={"beta": {"used": 0.85, "at": NOW.isoformat()}})

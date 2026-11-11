@@ -195,6 +195,8 @@
   "bugfix_lane_bonus": 1.5,
   "lane_pick_weights": {"fit": 1.0, "pacing": 0.5, "cost": 0.3, "busy": 0.2, "fallback_hint": 0.05},
   "lane_pick_explicit_scope": "hint",
+  "_lane_free_above_left": "Chuen, 11 Nov 2026: \"the holding back only applies if the weekly limit is less than 20%; if it's not, use them freely\". Share of a lane's weekly allowance left at or above which lane_pacing neither holds nor paces it (unknown usage counts as not low); below it reserve and pacing apply. A lane_pacing entry may set its own free_above_left.",
+  "lane_free_above_left": 0.2,
   "lane_pacing": {"claude": {"reset_anchor": "2026-11-04T18:00", "period_h": 168, "spend_window_h": 24, "reserve": 0.1}, "codex": {"reset_anchor": "2026-11-11T12:08", "period_h": 168, "spend_window_h": 12, "reserve": 1.0}},
   "lane_usage_file": "limits.json",
   "lane_usage_max_age_h": 24,

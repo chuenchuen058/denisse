@@ -134,6 +134,16 @@ def pacing(lane: str, cfg: dict, live: Live) -> tuple[float, bool, str]:
             return 0.0, True, f"allowance used up; reset in {hours:.0f}h"
         return 1.0, False, f"use it or lose it: reset in {hours:.0f}h"
     when = f"reset in {hours:.0f}h" if hours is not None else "reset time unknown"
+    # Chuen, 11 Nov 2026: "the holding back only applies if the weekly limit is less than
+    # 20%; if it's not, use them freely". At or above lane_free_above_left (per lane
+    # "free_above_left" wins) the lane is neither held nor paced; unknown usage counts as
+    # not low. Below it, reserve and pacing apply as before. Key absent = old behaviour.
+    free = p.get("free_above_left", cfg.get("lane_free_above_left"))
+    if isinstance(free, (int, float)) and not isinstance(free, bool):
+        if left is None:
+            return 0.0, False, f"usage unknown, used freely ({when})"
+        if left >= float(free):
+            return 0.0, False, f"{left:.0%} left, used freely above {float(free):.0%} ({when})"
     if reserve >= 1:
         return -1.0, True, f"held until the last {window:g}h before its reset ({when})"
     if left is None:
