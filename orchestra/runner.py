@@ -48,6 +48,7 @@ import sys
 import threading
 import time
 import traceback
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -1358,29 +1359,34 @@ def risk(branch: str) -> str | None:
     return "; ".join(why) or None
 
 
-def parse_verdict(text: str) -> tuple[str | None, str]:
-    """('ok'|'block'|None, reasons) from the reviewer's output (claude json or plain text)."""
+def parse_verdict(text: str, *, prompt_bounds: tuple[str, str] | None = None) -> tuple[str | None, str]:
+    """('ok'|'block'|None, reasons) from the reviewer's answer (JSON or plain text).
+
+    When parsing a process log, pass the invocation's prompt boundaries: echoed input is
+    never an answer, even if it contains VERDICT lines or JSON result objects.
+    """
     s = text.strip()
+    if prompt_bounds:
+        begin, end = prompt_bounds
+        # Discard the entire echo BEFORE looking for JSON or VERDICT. The last boundary
+        # also handles repeated echoes. An echo cut short cannot supply a verdict.
+        _echo, ended, answer = s.rpartition(end)
+        if begin in answer:
+            return None, "incomplete echoed review prompt"
+        if ended:
+            s = answer.strip()
     # The JSON result can be followed (or preceded) by stray lines, e.g. a failing hook's message
     # (10 Nov: a Coucou SessionEnd error after the JSON made a reviewer "ok" park as "block").
     # Decode the first JSON object that starts a line and ignore whatever trails it.
     starts = ([0] if s.startswith("{") else []) + [i + 1 for i in range(len(s)) if s.startswith("\n{", i)]
-    plain = True
     for i in starts:
         try:
             data, _end = json.JSONDecoder().raw_decode(s[i:])
         except ValueError:
             continue
         if isinstance(data, dict) and isinstance(data.get("result"), str):
-            s, plain = data["result"], False
+            s = data["result"]
             break
-    if plain:
-        # Plain-text reviewers (codex exec) echo the prompt, whose template shows both VERDICT
-        # lines, before their answer: the answer is the last VERDICT line, not the first.
-        last = None
-        for last in re.finditer(r"^\W*VERDICT:\W*(?:ok|block)\b", s, re.I | re.M):
-            pass
-        s = s[last.start():] if last else s
     m = re.search(r"^\W*VERDICT:\W*(ok|block)\b(.*)", s, re.I | re.M | re.S)
     if not m:
         return None, s[-500:]
@@ -1433,6 +1439,10 @@ def run_reviewer(task: Task, wt: Path, branch: str, report: Path, why: str, stat
                  ("BASE", base), ("WHY", why), ("DON", consult.reviewer_section(wt)),
                  ("DIFF", diff)):  # DIFF last: it may contain {{...}}
         prompt = prompt.replace("{{" + k + "}}", v)
+    # Fresh boundaries cannot occur in the supplied task/report/Don/diff. Keep the closing
+    # boundary AFTER all substitutions so every byte of echoed input stays outside the answer.
+    prompt_bounds = (f"<!-- {uuid.uuid4().hex} -->", f"<!-- {uuid.uuid4().hex} -->")
+    prompt = f"{prompt_bounds[0]}\n{prompt}\n{prompt_bounds[1]}\n"
     if Path(argv[0]).stem.lower() == "claude":
         (wt / ".review").mkdir(exist_ok=True)
         argv += ["--settings", str(hook_settings(wt))]
@@ -1463,7 +1473,7 @@ def run_reviewer(task: Task, wt: Path, branch: str, report: Path, why: str, stat
     if timed_out:
         return {"verdict": "block", "reasons": f"reviewer timed out after {timeout}s", "seconds": seconds,
                 "cost_usd": cost, "lane": rlane, "pick": rp["why"]}
-    verdict, reasons = parse_verdict(text)
+    verdict, reasons = parse_verdict(text, prompt_bounds=prompt_bounds)
     if verdict is None and detect_auth(rlane, log_path):
         return {"verdict": "unavailable", "reasons": auth_hit(detect_auth(rlane, log_path)),
                 "seconds": seconds, "cost_usd": cost, "lane": rlane, "pick": rp["why"]}
