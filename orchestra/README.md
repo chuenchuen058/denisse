@@ -187,12 +187,24 @@ with allowance (not LIMITED, spend cap not reached) and the fewest runs in
 `autopilot_balance_hours`. Every decision is one `AUTOPILOT ...` line in
 runner.log; the ledger is `.review/autopilot.json`. Off: `autopilot: false`.
 
-**Bug fixes go to Claude.** `Kind: bugfix` (config `bugfix_kinds`), or the
+**Bug fixes lean to Claude.** `Kind: bugfix` (config `bugfix_kinds`), or the
 planner's own reading (a PARTIAL/FAIL report's follow-up, a parked failure, the
-model saying so), runs on `bugfix_lane` (claude) whatever the balance says,
-unless Claude is limited (then the normal `lane_fallback`) or the task says
-`Lane-Fixed: yes`. The START line says `(claude: bug fix; header lane ...)`.
-Off: `bugfix_lane: ""`.
+model saying so), scores `bugfix_lane_bonus` more on `bugfix_lane` (claude), so it
+runs there while Claude can run and isn't held at its reserve (`lane_pacing`);
+otherwise another lane takes it. `Lane-Fixed: yes` never moves. The START line
+says `(claude: bug fix; header lane ...)`. Off: `bugfix_lane: ""`.
+
+**The runner picks the lane** (`orchestra/lane_pick.py`, 11 Nov 2026). `Lane: auto`
+(new_task.py's default) is scored at dispatch over every lane: fit for the work kind
+(`lane_strengths`; a `Work:` header, else the task's Kind, else the title), pacing to
+each lane's reset (`lane_pacing`: spend in proportion to the time left, use it or lose
+it in the last `spend_window_h` hours, hold at `reserve`; allowance used from
+`.review/limits.json` when present, else unknown), spend against
+`daily_spend_cap_usd` for priced lanes, and free slots. Limited lanes and lanes over
+the cap can't win. An explicit `Lane: X` is a strong preference: it leaves only for
+the bug-fix lane or, while X can't run, its `lane_fallback`. The reviewer of a risky
+diff is picked the same way from `reviewer_lanes`, never the lane that wrote it.
+`runner.py --dry-run` and `python -m orchestra.lane_pick explain <slug>` show the scores.
 
 ## Handing work to the queue (`new_task.py`)
 

@@ -20,6 +20,8 @@ The runner's code holds no limits, patterns or lane commands of its own; they ar
 | `limit_patterns`, `limit_tail_lines`, `limit_default_min` | Usage-limit regexes per lane, how much of the lane log they read, and how long a lane waits when the message names no time. |
 | `auth_patterns`, `auth_retry_min`, `auth_fix_hint` | The same for an expired sign-in. |
 | `review_risky_patterns`, `review_max_lines`, `review_timeout_s`, `review_diff_max_chars`, `reviewer_argv` | Which diffs get the reviewer lane, its time limit, how much diff it sees, and its command. |
+| `lane_auto_word`, `lane_strengths`, `lane_pacing`, `lane_pick_weights`, `lane_preference_bonus`, `bugfix_lane_bonus`, `lane_pick_explicit_scope`, `lane_usage_file` | How the runner picks a task's lane at dispatch (`orchestra/lane_pick.py`): `Lane: auto` (new_task.py's default) is scored over every lane by fit per work kind, pacing to each lane's reset, spend and free slots; an explicit `Lane:` is a strong preference; `Lane-Fixed: yes` never moves. The pick is written as `Lane-Picked:` / `Pick-Why:` in the task and `PICK <slug> -> <lane>: <why>` in runner.log. |
+| `reviewer_lanes`, `reviewer_work`, `reviewer_override_lane` | Lanes that can review (each with its read-only command; `[]` = `reviewer_argv`), picked the same way and never the lane that wrote the change. `.review/lanes.json` `reviewer` still overrides. |
 
 A bad value never crashes a tick. A key missing from `config.json`, or one of the wrong
 shape (a string where a number belongs, a list item of the wrong type, an invalid regex,
@@ -58,6 +60,8 @@ What is happening now (read-only):
 .venv\Scripts\python.exe orchestra\watch.py
 .venv\Scripts\python.exe orchestra\watch.py --once
 .venv\Scripts\python.exe orchestra\runner.py --dry-run
+.venv\Scripts\python.exe -m orchestra.lane_pick explain <slug>
+.venv\Scripts\python.exe -m orchestra.lane_pick migrate --dry-run
 ```
 
 `status.py` is the one screen: running tasks per lane slot, the queue and why each task
@@ -67,7 +71,9 @@ titled "Orchestra live" when a lane starts, and toasts each start and finish (co
 `live_window`, `toasts`; orchestra/README.md, "Seeing it run"). Each lane run also gets its own
 Windows Terminal tab, "Claude: <task title>", that shows the session the way Claude Code does
 and closes itself after DONE (config `lane_tabs`). `runner.py --dry-run` shows what the next
-tick would pick without running anything.
+tick would pick without running anything, with each runnable task's scores per lane and
+the winner. `lane_pick explain <slug>` prints the same for one task; `lane_pick migrate
+--dry-run` lists queued tasks whose `Lane:` could be `auto` (it never rewrites them).
 
 When the queue has no `Queue: auto` task left, the autopilot planner writes the next ones from
 the vault's Task Ideas Inbox, recent reports' NOT DONE / ODD, parked tasks and hot.md's waiting
