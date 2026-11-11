@@ -16,15 +16,26 @@
       "VWRL.L": "LSE:VWRL",
       "CSPX.L": "LSE:CSPX"
     },
-    "etf_holdings": [],
+    "tradingview_watchlist_glob": "**/*TradingView*.txt",
+    "tradingview_watchlist_files": [],
+    "etf_holdings": {
+      "SPY": "https://example.com/spy-holdings.json",
+      "VOO": "https://example.com/voo-holdings.json",
+      "VTI": "https://example.com/vti-holdings.json"
+    },
     "followed_managers": [
       {"name": "Berkshire Hathaway", "cik": "0001067983"},
       {"name": "Pershing Square", "cik": "0001526283"},
       {"name": "Bridgewater", "cik": "0001406079"},
-      {"name": "Renaissance Technologies", "cik": "0000916064"}
+      {"name": "Renaissance Technologies", "cik": "0000916064"},
+      {"name": "Scion Asset Management", "historical_only": true, "note": "Deregistered in 2025, no new filings; last filing shown"}
     ],
     "edgar_user_agent": "",
-    "weekly_note_day": "Sunday"
+    "holdings": {
+      "BRK.B": "2026-11-10"
+    },
+    "weekly_note_day": "Sunday",
+    "source_label": "config"
   },
   "alert_move_pct": 5.0,
   "refresh_minutes": 15,

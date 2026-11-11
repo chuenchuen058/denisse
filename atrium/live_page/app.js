@@ -132,7 +132,21 @@ function progress() {
     `<span>${esc(p.text)}</span></div>`).join("") + `</div>`;
 }
 
-function draw() { if (!D) return; header(); agents(); needs(); where(); timeline(); progress(); }
+function markets() {
+  const rows = D.markets || [];
+  if (!rows.length) {
+    $("markets").innerHTML = `<div class="needs none">${esc(D.words.nothing_needed || "No markets yet")}</div>`;
+    return;
+  }
+  $("markets").innerHTML = rows.map(r => {
+    const pct = Number(r.day_change_pct ?? 0);
+    const color = pct >= 0 ? "var(--ok)" : "var(--warn)";
+    const spark = (r.sparkline || []).map(v => Math.max(0, Math.min(1, Number(v) || 0))).join(",");
+    return `<div class="needs" title="${esc(r.ticker || "ticker")}"><b>${esc(r.ticker || "?")}</b><span>${esc(String(r.price ?? ""))}</span><span style="color:${color}">${esc(`${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`)}</span><span>spark:${esc(spark)}</span></div>`;
+  }).join("");
+}
+
+function draw() { if (!D) return; header(); agents(); needs(); where(); timeline(); progress(); markets(); }
 
 function live(on) {
   $("dot").classList.toggle("off", !on);
