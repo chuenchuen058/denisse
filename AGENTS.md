@@ -50,7 +50,12 @@ How to operate it (schedule, commands, results, safety layers, troubleshooting):
 
 - **Re-read before editing.** Chuen runs his own terminal AI sessions
   against this repo in parallel with remote ones. Files change under you.
-  Never `git add -A` — stage only what you changed.
+  Never `git add -A`; stage named paths only. By default commit only what you
+  changed. Exception (Chuen, 11 Nov 2026): you may also commit someone else's
+  uncommitted work after checking it thoroughly (read the whole diff, run the
+  relevant tests and they pass) when it is good work; say in the commit message
+  that it was found uncommitted, when, and by whom if known. If in doubt, back it
+  up as a patch in `.review/` instead of committing.
 - **Orchestra sessions** (a task from `.review/queue/`, in a `denisse-wt`
   worktree): commit, but never push or merge. The runner checks the gate and
   merges; pushing stays with Chuen or the main chat.
