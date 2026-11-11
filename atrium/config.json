@@ -278,9 +278,10 @@
       "needs",
       "cursors",
       "timeline",
-      "progress"
+      "progress",
+      "markets"
     ],
-    "headings": {"agents": "Agents", "needs": "Needs you", "cursors": "Where they are", "files": "Files in play", "timeline": "Today", "progress": "Progress"},
+    "headings": {"agents": "Agents", "needs": "Needs you", "cursors": "Where they are", "files": "Files in play", "timeline": "Today", "progress": "Progress", "markets": "Markets"},
     "title": "Atrium Live",
     "subtitle": "What's happening in the background",
     "_agents": "One bar and one timeline row each, in this order. lane = the Orchestra lane (snapshot usage rows); colour = the accent used everywhere that agent appears.",

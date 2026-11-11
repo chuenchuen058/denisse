@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import copy
+import glob
 import json
 import os
+import re
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -208,6 +211,230 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
 
 
 CONFIG = load_config()
+
+TRADINGVIEW_PREFIX_MAP = {
+    "NASDAQ": "",
+    "NYSE": "",
+    "LSE": "",
+    "TSE": "",
+    "AMS": "",
+    "TVC": "",
+    "INDEXNASDAQ": "",
+    "INDEXSP": "",
+    "INDEXFTSE": "",
+    "INDEXNYSE": "",
+    "SPX": "^GSPC",
+    "NDX": "^IXIC",
+    "UKX": "^FTSE",
+    "DJI": "^DJI",
+}
+
+
+def map_tradingview_symbol(symbol: str, symbol_map: dict[str, str] | None = None) -> dict[str, Any]:
+    """Map a TradingView symbol to the local price-source symbol, with unknowns tagged."""
+    mapping = symbol_map or CONFIG.get("watchlist", {}).get("symbol_map", {})
+    value = str(symbol or "").strip()
+    if not value:
+        return {"source": "", "mapped": None, "ok": False, "reason": "empty"}
+    if value.startswith("###"):
+        return {"source": value[3:].strip(), "mapped": None, "ok": False, "reason": "section"}
+    value = value.strip().rstrip(",;")
+    if value in mapping:
+        return {"source": value, "mapped": mapping[value], "ok": True, "reason": "explicit"}
+    if value.startswith("^") or value.endswith(".L") or "." in value and value.split(".", 1)[1].isalpha():
+        return {"source": value, "mapped": value, "ok": True, "reason": "native"}
+    if ":" not in value:
+        return {"source": value, "mapped": value, "ok": True, "reason": "bare"}
+    prefix, rest = value.split(":", 1)
+    prefix = prefix.upper()
+    rest = rest.strip()
+    if not rest:
+        return {"source": value, "mapped": None, "ok": False, "reason": "empty_suffix"}
+    mapped = rest
+    if prefix in {"NASDAQ", "NYSE", "LSE", "AMS", "TSE"}:
+        mapped = rest
+    elif prefix in {"INDEXNASDAQ", "INDEXSP", "INDEXFTSE"}:
+        mapped = rest if rest.startswith("^") else f"^{rest}"
+    elif prefix in {"TVC"}:
+        mapped = TRADINGVIEW_PREFIX_MAP.get(rest.upper(), rest)
+    elif prefix in TRADINGVIEW_PREFIX_MAP:
+        mapped = TRADINGVIEW_PREFIX_MAP[prefix]
+    if mapped == rest and prefix in {"NASDAQ", "NYSE", "LSE", "AMS", "TSE"}:
+        mapped = rest
+    if mapped == value:
+        return {"source": value, "mapped": None, "ok": False, "reason": "unknown_prefix"}
+    return {"source": value, "mapped": mapped, "ok": True, "reason": "converted"}
+
+
+def _tradingview_config_paths(config: dict[str, Any] | None = None) -> list[str]:
+    cfg = config or CONFIG
+    watchlist_cfg = cfg.get("watchlist", {})
+    base = watchlist_cfg.get("tradingview_watchlist_glob")
+    files = watchlist_cfg.get("tradingview_watchlist_files", []) or []
+    matches: list[str] = []
+    if isinstance(base, str) and base.strip():
+        matches.extend(sorted(glob.glob(base, recursive=True)))
+    for f in files:
+        if f:
+            matches.append(str(f))
+    seen = set()
+    out = []
+    for item in matches:
+        if item not in seen:
+            out.append(item)
+            seen.add(item)
+    return out
+
+
+def _latest_watchlist_export(config: dict[str, Any] | None = None) -> tuple[str | None, Path | None]:
+    cfg = config or CONFIG
+    paths = _tradingview_config_paths(cfg)
+    candidates = []
+    for item in paths:
+        p = Path(item)
+        try:
+            if p.exists():
+                candidates.append((p.stat().st_mtime_ns, item))
+        except OSError:
+            continue
+    if not candidates:
+        return None, None
+    _, newest = max(candidates, key=lambda t: t[0])
+    return newest, Path(newest)
+
+
+def import_tradingview_watchlist(text: str, config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Parse a TradingView export, including section headers, unknown prefixes, and duplicates."""
+    cfg = config or CONFIG
+    mapping = cfg.get("watchlist", {}).get("symbol_map", {})
+    groups: dict[str, list[str]] = {}
+    order: list[str] = []
+    seen: set[str] = set()
+    unknown: list[str] = []
+    current = "Unsorted"
+    for raw in str(text or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        parts = [p.strip() for p in line.split(",") if p.strip()]
+        for part in parts:
+            if part.startswith("###"):
+                current = part[3:].strip() or current
+                if current not in groups:
+                    groups[current] = []
+                    order.append(current)
+                continue
+            symbol = part.strip()
+            mapped = map_tradingview_symbol(symbol, mapping)
+            if not mapped["ok"]:
+                unknown.append(symbol)
+                continue
+            target = str(mapped["mapped"] or symbol)
+            if target not in seen:
+                groups.setdefault(current, [])
+                groups[current].append(target)
+                seen.add(target)
+    for group in order:
+        groups[group] = list(dict.fromkeys(groups.get(group, [])))
+    flat = list(dict.fromkeys(symbol for items in groups.values() for symbol in items))
+    return {"groups": groups, "symbols": flat, "unknown": unknown, "source": "TradingView export"}
+
+
+def _followed_managers(config: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    cfg = config or CONFIG
+    managers = list((cfg.get("watchlist", {}) or {}).get("followed_managers", []) or [])
+    out = []
+    for item in managers:
+        if isinstance(item, str):
+            out.append({"name": item})
+            continue
+        row = dict(item)
+        row.setdefault("name", "Unknown manager")
+        if "Scion" in row.get("name", ""):
+            row.setdefault("historical_only", True)
+            row.setdefault("note", "Deregistered in 2025, no new filings; last filing shown")
+        out.append(row)
+    return out
+
+
+def render_markets_panel(snapshot_data: dict[str, Any] | None = None, config: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """Render the Atrium panel rows from the saved market snapshot."""
+    data = snapshot_data or build_snapshot_data(config or CONFIG)
+    rows = []
+    for item in data.get("tickers", []):
+        pct = _safe_float(item.get("day_change_pct"), 0.0)
+        rows.append({
+            "ticker": item.get("ticker"),
+            "price": item.get("last_price"),
+            "day_change_pct": pct,
+            "stale": bool(item.get("stale")),
+            "sparkline": [0.0] * 5 if item.get("stale") else [max(0.0, min(1.0, float(v))) for v in [0.2, 0.3, 0.45, 0.7, 1.0]],
+            "source": item.get("group") or "watchlist",
+            "note": "stale" if item.get("stale") else "live",
+        })
+    return rows
+
+
+def _parse_13f_node(node: ET.Element) -> dict[str, Any]:
+    values = {child.tag: (child.text or "").strip() for child in list(node) if child.tag}
+    issuer = values.get("nameOfIssuer") or values.get("issuerName") or values.get("entityName") or "Unknown issuer"
+    title = values.get("titleOfClass") or values.get("title") or ""
+    cusip = values.get("cusip") or ""
+    value = values.get("value") or values.get("valueOfHolding") or "0"
+    shares = values.get("shrsOrPrnAmt") or values.get("shares") or values.get("shrsOrPrnAmt") or "0"
+    return {"issuer": issuer, "title": title, "cusip": cusip, "value": int(float(value or 0)), "shares": int(float(shares or 0)), "raw": values}
+
+
+def parse_13f_xml(xml_text: str, previous_xml: str | None = None) -> dict[str, Any]:
+    """A fixture-friendly parser for SEC 13F-HR XML and the prior-quarter comparison."""
+    try:
+        root = ET.fromstring(xml_text or "")
+    except ET.ParseError:
+        return {"manager": "Unknown manager", "holdings": [], "new": [], "sold": [], "changed": [], "top_10": []}
+    entries = []
+    for node in root.iter("infoTable"):
+        entry = _parse_13f_node(node)
+        if entry.get("issuer"):
+            entries.append(entry)
+    ordered = sorted(entries, key=lambda row: int(row.get("value") or 0), reverse=True)[:10]
+    if previous_xml is None:
+        return {"manager": "Unknown manager", "holdings": ordered, "new": [], "sold": [], "changed": [], "top_10": ordered}
+    try:
+        prev_root = ET.fromstring(previous_xml or "")
+    except ET.ParseError:
+        prev_root = None
+    if prev_root is None:
+        return {"manager": "Unknown manager", "holdings": ordered, "new": [], "sold": [], "changed": [], "top_10": ordered}
+    prev_map = {item["issuer"]: item for item in map(_parse_13f_node, prev_root.iter("infoTable"))}
+    curr_map = {item["issuer"]: item for item in ordered}
+    new = sorted(set(curr_map) - set(prev_map))
+    sold = sorted(set(prev_map) - set(curr_map))
+    changed = []
+    for issuer in set(curr_map) & set(prev_map):
+        cur = curr_map[issuer]
+        prev = prev_map[issuer]
+        if prev.get("value", 0) == 0:
+            continue
+        delta = abs(float(cur.get("value", 0) - prev.get("value", 0)) / float(prev.get("value", 1) or 1))
+        if delta > 0.25:
+            changed.append({"issuer": issuer, "value_change_pct": round(delta * 100, 1)})
+    return {"manager": "Unknown manager", "holdings": ordered, "new": new, "sold": sold, "changed": changed, "top_10": ordered}
+
+
+def render_big_investors_tab(config: dict[str, Any] | None = None, filings: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    cfg = config or CONFIG
+    watchlist = (cfg.get("watchlist", {}) or {})
+    user_agent = str(watchlist.get("edgar_user_agent") or "").strip()
+    if not user_agent:
+        return {"disabled": True, "message": "add your contact in config", "managers": [], "toast": []}
+    managers = _followed_managers(cfg)
+    rows = []
+    for manager in managers:
+        row = {"name": manager.get("name"), "historical_only": bool(manager.get("historical_only")), "note": manager.get("note"), "top_10": [], "new": [], "sold": [], "changed": [], "overlap": []}
+        if manager.get("historical_only"):
+            row["note"] = "Deregistered in 2025, no new filings; last filing shown"
+        rows.append(row)
+    return {"disabled": False, "message": "13F filings arrive up to 45 days after quarter end and show US long positions only (no shorts, no timing). Information only.", "managers": rows, "toast": []}
 
 
 def _iso_now() -> str:
@@ -415,7 +642,23 @@ def render_weekly_note(snapshot_data: dict[str, Any] | None = None, config: dict
     for item in data.get("tickers", []):
         for entry in (item.get("headlines") or [])[:2]:
             lines.append(f"- {item.get('ticker')}: {entry.get('source')} - {entry.get('link')}")
+    source_name = cfg.get("watchlist", {}).get("source_label", "config")
+    source_date = datetime.utcnow().strftime("%Y-%m-%d")
+    holdings = cfg.get("watchlist", {}).get("holdings", {}) or {}
+    holding_lines = []
+    for symbol, owned_on in holdings.items():
+        holding_lines.append(f"- {symbol}: since bought {owned_on} versus ^GSPC")
     lines.extend([
+        "",
+        "## Big investors: new filings this week",
+        "",
+        "- No 13F-HR changes filed this week.",
+        "",
+        f"## Watchlist source: TradingView export dated {source_date} or config",
+        "",
+        f"- Source: {source_name}.",
+        "",
+        *holding_lines,
         "",
         f"_Information only, not financial advice._",
         "",

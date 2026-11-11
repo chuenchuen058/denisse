@@ -228,9 +228,20 @@ def collect() -> dict:
         progress.append({"key": b["key"], "label": b["label"], "colour": b["colour"],
                          "pct": round(min(100, 100 * v["v"] / v["m"]), 1) if v["m"] else 0,
                          "text": b["text"].format(**v)})
+    markets_path = (snapshot.REPO / "markets" / "config.json") if getattr(snapshot, "REPO", None) else (Path.cwd() / "markets" / "config.json")
+    markets = []
+    try:
+        p = Path(".review") / "hub" / "markets.json"
+        if p.exists():
+            payload = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                markets = payload.get("tickers", [])
+    except (OSError, ValueError, TypeError):
+        markets = []
     return {"title": c["title"], "subtitle": c["subtitle"], "panels": c["panels"], "headings": c["headings"],
             "power": {"ac": pw.get("ac"), "battery_percent": pw.get("battery_percent")},
             "agents": agents, "needs": needs, "timeline": timeline, "progress": progress, "where": where,
+            "markets": markets,
             "timeline_cfg": {k: c["timeline"][k] for k in ("start_hour", "end_hour", "pad_hours", "tick_hours")},
             "words": words}
 
