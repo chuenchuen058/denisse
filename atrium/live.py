@@ -2,7 +2,8 @@
 
 Reads the same tables `atrium snapshot` builds (snapshot.tables, nothing collected
 twice), shapes them into the page's rows (agents + needs you, where each agent is working and
-who is about to collide (atrium/cursors.py), today's timeline, progress) and pushes a new copy down a server-sent event stream whenever a watched file
+who is about to collide (atrium/cursors.py), today's timeline, progress, and the v3 mission
+board built and rendered by atrium/board.py) and pushes a new copy down a server-sent event stream whenever a watched file
 changes. Binds loopback only. Read-only: every handler is a GET, nothing is written, and
 nothing runs while no tab holds the stream open. Every port, interval, path, label and
 colour: atrium/config.json "live".
@@ -21,7 +22,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import conf, context, cursors, snapshot
+from . import board, conf, context, cursors, snapshot
 
 HERE = Path(__file__).resolve().parent
 
@@ -238,7 +239,11 @@ def collect() -> dict:
                 markets = payload.get("tickers", [])
     except (OSError, ValueError, TypeError):
         markets = []
+    mission = board.build({"now": now, "t": t, "state": state, "agents": agents, "usage": usage, "where": where,
+                           "timeline": timeline, "progress": progress, "markets": markets, "power": pw,
+                           "live_words": words, "titles": _titles()})
     return {"title": c["title"], "subtitle": c["subtitle"], "panels": c["panels"], "headings": c["headings"],
+            "board": mission,
             "power": {"ac": pw.get("ac"), "battery_percent": pw.get("battery_percent")},
             "agents": agents, "needs": needs, "timeline": timeline, "progress": progress, "where": where,
             "markets": markets,

@@ -376,6 +376,187 @@
       "note_glob": "*Week*.md",
       "written_min_chars": 800
     },
+    "_board": "The v3 mission board (atrium/board.py builds and renders it from what live.collect() read; layout after atrium/design/mission-board-reference.html, none of its sample text). cards: the grid, in order; id = a section atrium/board.py knows, class = layout classes from style.css (span2, span4, tall); \"lanes\" becomes one card per entry of \"agents\" above. Every word, colour, regex for the runner's log lines and limit lives here. theme: CSS variables per colour scheme, set by app.js. favicon: one arc per agent in its colour, centre dot = the verdict's colour (theme ok/warn/bad of favicon.scheme).",
+    "board": {
+      "title": "Atrium hub",
+      "cards": [
+        {"id": "lanes", "class": ""},
+        {"id": "tree", "class": "span4"},
+        {"id": "local", "class": "span4"},
+        {"id": "cursors", "class": "span2 tall"},
+        {"id": "merged", "class": ""},
+        {"id": "needs_look", "class": ""},
+        {"id": "up_next", "class": "span2"},
+        {"id": "tokens", "class": "span4"},
+        {"id": "credits", "class": "span4"},
+        {"id": "limits", "class": "span2"},
+        {"id": "activity", "class": "span2"},
+        {"id": "today", "class": "span2"},
+        {"id": "projects", "class": "span2"},
+        {"id": "progress", "class": "span2"},
+        {"id": "markets", "class": "span2"}
+      ],
+      "headings": {
+        "tree": "What to work on", "local": "Local agents · on this laptop", "cursors": "Live · who's editing what",
+        "merged": "Merged today", "needs_look": "⚠︎ Needs a look", "up_next": "Up next", "tokens": "Tokens spent",
+        "credits": "Credits per task · today", "limits": "Limits & resets", "activity": "Live activity",
+        "today": "Today", "projects": "Projects", "progress": "Progress", "markets": "Markets"
+      },
+      "theme": {
+        "light": {"bg": "#f2f2f7", "card": "#ffffff", "text": "#1c1c1e", "sub": "#6e6e73", "line": "#e5e5ea",
+                  "ok": "#34c759", "warn": "#ff9f0a", "bad": "#ff3b30", "later": "#c7c7cc", "on-accent": "#ffffff",
+                  "shadow": "rgba(0,0,0,.06)"},
+        "dark": {"bg": "#000000", "card": "#1c1c1e", "text": "#f5f5f7", "sub": "#98989d", "line": "#2c2c2e",
+                 "ok": "#34c759", "warn": "#ff9f0a", "bad": "#ff3b30", "later": "#48484a", "on-accent": "#ffffff",
+                 "shadow": "rgba(0,0,0,.4)"}
+      },
+      "theme_storage_key": "atrium-theme",
+      "favicon": {"scheme": "light", "bg_top": "#2c2c2e", "bg_bottom": "#0b0b0d", "size": 64, "corner": 15,
+                  "radius": 19, "stroke": 6, "dot": 6},
+      "clock": {"locale": "en-GB", "date": {"weekday": "long", "day": "numeric", "month": "long"},
+                "time": {"hour": "2-digit", "minute": "2-digit"}, "join": " · ", "tick_ms": 1000},
+      "_rings": "The four rings, in order. key = a figure atrium/board.py computes (pass, slots, ready, spend); colour = a theme variable or an agent's lane (its colour). value/label are filled with v (the count), m (out of), pct; empty = shown when m is 0 (nothing to measure).",
+      "rings": [
+        {"key": "pass", "colour": "ok", "value": "{pct}%", "label": "pass rate today · {v} of {m}", "empty": "no runs finished today"},
+        {"key": "slots", "colour": "lane:codex", "value": "{v} of {m}", "label": "slots in use", "empty": "no slots configured"},
+        {"key": "ready", "colour": "lane:copilot", "value": "{v} of {m}", "label": "agents ready", "empty": "no agents configured"},
+        {"key": "spend", "colour": "lane:claude", "value": "${v:.0f}", "label": "of ${m:.0f} today · notional", "empty": "no spend cap set"}
+      ],
+      "ring": {"radius": 15, "stroke": 4, "box": 36},
+      "_runner_log": "The runner's own line format (.review/runner.log: '<ISO time> <rest>'); each regex is matched against <rest>. start_line gives a running task's timeout; merged_line counts today's merges; consult_line is Don's consult.",
+      "runner_log": {
+        "file": "runner.log",
+        "lines": 400,
+        "start_line": "^START (?P<task>\\S+) lane=(?P<lane>\\w+) .*?timeout=(?P<timeout>\\d+)s",
+        "merged_line": "^merge review/(?P<task>[^:]+): merged",
+        "consult_line": "^CONSULT (?P<task>[^:]+):.*-> (?P<confidence>\\w+) confidence by (?P<by>\\w+)"
+      },
+      "_activity": "The feed: the newest max lines of runner.log that match one of events (first match wins), newest first. text is filled with the regex's named groups plus title (the task's title) and label (the lane's agent label). Lines that match nothing are not shown.",
+      "activity": {
+        "max": 8,
+        "text_chars": 110,
+        "time_today": "%H:%M",
+        "time_other": "%d %b",
+        "events": [
+          {"pattern": "^START (?P<task>\\S+) lane=(?P<lane>\\w+)", "text": "{label} started: {title}"},
+          {"pattern": "^(?P<word>PASS|PARTIAL|FAIL) (?P<task>\\S+) after (?P<seconds>\\d+)s", "text": "{word}: {title}"},
+          {"pattern": "^PARKED (?P<task>[^:]+):", "text": "Parked: {title}"},
+          {"pattern": "^merge review/(?P<task>[^:]+): merged", "text": "✓ Merged: {title}"},
+          {"pattern": "^LIMITED (?P<task>\\S+) lane=(?P<lane>\\w+) until (?P<until>.+)$", "text": "{label} limited until {until}"},
+          {"pattern": "^CONSULT (?P<task>[^:]+):.*-> (?P<confidence>\\w+) confidence", "text": "Don gave an opinion ({confidence} confidence): {title}"},
+          {"pattern": "^REQUEUED (?P<task>[^:]+):", "text": "Requeued: {title}"}
+        ]
+      },
+      "lane_card": {"max_tasks": 2, "bar_full_pct": 100},
+      "up_next": {"max": 4, "priority_order": ["urgent", "high", "normal", "low"]},
+      "_tree": "What to work on: one branch per group. source hot = the bullets of a hot.md section (struck ~~lines~~ are done; the block between skip_block markers is Orchestra's own copy of the queue and is left out); source queue = Orchestra's task files by status. classes: u urgent, s open, l later, d done (legend, in that order).",
+      "tree": {
+        "note": "hot.md",
+        "item_chars": 70,
+        "max_open": 6,
+        "max_done": 2,
+        "done_pattern": "^~~(?P<text>.+?)~~",
+        "skip_block": ["<!-- orchestra:waiting -->", "<!-- /orchestra:waiting -->"],
+        "skip": ["TODO"],
+        "open_class": "s",
+        "done_class": "d",
+        "groups": [
+          {"title": "Waiting on you", "source": "hot", "section": "Waiting on Chuen"},
+          {"title": "Orchestra", "source": "queue",
+           "statuses": [{"status": "queued", "label": "Queued", "class": "s"},
+                        {"status": "parked", "label": "Parked", "class": "u"},
+                        {"status": "draft", "label": "Drafts to approve", "class": "l"}],
+           "urgent_priorities": ["urgent"], "urgent_class": "u", "max_per_status": 4}
+        ],
+        "legend": [{"class": "u", "text": "urgent / parked"}, {"class": "s", "text": "open"},
+                   {"class": "l", "text": "later"}, {"class": "d", "text": "done"}]
+      },
+      "_local": "Local agents: one tile per entry, in order; kind = what atrium/board.py reads for it (ollama: /api/ps at snapshot.ollama.url; gpu: gpu_command's first line as 'busy %, MiB used, MiB total'; don: today's consult lines in runner.log; evals: .review/<evals_file>, the agents whose name starts with evals_prefix; digest: the vault's digest.state_file). Each read is cached for cache_s. A tile with nothing to read shows the empty word, never a number.",
+      "local": {
+        "cache_s": 30,
+        "gpu_command": ["nvidia-smi", "--query-gpu=utilization.gpu,memory.used,memory.total", "--format=csv,noheader,nounits"],
+        "gpu_timeout_s": 3,
+        "mib_per_gb": 1024,
+        "bytes_per_gb": 1073741824,
+        "evals_file": "exams/last_run.json",
+        "evals_prefix": "local:",
+        "time_today": "%H:%M",
+        "time_other": "%d %b %H:%M",
+        "tiles": [
+          {"kind": "ollama", "name": "Ollama"},
+          {"kind": "gpu", "name": "GPU"},
+          {"kind": "don", "name": "Don"},
+          {"kind": "evals", "name": "Local evals"},
+          {"kind": "digest", "name": "Atrium digest"}
+        ],
+        "words": {
+          "ollama_up": "healthy", "ollama_down": "not running", "no_model": "no model loaded",
+          "vram": "{used:.1f} GB in VRAM",
+          "gpu_busy": "{pct}% busy", "gpu_mem": "{used:.1f} / {total:.1f} GB VRAM",
+          "consults": "{n} consult(s) today", "no_consults": "no consults today",
+          "last_consult": "last {time} · {confidence} confidence",
+          "evals": "{v} of {m} passed", "eval_row": "{name} {result}", "eval_join": " · ", "evals_last": "last run {time}",
+          "digest_last": "last saved {time}"
+        }
+      },
+      "_tokens": "Tokens spent: summed from the runner's record of each finished run (state.json history -> tokens: in, out, cache_read, cache_write). fresh = in + out. Lanes that report no tokens are listed as unknown, never as 0. units: largest first.",
+      "tokens": {
+        "week_days": 7,
+        "fresh_keys": ["in", "out"],
+        "all_keys": ["in", "out", "cache_read", "cache_write"],
+        "units": [[1000000000, "B"], [1000000, "M"], [1000, "k"]],
+        "unit_format": "{n:.1f}{unit}",
+        "periods": [
+          {"key": "today", "label": "today · {fresh} fresh"},
+          {"key": "week", "label": "last {days} days"},
+          {"key": "month", "label": "this month"},
+          {"key": "all", "label": "all time · since {since}"}
+        ],
+        "since_format": "%d %b",
+        "lane": "{label} {tokens}", "lane_unknown": "{label} n/a", "lane_join": " · ",
+        "note": "most is cached re-reads; \"fresh\" = new tokens"
+      },
+      "credits": {
+        "max": 8,
+        "row": "{label} · {tokens} tokens · {spent}",
+        "row_no_tokens": "{label} · tokens n/a · {spent}",
+        "spent_unknown": "cost unknown"
+      },
+      "limits": {"time_today": "%H:%M", "time_other": "%a %H:%M"},
+      "today": {"max": 6, "time": "{h:02d}:{m:02d}"},
+      "_projects": "Projects: the bullets of a hot.md section; lead_pattern splits off a leading date and [who].",
+      "projects": {"note": "hot.md", "section": "Active right now", "max": 5, "item_chars": 110, "skip": ["TODO"],
+                   "lead_pattern": "^(?:(?P<date>\\d{4}-\\d{2}-\\d{2})\\s*)?(?:\\[(?P<who>[^\\]]+)\\]\\s*)?(?P<text>.*)$"},
+      "markets": {"row_change": "{sign}{pct:.1f}%", "up": "+", "down": ""},
+      "words": {
+        "verdict_ok": "Agents OK",
+        "verdict_stuck": "{n} agent(s) stuck",
+        "verdict_limited": "{label} limited until {time}",
+        "verdict_time": "%H:%M",
+        "pill": "{working} working · {stuck} stuck",
+        "pill_power": " · {icon} {pct}%",
+        "pill_power_unknown": "",
+        "state_working": "Working", "state_held": "Held", "state_limited": "Limited", "state_free": "Free",
+        "state_down": "Unavailable",
+        "slots": "{busy} of {slots}",
+        "resets": "resets {time}",
+        "resets_today": "%H:%M",
+        "resets_other": "%a %H:%M",
+        "timer": "{elapsed} elapsed",
+        "timer_limit": "{elapsed} elapsed · of {limit} min limit",
+        "queued": "{n} queued",
+        "no_task": "no task running",
+        "merged_of": "of {n} finished today",
+        "needs_sub": "{parked} parked · {drafts} draft(s) to approve",
+        "needs_none": "nothing parked",
+        "limit_until": "until {time}",
+        "limit_none": "not limited",
+        "result_running": "running",
+        "empty": "no data yet",
+        "dash": "–",
+        "join": " · "
+      }
+    },
     "words": {
       "working": "working",
       "free": "free",

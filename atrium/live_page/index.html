@@ -4,32 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title></title>
+<link rel="icon" id="favicon" type="image/svg+xml" href="data:,">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header>
-  <div class="logo"></div>
-  <div><h1 id="title"></h1><div class="sub" id="subtitle"></div></div>
-  <div class="live"><span class="dot" id="dot"></span><span id="state"></span><span id="power"></span>
-    <button class="theme" id="theme" type="button"></button></div>
-</header>
-
-<section class="grid g2a" data-panel="agents needs">
-  <div class="card" data-panel="agents"><h2 data-heading="agents"></h2><div id="capacity"></div></div>
-  <div class="card needs-card" data-panel="needs"><h2 data-heading="needs"></h2><div id="needs"></div></div>
-</section>
-
-<section class="grid" data-panel="cursors"><div class="card where"><h2 data-heading="cursors"></h2>
-  <div class="where-grid">
-    <div class="where-list" id="where-tasks"><div class="rows"></div><div class="layer" aria-hidden="true"></div></div>
-    <div><h3 data-heading="files"></h3>
-      <div class="where-list" id="where-files"><div class="rows"></div><div class="layer" aria-hidden="true"></div></div></div>
-  </div></div></section>
-
-<section class="grid" data-panel="timeline"><div class="card"><h2 data-heading="timeline"></h2><svg id="gantt" width="100%" viewBox="0 0 1000 190" role="img" aria-label="Today's runs per agent"></svg></div></section>
-
-<section class="grid" data-panel="progress"><div class="card"><h2 data-heading="progress"></h2><div id="progress"></div></div></section>
-<section class="grid" data-panel="markets"><div class="card"><h2 data-heading="markets"></h2><div id="markets"></div></div></section>
+<!-- Every word, number and colour below is put here by app.js from /events (atrium/board.py
+     renders it from real data; atrium/config.json "live" -> "board" holds the words). -->
+<header class="top" id="top" data-section="header"></header>
+<div class="rings" id="rings" data-section="rings"></div>
+<div class="grid" id="grid"></div>
 <div class="foot" id="foot"></div>
 <script src="app.js"></script>
 </body>
