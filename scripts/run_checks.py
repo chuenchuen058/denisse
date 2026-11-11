@@ -13,6 +13,9 @@ any access to Chuen's real vault or memory folders and any network connection
 Markers, put on a line of their own in a test module:
 
     # checks: slow                      skipped by --fast
+    # checks: desktop <what it opens>   opens real windows on the desktop; run only with
+                                        --desktop (never from Orchestra's unattended runs:
+                                        Chuen, 11 Nov 2026, 'dead bubble' popups on a loop)
     # checks: quarantine <reason>       never run; listed with its reason
 
 Exit status is non-zero if any module fails, times out or tries the guard.
@@ -39,7 +42,7 @@ SKIP_DIRS = {".git", ".venv", "venv", "__pycache__", "node_modules", "models", "
 # Set for every module by a run without --fast. A test too slow for a plain
 # `unittest discover` gate (orchestra's soak) skips unless it is set.
 SLOW_ENV = "RUN_CHECKS_SLOW"
-MARKER = re.compile(r"^#\s*checks:\s*(slow|quarantine)\b[ \t]*(.*)$", re.M)
+MARKER = re.compile(r"^#\s*checks:\s*(slow|quarantine|desktop)\b[ \t]*(.*)$", re.M)
 HOME = Path(os.path.expanduser("~"))
 # Never touched by a test: the real vault, Claude's memory, and the tray's
 # memory folders (this checkout's, and the main checkout's when this is a
@@ -160,6 +163,8 @@ def main():
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("only", nargs="*", help="run only modules whose path contains one of these")
     parser.add_argument("--fast", action="store_true", help="skip modules marked '# checks: slow'")
+    parser.add_argument("--desktop", action="store_true",
+                        help="also run modules marked '# checks: desktop' (they open real windows)")
     parser.add_argument("--jobs", "-j", type=int, default=min(8, os.cpu_count() or 2))
     parser.add_argument("--verbose", "-v", action="store_true", help="print every module's output")
     parser.add_argument("--report", type=Path, help="optional JSON summary, without transcripts")
@@ -176,6 +181,9 @@ def main():
         if "quarantine" in mark:
             rows.append({"suite": rel, "status": "QUARANTINED", "passed": True, "exit_code": None,
                          "seconds": 0.0, "detail": mark["quarantine"] or "(no reason given)"})
+        elif "desktop" in mark and not args.desktop:
+            rows.append({"suite": rel, "status": "SKIP-DESKTOP", "passed": True, "exit_code": None,
+                         "seconds": 0.0, "detail": "opens real windows; run with --desktop"})
         elif args.fast and "slow" in mark:
             rows.append({"suite": rel, "status": "SKIP-SLOW", "passed": True, "exit_code": None,
                          "seconds": 0.0, "detail": "marked slow; run without --fast"})
