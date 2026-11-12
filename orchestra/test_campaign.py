@@ -116,7 +116,8 @@ class CampaignFileTest(unittest.TestCase):
         self.assertEqual(seed["stop_at_source"], "Chuen in chat, 2 Nov")
         self.assertFalse(seed["restart_after_stop"])
         cfg = json.loads((HERE / "config.json").read_text(encoding="utf-8"))
-        self.assertEqual(cfg["lane_slots"], {"claude": 1, "codex": 1, "copilot": 1})
+        # gemini: 1 added by Chuen's request, 12 Nov 2026 (Gemini via the Antigravity CLI)
+        self.assertEqual(cfg["lane_slots"], {"claude": 1, "codex": 1, "copilot": 1, "gemini": 1})
         self.assertEqual(cfg["daily_spend_cap_usd"], 5.0)
 
     def test_seed_installs_once_and_a_deleted_campaign_stays_deleted(self):
