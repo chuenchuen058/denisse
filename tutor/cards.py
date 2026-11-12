@@ -95,8 +95,13 @@ def _ask(call, system: str, user: str, schema: str) -> dict:
     raise model.ModelError(_SAY["cards_no_json"])
 
 
+def spec(kind: str) -> dict:
+    """The kind's entry: cards.kinds, else cards.extra_kinds (kinds made outside the generation call)."""
+    return _C["kinds"].get(kind) or _C.get("extra_kinds", {}).get(kind) or {}
+
+
 def _limit(kind: str, what: str) -> int:
-    return _C["kinds"].get(kind, {}).get(what) or _C[what]
+    return spec(kind).get(what) or _C[what]
 
 
 def active_kinds() -> list:
@@ -181,17 +186,18 @@ def _with_answer(back: str, item: dict, kind: str) -> str:
 
 def generate(module: Module, src: sources.Source, calls: dict | None = None, num_ctx: int | None = None,
              only: set | None = None, scope: dict | None = None, dropped: list | None = None,
-             paths: Paths | None = None) -> list:
+             paths: Paths | None = None, rule: str = "") -> list:
     """Candidates for one source; known foreign topics carry a held verdict for the sidecar.
     Candidates screened out (no quote from the note, no final answer) go to
     `dropped` as (kind, front, why) and are not returned. With `paths`, a
     local writer is shown the checker's earlier corrections of cards like
-    these (learn.shots)."""
+    these (learn.shots). `rule`: more of the writer's system prompt (a study
+    note's rule, tutor.json cards.note.rule)."""
     with model.job("cards"):
-        return _generate(module, src, calls, num_ctx, only, scope, dropped, paths)
+        return _generate(module, src, calls, num_ctx, only, scope, dropped, paths, rule)
 
 
-def _generate(module, src, calls, num_ctx, only, scope, dropped, paths) -> list:
+def _generate(module, src, calls, num_ctx, only, scope, dropped, paths, rule="") -> list:
     by_engine = {}
     for kind, spec in _C["kinds"].items():
         if spec["count"] > 0 and (only is None or kind in only):
@@ -199,7 +205,7 @@ def _generate(module, src, calls, num_ctx, only, scope, dropped, paths) -> list:
     standing = rules.block("cards")
     text = src.text[:max(0, model.chunk_chars(num_ctx) - len(standing))]
     c = don.ctx(module)
-    system = _C["system"].format(**c) + _C["scope"]["rule"].format(**c) + standing
+    system = _C["system"].format(**c) + _C["scope"]["rule"].format(**c) + rule + standing
     out = []
     for engine, kinds in by_engine.items():
         wanted = "\n".join(_C["wanted"].format(kind=k, **_C["kinds"][k]) for k in kinds)
@@ -268,7 +274,8 @@ def _hash(text: str) -> str:
 
 
 def sidecar(module: Module) -> str:
-    return _D["card_file"].format(slug=module.slug)
+    """The deck's card store in the Don data folder; a study-note deck names its own (note_cards.NoteDeck)."""
+    return getattr(module, "card_file", "") or _D["card_file"].format(slug=module.slug)
 
 
 def load(paths: Paths, module: Module) -> dict:
@@ -300,7 +307,7 @@ def checked_cards(deck: dict) -> list:
 # -- the check ---------------------------------------------------------------------
 
 def check_engine(kind: str) -> str:
-    return _K["all_with"] or _C["kinds"][kind]["check"]
+    return _K["all_with"] or spec(kind)["check"]
 
 
 def as_written(card: dict) -> dict:
@@ -423,7 +430,7 @@ def _check(module, src, written, before, checks, when, num_ctx, scope, paths) ->
     for engine, batch in pending.items():
         items = "\n".join(_K["item"].format(n=n, kind=card["kind"], front=card["front"], back=card["back"],
                                            topic=card.get("topic", ""))
-                          + _C["kinds"].get(card["kind"], {}).get("check_note", "")
+                          + spec(card["kind"]).get("check_note", "")
                           for n, (_i, card) in enumerate(batch, 1))
         user = _K["user"].format(week=_C["week"].format(week=src.week) if src.week else "", source=src.stem,
                                  items=items, schema=_K["schema"], right=_K["right"], wrong=_K["wrong"],
