@@ -2306,6 +2306,11 @@ def merge_only(task: Task, state: dict, ts: dict) -> str:
         return "RUNNER-CRASHED"
 
 
+def _dispatch_lock() -> "_FileLock":
+    """The one lock under which a tick picks and claims work (dispatch, auto-requeue)."""
+    return _FileLock(REVIEW / "dispatch.lock", wait=60, stale=120)
+
+
 def reviewer_slot_free(lane: str) -> bool:
     """A slot of `lane` (lane_slots, slot locks runner.<lane>[.<n>].lock) that no live or orphaned
     owner holds. An unreadable lock counts as held: take_lock's age rule decides those."""
@@ -2325,20 +2330,37 @@ def _parked_at(why_file: Path) -> dt.datetime | None:
         return None
 
 
-def _set_header(path: Path, name: str, value: str) -> None:
-    """Set header `name` in the task's header block (replace it, or add it after the last header)."""
-    lines = path.read_text(encoding="utf-8").replace("\r\n", "\n").rstrip("\n").split("\n")
-    last, found = 0, False
-    for i, line in enumerate(lines[1:20], start=1):
+def _find_header(lines: list[str], name: str) -> tuple[int | None, int]:
+    """(index of header `name` or None, index of the last header) in the task's whole header block:
+    the header/blank lines after the title, up to the first other line. Not capped at parse_task's
+    window: the auto-requeue counter is written and read through this one scan, so a task with a
+    full window (parse_task reads lines[1:20]) still has its count seen (Codex review, 12 Nov 2026)."""
+    last = 0
+    for i, line in enumerate(lines[1:], start=1):
         m = HEADER.match(line)
         if m and m.group(1).lower() == name.lower():
-            lines[i], found = f"{name}: {value}", True
-            break
+            return i, last
         if m:
             last = i
         elif line.strip():
             break
-    if not found:
+    return None, last
+
+
+def _header_value(path: Path, name: str) -> str:
+    """Header `name` of the task file, read by the same scan _set_header writes with ("" if none)."""
+    lines = path.read_text(encoding="utf-8", errors="replace").replace("\r\n", "\n").split("\n")
+    i, _ = _find_header(lines, name)
+    return HEADER.match(lines[i]).group(2) if i is not None else ""
+
+
+def _set_header(path: Path, name: str, value: str) -> None:
+    """Set header `name` in the task's header block (replace it, or add it after the last header)."""
+    lines = path.read_text(encoding="utf-8").replace("\r\n", "\n").rstrip("\n").split("\n")
+    i, last = _find_header(lines, name)
+    if i is not None:
+        lines[i] = f"{name}: {value}"
+    else:
         lines.insert(last + 1, f"{name}: {value}")
     tmp = path.with_suffix(".header.tmp")
     tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -2357,7 +2379,11 @@ def auto_requeue_review_step(state: dict | None = None) -> list[str]:
     its reason, which hot.md "Waiting on Chuen" lists. requeue.py's own requeue_merge_only does
     the move. Returns the slugs re-queued. Never raises."""
     try:
-        return _auto_requeue_review(state)
+        # Under the dispatch lock, like a pick: eligibility (state, slot locks), the attempt count and
+        # the move are one step, so two overlapping ticks can't both re-queue a task off the same
+        # count, nor re-queue one the other is dispatching (Codex review, 12 Nov 2026).
+        with _dispatch_lock():
+            return _auto_requeue_review(state)
     except Exception as e:  # noqa: BLE001 -- the auto-requeue must never stop a tick
         log(f"AUTO-REQUEUE failed: {type(e).__name__}: {e}")
         return []
@@ -2409,7 +2435,7 @@ def _auto_requeue_review(state: dict | None) -> list[str]:
             continue
         task = parse_task(task_file)
         try:
-            tries = int(task.fields.get(header.lower(), "0") or 0)
+            tries = int(_header_value(task_file, header) or 0)
         except ValueError:
             tries = 0
         if tries >= max_tries:
@@ -3093,7 +3119,7 @@ def _tick(dry_run: bool = False) -> str:
         # Pick and claim under one dispatch lock, and read the other slots' locks *there*: two
         # ticks starting together each scanned before the other had written its task, took
         # different slots and both picked the same top task (race seen in review, soak 3 Nov 2026).
-        with _FileLock(REVIEW / "dispatch.lock", wait=60, stale=120):
+        with _dispatch_lock():
             running = running_tasks()
             # Then re-read the state, under the lock: the tick that just freed a slot saved its
             # entry (LIMITED, NO_REPORT, ...) after this one loaded its copy. Dispatching from the

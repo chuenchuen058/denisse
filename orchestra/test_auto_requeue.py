@@ -11,6 +11,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -196,6 +198,66 @@ class AutoRequeueTest(unittest.TestCase):
         self.R.C["auto_requeue_review_max_per_tick"] = 0
         self.park("z", self.unavailable("z"))
         self.assertEqual(self.R.auto_requeue_review_step(), [])
+
+    def test_counter_is_seen_when_the_header_window_is_full(self):
+        """parse_task reads lines[1:20]: with 19 headers already there, the counter goes on line 20.
+        It must still be counted, so the attempts limit holds (Codex review, 12 Nov 2026)."""
+        self.park("h", self.unavailable("h"))
+        path = self.R.PARKED / "h.md"
+        lines = path.read_text(encoding="utf-8").split("\n")
+        extra = [f"Extra-{chr(97 + i)}: v" for i in range(19 - 6)]  # TASK has 6 headers: 19 in all
+        path.write_text("\n".join(lines[:7] + extra + lines[7:]), encoding="utf-8")
+        self.assertEqual(len(self.R.parse_task(path).fields), 19)
+        header = self.R.C["auto_requeue_review_header"]
+        self.R._set_header(path, header, "1")
+        self.assertEqual(path.read_text(encoding="utf-8").split("\n")[20], f"{header}: 1", "past the window")
+        self.assertEqual(self.R._header_value(path, header), "1")
+        self.R._set_header(path, header, "2")  # replaced in place, not added again
+        self.assertEqual(path.read_text(encoding="utf-8").count(f"{header}:"), 1)
+        self.assertEqual(self.R.auto_requeue_review_step(), [], "2 of 2 attempts used: left parked")
+        self.assertTrue(path.exists())
+        self.assertIn("Auto-requeue stopped after 2 attempt(s)",
+                      (self.R.PARKED / "h.why.txt").read_text(encoding="utf-8"))
+
+    def test_counter_survives_the_requeue_with_a_full_header_window(self):
+        self.park("f", self.unavailable("f"))
+        path = self.R.PARKED / "f.md"
+        lines = path.read_text(encoding="utf-8").split("\n")
+        path.write_text("\n".join(lines[:7] + [f"Extra-{chr(97 + i)}: v" for i in range(13)] + lines[7:]), encoding="utf-8")
+        self.assertEqual(self.R.auto_requeue_review_step(), ["f"])
+        self.assertEqual(self.R._header_value(self.R.QUEUE / "f.md", self.R.C["auto_requeue_review_header"]), "1")
+
+    def test_runs_under_the_dispatch_lock(self):
+        seen = []
+        real = self.R._auto_requeue_review
+        def check(state):
+            seen.append((self.R.REVIEW / "dispatch.lock").exists())
+            return real(state)
+        self.park("l", self.unavailable("l"))
+        with mock.patch.object(self.R, "_auto_requeue_review", side_effect=check):
+            self.assertEqual(self.R.auto_requeue_review_step(), ["l"])
+        self.assertEqual(seen, [True])
+        self.assertFalse((self.R.REVIEW / "dispatch.lock").exists(), "released afterwards")
+
+    def test_waits_for_another_tick_and_sees_what_it_claimed(self):
+        """Another tick holds the dispatch lock and claims the task meanwhile: this tick's
+        eligibility check runs after it lets go, so the task is neither re-queued nor counted."""
+        self.park("w", self.unavailable("w"))
+        me = {"pid": os.getpid(), "created": self.R.proc_created(os.getpid())}
+        dispatch = self.R.REVIEW / "dispatch.lock"
+        dispatch.write_text(json.dumps(me), encoding="utf-8")  # "another tick is picking"
+        result = {}
+        th = threading.Thread(target=lambda: result.setdefault("r", self.R.auto_requeue_review_step()))
+        th.start()
+        time.sleep(1.0)
+        self.assertTrue(th.is_alive(), "waits for the dispatch lock")
+        self.assertTrue((self.R.PARKED / "w.md").exists())
+        (self.R.REVIEW / "runner.other.lock").write_text(json.dumps({**me, "task": "w"}), encoding="utf-8")
+        dispatch.unlink()
+        th.join(timeout=60)
+        self.assertFalse(th.is_alive())
+        self.assertEqual(result["r"], [])
+        self.assertEqual(self.R._header_value(self.R.PARKED / "w.md", self.R.C["auto_requeue_review_header"]), "")
 
     def test_park_text_unchanged_for_existing_readers(self):
         text = self.unavailable("t1")

@@ -123,7 +123,8 @@ reviewer lane for it is free (log `AUTO-REQUEUE <slug>: reviewer <lane> free`), 
 `auto_requeue_review_max_age_days` ago. After `auto_requeue_review_max_attempts` tries (its
 `Auto-Requeued:` header) it stays parked with "Auto-requeue stopped after N attempt(s)" in its
 reason and is listed in hot.md "Waiting on Chuen": then run `requeue.py <slug> --merge-only`
-yourself once you know why the reviewer keeps failing.
+yourself once you know why the reviewer keeps failing. It runs under the dispatch lock, so a
+tick that is picking holds it up for a moment (and a stuck `dispatch.lock` stops both).
 
 Pause, resume and stop (`orchestra/campaign.py`; the runner itself enforces these, and
 only `resume` undoes them — no tick, watchdog or logon clears a pause):

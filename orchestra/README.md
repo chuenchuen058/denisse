@@ -346,7 +346,11 @@ itself, through `requeue.py`'s own `requeue_merge_only`:
   one is recorded), and never one parked more than `auto_requeue_review_max_age_days` ago;
 - each re-queue bumps the task's `Auto-Requeued:` header (`auto_requeue_review_header`); after
   `auto_requeue_review_max_attempts` the task stays parked, `auto_requeue_review_gave_up` is
-  added to its reason, and hot.md "Waiting on Chuen" lists it with that reason;
+  added to its reason, and hot.md "Waiting on Chuen" lists it with that reason. The header is
+  read and written by one scan of the whole header block (`_find_header`), not parse_task's
+  first-19-lines window, so a task whose window is already full still has its count seen;
+- the whole step (state and slot-lock reads, the count, the move) runs under the same
+  `dispatch.lock` a tick picks under, so two overlapping ticks can't both re-queue off one count;
 - one runner.log line per re-queue: `AUTO-REQUEUE <slug>: reviewer <lane> free`
   (`auto_requeue_review_log`), after `requeue.py`'s own `REQUEUED ... merge-only` line.
 
