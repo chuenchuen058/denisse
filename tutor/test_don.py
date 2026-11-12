@@ -49,6 +49,7 @@ def tearDownModule():
     conf.CONFIG["cards"]["kinds"].update(_KINDS)
 
 CFG = conf.CONFIG
+CONFIGURED_ANKI_URL = anki._K["url"]  # read before any test patches it
 
 
 # -- fakes -------------------------------------------------------------------------
@@ -246,6 +247,11 @@ class DonFixture(Fixture):
             NOTE=pathlib.Path(self.vault, "Atlas", "Concepts", "Learning", "Learner-Model.md"))
         patcher.start()
         self.addCleanup(patcher.stop)
+        # A default anki.Connect() (cards' closing sync, the pending sync before a job) is a closed
+        # port here: loopback is allowed by the checks sandbox, so the configured URL could be his Anki.
+        anki_url = unittest.mock.patch.dict(anki._K, url=closed_port_url())
+        anki_url.start()
+        self.addCleanup(anki_url.stop)
         refuse_real_engines(self)
 
     def out(self, s):
@@ -660,6 +666,11 @@ class AnkiTests(DonFixture):
         model = json.loads(self.read(os.path.join(self.vault, "Dev", "learner", "model.json")))
         self.assertEqual([b["status"] for b in model["beliefs"]], ["superseded", "current"])
         self.assertIn("Keeps", model["beliefs"][1]["claim"])
+
+    def test_default_client_is_never_the_real_anki(self):
+        default = anki.Connect()
+        self.assertNotEqual(default.url, CONFIGURED_ANKI_URL)
+        self.assertFalse(anki.Connect(timeout=1).reachable()[0])
 
     def test_cli_cards_and_anki_sync(self):
         out = io.StringIO()
