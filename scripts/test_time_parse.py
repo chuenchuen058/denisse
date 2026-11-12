@@ -332,6 +332,54 @@ class DataChangesBehaviour(unittest.TestCase):
         self.assertIsNone(tp.parse_duration("an hour and a bit"))
         self.assertIsNone(tp.parse_duration("an hour plus 10 mins"))
 
+    # ---- third pass (12 Nov): dates, separators, punctuation, describe()
+
+    def test_slash_date_order(self):
+        self.assertEqual(self._when(tp, "12/11"), "2026-11-12 23:59")
+        mod = _load_with(lambda c: c.update(slash_date_order="month_day"))
+        self.assertEqual(self._when(mod, "12/11"), "2026-12-11 23:59")
+
+    def test_ordinal_suffixes_and_joiners(self):
+        mod = _load_with(lambda c: (c["ordinal_suffixes"].append("e"),
+                                    c["day_month_joiners"].append("de"),
+                                    c["month_day_joiners"].append("le")))
+        self.assertEqual(self._when(mod, "on the 12e"), "2026-11-12 23:59")
+        self.assertEqual(self._when(mod, "12 de november"), "2026-11-12 23:59")
+        self.assertEqual(self._when(mod, "november le 12"), "2026-11-12 23:59")
+        for phrase in ("on the 12e", "12 de november", "november le 12"):
+            self.assertIsNone(tp.parse(phrase, TUE).when, phrase)
+
+    def test_ordinal_suffix_written_back(self):
+        # TUE is the 3rd: "on the 3rd" asks, using ordinal_suffix.
+        self.assertIn("3rd", tp.parse("on the 3rd at 5pm", TUE).question)
+        mod = _load_with(lambda c: c["ordinal_suffix"]["by_last_digit"].update({"3": "e"}))
+        self.assertIn("Today is the 3e", mod.parse("on the 3rd at 5pm", TUE).question)
+        self.assertEqual(mod._suffix(13), "th")  # still an exception
+
+    def test_clock_separators_and_compact_lengths(self):
+        self.assertIsNone(tp.parse("tomorrow 15u30", TUE).when)
+        self.assertIsNone(tp.parse_duration("1u30"))
+        mod = _load_with(lambda c: (c["clock_separators"].append("u"),
+                                    c["compact_hour_marks"].append("u")))
+        self.assertEqual(self._when(mod, "tomorrow 15u30"), "2026-11-04 15:30")
+        self.assertEqual(mod.parse_duration("1u30"), timedelta(minutes=90))
+
+    def test_punctuation_and_apostrophes(self):
+        mod = _load_with(lambda c: (c["punctuation_to_space"].append(";"),
+                                    c["apostrophe_variants"].update({"`": "'"})))
+        self.assertEqual(self._when(mod, "tomorrow 5pm;"), "2026-11-04 17:00")
+        self.assertIsNone(tp.parse("tomorrow 5pm;", TUE).when)
+        # o`clock becomes o'clock, a strip word, so nothing is left over.
+        self.assertEqual(mod.parse("tomorrow at 5 o`clock", TUE).leftover, "")
+        self.assertNotEqual(tp.parse("tomorrow at 5 o`clock", TUE).leftover, "")
+
+    def test_describe_format_and_month_abbreviation(self):
+        mod = _load_with(lambda c: (c["wording"].update(
+            describe="{time} on {date}", describe_date="{weekday} {month} {day}",
+            time_of_day="{hour}h{minute:02d}"), c.update(month_abbreviation_length=4)))
+        self.assertEqual(mod.describe(at(2026, 11, 5, 15, 0), TUE), "15h00 on Thursday Nove 5")
+        self.assertEqual(self._when(mod, "5 nove"), "2026-11-05 23:59")
+
 
 class PartSourceTest(unittest.TestCase):
     """The hook the learner model will use to say what 'morning' means for
