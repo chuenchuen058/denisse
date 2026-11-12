@@ -495,7 +495,49 @@
     "topic_chars": 80,
     "id": "{tutor_slug}-{hash}",
     "id_hash_chars": 16,
-    "id_key": "{module}|{source}|{kind}|{n}"
+    "id_key": "{module}|{source}|{kind}|{n}",
+    "extra_kinds": {
+      "_help": "Kinds made outside the generation call (tutor/note_cards.py: the note's own self-check questions). Same fields as cards.kinds, for the check and the limits only.",
+      "selfcheck": {
+        "check": "local",
+        "check_note": " [the note's own self-check question; the back is the note's own answer, copied from it. Judge it like any card.]"
+      }
+    },
+    "note": {
+      "_help": "python -m tutor cards --note PATH --deck NAME (tutor/note_cards.py): cards from one study note, in or outside the vault (read only). The deck is <anki.deck> with the deck name as the module; its card store is card_file in the Don data folder, keyed by the note's path and content hash; a note longer than one model call is read in parts (part_key), each with its own hash. The self-check questions the note sets are copied as cards: the note's own answer on the back, or no_answer when it gives none (never a model-written answer). rule goes into the writer's system prompt. guard: the battery rule and the shared GPU lease (orchestra/power.py, orchestra/local_team/lease.py), as for the other local batch jobs.",
+      "card_file": "cards-note-{slug}.json",
+      "pending_key": "note:{slug}",
+      "part_key": "{rel}#{n}",
+      "rule": "\nThis note is a study note for {module}, not lecture material: stay within what it teaches. Where the NOTE says a statement is uncertain, provisional, to be checked or only its own working, the back keeps that warning; never turn it into a plain fact.",
+      "self_check": {
+        "kind": "selfcheck",
+        "engine": "local",
+        "max": 30,
+        "system": "You are {tutor}, copying the self-check questions a study note sets its reader. Copy, never write: every question and answer you give is copied word for word from the NOTE. Answer with one JSON object and nothing else.",
+        "user": "Source note: {source}.\n\nList every question the NOTE itself sets its reader to answer as a check of understanding (self-check, check-yourself or review questions, exercises). For each: question, copied word for word from the NOTE; answer, copied word for word from the NOTE where the note itself answers that question, otherwise empty -- never write an answer the note does not give; topic, the few words it tests. A note that sets no such questions: an empty list.\n\nReply with JSON of exactly this shape:\n{schema}\n\nNOTE:\n{text}",
+        "schema": "{\"questions\": [{\"question\": \"...\", \"answer\": \"...\", \"topic\": \"...\"}]}",
+        "no_answer": "The note sets this question without an answer: work it out from {source} and check it there.",
+        "unanswered_checker": "note",
+        "unanswered_reason": "the note's own question; it gives no answer, so the back makes no claim to check"
+      },
+      "guard": {
+        "battery": true,
+        "lease": true,
+        "lease_holder": "python -m tutor cards --note",
+        "lease_wait_s": 900,
+        "lease_poll_s": 15,
+        "lease_ttl_s": 7200
+      },
+      "say": {
+        "no_deck": "{tutor}: cards --note needs --deck NAME (the deck under {tutor} in Anki)",
+        "no_target": "{tutor}: cards needs a MODULE, or --note PATH --deck NAME",
+        "no_note": "{tutor}: no readable note at {path}",
+        "on_battery": "{tutor}: on battery -- no local-model batch jobs on battery; cards for {deck} not made, run it again on AC",
+        "lease_busy": "{tutor}: the GPU lease is held by {holder} (pid {pid}); cards for {deck} not made, run it again later",
+        "self_checks": "  {name}: {n} self-check question(s) copied, {answered} with the note's answer ({dropped} not found in the note, left out)",
+        "done": "{tutor}: {n} checked card(s) for deck {deck} from {source} ({status}), {held} held back"
+      }
+    }
   },
   "math": {
     "_help": "tutor/mathfmt.py. delimited: [kind, regex with a 'body' group, optional reject-body regex], earliest accepted span wins; config order breaks ties (display first). Single dollars cannot close before a digit or another dollar; a number followed by prose words or punctuation and whitespace is treated as currency. Numeric equations and padded maths remain valid; escaped dollars stay in the body. adjacent_separator keeps neighbouring maths spans from forming ambiguous target delimiters. bare: 'token' splits prose, 'braces' groups balanced arguments; a token with 'sign' starts maths, 'operator'/'operand' tokens around it join it, 'trailing' punctuation is left outside. targets: the delimiters each place renders.",
@@ -556,6 +598,7 @@
     "fields": ["Front", "Back", "Source", "Topic", "Id"],
     "field_of": {"front": "Front", "back": "Back", "source": "Source", "topic": "Topic", "id": "Id"},
     "source_html": "<a href=\"obsidian://open?vault={vault}&amp;file={file}\">{stem}</a>",
+    "source_html_file": "<a href=\"file:///{file}\">{stem}</a>",
     "tags": ["{tutor_slug}", "{slug}", "{kind}", "week::{week}", "topic::{topic_slug}"],
     "css": ".card { font-family: -apple-system, 'Segoe UI', sans-serif; font-size: 20px; line-height: 1.5; text-align: left; color: #1f2328; background-color: #ffffff; padding: 8px 4px; } .nightMode.card, .night_mode .card { color: #e6e6e6; background-color: #2b2b2b; } .q { font-weight: 600; margin-bottom: 12px; } .typed { width: 100%; box-sizing: border-box; font: inherit; font-size: 17px; padding: 8px; margin-top: 8px; border: 1px solid #b0b7c0; border-radius: 6px; background: transparent; color: inherit; } .label { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: #888; margin: 10px 0 4px; } .yours { padding: 8px 10px; border-left: 3px solid #4a90d9; background: rgba(74,144,217,.08); white-space: pre-wrap; } .topic, .source { font-size: 14px; color: #888; margin-top: 10px; } mjx-container[display=true] { margin: .6em 0; }",
     "math_target": "anki",

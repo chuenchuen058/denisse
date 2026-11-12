@@ -88,8 +88,12 @@ def _html(text: str) -> str:
 
 def fields(paths: Paths, card: dict) -> dict:
     stem = card.get("source_name") or os.path.splitext(card["source"].split("/")[-1])[0]
-    source = _A["source_html"].format(vault=urllib.parse.quote(os.path.basename(os.path.normpath(paths.vault))),
-                                      file=urllib.parse.quote(card["source"]), stem=html.escape(stem))
+    if os.path.isabs(card["source"]):  # a study note outside the vault (note_cards): a file link, not a vault one
+        source = _A["source_html_file"].format(file=urllib.parse.quote(card["source"].replace(os.sep, "/"), safe="/:"),
+                                               stem=html.escape(stem))
+    else:
+        source = _A["source_html"].format(vault=urllib.parse.quote(os.path.basename(os.path.normpath(paths.vault))),
+                                          file=urllib.parse.quote(card["source"]), stem=html.escape(stem))
     values = {"front": _html(mathfmt.normalise(card["front"], _A["math_target"])),
               "back": _html(mathfmt.normalise(card["back"], _A["math_target"])), "source": source,
               "topic": html.escape(card.get("topic") or ""), "id": card["id"]}

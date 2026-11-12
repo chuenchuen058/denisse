@@ -3,6 +3,9 @@
   ingest [--dry]          read the KEATS inbox folders, write tutor notes and topic maps
   topics MODULE           print a module's topic map (name, code or alias words)
   cards MODULE            make cards from every vault note of a module (changed notes only)
+  cards --note PATH       cards from one study note, in the vault or not (read only), into the
+        --deck NAME       deck NAME under the tutor's deck; its own self-check questions kept
+                          (tutor/note_cards.py); not on battery, with the shared GPU lease
   anki-sync [MODULE]      write the Anki TSV per module; with AnkiConnect, add/update the
                           cards and read the review stats (weak topics) back
   explain MODULE TOPIC    the tutor's lesson on a topic, from the vault (part 3; also a chat tool)
@@ -37,7 +40,7 @@ import argparse
 import json
 import sys
 
-from . import anki, cards, conf, don, ingest, progress, rules, topics
+from . import anki, cards, conf, don, ingest, note_cards, progress, rules, topics
 from .conf import CONFIG
 
 CHAT_COMMANDS = ("explain", "quiz", "weak", "exam", "mark")
@@ -99,14 +102,20 @@ def _sync_pending(paths, client, learner_core, say=print) -> None:
         return
     say(c["say_pending"].format(n=len(slugs)))
     mods = [m for m in conf.modules(paths) if m.slug in slugs]
-    gone = [s for s in slugs if s not in {m.slug for m in mods}]
+    decks = [d for d in note_cards.known(paths) if note_cards.pending_key(d) in slugs]
+    gone = [s for s in slugs if s not in {m.slug for m in mods} | {note_cards.pending_key(d) for d in decks}]
     if gone:
         rules.mark_synced(paths, gone, [])
     if mods:
         _sync(paths, mods, client, learner_core, say=say)
+    for d in decks:
+        result = note_cards.sync(paths, d, client, say=say)
+        touched = result["touched"] + [f for f in [note_cards.record_sync(paths, d, result)] if f]
+        don.commit(paths, touched, "anki", say=say)
 
 
-def main(argv=None, anki_client=None, calls=None, learner_core=None, checks=None) -> int:
+def main(argv=None, anki_client=None, calls=None, learner_core=None, checks=None, power=None, lease=None) -> int:
+    """`power`, `lease` (tests): the battery reading and the GPU lease for cards --note (note_cards.guarded)."""
     ap = argparse.ArgumentParser(prog="python -m tutor", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -125,6 +134,10 @@ def main(argv=None, anki_client=None, calls=None, learner_core=None, checks=None
             s.add_argument("--days", type=int, default=None)
         elif name in ("anki-sync", "progress"):
             s.add_argument("module", nargs="?", default=None)
+        elif name == "cards":
+            s.add_argument("module", nargs="?", default=None)
+            s.add_argument("--note", default=None)
+            s.add_argument("--deck", default=None)
         else:
             s.add_argument("module")
         if name in ("explain", "mark"):
@@ -132,6 +145,10 @@ def main(argv=None, anki_client=None, calls=None, learner_core=None, checks=None
         elif name in ("quiz", "exam"):
             s.add_argument("text", nargs="*")
     a = ap.parse_args(argv)
+    if a.cmd == "cards" and not (a.note or a.module):
+        ap.error(CONFIG["cards"]["note"]["say"]["no_target"].format(**don.ctx()))
+    if a.cmd == "cards" and a.note and not (a.deck or "").strip():
+        ap.error(CONFIG["cards"]["note"]["say"]["no_deck"].format(**don.ctx()))
     try:
         sys.stdout.reconfigure(encoding="utf-8")
     except (AttributeError, ValueError):
@@ -146,11 +163,43 @@ def main(argv=None, anki_client=None, calls=None, learner_core=None, checks=None
         _sync_pending(paths, anki_client, learner_core)
     try:
         with rules.batch_lock(paths, a.cmd):
+            if a.cmd == "cards" and a.note:
+                return _note_cards(a, paths, anki_client, calls, checks, power, lease)
             return _run(a, paths, anki_client, calls, learner_core, checks)
     except rules.Busy as busy:
         print(busy.line)
         rules.handoff(paths, "busy", command=a.cmd)
         return 1
+
+
+def _note_cards(a, paths, anki_client, calls, checks, power, lease) -> int:
+    """cards --note: one study note's cards, synced like a module's; the
+    battery rule and the GPU lease first (note_cards.guarded)."""
+    title = note_cards.deck(a.deck, a.note).title
+    try:
+        with note_cards.guarded(title, power=power, lease=lease):
+            moved = don.migrate(paths)
+            if moved:
+                don.commit(paths, moved, "migrate")
+            rules.check_kinds()
+            out = note_cards.run(paths, a.note, a.deck, calls=calls, checks=checks)
+    except note_cards.Refused as refused:
+        print(refused.line)
+        return 1
+    if out is None:
+        return 1
+    module, touched = out["module"], list(out["touched"])
+    h = CONFIG["rules"]["handoff"]
+    word = h["not_synced"]
+    if rules.on("sync_after_cards") and out["cards"]:
+        result = note_cards.sync(paths, module, anki_client)
+        touched += [f for f in result["touched"] + [note_cards.record_sync(paths, module, result)]
+                    if f and f not in touched]
+        word = h["anki_off"] if not CONFIG["anki"]["connect"]["enabled"]             else h["synced"] if result["synced"] is not None else h["unsynced"]
+    don.commit(paths, touched, "cards", module)  # one job, one commit
+    rules.handoff(paths, "cards", module=module.title, cards=len(out["cards"]), made=len(out["made"]),
+                  held=len(out["held"]), synced=word)
+    return 1 if out["failed"] and not out["cards"] else 0
 
 
 def _run(a, paths, anki_client, calls, learner_core, checks) -> int:
