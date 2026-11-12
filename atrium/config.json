@@ -181,6 +181,46 @@
     }
   },
 
+  "import_chats": {
+    "_note": "python -m atrium.import_chats (nightly import) and python -m atrium import-chats --link-existing [--dry-run] (backfill). Every chat note gets one Related line (appended at the end) linking its day note, its handoff note (handoff.note) and the project/module notes it is about; only notes that exist are linked, at most max_related_links. The day note gets a day_section listing its chats. Notes are only ever added to: a line is appended or inserted, nothing existing is rewritten. {date} = YYYY-MM-DD; {path} = vault-relative path without .md; {name} = note name.",
+    "chats_folder": "Calendar/Chats",
+    "state_file": "Dev/chat-import-state.json",
+    "chat_type": "chat",
+    "chat_protection": "append",
+    "day_note": "Calendar/Log/{date}.md",
+    "link": "[[{path}|{name}]]",
+    "link_unsafe_chars": "#^|[]",
+    "related_line": "Related: {links}",
+    "related_prefix": "Related:",
+    "related_join": " · ",
+    "max_related_links": 5,
+    "day_section": "## Chats",
+    "day_line": "- {link}",
+    "_protection": "AI-RULES.md: protection is open (edit), append (add lines only) or locked (unattended: never). Missing = locked, except where missing says otherwise: chat notes are this importer's own output (written before it set the field).",
+    "protection": {"field": "protection", "writable": ["open", "append"],
+                   "missing": {"chat": "append", "day": "locked"}},
+    "_match": "Project/module notes a chat is about: candidates are the notes matching candidate_globs (minus exclude_names, fnmatch on the note name). Each candidate's terms are its name, its name minus any drop_suffixes, its aliases_field list and extra_aliases[name]; terms shorter than min_term_chars, or shared by two candidates, are dropped. A chat's score for a note is how many of its text units (title, and each bullet under match_sections) contain one of the note's terms as a whole phrase (case-insensitive). Notes scoring min_score or more are linked, highest first; ties go to the shallower note (the hub) when prefer_shallow.",
+    "match": {
+      "candidate_globs": ["Atlas/Projects/**/*.md", "Atlas/Academic/SEM 1 Modules/**/*.md", "Denisse/*.md", "Efforts/**/*.md"],
+      "exclude_names": ["*-Index", "Ideas", "Reading list", "Coursework", "Tasks", "roadmap"],
+      "drop_suffixes": [" notes"],
+      "aliases_field": "aliases",
+      "extra_aliases": {},
+      "min_term_chars": 4,
+      "min_score": 1,
+      "prefer_shallow": true,
+      "match_title": true,
+      "match_sections": ["## What was asked"]
+    },
+    "dry_run_sample": 5,
+    "sample_line": "  {chat} -> {links}",
+    "report": "{chats} chat note(s) {verb} a Related line ({already} already had one, {empty} with nothing to link, {locked_chats} skipped by protection); {days} day note(s) {verb} {lines} Chats line(s) ({locked_days} skipped by protection).",
+    "verb_dry": "would get",
+    "verb_apply": "got",
+    "dry_header": "(dry run: nothing written)",
+    "failed": "Linking failed: check the vault path and permissions; lines already added were kept."
+  },
+
   "digest": {
     "_note": "python -m atrium digest [--since HOURS] [--dry]: what happened on this laptop since the last digest. Sections are written in the order listed and a section with no lines is left out. When no section with counts_as_activity has a line, nothing is written (the state still moves on). log/review are repo-relative; state_file and globs are vault-relative.",
     "state_file": "Dev/digest-state.json",
