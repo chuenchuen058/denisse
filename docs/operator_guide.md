@@ -40,7 +40,7 @@ command blocks exists.
 |---|---|---|
 | **Runner** (`orchestra/runner.py`) | Task Scheduler task "Denisse Orchestra", from the main checkout | Every 2 minutes, **only while you are logged on** (no stored password). Screen locked is fine; logged off or asleep means no ticks. |
 | **Task sessions** | Each in its own worktree, `..\denisse-wt\<slug>`, on branch `review/<slug>` | Started by a tick. Up to 3 Claude, 1 Codex and 1 Copilot at once (`lane_slots`). A task goes to Copilot only with `Lane: copilot`, until the daily exams have scored it. |
-| **Power** | The runner checks the battery itself (`orchestra/power.py`) | On battery, ticks still run and finish off completed work (gate, merge, push), but **no new task starts** until you are back on mains. Running tasks are never killed for power. |
+| **Power** | The runner checks the battery itself (`orchestra/power.py`); it is the only thing that decides | On battery, ticks still run and finish off completed work (gate, merge, push). With `dispatch_on_battery: false` (today) **no new task starts** until you are back on mains. Set it `true` in `orchestra/config.json` and, above `battery_floor_percent`, `Weight: light` tasks (`battery_weights`) start, at most `battery_lane_slots` (1) lanes at once; heavy tasks and master's baseline check wait for mains. At or under the floor nothing new starts. `power.py allow-once` still lets one task of any weight through. Running tasks are never killed for power. |
 | **Producer** (local team, optional) | Task "Denisse Orchestra Producer", local Ollama model | Every 30 min if registered. Writes draft tasks only. |
 | **Exams** | The runner, as a hidden background process (`orchestra/exams/daily.py`, lock `.review/exams.lock`) | First tick after 07:10 (`exams_daily_at`), once a day, not while any lane is limited. One canary exam each for `exams_agents` (codex, copilot, local; claude only with `exams_include_claude`; add `don` for the study tutor's own canary, answered from a fixture vault), 15 min cap in all. Writes `.review/exams/scores.json`, `Dev/Agent-Scores.md`, and a line in runner.log and the Orchestra day note. Takes no lane slot. The older opt-in Task "Denisse Agent Canary" (`install_task.ps1 -Canary`) is now redundant. |
 | **Atrium capture** | A Claude Code hook (Stop, PreCompact, SessionEnd) | At the end of each Claude Code session; saves it into the vault. |
@@ -168,6 +168,9 @@ powershell -ExecutionPolicy Bypass -File orchestra\install_task.ps1
 
 `atrium.import_chats` is a dry run until you add `--apply`. `install_task.ps1`
 re-registers "Denisse Orchestra" in place (add `-Canary` / `-Producer` for those tasks).
+It registers the tick to start and keep running on battery, so the runner's battery rule
+(Power row above) is the only one. A task registered before that still has Windows' "Start
+only if on AC power" and does nothing on battery until you re-run this once.
 `orchestra.soak` runs the whole runner against a throwaway repo with fake lanes, concurrent
 ticks, kills and power flips, and checks invariants at the end; run it (a few seeds) after
 touching the runner's locking or integration. Details and the bugs it found:

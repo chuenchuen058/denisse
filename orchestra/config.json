@@ -173,7 +173,10 @@
 
   "dispatch_on_battery": false,
   "battery_floor_percent": 30,
-  "_dispatch_on_battery": "Master prompt section 8: pause heavy background work on battery. false = on battery the runner starts no new lane (logs ON BATTERY at most every 30 min); running lanes finish and a finished lane is still gated, merged and pushed. true = dispatch on battery until battery_floor_percent, then stop starting lanes. Running lanes are never killed for power. Task Scheduler no longer stops ticks on unplug (install_task.ps1, 2 Nov 2026).",
+  "_dispatch_on_battery": "Master prompt section 8: pause heavy background work on battery. false = on battery the runner starts no new lane (logs ON BATTERY at most every 30 min); running lanes finish and a finished lane is still gated, merged and pushed. true = dispatch on battery until battery_floor_percent, then stop starting lanes; above the floor only battery_weights tasks start, at most battery_lane_slots lanes at once, and master's background baseline run waits for AC. Running lanes are never killed for power. The runner is the only place that decides: install_task.ps1 registers the tick to start and keep running on battery (2 Nov 2026; re-register to apply).",
+  "battery_lane_slots": 1,
+  "battery_weights": ["light"],
+  "_battery_lane_slots": "On battery with dispatch_on_battery true and the battery above battery_floor_percent: at most this many lanes run at once (every running lane counts, including ones started on AC), and only tasks whose Weight is in battery_weights start; a heavy task waits for AC. The one-task override (power_override_*) is separate: exactly one task, any weight. Chuen, 12 Nov 2026.",
   "power_override_minutes": 60,
   "power_override_file": "power_override.json",
   "power_override_used_file": "power_override_used.json",

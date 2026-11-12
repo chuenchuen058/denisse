@@ -93,6 +93,14 @@ def dispatch_block(status: dict, cfg: dict) -> str | None:
     return None
 
 
+def heavy_block(status: dict, cfg: dict) -> str | None:
+    """Why heavy background work (master's baseline run) may not start now, or None. Never on
+    battery, even with dispatch_on_battery on: that lets light lanes start, nothing heavier."""
+    if not on_battery(status):
+        return None
+    return dispatch_block(status, cfg) or "on battery, heavy work waits for AC"
+
+
 def describe(status: dict, cfg: dict) -> str:
     """'AC' or 'battery 87% (dispatch paused)' for STATE NOW and status.py."""
     if not on_battery(status):
