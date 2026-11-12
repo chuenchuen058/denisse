@@ -396,9 +396,12 @@ def _check(module, src, written, before, checks, when, num_ctx, scope, paths) ->
     text = src.text[:max(0, model.chunk_chars(num_ctx) - len(standing))]
     c = don.ctx(module)
     scope_text = _scope_context(module, src, scope)
-    scope_key = _hash(json.dumps([text, scope_text, _C["scope"], _K["system"], _K["user"], _K["schema"],
-                                 _K["other_module"], _K["reasons"]],
-                                sort_keys=True, ensure_ascii=False))
+    # Chuen's check rules are part of what the checker judged by, so a changed
+    # rule re-checks. Only when there are any: with no rules note the key is
+    # what it was, and the deck is not re-checked for nothing.
+    keyed = [text, scope_text, _C["scope"], _K["system"], _K["user"], _K["schema"],
+             _K["other_module"], _K["reasons"]] + ([standing] if standing else [])
+    scope_key = _hash(json.dumps(keyed, sort_keys=True, ensure_ascii=False))
     done, pending = [], {}
     reused = 0
     for i, card in enumerate(written):

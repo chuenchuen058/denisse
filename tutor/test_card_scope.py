@@ -196,6 +196,37 @@ class CardScopeTests(DonFixture):
         self.assertEqual(out["cards"], [])
         self.assertEqual(out["held"][0]["check"]["reason"], "outside syllabus")
 
+    def test_changed_check_rules_recheck_and_unchanged_rules_reuse(self):
+        rule = "\nRULES:\nA card that hedges is wrong."
+        with mock.patch.object(cards.rules, "block", return_value=""):
+            self.make([FOURIER])
+        with mock.patch.object(cards.rules, "block", return_value=rule):
+            writer_log, check_log = [], []
+            out = self.make([FOURIER], writer_log=writer_log, check_log=check_log)
+            self.assertEqual(writer_log, [])
+            self.assertTrue(check_log, "new rules need a fresh check")
+            self.assertEqual(len(out["cards"]), 1)
+            check_log.clear()
+            self.make([FOURIER], check_log=check_log)
+            self.assertEqual(check_log, [], "the same rules reuse the check")
+        with mock.patch.object(cards.rules, "block", return_value=rule + " Units always."):
+            check_log = []
+            self.make([FOURIER], check_log=check_log)
+            self.assertTrue(check_log, "an edited rule needs a fresh check")
+
+    def test_no_rules_keeps_the_check_key_it_had(self):
+        with mock.patch.object(cards.rules, "block", return_value=""):
+            self.make([FOURIER])
+            deck = cards.load(self.paths, self.ss_module)
+            [card] = [c for s in deck["sources"].values() for c in s["cards"]]
+        k = conf.CONFIG["cards"]["check"]
+        text = self.src.text[:max(0, cards.model.chunk_chars(None))]
+        scope = cards.module_scope(self.paths, self.ss_module, [self.src])
+        old = cards._hash(json.dumps([text, cards._scope_context(self.ss_module, self.src, scope),
+                                      conf.CONFIG["cards"]["scope"], k["system"], k["user"], k["schema"],
+                                      k["other_module"], k["reasons"]], sort_keys=True, ensure_ascii=False))
+        self.assertEqual(card["check"]["scope"], old, "no rules note: existing checks stay reusable")
+
     def test_topic_label_is_part_of_check_identity(self):
         first = copy.deepcopy(FOURIER)
         self.assertNotEqual(cards.check_key(first), cards.check_key({**first, "topic": "Electromagnetism"}))
