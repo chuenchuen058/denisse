@@ -552,6 +552,8 @@ def save_state(state: dict) -> None:
 
 def today_usage(state: dict) -> dict:
     u = state["days"].setdefault(now().date().isoformat(), {})
+    if not u:  # a new day also keeps reported cost apart from estimates (see charge)
+        u["known_cost_usd"] = 0
     for k in ("work_s", "maint_s", "cost_usd", "known_cost_s"):
         u.setdefault(k, 0)
     u.setdefault("estimated_runs", 0)
@@ -585,6 +587,7 @@ def task_state(state: dict, task: Task) -> dict:
     ts = state["tasks"].setdefault(task.slug, {"attempts": 0, "history": []})
     if ts.get("digest") != task.digest:  # edited (or new) task: a fresh start
         ts.update(digest=task.digest, attempts=0, last_result=None, last_end=None)
+        ts.pop("lost_to_restart", None)
     return ts
 
 
@@ -1080,9 +1083,10 @@ def run_id(info: dict | None) -> str:
     return f"{info['pid']}@{info['since']}" if info.get("pid") and info.get("since") else ""
 
 
-def set_lock_task(slug: str, lane: str = "") -> str:
-    """Name the task in this tick's slot lock; returns the run's id (see run_id)."""
-    info = _my_lock(task=slug, lane=lane)
+def set_lock_task(slug: str, lane: str = "", **extra) -> str:
+    """Name the task in this tick's slot lock; returns the run's id (see run_id). `extra`: e.g.
+    the lane's timeout, so reconcile() caps a dead lane's charge at it."""
+    info = _my_lock(task=slug, lane=lane, **extra)
     info["run"] = run_id(info)
     write_lock(LOCK_FILE, info)
     return info["run"]
@@ -1959,10 +1963,16 @@ def charge(state: dict, task: Task, seconds: int, cost: float | None, lane: str 
     if cost is not None:
         u["cost_usd"] += cost
         u["known_cost_s"] += seconds
+        if "known_cost_usd" in u:
+            u["known_cost_usd"] += cost
         return f"${cost:.2f}"
     # Unpriced lanes (codex, gemini, copilot) report no cost and run on their own plans: no estimate.
     if (lane or task.lane) not in C["unpriced_lanes"] and seconds:
-        rate = (u["cost_usd"] / (u["known_cost_s"] / 60)) if u["known_cost_s"] >= 60 else C["unknown_cost_per_min_usd"]
+        # The rate is reported cost over reported minutes. cost_usd also holds earlier estimates, and
+        # using it let one estimate inflate the next (11 Nov 2026: ~$98, then ~$558 at 6x the rate).
+        # A day recorded before known_cost_usd existed falls back to cost_usd.
+        known = u.get("known_cost_usd", u["cost_usd"])
+        rate = (known / (u["known_cost_s"] / 60)) if u["known_cost_s"] >= 60 else C["unknown_cost_per_min_usd"]
         est = rate * seconds / 60
         u["cost_usd"] += est
         u["estimated_runs"] += 1
@@ -1973,11 +1983,18 @@ def charge(state: dict, task: Task, seconds: int, cost: float | None, lane: str 
 # ---------------------------------------------------------------- tick
 
 def finish(task: Task, state: dict, wt: Path, branch: str, outcome: str, seconds: int,
-           before_status: set[str] = frozenset(), prov: dict | None = None, run: str = "") -> str:
+           before_status: set[str] = frozenset(), prov: dict | None = None, run: str = "",
+           timeout: int | None = None, booted: dt.datetime | None = None) -> str:
+    """`seconds` is wall time since the lane started; only the part it could have run (see
+    chargeable_seconds) is charged. `booted`: Windows booted after the lane started (reconcile),
+    so a lane with no report died with the restart (lost_to_restart_status)."""
     report = REPORTS / f"{task.slug}.md"
     ts = task_state(state, task)
     lane_info = lane_result(REPORTS / f"{task.slug}.lane.log")
-    spent = charge(state, task, seconds, lane_info.get("cost_usd"))
+    end = now()
+    ran, cut = chargeable_seconds(end - dt.timedelta(seconds=seconds), end,
+                                  timeout or timeout_for(task.weight, state), booted)
+    spent = charge(state, task, ran, lane_info.get("cost_usd"))
     provenance = provenance_fields(task.lane, prov, lane_info)
 
     if outcome == "TIMEOUT":
@@ -1985,7 +2002,11 @@ def finish(task: Task, state: dict, wt: Path, branch: str, outcome: str, seconds
     else:
         info = read_report(report)
         if info["result"] != "NO_REPORT":
-            state["durations"].setdefault(task.weight, []).append(seconds)
+            state["durations"].setdefault(task.weight, []).append(ran)
+    if cut:
+        info["note"] = f"{info['note']} (charged {ran}s of {seconds}s: {cut})".lstrip()
+    if info["result"] == "NO_REPORT" and booted and ts.get("lost_to_restart", 0) < C["lost_to_restart_retries"]:
+        return _lost_to_restart(task, ts, booted, seconds, ran, spent, info["note"], provenance, run)
     if info["result"] in ("NO_REPORT", "TIMEOUT"):
         hit = detect_limit(task.lane, REPORTS / f"{task.slug}.lane.log")
         auth = None if hit else detect_auth(task.lane, REPORTS / f"{task.slug}.lane.log")
@@ -2000,6 +2021,8 @@ def finish(task: Task, state: dict, wt: Path, branch: str, outcome: str, seconds
              "weight": task.weight, "note": info["note"], "premise": info["premise"], "spent": spent,
              "denied": lane_info.get("denied", []), "main_checkout_changed": stray,
              "hooks_loaded": hooks_loaded, **provenance}
+    if cut:
+        entry["charged_s"] = ran
     if task.fields.get("lane-from"):
         entry["fallback_from"] = task.fields["lane-from"]
     if task.fields.get("lane-picked"):  # lane_pick chose it (Lane: auto, or moved off the header lane)
@@ -2302,6 +2325,27 @@ def _limited(task: Task, state: dict, ts: dict, hit: str, seconds: int, spent: s
     return "LIMITED"
 
 
+def _lost_to_restart(task: Task, ts: dict, booted: dt.datetime, seconds: int, ran: int, spent: str,
+                     note: str, provenance: dict, run: str = "") -> str:
+    """The lane died with a Windows restart and left no report: not an attempt, re-run (config
+    lost_to_restart_retries times; a further loss is NO_REPORT as usual). No backoff: the
+    status is not in INFRA."""
+    status = C["lost_to_restart_status"]
+    ts["attempts"] = max(0, ts["attempts"] - 1)
+    ts["lost_to_restart"] = ts.get("lost_to_restart", 0) + 1
+    note = f"lane died with the restart (Windows booted {booted:%Y-%m-%d %H:%M}); {note}".rstrip("; ")
+    entry = {"end": now().isoformat(), "result": status, "seconds": seconds, "charged_s": ran,
+             "lane": task.lane, "weight": task.weight, "note": note, "premise": "not stated",
+             "spent": spent, **provenance}
+    if run:
+        entry["run"] = run
+    ts["history"].append(entry)
+    ts.update(last_end=entry["end"], last_result=status)
+    log(f"{status} {task.slug} after {seconds}s ({spent}, attempt not counted, re-run "
+        f"{ts['lost_to_restart']} of {C['lost_to_restart_retries']}) {note}")
+    return status
+
+
 def aftercare_on() -> bool:
     """Vault notes and pushes are for the real repo only, never a test's temp repo."""
     return os.environ.get("ORCHESTRA_AFTERCARE") == "1" or "ORCHESTRA_REPO" not in os.environ
@@ -2518,13 +2562,17 @@ def _collect(state: dict, info: dict, slug: str) -> str:
         started = dt.datetime.fromisoformat(info.get("lane_since") or info.get("since"))
         seconds = max(0, int((now() - started).total_seconds()))
     except (TypeError, ValueError):
-        seconds = 0
+        started, seconds = None, 0
+    boot = boot_time()
+    booted = boot if boot and started and started < boot else None  # the restart killed the lane
     before = set(info["before"]) if isinstance(info.get("before"), list) else main_checkout_status()
-    log(f"RECONCILE collecting {slug}: lane gone, report {'found' if local_report.exists() else 'missing'}")
+    log(f"RECONCILE collecting {slug}: lane gone, report {'found' if local_report.exists() else 'missing'}"
+        + (f", Windows booted {booted:%Y-%m-%d %H:%M} since it started" if booted else ""))
     ts = task_state(state, task)
     n = len(ts["history"])
     prov = {k: info.get(k) for k in PROVENANCE_KEYS}  # run_lane put them in the lock
-    result = finish(task, state, wt, branch, "ran", seconds, before, prov, run)
+    timeout = info.get("timeout") if isinstance(info.get("timeout"), int) else None  # set at dispatch
+    result = finish(task, state, wt, branch, "ran", seconds, before, prov, run, timeout, booted)
     for entry in ts["history"][n:]:
         entry["recovered"] = True
     save_state(state)
@@ -2557,6 +2605,99 @@ def install_pre_push() -> bool:
     except (OSError, subprocess.SubprocessError) as e:
         log(f"pre-push hook not installed: {e!r}")
         return False
+
+
+# ---------------------------------------------------------------- uptime
+# A lane can't run while the laptop is off or asleep, and its own timeout can't fire then either
+# (11 Nov 2026: a restart at 18:47 killed two Claude lanes; the 22:46 tick charged them ~$650
+# estimated for 4 h and the daily cap moved work off Claude). Two sources, both read on Windows
+# without extra packages: the boot time (now - GetTickCount64, which keeps counting through sleep,
+# so only a real boot moves it) and the gaps between ticks (Task Scheduler runs one every 2 min;
+# a gap over tick_gap_counts_as_downtime_s is the machine off or asleep).
+
+def uptime_file() -> Path:
+    return REVIEW / C["uptime_file"]
+
+
+def boot_time() -> dt.datetime | None:
+    """When Windows last booted (local time, to the second), or None if it can't be read."""
+    try:
+        import ctypes
+        f = ctypes.windll.kernel32.GetTickCount64
+        f.restype = ctypes.c_ulonglong
+        return now() - dt.timedelta(seconds=int(f()) // 1000)
+    except Exception:  # noqa: BLE001 -- not Windows, or no kernel32: no boot time, gaps still count
+        return None
+
+
+def _read_uptime() -> dict:
+    try:
+        data = json.loads(uptime_file().read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def downtime_gaps() -> list[tuple[dt.datetime, dt.datetime]]:
+    out = []
+    for g in _read_uptime().get("downtime") or []:
+        try:
+            out.append((dt.datetime.fromisoformat(g[0]), dt.datetime.fromisoformat(g[1])))
+        except (TypeError, ValueError, IndexError):
+            continue
+    return out
+
+
+def note_tick(at: dt.datetime | None = None) -> None:
+    """Record this tick. A gap since the previous tick longer than tick_gap_counts_as_downtime_s
+    is kept as downtime [previous tick, this tick]. Never raises."""
+    at = at or now()
+    try:
+        with _FileLock(REVIEW / f"{C['uptime_file']}.lock", wait=10, stale=60):
+            data = _read_uptime()
+            keep = at - dt.timedelta(days=C["downtime_keep_days"])
+            gaps = [g for g in downtime_gaps() if g[1] >= keep]
+            try:
+                last = dt.datetime.fromisoformat(data["last_tick"])
+            except (KeyError, TypeError, ValueError):
+                last = None
+            if last and (at - last).total_seconds() > C["tick_gap_counts_as_downtime_s"] \
+                    and (last, at) not in gaps:
+                gaps.append((last, at))
+                log(f"DOWNTIME no tick from {last.isoformat(sep=' ')} to {at.isoformat(sep=' ')} "
+                    f"({int((at - last).total_seconds())}s): laptop off or asleep; lanes are not charged for it")
+            latest = max(at, last) if last else at
+            REVIEW.mkdir(parents=True, exist_ok=True)
+            uptime_file().write_text(json.dumps({
+                "last_tick": latest.isoformat(),
+                "downtime": [[a.isoformat(), b.isoformat()] for a, b in sorted(gaps)]}), encoding="utf-8")
+    except Exception as e:  # noqa: BLE001 -- bookkeeping must never stop a tick
+        log(f"uptime: tick not recorded: {e!r}")
+
+
+def _overlap(gaps, start: dt.datetime, end: dt.datetime) -> float:
+    return sum(max(0.0, (min(b, end) - max(a, start)).total_seconds()) for a, b in gaps)
+
+
+def chargeable_seconds(start: dt.datetime, end: dt.datetime, timeout: int | None = None,
+                       boot: dt.datetime | None = None, gaps=None) -> tuple[int, str]:
+    """(seconds the lane could actually have run between start and end, why it is less, or "").
+    Minus downtime gaps; only up to the boot if Windows booted after the lane started (the
+    restart killed it); never more than the lane's own timeout."""
+    gaps = downtime_gaps() if gaps is None else gaps
+    raw = max(0.0, (end - start).total_seconds())
+    secs, why = raw - _overlap(gaps, start, end), []
+    if secs < raw:
+        why.append(f"{int(raw - secs)}s off or asleep")
+    if boot and start < boot <= end:
+        before = (boot - start).total_seconds() - _overlap(gaps, start, boot)
+        if before < secs:
+            secs = before
+            why.append(f"Windows booted at {boot:%Y-%m-%d %H:%M}")
+    if timeout and secs > timeout:
+        secs = timeout
+        why.append(f"capped at its {timeout}s timeout")
+    return max(0, int(secs)), "; ".join(why)
 
 
 # ---------------------------------------------------------------- power
@@ -2718,6 +2859,8 @@ def _record_crash(state: dict, task: Task, e: BaseException) -> None:
 def _tick(dry_run: bool = False) -> str:
     for d in (QUEUE, REPORTS, ARCHIVE, PARKED):
         d.mkdir(parents=True, exist_ok=True)
+    if not dry_run:  # first: the gap since the last tick is downtime that reconcile must not charge
+        note_tick()
     if aftercare_on() and not dry_run:  # the real repo only: a campaign Chuen set in chat, installed once
         campaign.seed(REVIEW, REPO, log)
     # Re-read the campaign-governed limits every tick: its overrides end at stop_at with no config
@@ -2827,7 +2970,7 @@ def _tick(dry_run: bool = False) -> str:
             ts["attempts"] += 1
             ts["last_start"] = now().isoformat()
             save_state(state)  # count the attempt before running, so a crash still counts
-            run = set_lock_task(task.slug, task.lane)
+            run = set_lock_task(task.slug, task.lane, timeout=timeout)
         start_watchdog(timeout + C["tick_watchdog_extra_s"])
         fb = ""
         if task.fields.get("lane-from"):
@@ -2873,7 +3016,7 @@ def _tick(dry_run: bool = False) -> str:
             save_state(state)
             visible.lane_finished(task, "LANE_MISSING", C, log)
             return "LANE_MISSING"
-        result = finish(task, state, wt, branch, outcome, seconds, before, prov, run)
+        result = finish(task, state, wt, branch, outcome, seconds, before, prov, run, timeout)
         save_state(state)
         write_vault_note(task, ts, result)
         visible.lane_finished(task, result, C, log)
