@@ -71,6 +71,11 @@
 
   "daily_spend_cap_usd": 5.0,
   "unknown_cost_per_min_usd": 0.10,
+  "tick_gap_counts_as_downtime_s": 900,
+  "uptime_file": "uptime.json",
+  "downtime_keep_days": 3,
+  "lost_to_restart_status": "LOST-TO-RESTART",
+  "lost_to_restart_retries": 1,
   "done_window_days": 14,
   "status_by_prompt_days": 14,
   "status_recent_runs": 5,

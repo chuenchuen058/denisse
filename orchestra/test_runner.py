@@ -845,6 +845,97 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(self.state()["tasks"]["nr2"]["attempts"], 2)
         self.assertTrue((self.R.PARKED / "nr2.md").exists())
 
+    # --- a laptop restart (11 Nov 2026: two lanes killed at 18:47, collected at 22:46 as NO_REPORT
+    #     and charged ~$650 estimated for the hours the laptop was off)
+
+    def dead_lane_lock(self, slug, ran_s, timeout=3600):
+        started = dt.datetime.now().replace(microsecond=0) - dt.timedelta(seconds=ran_s)
+        self.write_lock(pid=self.dead_pid(), created=1, task=slug, lane="fake", lane_pid=self.dead_pid(),
+                        lane_created=1, before=[], since=started.isoformat(), lane_since=started.isoformat(),
+                        timeout=timeout)
+        return started
+
+    def test_restart_gap_charges_at_most_the_timeout_and_is_lost_to_restart(self):
+        self.add("rb")
+        self.orphan_worktree("rb")
+        started = self.dead_lane_lock("rb", 15000)
+        self.R.boot_time = lambda: started + dt.timedelta(seconds=14000)  # rebooted 4 h after it started
+        st = self.R.load_state()
+        lost = self.R.C["lost_to_restart_status"]
+        self.assertEqual(self.R.reconcile(st), {"rb": lost})
+        s = self.state()
+        h = s["tasks"]["rb"]["history"][-1]
+        self.assertEqual(h["result"], lost)
+        self.assertLessEqual(h["charged_s"], 3600)
+        day = s["days"][dt.date.today().isoformat()]
+        self.assertLessEqual(day["cost_usd"], self.R.C["unknown_cost_per_min_usd"] * 60 + 1e-9,
+                             "charged for at most the 3600 s timeout, not 15 000 s")
+        self.assertLessEqual(day["work_s"], 3600)
+        self.assertEqual(s["tasks"]["rb"]["attempts"], 0, "not an attempt")
+        self.assertIn(f"{lost} rb after", self.R.LOG_FILE.read_text(encoding="utf-8"))
+
+    def test_tick_gaps_are_downtime_and_not_charged(self):
+        t0 = dt.datetime.now().replace(microsecond=0) - dt.timedelta(seconds=15000)
+        gap = self.R.C["tick_gap_counts_as_downtime_s"]
+        self.R.note_tick(t0)
+        self.R.note_tick(t0 + dt.timedelta(seconds=120))  # a normal tick: no downtime
+        self.assertEqual(self.R.downtime_gaps(), [])
+        back = t0 + dt.timedelta(seconds=120 + gap + 1)
+        self.R.note_tick(back)
+        self.assertEqual(self.R.downtime_gaps(), [(t0 + dt.timedelta(seconds=120), back)])
+        # no boot time (e.g. sleep): the gap alone is taken off, the timeout still caps the rest
+        ran, why = self.R.chargeable_seconds(t0, back + dt.timedelta(seconds=60), None, None)
+        self.assertEqual(ran, 120 + 60)
+        self.assertIn("off or asleep", why)
+        ran, why = self.R.chargeable_seconds(t0, t0 + dt.timedelta(seconds=15000), 3600, None, [])
+        self.assertEqual((ran, why), (3600, "capped at its 3600s timeout"))
+        # a reboot inside the run: only up to the boot, minus the gap before it
+        boot = back - dt.timedelta(seconds=30)
+        self.assertEqual(self.R.chargeable_seconds(t0, back + dt.timedelta(seconds=600), 3600, boot)[0], 120)
+
+    def test_an_estimate_does_not_raise_the_rate_of_the_next(self):
+        self.add("e1")
+        t = next(t for t in self.R.load_queue() if t.slug == "e1")
+        st = self.R.load_state()
+        self.R.charge(st, t, 600, 1.0)  # reported: $1 for 10 min = $0.10/min
+        first = self.R.charge(st, t, 6000, None)
+        second = self.R.charge(st, t, 6000, None)
+        self.assertEqual(first, second, "both estimated at the reported $0.10/min")
+        self.assertEqual(first, "~$10.00 (estimated)")
+
+    def test_normal_no_report_still_charges_as_before(self):
+        self.add("nn")
+        self.orphan_worktree("nn")
+        started = self.dead_lane_lock("nn", 600)
+        self.R.boot_time = lambda: started - dt.timedelta(days=1)  # no restart during the run
+        self.assertEqual(self.R.reconcile(self.R.load_state()), {"nn": "NO_REPORT"})
+        s = self.state()
+        h = s["tasks"]["nn"]["history"][-1]
+        self.assertNotIn("charged_s", h)
+        self.assertEqual(s["tasks"]["nn"]["attempts"], 1, "counts as an attempt")
+        cost = s["days"][dt.date.today().isoformat()]["cost_usd"]
+        self.assertAlmostEqual(cost, self.R.C["unknown_cost_per_min_usd"] * h["seconds"] / 60, places=6)
+        self.assertGreaterEqual(h["seconds"], 600)
+
+    def test_lost_to_restart_reruns_once_without_counting_an_attempt(self):
+        self.add("lr")
+        lost = self.R.C["lost_to_restart_status"]
+        self.orphan_worktree("lr")
+        started = self.dead_lane_lock("lr", 5000)
+        self.R.boot_time = lambda: started + dt.timedelta(seconds=600)
+        self.assertEqual(self.R.reconcile(self.R.load_state()), {"lr": lost})
+        ts = self.state()["tasks"]["lr"]
+        self.assertEqual((ts["attempts"], ts["last_result"], ts["lost_to_restart"]), (0, lost, 1))
+        self.assertTrue((self.R.QUEUE / "lr.md").exists())
+        self.assertIsNone(self.why("lr"), "re-run at once: no backoff, no retry used")
+        # lost to a restart a second time: now it is NO_REPORT and counts
+        self.orphan_worktree("lr")
+        started = self.dead_lane_lock("lr", 5000)
+        self.R.boot_time = lambda: started + dt.timedelta(seconds=600)
+        self.assertEqual(self.R.reconcile(self.R.load_state()), {"lr": "NO_REPORT"})
+        ts = self.state()["tasks"]["lr"]
+        self.assertEqual((ts["attempts"], ts["last_result"]), (1, "NO_REPORT"))
+
     def test_parallel_state_saves_keep_lane_limits(self):
         base = self.R.load_state()
         mine = json.loads(json.dumps(base))
