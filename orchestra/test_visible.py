@@ -135,6 +135,28 @@ class VisibleTest(unittest.TestCase):
         self.assertIn(str(HERE / "toast.ps1"), self.ran[0][0])
         self.assertEqual(self.ran[0][1]["timeout"], self.cfg["toast_timeout_s"])
 
+    def test_a_lane_with_its_own_tab_does_not_also_open_the_live_window(self):
+        """One window per run (config live_window_with_lane_tab false): the tab shows the lane, so
+        the live window opens only for a lane that gets no tab. The toasts are not affected."""
+        cfg = {**self.cfg, "lane_tabs": True, "lane_tab_lanes": ["codex"], "live_window_with_lane_tab": False}
+        started = lambda c, lane: visible.lane_started(Task(lane=lane), c, self.review, self.tmp, self.log.append,  # noqa: E731
+                                                       self.spawn, self.alive, self.fake_run)
+        started(cfg, "codex")
+        self.assertEqual(self.spawned, [], "codex gets a tab: no live window")
+        self.assertEqual(len(self.ran), 1, "the start toast still goes out")
+        started(cfg, "gemini")
+        self.assertEqual(len(self.spawned), 1, "no tab for this lane: the live window opens")
+        self.procs.clear()
+        self.spawned.clear()
+        started({**cfg, "lane_tabs": False}, "codex")
+        self.assertEqual(len(self.spawned), 1, "tabs off: the live window is the only view")
+        self.procs.clear()
+        self.spawned.clear()
+        started({**cfg, "live_window_with_lane_tab": True}, "codex")
+        self.assertEqual(len(self.spawned), 1, "true = both, as before")
+        defaults = json.loads((HERE / "config_defaults.json").read_text(encoding="utf-8"))
+        self.assertIs(defaults["live_window_with_lane_tab"], False)
+
     def test_toast_off_failing_or_hanging_is_a_log_line_at_most(self):
         self.assertFalse(visible.toast({**self.cfg, "toasts": False}, "x", self.log.append, self.fake_run))
         self.assertEqual(self.ran, [])

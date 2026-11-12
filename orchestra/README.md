@@ -113,6 +113,10 @@ every agent goes through Don. Which tasks is the config rule
 default) = every task, any lane; `named` = only a task whose header says
 `Consult: don` or whose text names `study_brief`, `study_mode`, `tutor` or
 `learner` as a file or folder (`consult.json` path_patterns); `off` = none.
+`consult_narrow_to` caps that rule without editing it and is shipped as
+`named`: `all` then means `named`, so only study tasks reach the tutor (12 Nov
+2026, `docs/orchestra_vs_thomas.md`: no model council); `""` = no cap, every
+task again.
 A consulted task has `python -m tutor consult --json` run on its prompt in the
 main checkout before the lane starts (a task about nothing study-related gets
 the general question, `question_general`).
@@ -149,7 +153,10 @@ never twice. A Windows toast says "Orchestra: <lane> started <title>" and
 "Orchestra: <lane> finished: PASS|PARTIAL|... <title>". Switches and wording:
 `live_window`, `live_window_title`, `live_window_argv`, `toasts`,
 `toast_started`, `toast_finished`, `toast_argv`, `toast_timeout_s` in
-`config.json`. A window or toast that fails is one log line, never a stopped
+`config.json`. One window per run: a lane that gets its own tab (`lane_tabs`,
+below) does not also open the live window unless `live_window_with_lane_tab`
+is true (12 Nov 2026, `docs/orchestra_vs_thomas.md`); `python
+orchestra\watch.py` opens it by hand. A window or toast that fails is one log line, never a stopped
 lane. If Task Scheduler runs the runner "whether the user is logged on or not",
 it has no desktop and neither can be seen: run it as the logged-on user.
 
@@ -176,7 +183,11 @@ When no `Queue: auto` task is left, the laptop is on AC and a lane has
 allowance, the runner asks the planner for the next tasks (one tick at a time,
 `.review/autopilot.lock`). It reads the vault's `Atlas/Task Ideas.md` Inbox,
 NOT DONE / ODD lines of recent reports, parked tasks (not those waiting on
-Chuen) and hot.md's "Waiting on Chuen" (not Orchestra's own block). The local
+Chuen) and hot.md's "Waiting on Chuen" (not Orchestra's own block), less the
+sources in `autopilot_sources_off`. Shipped, that takes out `not_done`, `odd`
+and `parked`: no task is written from Orchestra's own reports or park reasons
+("tasks generated from log errors" were not copied from Atrium;
+`docs/orchestra_vs_thomas.md`), only from Chuen's own notes. The local
 model judges each one (actionable? repo-only? a bug fix? title, files). If it
 can't answer, the fallback rule applies and the task is a draft. `Queue: auto` only
 for repo-only work whose gate (`autopilot_gate`) can run; everything else is

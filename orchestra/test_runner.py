@@ -407,8 +407,16 @@ class RunnerTest(unittest.TestCase):
         self.assertIn("CONSULT study2: ", log)
         self.assertIn("could not answer", log)
 
-    def test_plain_task_is_consulted_by_default_and_not_under_the_named_rule(self):
+    def test_plain_task_is_consulted_under_the_all_rule_and_not_when_narrowed_or_named(self):
         prompt = self.consult_with()
+        # Shipped (12 Nov 2026, docs/orchestra_vs_thomas.md): consult_applies all, capped by
+        # consult_narrow_to "named", so a plain task is not put to the tutor.
+        self.assertEqual((self.R.C["consult_applies"], self.R.C["consult_narrow_to"]), ("all", "named"))
+        self.add("plain0", extra=" A plain task under the shipped rule.")
+        self.assertEqual(self.R.tick(), "PASS")
+        self.assertEqual(prompt.read_text(encoding="utf-8"), self.R.build_prompt(".review/task.md", ".review/report.md"))
+        self.assertNotIn("CONSULT plain0", self.R.LOG_FILE.read_text(encoding="utf-8"))
+        self.R.C["consult_narrow_to"] = ""  # the all rule itself: every task, any lane
         self.add("plain")
         self.assertEqual(self.R.tick(), "PASS")
         self.assertIn("`.review/don.md`", prompt.read_text(encoding="utf-8"), "every task, any lane")
@@ -421,6 +429,7 @@ class RunnerTest(unittest.TestCase):
 
     def test_busy_or_failed_tutor_gives_the_notes_only_opinion(self):
         prompt = self.consult_with("crash", notes="ok")
+        self.R.C["consult_narrow_to"] = ""  # a plain task is consulted only under the un-narrowed all rule
         self.add("busy")
         self.assertEqual(self.R.tick(), "PASS")
         self.assertIn("confidence: medium", prompt.read_text(encoding="utf-8"))

@@ -68,7 +68,8 @@ What is happening now (read-only):
 is waiting, parked tasks and why, today's results and spend, the last log lines.
 `watch.py` follows the running sessions live; the runner opens it itself, once, in a window
 titled "Orchestra live" when a lane starts, and toasts each start and finish (config
-`live_window`, `toasts`; orchestra/README.md, "Seeing it run"). Each lane run also gets its own
+`live_window`, `toasts`; orchestra/README.md, "Seeing it run"; since 12 Nov 2026 only for a lane
+without its own tab, config `live_window_with_lane_tab`). Each lane run also gets its own
 Windows Terminal tab, "Claude: <task title>", that shows the session the way Claude Code does
 and closes itself after DONE (config `lane_tabs`). `runner.py --dry-run` shows what the next
 tick would pick without running anything, with each runnable task's scores per lane and
@@ -78,7 +79,9 @@ the winner. `lane_pick explain <slug>` prints the same for one task; `lane_pick 
 When the queue has no `Queue: auto` task left, the autopilot planner writes the next ones from
 the vault's Task Ideas Inbox, recent reports' NOT DONE / ODD, parked tasks and hot.md's waiting
 items. It spreads them over the lanes with allowance left and sends bug fixes to Claude. Anything
-not shown to be repo-only is a draft listed in hot.md. Its decisions are the `AUTOPILOT` lines in
+not shown to be repo-only is a draft listed in hot.md. Since 12 Nov 2026 the report and parked
+sources are switched off (config `autopilot_sources_off`; docs/orchestra_vs_thomas.md): it writes
+tasks only from the Inbox and your own waiting items. Its decisions are the `AUTOPILOT` lines in
 runner.log (config `autopilot`, `bugfix_lane`; orchestra/README.md, "Autopilot").
 
 Writing a task:

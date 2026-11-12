@@ -2,9 +2,10 @@
 
 Chuen (5 Nov 2026): "treat Don like a professional opinion on task"; (9 Nov):
 every agent goes through Don. Which tasks are consulted is the runner's config
-rule `consult_applies` (config.json): all (the default) = every task, any
+rule `consult_applies` (config.json): all = every task, any
 lane; named = a task whose header says `Consult: don` or whose text names the
-study tooling (consult.json path_patterns); off = none.
+study tooling (consult.json path_patterns); off = none. `consult_narrow_to`
+caps that rule (shipped: named, so all means named; "" = no cap).
 
 The consult is `python -m tutor consult --json` run in the main checkout, its
 opinion written into the worktree as `.review/don.md`, named in the lane
@@ -41,7 +42,7 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-RULE_KEYS = ("consult_applies", "consult_timeout_s", "consult_notes_timeout_s", "consult_busy_wait_s",
+RULE_KEYS = ("consult_applies", "consult_narrow_to", "consult_timeout_s", "consult_notes_timeout_s", "consult_busy_wait_s",
              "consult_busy_poll_s", "consult_gpu_busy_pct", "consult_notes_fallback")
 
 
@@ -87,9 +88,15 @@ def _named(fields: dict, text: str, cfg: dict) -> str | None:
 def why(fields: dict, text: str, cfg: dict | None = None, rule: dict | None = None) -> str | None:
     """Why this task is consulted, or None. consult_applies: all = every task (one that also
     names the tutor or the study tooling says so), named = only those, off = none. An
-    unknown value counts as all. consult.json "enabled": false is off whatever the rule."""
+    unknown value counts as all. consult.json "enabled": false is off whatever the rule.
+    consult_narrow_to caps it without editing it: named makes all mean named, off means off,
+    anything else (the empty string) leaves consult_applies as written."""
     cfg = cfg or load()
-    applies = str((rule if rule is not None else rules()).get("consult_applies", "")).strip().lower()
+    rule = rule if rule is not None else rules()
+    applies = str(rule.get("consult_applies", "")).strip().lower()
+    cap = str(rule.get("consult_narrow_to", "")).strip().lower()
+    if cap == cfg["applies_off"] or (cap == cfg["applies_named"] and applies != cfg["applies_off"]):
+        applies = cap
     if not cfg.get("enabled") or applies == cfg["applies_off"]:
         return None
     named = _named(fields, text, cfg)
