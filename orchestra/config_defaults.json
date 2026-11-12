@@ -53,6 +53,7 @@
                 "(out of|exhausted|no remaining|used (all|up)( of)?)( your)? (premium requests|ai credits)",
                 "ai credits?\\b.{0,40}\\b(exhausted|limit (reached|exceeded)|run out|used up)",
                 "monthly (limit|quota|allowance) (reached|exceeded|hit)",
+                "exceeded your (monthly )?(quota|limit)",
                 "you've (hit|reached|exceeded) your .{0,40}(limit|quota)",
                 "rate limit(ed)? (reached|exceeded)", "429 too many requests"]
   },
