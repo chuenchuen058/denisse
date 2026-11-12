@@ -504,6 +504,7 @@
         "done_class": "d",
         "groups": [
           {"title": "Waiting on you", "source": "hot", "section": "Waiting on Chuen"},
+          {"title": "From your reels", "source": "hot", "section": "From your reels"},
           {"title": "Orchestra", "source": "queue",
            "statuses": [{"status": "queued", "label": "Queued", "class": "s"},
                         {"status": "parked", "label": "Parked", "class": "u"},
