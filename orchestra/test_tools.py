@@ -95,6 +95,17 @@ class ToolsTest(unittest.TestCase):
         t = self.R.parse_task(q)
         self.assertIsNone(self.R.why_not_runnable(t, self.R.load_state()))
 
+    def test_plain_requeue_drops_an_old_merge_only_paragraph(self):
+        # 12 Nov 2026: a reviewer-blocked task re-queued with a note still ran merge-only
+        task = self.park()
+        mark = self.R.C["merge_only_mark"]
+        task.write_text(task.read_text(encoding="utf-8") + f"\n{mark} the work is on branch review/p1\n",
+                        encoding="utf-8")
+        self.Q.requeue("p1", note="fix the reviewer's points")
+        text = (self.R.QUEUE / "p1.md").read_text(encoding="utf-8")
+        self.assertNotIn(mark, text)
+        self.assertIn("fix the reviewer's points", text)
+
     def test_requeue_without_note_and_with_md_suffix(self):
         self.park()
         self.Q.requeue("p1.md")

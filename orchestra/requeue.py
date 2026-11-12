@@ -106,6 +106,10 @@ def requeue(slug: str, note: str | None = None, merge_only: bool = False) -> str
 
     when = R.now().isoformat(timespec="minutes")
     text = parked.read_text(encoding="utf-8").rstrip("\n")
+    # A plain re-queue means "run the lane again". A merge-only paragraph left from an
+    # earlier --merge-only pass would make the runner merge the old branch instead and
+    # skip the fix (12 Nov 2026: three reviewer-blocked tasks went straight back to review).
+    text = "\n".join(l for l in text.split("\n") if not l.startswith(MERGE_MARK)).rstrip("\n")
     text += f"\n\nRe-queued {when}: {note}\n" if note else f"\n\nRe-queued {when}\n"
     R.QUEUE.mkdir(parents=True, exist_ok=True)
     tmp = parked.with_suffix(".requeue.tmp")
