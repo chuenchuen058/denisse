@@ -570,7 +570,12 @@
       "_projects": "Projects: the bullets of a hot.md section; lead_pattern splits off a leading date and [who].",
       "projects": {"note": "hot.md", "section": "Active right now", "max": 5, "item_chars": 110, "skip": ["TODO"],
                    "lead_pattern": "^(?:(?P<date>\\d{4}-\\d{2}-\\d{2})\\s*)?(?:\\[(?P<who>[^\\]]+)\\]\\s*)?(?P<text>.*)$"},
-      "markets": {"row_change": "{sign}{pct:.1f}%", "up": "+", "down": ""},
+      "markets": {"row_change": "{sign}{pct:.1f}%", "up": "+", "down": "",
+                  "_insiders": "Insiders buying list (markets.json insiders block, from markets/insiders.py). heading/empty are fallbacks when the payload has none.",
+                  "insiders": {"heading": "Insiders buying",
+                               "row": "{who} ({role}) · {date} · {shares} sh at {price} = ${value}",
+                               "shares_fmt": "{:,.0f}", "price_fmt": "{:,.2f}", "value_fmt": "{:,.0f}",
+                               "empty": "No officer or director open-market purchases over the threshold."}},
       "words": {
         "verdict_ok": "Agents OK",
         "verdict_stuck": "{n} agent(s) stuck",

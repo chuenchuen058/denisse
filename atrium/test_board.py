@@ -408,5 +408,31 @@ class PageAssetsTest(unittest.TestCase):
         self.assertIn('id="favicon"', self.index)
 
 
+class InsidersListTest(unittest.TestCase):
+    """The markets card's "Insiders buying" list, from markets.json's insiders block."""
+
+    def card(self, insiders):
+        return board._markets({"markets": [], "insiders": insiders, "words": BOARD["words"]})
+
+    def test_rows_render_with_heading_in_given_order(self):
+        html_text = self.card({"heading": "Insiders buying", "message": None, "rows": [
+            {"ticker": "NVDA", "who": "B Person", "role": "Director", "date": "2026-11-06",
+             "shares": 10, "price": 100, "value": 1000},
+            {"ticker": "AMD", "who": "J Person", "role": "CFO", "date": "2026-11-03",
+             "shares": 2000, "price": 150.25, "value": 300500}]})
+        seen = read(html_text).chunks
+        self.assertIn("Insiders buying", seen)
+        self.assertLess(html_text.index("NVDA"), html_text.index("AMD"))
+        self.assertIn("300,500", html_text)
+        self.assertIn("150.25", html_text)
+
+    def test_message_shown_when_edgar_is_off(self):
+        html_text = self.card({"heading": "Insiders buying", "message": "SEC EDGAR is off", "rows": []})
+        self.assertIn("SEC EDGAR is off", html_text)
+
+    def test_no_block_no_list(self):
+        self.assertNotIn("<h4", self.card(None))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

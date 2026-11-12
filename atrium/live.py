@@ -230,17 +230,18 @@ def collect() -> dict:
                          "pct": round(min(100, 100 * v["v"] / v["m"]), 1) if v["m"] else 0,
                          "text": b["text"].format(**v)})
     markets_path = (snapshot.REPO / "markets" / "config.json") if getattr(snapshot, "REPO", None) else (Path.cwd() / "markets" / "config.json")
-    markets = []
+    markets, insiders = [], None
     try:
         p = Path(".review") / "hub" / "markets.json"
         if p.exists():
             payload = json.loads(p.read_text(encoding="utf-8"))
             if isinstance(payload, dict):
                 markets = payload.get("tickers", [])
+                insiders = payload.get("insiders") if isinstance(payload.get("insiders"), dict) else None
     except (OSError, ValueError, TypeError):
-        markets = []
+        markets, insiders = [], None
     mission = board.build({"now": now, "t": t, "state": state, "agents": agents, "usage": usage, "where": where,
-                           "timeline": timeline, "progress": progress, "markets": markets, "power": pw,
+                           "timeline": timeline, "progress": progress, "markets": markets, "insiders": insiders, "power": pw,
                            "live_words": words, "titles": _titles()})
     return {"title": c["title"], "subtitle": c["subtitle"], "panels": c["panels"], "headings": c["headings"],
             "board": mission,
