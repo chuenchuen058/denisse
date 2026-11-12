@@ -214,7 +214,8 @@ it in the last `spend_window_h` hours, hold at `reserve`; allowance used from
 `daily_spend_cap_usd` for priced lanes, and free slots. Limited lanes and lanes over
 the cap can't win. An explicit `Lane: X` is a strong preference: it leaves only for
 the bug-fix lane or, while X can't run, its `lane_fallback`. The reviewer of a risky
-diff is picked the same way from `reviewer_lanes`, never the lane that wrote it.
+diff is picked the same way from `reviewer_lanes` (claude, codex, copilot; each with a
+read-only command), never the lane that wrote it.
 `runner.py --dry-run` and `python -m orchestra.lane_pick explain <slug>` show the scores.
 
 ## Handing work to the queue (`new_task.py`)

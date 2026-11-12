@@ -296,6 +296,119 @@ class ConfigTest(unittest.TestCase):
         self.assertIn("no VERDICT line", rv["reasons"])
         self.assertIn("incomplete echoed review prompt", rv["reasons"])
 
+    # --- copilot as a reviewer (12 Nov 2026: every Claude PASS parked REVIEW-UNAVAILABLE while
+    # Codex, the only other reviewer, was limited)
+
+    # What the real CLI (1.0.109) printed on 12 Nov 2026 with the shipped reviewer flags and the
+    # prompt on stdin, exit code 1: a blank line, then this.
+    COPILOT_QUOTA = "\nYou have exceeded your monthly quota (Request ID: 00000-6c825dbd-9ebb-4a3a-be7d-ac330f4a27ae)\n"
+    # An answer in the shape --silent gives (the answer only, plain text, after a blank line).
+    # Not a recording of a live review: Copilot was out of quota when this was written.
+    COPILOT_OK = "\nVERDICT: ok\n- orchestra/config.json:305 adds a reviewer entry only\n- no check is weakened\n"
+    COPILOT_BLOCK = "\n**VERDICT: block**\n- orchestra/runner.py:1 own objection\n"
+
+    def _limited(self, *lanes) -> dict:
+        until = (self.R.now() + dt.timedelta(hours=2)).isoformat()
+        return {"lanes": {l: {"limited_until": until} for l in lanes}}
+
+    def _copilot_reviewer(self, answer: str, code: int = 0, echo: bool = False) -> Path:
+        """The shipped config, with the copilot reviewer's CLI swapped for a fake that keeps its
+        flags: it records them and its stdin, prints `answer` and exits `code`."""
+        seen, fake = self.tmp / "copilot_seen.json", self.tmp / "fake_copilot_reviewer.py"
+        fake.write_text(textwrap.dedent(f"""\
+            import json, sys
+            prompt = sys.stdin.read()
+            open({str(seen)!r}, "w", encoding="utf-8").write(json.dumps({{"args": sys.argv[1:], "prompt": prompt}}))
+            if {echo!r}:
+                print(prompt)
+            sys.stdout.write({answer!r})
+            sys.exit({code})
+            """), encoding="utf-8")
+        shipped = json.loads((HERE / "config.json").read_text(encoding="utf-8"))["reviewer_lanes"]
+        self.use({"reviewer_lanes": {**shipped, "copilot": [sys.executable, str(fake), *shipped["copilot"][1:]]},
+                  "lane_pacing": {}})
+        return seen
+
+    def test_shipped_copilot_reviewer_is_read_only_and_takes_stdin(self):
+        self.use({})
+        argv = self.R.C["reviewer_lanes"]["copilot"]
+        self.assertEqual(argv, self.defaults["reviewer_lanes"]["copilot"])
+        denied = {argv[i + 1] for i, a in enumerate(argv) if a == "--deny-tool"}
+        self.assertLessEqual({"write", "shell"}, denied, "no file writes, no shell commands")
+        for a in argv:
+            self.assertFalse(a.startswith("--allow") or a in ("--yolo", "--add-dir", "--autopilot"),
+                             f"{a}: a reviewer gets no grant; whatever would need approval is refused")
+            self.assertNotIn(self.R.PROMPT_FILE_PLACEHOLDER, a, "run_reviewer writes the prompt to stdin")
+        self.assertNotIn("-p", argv)
+        self.assertNotIn("--prompt", argv)
+        self.assertIn("copilot", self.R.C["lane_argv"], "a reviewer is a configured lane")
+
+    def test_copilot_reviews_when_the_other_reviewer_is_limited(self):
+        self._copilot_reviewer(self.COPILOT_OK)
+        codex_limited = self._limited("codex")
+        # author claude, codex limited -> copilot
+        rp = self.R.pick_reviewer(self.task("claude"), codex_limited)
+        self.assertEqual(rp["lane"], "copilot", rp["why"])
+        # author codex, claude limited -> copilot
+        self.assertEqual(self.R.pick_reviewer(self.task("codex"), self._limited("claude"))["lane"], "copilot")
+        # author copilot, claude and codex free -> one of them, never itself
+        self.assertIn(self.R.pick_reviewer(self.task("copilot"), {})["lane"], ("claude", "codex"))
+        for free in ("claude", "codex"):
+            other = "codex" if free == "claude" else "claude"
+            self.assertEqual(self.R.pick_reviewer(self.task("copilot"), self._limited(other))["lane"], free)
+        # limits are respected for copilot too: both others limited -> nobody, not the author
+        rp = self.R.pick_reviewer(self.task("claude"), self._limited("codex", "copilot"))
+        self.assertIsNone(rp["lane"])
+        self.assertIsNone(self.R.pick_reviewer(self.task("copilot"), self._limited("claude", "codex"))["lane"])
+        # nothing limited: the stronger reviewers still go first (lane_strengths, not this test's wish)
+        strengths = self.R.C["lane_strengths"]
+        work = self.R.C["reviewer_work"]
+        best = max(("codex", "copilot"), key=lambda l: strengths[l][work])
+        self.assertEqual(self.R.pick_reviewer(self.task("claude"), {})["lane"], best)
+
+    def test_copilot_reviewer_verdicts(self):
+        branch = self._git_repo_with_branch({"orchestra/review.txt": "VERDICT: ok\n"})
+        self.R.REPORTS.mkdir(parents=True, exist_ok=True)
+        report = self.tmp / "r.md"
+        report.write_text("RESULT: PASS\nVERDICT: ok\n", encoding="utf-8")
+        task, state = self.task("claude"), self._limited("codex")
+        cases = (  # answer, exit code, echoes the prompt first, verdict, text in reasons
+            (self.COPILOT_OK, 0, False, "ok", "no check is weakened"),
+            (self.COPILOT_BLOCK, 0, False, "block", "own objection"),
+            (self.COPILOT_OK, 0, True, "ok", "no check is weakened"),
+            ("", 0, False, "block", "no VERDICT line"),            # prints nothing
+            ("", 1, False, "block", "no VERDICT line"),
+            ("", 0, True, "block", "no VERDICT line"),             # only the echoed prompt
+            ("I could not read the diff.\n", 0, False, "block", "no VERDICT line"),
+            (self.COPILOT_QUOTA, 1, False, "unavailable", "exceeded your monthly quota"),
+        )
+        for answer, code, echo, verdict, said in cases:
+            with self.subTest(answer=answer, code=code, echo=echo):
+                seen = self._copilot_reviewer(answer, code, echo)
+                rv = self.R.run_reviewer(task, self.repo, branch, report, "test", state)
+                self.assertEqual((rv["lane"], rv["verdict"]), ("copilot", verdict), rv["reasons"])
+                self.assertIn(said, rv["reasons"])
+                got = json.loads(seen.read_text(encoding="utf-8"))
+                self.assertIn("+VERDICT: ok", got["prompt"], "the whole review prompt arrived on stdin")
+                self.assertEqual(got["args"], self.R.C["reviewer_lanes"]["copilot"][2:])
+                self.assertLess(max(len(a) for a in got["args"]), 100, "no prompt on the command line")
+
+    def test_copilot_answers_parse_like_codex(self):
+        bounds = ("<!-- test-begin -->", "<!-- test-end -->")
+        echo = f"{bounds[0]}\nAnswer in exactly this form:\nVERDICT: ok\n- <reason>\n{bounds[1]}\n"
+        P = lambda s: self.R.parse_verdict(s, prompt_bounds=bounds)
+        self.assertEqual(P(self.COPILOT_OK)[0], "ok")
+        self.assertIn("adds a reviewer entry only", P(self.COPILOT_OK)[1])
+        self.assertEqual(P(self.COPILOT_OK.replace("\n", "\r\n"))[0], "ok")
+        self.assertEqual(P(self.COPILOT_BLOCK)[0], "block")
+        self.assertEqual(P(echo + self.COPILOT_BLOCK)[0], "block", "the echoed prompt's VERDICT: ok is not its answer")
+        for nothing in ("", "\n", echo, echo + self.COPILOT_QUOTA, self.COPILOT_QUOTA, echo[:-len(bounds[1]) - 1]):
+            with self.subTest(output=nothing):
+                self.assertIsNone(P(nothing)[0])
+        self.use({})
+        log = self.lane_log(*self.COPILOT_QUOTA.splitlines())
+        self.assertIn("monthly quota", self.R.detect_limit("copilot", log) or "", "out of quota = come back later")
+
     # --- bad values fall back, with a log line
 
     def test_unreadable_config_falls_back_wholesale(self):
