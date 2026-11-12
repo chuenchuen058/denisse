@@ -208,7 +208,7 @@
   "lane_pacing": {"claude": {"reset_anchor": "2026-11-04T18:00", "period_h": 168, "spend_window_h": 24, "reserve": 0.1}, "codex": {"reset_anchor": "2026-11-11T12:08", "period_h": 168, "spend_window_h": 12, "reserve": 1.0}},
   "lane_usage_file": "limits.json",
   "lane_usage_max_age_h": 24,
-  "reviewer_lanes": {"claude": [], "codex": ["{npm-shim:codex}", "exec", "--skip-git-repo-check", "--color", "never", "-c", "mcp_servers.node_repl.enabled=false", "-c", "mcp_servers.desktop-commander.enabled=false", "-c", "mcp_servers.obsidian.enabled=false", "-s", "read-only", "-"]},
+  "reviewer_lanes": {"claude": [], "codex": ["{npm-shim:codex}", "exec", "--skip-git-repo-check", "--color", "never", "-c", "mcp_servers.node_repl.enabled=false", "-c", "mcp_servers.desktop-commander.enabled=false", "-c", "mcp_servers.obsidian.enabled=false", "-s", "read-only", "-"], "copilot": ["{npm-shim:copilot}", "--silent", "--no-ask-user", "--no-color", "--no-auto-update", "--disable-builtin-mcps", "--no-custom-instructions", "--deny-tool", "write", "--deny-tool", "shell", "--deny-tool", "memory", "--deny-tool", "url"]},
   "reviewer_work": "review",
   "reviewer_override_lane": "reviewer",
   "autopilot": true,
