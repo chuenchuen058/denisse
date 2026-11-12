@@ -236,6 +236,8 @@
     "create": ["schtasks", "/Create", "/F", "/SC", "HOURLY", "/MO", "1", "/TN", "{name}", "/TR", "\"{python}\" \"{script}\""]
   },
 
+  "_app": "scripts/atrium_app.pyw (Chuen, 12 Nov 2026: an app for the hub that stays live): starts `atrium live` when it is not answering, then opens the page in its own window. browsers = tried in order (%VARS% expanded, bare names looked up on PATH); --app gives a window without tabs.",
+  "app": {"browsers": ["%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe", "%ProgramFiles%\\Microsoft\\Edge\\Application\\msedge.exe", "msedge", "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe", "chrome"], "browser_args": ["--window-size=1280,860"], "probe_timeout_s": 2, "start_wait_s": 20},
   "live": {
     "_note": "python -m atrium live: the laptop's own live Atrium page (atrium/live.py, page in atrium/live_page/). Read-only: it serves what atrium/snapshot.py collects and never writes. host must be one of loopback. Work happens only while a browser tab holds the event stream open: every poll_s the watched files are stat'ed and the data rebuilt when one changed (or refresh_s passed, for limits that lift with the clock).",
     "host": "127.0.0.1",
