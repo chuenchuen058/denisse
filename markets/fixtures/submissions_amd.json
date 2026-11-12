@@ -1,0 +1,7 @@
+{"cik": "2488", "name": "ADVANCED MICRO DEVICES INC", "tickers": ["AMD"],
+ "filings": {"recent": {
+   "accessionNumber": ["0000002488-26-000101", "0000002488-26-000100", "0000002488-26-000099", "0000002488-26-000050"],
+   "filingDate": ["2026-11-06", "2026-11-05", "2026-11-04", "2026-08-01"],
+   "form": ["4", "8-K", "4", "4"],
+   "primaryDocument": ["xslF345X05/wk-form4_fund.xml", "amd-8k.htm", "xslF345X05/wk-form4_cfo.xml", "xslF345X05/wk-form4_old.xml"]
+ }}}
