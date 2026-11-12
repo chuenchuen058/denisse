@@ -109,8 +109,11 @@ Read `.review/parked/<slug>.why.txt` and the parked report first. A blind re-run
 PARTIAL or FAIL has never come back PASS; the note is how you change the outcome. Never
 edit `state.json` by hand. If the work is done on `review/<slug>` but never merged (conflict,
 integration reject), `requeue.py <slug> --merge-only [--note "..."]` takes it from parked or the
-newest archive and marks it urgent; the runner then merges that existing branch itself (gate,
-reviewer if risky, combined-tree integration) and runs no lane. A missing branch or a merge
+newest archive and marks it urgent; the runner then merges that existing branch itself and runs
+no lane: first the trial merge onto current master and its gate, then, only if that merge is
+clean and green and the diff is risky, the reviewer on that merge's diff against master, then
+the fast-forward. A conflict or red combined tree parks it before any review is paid for; a
+reviewer block parks it with nothing landed. A missing branch or a merge
 that can't run (conflict, dirty main checkout) parks it with the reason. Whenever the runner
 deletes or resets a `review/<slug>` branch that has commits not on master, it first saves them
 as `refs/keep/<slug>-<UTC time>` (config `keep_ref_prefix`) and logs `KEPT ...`; recover with

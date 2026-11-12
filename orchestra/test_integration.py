@@ -487,6 +487,85 @@ class IntegrationTest(unittest.TestCase):
         self.assertNotIn("runner's own gate check", why)
         self.assertNotIn("merge", self.state()["tasks"]["caller"])
 
+    # --- merge-only: the trial merge and its gate come before the (paid) reviewer
+
+    def test_merge_only_conflict_spends_no_review(self):
+        branch = self.parked_branch("risky-clash", {"orchestra/thing.py": "X = 'branch'\n"})
+        tip = self.git("rev-parse", branch)
+        (self.repo / "orchestra" / "thing.py").write_text("X = 'master'\n")
+        self.git("add", "orchestra/thing.py")
+        self.git("commit", "-qm", "master writes the same file")
+        before = self.head()
+        self.merge_only_task("risky-clash")
+        self.assertEqual(self.run_tick({}), "INTEGRATION-REJECTED")
+        self.assertFalse(self.flag.exists(), "no reviewer call for a merge that cannot happen")
+        self.assertEqual(self.head(), before)
+        self.assertEqual(self.git("rev-parse", branch), tip, "branch untouched")
+        self.assertIn("merge conflict", (self.R.PARKED / "risky-clash.why.txt").read_text(encoding="utf-8"))
+        self.assertFalse((self.R.PARKED / "risky-clash.review.md").exists())
+        self.assertNotIn("review", self.state()["tasks"]["risky-clash"])
+        self.assertAlmostEqual(self.R.today_usage(self.R.load_state())["cost_usd"], 0.0)
+
+    def test_merge_only_red_combined_tree_spends_no_review(self):
+        self.parked_branch("risky-red", {"orchestra/thing.py": "X = 1\n",
+                                         "check_thing.py": "import unittest, lib\n\nclass T(unittest.TestCase):\n"
+                                                           "    def test(self):\n        lib.greet()\n"})
+        (self.repo / "lib.py").write_text('def hello():\n    return "hi"\n')
+        (self.repo / "check_lib.py").write_text(CHECK_LIB.replace("greet", "hello"))
+        self.git("commit", "-qam", "master renames greet")
+        self.merge_only_task("risky-red")
+        self.assertEqual(self.run_tick({}), "INTEGRATION-REJECTED")
+        self.assertFalse(self.flag.exists(), "no reviewer call for a merge whose gate fails")
+
+    def test_merge_only_clean_merge_is_reviewed_on_its_diff_against_master(self):
+        # Stacked: review/stacked carries orchestra/first.py, which already reached master as a
+        # different commit (a squash), plus its own orchestra/second.py.
+        self.add("stacked")
+        task = next(t for t in self.R.load_queue() if t.slug == "stacked")
+        wt, branch = self.R.fresh_worktree(task)
+        for name in ("first", "second"):
+            (wt / "orchestra" / f"{name}.py").write_text(f"{name.upper()} = 1\n")
+            self.git("add", f"orchestra/{name}.py", cwd=wt)
+            self.git("commit", "-qm", name, cwd=wt)
+        self.R.remove_worktree(wt, branch, delete_branch=False)
+        (self.repo / "orchestra" / "first.py").write_text("FIRST = 1\n")
+        self.git("add", "orchestra/first.py")
+        self.git("commit", "-qm", "first, landed another way")
+        base = self.head()
+        self.merge_only_task("stacked")
+        self.assertEqual(self.run_tick({}), "PASS")
+        prompt = self.flag.read_text()
+        diff = prompt.split("## Diff", 1)[-1]
+        self.assertIn("orchestra/second.py", diff, "the reviewer sees what master is about to gain")
+        self.assertNotIn("orchestra/first.py", diff, "and nothing already on master")
+        self.assertIn(base, prompt, "against the master the merge was built on")
+        ts = self.state()["tasks"]["stacked"]
+        self.assertEqual(ts["review"]["verdict"], "ok")
+        self.assertNotIn("first.py", ts["review"]["why"])
+        self.assertEqual(ts["merge"], "merged")
+        self.assertEqual(self.git("rev-parse", "HEAD^1"), base)
+        self.assertEqual(self.head(), ts["integration"]["commit"], "the reviewed commit is what landed")
+
+    def test_merge_only_reviewer_block_on_a_clean_merge_lands_nothing(self):
+        branch = self.parked_branch("risky-mo", {"orchestra/thing.py": "GUARD = False\n"})
+        tip = self.git("rev-parse", branch)
+        before = self.head()
+        os.environ["FAKE_VERDICT"] = "VERDICT: block\n- orchestra/thing.py:1 turns the guard off"
+        self.merge_only_task("risky-mo")
+        self.assertEqual(self.run_tick({}), "REVIEW-BLOCKED")
+        self.assertTrue(self.flag.exists(), "reviewed")
+        self.assertEqual(self.head(), before, "master untouched")
+        self.assertFalse((self.repo / "orchestra" / "thing.py").exists())
+        self.assertEqual(self.git("rev-parse", branch), tip, "branch kept")
+        self.assertIn("turns the guard off", (self.R.PARKED / "risky-mo.review.md").read_text())
+        self.assertIn("reviewer blocked it", (self.R.PARKED / "risky-mo.why.txt").read_text(encoding="utf-8"))
+        ts = self.state()["tasks"]["risky-mo"]
+        self.assertEqual(ts["review"]["verdict"], "block")
+        self.assertTrue(ts["integration"]["checks"][0].startswith("gate: pass"), "reviewed after a green merge")
+        self.assertNotIn("merge", ts)
+        self.assertFalse(any(p.name.endswith("--integration") for p in self.R.WORKTREES.iterdir()),
+                         "integration worktree cleaned up")
+
     def test_merge_only_branch_already_on_master_is_archived_without_a_gate(self):
         branch = self.parked_branch("landed", {"done.txt": "x"})
         self.git("merge", "-q", "--no-ff", "-m", "landed another way", branch)  # not the runner's merge
