@@ -8,7 +8,8 @@ running, not just in the background, because I don't know if it's actually happe
     lane_tab_done(done_path, outcome, report)      tells that tab the lane has exited
 
 The live window is one console titled cfg["live_window_title"] running orchestra/watch.py.
-It is opened when a lane starts and no such window is open (its pid and creation time are
+It is opened when a lane starts (one that gets no tab of its own, unless config
+live_window_with_lane_tab) and no such window is open (its pid and creation time are
 kept in <review>/live_window.json), shown without taking focus, and never opened twice:
 one window, reused. Toasts go through orchestra/toast.ps1. Both are switches in
 config.json (live_window, toasts). Nothing here can stop a lane: every failure is one log
@@ -209,8 +210,19 @@ def lane_tab_done(done_path: Path, outcome: str, report: Path | None, log=None) 
                 pass
 
 
+def has_tab(task, cfg: dict) -> bool:
+    """This lane's run gets its own tab (lane_tabs on and the lane in lane_tab_lanes)."""
+    try:
+        return bool(cfg.get("lane_tabs")) and task.lane in cfg["lane_tab_lanes"]
+    except (KeyError, TypeError, AttributeError):
+        return False
+
+
 def lane_started(task, cfg: dict, review: Path, repo: Path, log, spawn=None, alive=None, run=None) -> None:
-    ensure_window(cfg, review, repo, log, spawn, alive)
+    # One window per run: a lane with its own tab does not also open the live window, unless
+    # config live_window_with_lane_tab says both.
+    if cfg.get("live_window_with_lane_tab", True) or not has_tab(task, cfg):
+        ensure_window(cfg, review, repo, log, spawn, alive)
     try:
         text = cfg["toast_started"].format(lane=task.lane, title=task.title, slug=task.slug)
     except Exception:  # noqa: BLE001

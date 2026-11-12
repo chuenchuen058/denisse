@@ -8,7 +8,8 @@ continuously so I don't have to put it in myself").
 The runner calls it once a tick when no Queue: auto task is left (orchestra/runner.py
 autopilot_step); every decision it takes is one `AUTOPILOT ...` line in runner.log.
 
-Where the work comes from (each a switch in config autopilot_sources):
+Where the work comes from (each a switch in config autopilot_sources; those listed in
+autopilot_sources_off are not read: shipped, not_done / odd / parked, docs/orchestra_vs_thomas.md):
   inbox     Inbox lines in the vault's Atlas/Task Ideas.md
   not_done  NOT DONE lines of recent reports (archive and parked)
   odd       ODD lines of recent reports
@@ -188,8 +189,10 @@ def from_waiting(vault: Path | None, cfg: dict) -> list[Candidate]:
 
 
 def candidates(*, cfg, review, vault, state, at) -> list[Candidate]:
-    """Every candidate from the sources switched on in config autopilot_sources, in that order."""
-    want = list(cfg["autopilot_sources"])
+    """Every candidate from the sources switched on in config autopilot_sources, in that order,
+    less those in autopilot_sources_off."""
+    off = set(cfg.get("autopilot_sources_off") or [])
+    want = [s for s in cfg["autopilot_sources"] if s not in off]
     out, reports_read = [], False
     for src in want:
         if src == "inbox":

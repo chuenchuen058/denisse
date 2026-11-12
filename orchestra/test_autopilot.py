@@ -403,12 +403,25 @@ class PlannerTest(unittest.TestCase):
         old = self.review / "archive" / "2026-10-01"
         old.mkdir()
         (old / "x.report.md").write_text("RESULT: FAIL\nNOT DONE:\n- ancient\n", encoding="utf-8")
-        cands = AP.candidates(cfg={**self.cfg, "autopilot_sources": ["not_done", "odd"]}, review=self.review,
-                              vault=None, state={}, at=AT)
+        # The report sources themselves (shipped: switched off by autopilot_sources_off, below).
+        cfg = {**self.cfg, "autopilot_sources": ["not_done", "odd"], "autopilot_sources_off": []}
+        cands = AP.candidates(cfg=cfg, review=self.review, vault=None, state={}, at=AT)
         got = {(c.source, c.text, c.bugfix) for c in cands}
         self.assertEqual(got, {("not_done", "the README section", False),
                                ("not_done", "the failing test in test_tray", True),
                                ("odd", "the gate took 40 min", False)})
+        # autopilot_sources_off takes a source out without editing autopilot_sources.
+        only = AP.candidates(cfg={**cfg, "autopilot_sources_off": ["odd"]}, review=self.review, vault=None,
+                             state={}, at=AT)
+        self.assertEqual({c.source for c in only}, {"not_done"})
+        # Shipped: no task is written from Orchestra's own reports or park reasons (.review/README.md:
+        # "tasks generated from log errors" were not copied); Chuen's own notes are still read.
+        ship = shipped()
+        self.assertEqual(set(ship["autopilot_sources"]) - set(ship["autopilot_sources_off"]), {"inbox", "waiting"})
+        (parked / "2026-11-08T0900-b.md").write_text("# B\n", encoding="utf-8")
+        (parked / "2026-11-08T0900-b.why.txt").write_text("2026-11-08T09:30:00 FAIL: see report\n", encoding="utf-8")
+        self.assertEqual(AP.candidates(cfg={**ship, "autopilot_report_days": cfg["autopilot_report_days"]},
+                                       review=self.review, vault=None, state={}, at=AT), [])
 
     def test_parked_tasks_but_not_those_waiting_on_chuen(self):
         parked = self.review / "parked"

@@ -130,6 +130,29 @@ class ConsultTest(unittest.TestCase):
         self.assertIsNone(consult.why({"consult": "don"}, "tutor/chat.py", self.cfg, {"consult_applies": "off"}))
         self.assertEqual(consult.why({}, "x", self.cfg, {"consult_applies": "whatever"}), self.cfg["why_all"])
 
+    def test_narrow_to_caps_the_rule_without_editing_it(self):
+        """consult_narrow_to: named makes all mean named, off is off, "" leaves the rule alone,
+        and it never widens a narrower consult_applies."""
+        def why(applies, cap, fields=None, text="a tutorial on git"):
+            return consult.why(fields or {}, text, self.cfg, {"consult_applies": applies, "consult_narrow_to": cap})
+        self.assertEqual(why("all", ""), self.cfg["why_all"])
+        self.assertIsNone(why("all", "named"), "an ordinary task is no longer put to the tutor")
+        self.assertIn("Consult: don", why("all", "named", {"consult": "don"}))
+        self.assertIn("names tutor/", why("all", "named", text="Edit tutor/chat.py"))
+        self.assertIsNone(why("all", "off", {"consult": "don"}, "tutor/chat.py"))
+        self.assertIsNone(why("off", "named", {"consult": "don"}, "tutor/chat.py"), "never widens off")
+        self.assertIsNone(why("named", ""), "named stays named")
+        self.assertEqual(why("all", "something else"), self.cfg["why_all"], "an unknown cap is no cap")
+
+    def test_shipped_rule_is_narrowed_to_named_tasks(self):
+        """Shipped: consult_applies is still all, capped by consult_narrow_to (docs/orchestra_vs_thomas.md)."""
+        rule = consult.rules()
+        self.assertEqual(rule["consult_narrow_to"], "named")
+        self.assertIsNone(consult.why({}, "Fix the tray restart.", self.cfg, rule))
+        self.assertIsNotNone(consult.why({}, "Edit tutor/chat.py", self.cfg, rule))
+        self.assertEqual(self.before(self.task(text="Fix the tray restart."), **rule), "")
+        self.assertEqual(self.log, [], "not consulted: no log line, no note")
+
     def test_shipped_rule_is_every_task_in_both_config_files(self):
         for name in ("config.json", "config_defaults.json"):
             data = json.loads((HERE / name).read_text(encoding="utf-8"))
@@ -217,7 +240,8 @@ class ConsultTest(unittest.TestCase):
     # --- every task, and the busy GPU
 
     def test_every_task_is_consulted_with_the_general_question(self):
-        extra = self.before(self.task(text="Fix the tray restart."))
+        # consult_applies all, not narrowed (shipped: consult_narrow_to "named", tested below).
+        extra = self.before(self.task(text="Fix the tray restart."), consult_narrow_to="")
         self.assertIn("`.review/don.md`", extra)
         note = (self.wt / ".review" / "don.md").read_text(encoding="utf-8")
         self.assertIn(self.cfg["why_all"], note)
