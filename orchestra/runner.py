@@ -2917,6 +2917,9 @@ def _tick(dry_run: bool = False) -> str:
     # Dispatching on battery (dispatch_on_battery, above the floor): light work only, at most
     # battery_lane_slots lanes at once. A grant is its own rule: exactly one task, any weight.
     on_batt = None if grant else battery_rules()
+    # There a grant lets one task past those rules (a heavy one, or one over the slot cap), and
+    # it is only used up if the task picked needed it (12 Nov 2026, Codex review).
+    batt_grant = power_override() if on_batt else None
     if not grant and exams_enabled():  # background; returns at once, holds no lane slot
         exams_step(state)
     master_health.step(sys.modules[__name__], state)  # background baseline run; never raises, never waits
@@ -2926,7 +2929,8 @@ def _tick(dry_run: bool = False) -> str:
     if grant:
         tasks = [t for t in tasks if granted_for(grant, t)]
     if on_batt:
-        tasks = [t for t in tasks if t.weight in on_batt["weights"]]
+        tasks = [t for t in tasks if t.weight in on_batt["weights"]
+                 or (batt_grant and granted_for(batt_grant, t))]
     if parallel:
         # One runner per lane at a time (Chuen, 2 Nov 2026: use Claude and Codex together).
         # Each lane has its own lock; state saves merge, and merges are serialised.
@@ -2976,14 +2980,26 @@ def _tick(dry_run: bool = False) -> str:
                     save_state(state)
                     return "on battery"
                 tasks = [t for t in tasks if granted_for(live, t)]
-            if on_batt and len(running) >= on_batt["slots"]:  # read under the lock: no two ticks race past it
-                save_state(state)
-                return "on battery"
+            batt_ok = lambda t: True  # noqa: E731  (does the task fit the battery rules without a grant?)
+            if on_batt:  # slots read under the lock: no two ticks race past them
+                free = len(running) < on_batt["slots"]
+                batt_ok = lambda t: free and t.weight in on_batt["weights"]  # noqa: E731
+                live = None
+                if batt_grant:  # still there, unexpired, above the floor? Another tick may have used it.
+                    import power
+                    pst = power.power_status()
+                    live = power.usable_grant(REVIEW, C, pst, now())
+                    if live is not None and live.get("created") != batt_grant.get("created"):
+                        live = None
+                tasks = [t for t in tasks if batt_ok(t) or (live and granted_for(live, t))]
+                if not tasks and not free:
+                    save_state(state)
+                    return "on battery"
             task = pick(tasks, state)
             if not task:
                 save_state(state)
                 return "idle"
-            if grant:
+            if grant or (on_batt and not batt_ok(task)):
                 log(power.consume(REVIEW, C, live, task.slug, pst.get("battery_percent"), now()))
             timeout = timeout_for(task.weight, state)
             ts = task_state(state, task)

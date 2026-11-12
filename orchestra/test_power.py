@@ -241,6 +241,45 @@ class RunnerOnBatteryTest(unittest.TestCase):
         self.assertEqual(self.R.tick(), "on battery")
         self.assertEqual(self.attempts("gl"), 0)
 
+    # --- the override with dispatch_on_battery on (Codex review, 12 Nov 2026)
+
+    def test_switch_on_grant_lets_one_heavy_task_through(self):
+        self.R.C["dispatch_on_battery"] = True
+        self.add_heavy("h1", "heavy one")
+        self.add_heavy("h2", "heavy two")
+        ok, msg = self.grant()
+        self.assertTrue(ok, f"a grant is accepted while heavy work waits: {msg}")
+        self.assertEqual(self.R.tick(), "PASS")
+        self.assertEqual(self.attempts("h1") + self.attempts("h2"), 1, "one heavy task ran")
+        self.assertFalse(self.grant_file().exists(), "consumed")
+        self.assertIn("one-task override used", self.log_text())
+        self.assertIn(self.R.tick(), ("idle", "on battery"))
+        self.assertEqual(self.attempts("h1") + self.attempts("h2"), 1, "the next heavy task waits again")
+
+    def test_switch_on_light_task_does_not_use_up_the_grant(self):
+        self.R.C["dispatch_on_battery"] = True
+        self.add("lg", title="light with grant")
+        self.assertTrue(self.grant()[0])
+        self.assertEqual(self.R.tick(), "PASS", "the light task runs under the battery rules")
+        self.assertTrue(self.grant_file().exists(), "it did not need the grant")
+        self.assertNotIn("one-task override used", self.log_text())
+
+    def test_switch_on_grant_passes_the_slot_cap(self):
+        self.R.C["dispatch_on_battery"] = True
+        self.R.C["battery_lane_slots"] = 1
+        self.add("ls", title="light over cap")
+        self.busy_lane()
+        self.assertEqual(self.R.tick() if self.grant()[0] else None, "PASS", "the grant is the one extra lane")
+        self.assertEqual(self.attempts("ls"), 1)
+        self.assertFalse(self.grant_file().exists())
+
+    def test_switch_on_grant_refused_at_floor_and_on_ac(self):
+        self.R.C["dispatch_on_battery"] = True
+        ok, msg = self.grant(f"battery:{self.R.C['battery_floor_percent']}")
+        self.assertFalse(ok)
+        self.assertIn("floor", msg)
+        self.assertFalse(self.grant("ac")[0])
+
     def test_named_task_and_lane(self):
         self.add("aa", title="aa")
         self.add("zz", title="zz")

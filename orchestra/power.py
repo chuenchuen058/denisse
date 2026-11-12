@@ -167,10 +167,12 @@ def is_expired(grant: dict, now: dt.datetime) -> bool:
 
 def allow_once(review: Path, cfg: dict, status: dict, now: dt.datetime, task: str | None = None,
                lane: str | None = None, who: str = "", why: str = "") -> tuple[bool, str]:
-    """Write the grant if there is a battery block to override: (written?, message)."""
+    """Write the grant if there is a battery block to override: (written?, message). With
+    dispatch_on_battery on, that is one task the battery rules hold back (heavy, or over
+    battery_lane_slots)."""
     if _at_floor(status, cfg) and on_battery(status):
         return False, text(cfg, "refused_floor", pct=status.get("battery_percent"), floor=_floor(cfg))
-    if not dispatch_block(status, cfg):
+    if not heavy_block(status, cfg):  # on battery something is always held back: all dispatch, or heavy work
         return False, text(cfg, "not_needed", power=describe(status, cfg))
     minutes = int(cfg["power_override_minutes"])
     grant = {"who": who, "why": why, "created": now.isoformat(timespec="seconds"),
