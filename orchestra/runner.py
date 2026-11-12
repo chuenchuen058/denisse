@@ -10,7 +10,8 @@ What a tick does with a session's result (after Thomas's review, 31 Oct 2026):
     commands in the worktree and merges only if they exit 0, the hooks loaded,
     and nothing was written into the main checkout
   * a risky diff (config review_risky_patterns, or over review_max_lines) first
-    goes to a fresh read-only reviewer lane; VERDICT: block parks it (2 Nov 2026)
+    goes to a fresh read-only reviewer lane; VERDICT: block parks it (2 Nov 2026), after
+    auto_fix_round_max automatic fix rounds with the findings as the note (12 Nov 2026)
   * the branch is then merged onto *current* master in an integration worktree, the gate
     (plus run_checks --fast if it exists) re-runs there, and master is fast-forwarded to
     that exact tested commit; a red combined tree parks it, master moving twice parks it
@@ -764,7 +765,8 @@ def lane_ask(task: Task) -> "lane_pick.Ask":
     asked = task.fields.get("lane-asked") or task.fields.get("lane", "") or task.lane
     return lane_pick.Ask(slug=task.slug, asked=asked.lower(),
                          work=lane_pick.work_kind(task.fields, task.title, task.kind, C, _title_category()),
-                         bugfix=is_bugfix(task), fixed=lane_pick.is_yes(task.fields.get("lane-fixed"), C))
+                         bugfix=is_bugfix(task), fixed=lane_pick.is_yes(task.fields.get("lane-fixed"), C),
+                         avoid=tuple(fix_avoid(task)))
 
 
 def lane_pick_for(task: Task, state: dict, live=None) -> "lane_pick.Pick":
@@ -909,6 +911,9 @@ def why_not_runnable(task: Task, state: dict) -> str | None:
         route([task], state)  # Lane: auto, not routed by the caller: pick it now
     if task.fields.get("pick-none"):
         return task.fields["pick-none"]
+    avoid = fix_avoid(task)
+    if task.lane in avoid:  # a fix round never runs on a lane whose review blocked it
+        return C["auto_fix_wait"].format(avoid=", ".join(avoid))
     until = lane_limited(state, task.lane)
     # A routed task already had its fallback considered by the scorer (lane_pick).
     if until and ("lane-asked" in task.fields or not fallback_lane(task, state)):
@@ -1489,7 +1494,161 @@ def run_reviewer(task: Task, wt: Path, branch: str, report: Path, why: str, stat
     if verdict is None:
         return {"verdict": "block", "reasons": "reviewer gave no VERDICT line: " + reasons[-300:],
                 "seconds": seconds, "cost_usd": cost, "lane": rlane, "pick": rp["why"]}
-    return {"verdict": verdict, "reasons": reasons, "seconds": seconds, "cost_usd": cost, "lane": rlane, "pick": rp["why"]}
+    # answered: the reviewer itself gave this verdict and its findings (not a timeout or a missing
+    # VERDICT line); only such a block can get an automatic fix round (auto_fix_round_max).
+    return {"verdict": verdict, "reasons": reasons, "seconds": seconds, "cost_usd": cost, "lane": rlane,
+            "pick": rp["why"], "answered": True}
+
+
+# ---------------------------------------------------------------- automatic fix round
+# 11 Nov 2026 every reviewer block was re-queued by hand with `requeue.py <slug> --note "<the
+# reviewer's points>"`. Now a block re-queues itself (auto_fix_round_max times) with the findings
+# as the note, from the blocked branch's tip, on another lane. The round, the lanes to avoid and
+# the base commit travel in the task's own header (auto_fix_*_header), so the count survives
+# requeues and only real blocks use a round.
+
+def _field(task: Task, key: str) -> str:
+    return str(task.fields.get(str(C[key]).lower(), "") or "").strip()
+
+
+def fix_round(task: Task) -> int:
+    """Which automatic fix round this task is (0: not one)."""
+    try:
+        return max(0, int(_field(task, "auto_fix_round_header") or 0))
+    except ValueError:
+        return 0
+
+
+def fix_avoid(task: Task) -> list[str]:
+    """The lanes whose review blocked this task: never its fix round's lane."""
+    return [l.strip().lower() for l in _field(task, "auto_fix_avoid_header").split(",") if l.strip()]
+
+
+def fix_base(task: Task) -> str:
+    """The commit a fix round starts from ("" if none)."""
+    return _field(task, "auto_fix_base_header")
+
+
+def word_hit(text: str, words: list[str]) -> str | None:
+    """The first of `words` (config) in `text`, at the start of a word, in a clause that doesn't
+    negate it first (auto_fix_negation_words, clauses by auto_fix_clause_split). None: no hit."""
+    neg = [re.compile(r"(?<!\w)" + re.escape(str(n).lower()) + r"(?!\w)") for n in C["auto_fix_negation_words"]]
+    for clause in re.split(C["auto_fix_clause_split"], text or "", flags=re.I):
+        low = clause.lower()
+        for w in words:
+            m = re.search(r"(?<!\w)" + re.escape(str(w).lower()), low)
+            if m and not any(n.search(low[:m.start()]) for n in neg):
+                return str(w)
+    return None
+
+
+def auto_fix_refusal(task: Task, rv: dict, merge_only_run: bool = False) -> str | None:
+    """Why this reviewer block gets no automatic fix round (an auto_fix_why_* line), or None."""
+    cap, n = int(C["auto_fix_round_max"]), fix_round(task)
+    if n >= cap:
+        return C["auto_fix_why_cap"].format(n=n, max=cap)
+    if not rv.get("answered") or not str(rv.get("reasons") or "").strip():
+        return C["auto_fix_why_no_findings"]
+    if merge_only_run or is_merge_only(task):
+        return C["auto_fix_why_merge_only"]
+    # Only the review's own text: a worker's report correcting its premise is normal work.
+    hit = word_hit(rv["reasons"], C["auto_fix_premise_words"])
+    if hit:
+        return C["auto_fix_why_premise"].format(word=hit)
+    hit = word_hit(rv["reasons"], C["auto_fix_forbidden_words"])
+    if hit:
+        return C["auto_fix_why_forbidden"].format(word=hit)
+    avoid = list(dict.fromkeys(fix_avoid(task) + [str(rv.get("lane") or "").lower()]))
+    if lane_pick.is_yes(task.fields.get("lane-fixed"), C) and task.lane in avoid:
+        return C["auto_fix_why_fixed"].format(lane=task.lane)
+    override = str(C.get("reviewer_override_lane") or "")
+    if not [l for l in lanes() if l not in avoid and l != override]:
+        return C["auto_fix_why_no_lane"].format(avoid=", ".join(a for a in avoid if a))
+    return None
+
+
+def _set_headers(text: str, values: dict[str, str]) -> str:
+    """Replace (or add, just under the title) these header lines; parse_task reads lines 1..19."""
+    lines = text.replace("\r\n", "\n").rstrip("\n").split("\n")
+    at = next((i + 1 for i, l in enumerate(lines) if l.startswith("# ")), 0)
+    for name, value in values.items():
+        for i, line in enumerate(lines[1:20], start=1):
+            m = HEADER.match(line)
+            if m and m.group(1).lower() == name.lower():
+                lines[i] = f"{name}: {value}"
+                break
+        else:
+            lines.insert(at, f"{name}: {value}")
+    return "\n".join(lines) + "\n"
+
+
+def drop_fix_base(path: Path) -> None:
+    """A parked fix round loses its base header: a manual requeue.py starts fresh, as before."""
+    name = str(C["auto_fix_base_header"])
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    pat = re.compile(r"^" + re.escape(name) + r":.*(?:\r?\n|$)", re.M | re.I)
+    if pat.search(text):
+        path.write_text(pat.sub("", text, count=1), encoding="utf-8")
+
+
+def auto_fix_requeue(task: Task, ts: dict, entry: dict, rv: dict, branch: str, report: Path,
+                     review_text: str) -> None:
+    """Rewrite the queued task as fix round n+1 (headers + the findings before ## Gate), keep the
+    review and the session's report under .review/reports/, and log one AUTO-FIX line. The task
+    stays in the queue; its new text is a new digest, so its attempts start again."""
+    n = fix_round(task) + 1
+    lane = str(rv.get("lane") or "").lower()
+    avoid = list(dict.fromkeys(fix_avoid(task) + ([lane] if lane else [])))
+    base = git("rev-parse", f"refs/heads/{branch}", check=False).stdout.strip()
+    findings = str(rv["reasons"]).strip()
+    first = next((l.strip().lstrip("-*• ").strip() for l in findings.splitlines() if l.strip()), "")
+    # Quoted: a finding line can't become a header, a merge-only mark, a ## Gate or a gate command.
+    quoted = "\n".join("> " + l for l in findings.replace("\r\n", "\n").split("\n"))
+    para = C["auto_fix_paragraph"].format(
+        when=now().isoformat(timespec="minutes"), n=n, max=int(C["auto_fix_round_max"]), lane=lane or "?",
+        avoid=", ".join(avoid) or "?", branch=branch, base=base[:12] or "?", findings=quoted)
+    text = task.path.read_text(encoding="utf-8")
+    text = _set_headers(text, {str(C["auto_fix_round_header"]): str(n),
+                               str(C["auto_fix_avoid_header"]): ",".join(avoid),
+                               str(C["auto_fix_base_header"]): base})
+    m = re.search(r"^##\s*Gate\s*$", text, re.M | re.I)
+    text = (text[:m.start()] + para + "\n\n" + text[m.start():]) if m else text + "\n" + para + "\n"
+    REPORTS.mkdir(parents=True, exist_ok=True)
+    (REPORTS / C["auto_fix_review_name"].format(slug=task.slug, n=n)).write_text(review_text, encoding="utf-8")
+    if report.exists():
+        os.replace(report, REPORTS / C["auto_fix_report_name"].format(slug=task.slug, n=n))
+    tmp = task.path.with_suffix(".autofix.tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, task.path)  # the next tick never sees a half-written task
+    entry["auto_fix"] = ts["auto_fix"] = {"round": n, "reviewer": lane, "avoid": avoid, "base": base,
+                                          "first": first[:300]}
+    ts["last_result"] = "AUTO_FIX"
+    log(C["auto_fix_log"].format(slug=task.slug, n=n, first=first[:200]))
+
+
+def fix_round_worktree(task: Task) -> tuple[Path, str]:
+    """A fix round's worktree: review/<slug> reset to the task's base commit (the blocked work),
+    so a retry of the round starts there too. Newer commits on the branch are kept under
+    keep_ref_prefix first. A base that is gone: a fresh worktree, logged."""
+    base = fix_base(task)
+    if not base or git("rev-parse", "--verify", "--quiet", f"{base}^{{commit}}", check=False).returncode:
+        log(C["auto_fix_no_base_log"].format(slug=task.slug, base=base or "?"))
+        return fresh_worktree(task)
+    branch = f"review/{task.slug}"
+    wt = WORKTREES / task.slug
+    if wt.exists():
+        remove_worktree(wt, branch, delete_branch=False)
+    git("worktree", "prune", check=False)
+    tip = git("rev-parse", "--verify", "--quiet", f"refs/heads/{branch}", check=False).stdout.strip()
+    if tip and tip != git("rev-parse", f"{base}^{{commit}}", check=False).stdout.strip():
+        keep_unmerged(branch, task.slug, "a fix round's worktree")
+    WORKTREES.mkdir(parents=True, exist_ok=True)
+    git("worktree", "add", "-B", branch, str(wt), base)
+    link_venv(wt)
+    return wt, branch
 
 
 # ---------------------------------------------------------------- lanes
@@ -2116,11 +2275,17 @@ def _after_pass(task: Task, state: dict, ts: dict, entry: dict, wt: Path, branch
                                                        slug=task.slug, branch=branch), report)
         return "REVIEW-UNAVAILABLE"
     if rv["verdict"] == "block":
+        review_text = f"# Reviewer: VERDICT: block\nWhy reviewed: {why_risky}\n\n{rv['reasons']}\n"
+        no_fix = auto_fix_refusal(task, rv, park_unmerged)
+        if no_fix is None:
+            auto_fix_requeue(task, ts, entry, rv, branch, report, review_text)
+            return "AUTO-FIX"
         PARKED.mkdir(parents=True, exist_ok=True)
-        (PARKED / f"{task.slug}.review.md").write_text(
-            f"# Reviewer: VERDICT: block\nWhy reviewed: {why_risky}\n\n{rv['reasons']}\n", encoding="utf-8")
+        (PARKED / f"{task.slug}.review.md").write_text(review_text, encoding="utf-8")
         park(task, f"reviewer blocked it ({rv['reasons'].splitlines()[0][:200] if rv['reasons'] else 'no reason'});"
-                   f" review in {task.slug}.review.md. Branch {branch} kept.", report)
+                   f" review in {task.slug}.review.md. Branch {branch} kept."
+                   + C["auto_fix_park_note"].format(why=no_fix), report)
+        drop_fix_base(PARKED / task.path.name)
         return "REVIEW-BLOCKED"
 
     progress["stage"] = "integration"
@@ -3205,7 +3370,7 @@ def _tick(dry_run: bool = False) -> str:
         log(f"START {task.slug} lane={task.lane}{fb} weight={task.weight} timeout={timeout}s attempt={ts['attempts']}")
         visible.lane_started(task, C, REVIEW, REPO, log, alive=proc_created)  # never raises
         try:
-            wt, branch = fresh_worktree(task)
+            wt, branch = fix_round_worktree(task) if fix_base(task) else fresh_worktree(task)
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
             log(f"worktree failed for {task.slug}: {(getattr(e, 'stderr', '') or str(e)).strip()}")
             ts.update(last_end=now().isoformat(), last_result="WORKTREE_FAILED")

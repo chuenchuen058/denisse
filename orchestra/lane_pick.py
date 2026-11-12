@@ -43,6 +43,7 @@ class Ask:
     bugfix: bool = False
     fixed: bool = False      # Lane-Fixed: yes
     author: str | None = None  # reviewer picks: the lane that wrote the change
+    avoid: tuple[str, ...] = ()  # lanes that may not take it (a fix round: the reviewers that blocked it)
 
 
 @dataclass
@@ -203,6 +204,8 @@ def availability(lane: str, ask: Ask, cfg: dict, live: Live, held: bool, held_wh
         return f"conserving: {held_why}"
     if ask.author and lane == ask.author:
         return "wrote the change (the review must be independent)"
+    if lane in ask.avoid:
+        return str(cfg.get("auto_fix_avoid_why") or "avoided by this task")
     return None
 
 
@@ -213,7 +216,9 @@ def candidates(ask: Ask, cfg: dict, live: Live, pool: list[str]) -> list[str]:
     lane_fallback hint (today's rules, as weights)."""
     if ask.fixed and not ask.author:
         return [ask.asked]
-    if ask.author or is_auto(ask.asked, cfg) or cfg.get("lane_pick_explicit_scope") == "any":
+    # A fix round whose header lane blocked it as reviewer may go to any lane of the pool.
+    if (ask.author or is_auto(ask.asked, cfg) or cfg.get("lane_pick_explicit_scope") == "any"
+            or ask.asked in ask.avoid):
         return [l for l in pool if l in live.lanes]
     out = [ask.asked]
     bug = str(cfg.get("bugfix_lane") or "")
