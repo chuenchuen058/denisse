@@ -32,6 +32,7 @@ _KINDS = None
 CARD_RULE = "Wrong is worse than missing, and a card in purple ink is never kept."
 REPORT_RULE = "Mark each part straight after he answers it, never at the end."
 RUNNING_RULE = "Only on mains power."
+MATERIAL_RULE = "Read new KEATS material the same day."
 
 
 def rules_note(date: str) -> str:
@@ -40,7 +41,7 @@ def rules_note(date: str) -> str:
             "## Cards\n\n1. **Stay on the module.** Only the module's material.\n"
             f"4. {CARD_RULE}\n\n"
             f"## Running\n\n6. {RUNNING_RULE}\n\n"
-            f"## Reporting\n\n12. {REPORT_RULE}\n\n"
+            f"## Reporting\n\n8. {MATERIAL_RULE}\n12. {REPORT_RULE}\n\n"
             "## Exams\n\n| Exam | Module | Weeks | Date |\n| --- | --- | --- | --- |\n"
             f"| Mock | Signals and Systems | 1–5 | {date} |\n")
 
@@ -155,6 +156,7 @@ class NoteTests(RulesFixture):
         self.assertIn(CARD_RULE, cards_text)
         self.assertNotIn(RUNNING_RULE, cards_text)
         self.assertNotIn("| Mock |", cards_text)  # the table is machinery, not a prompt
+        self.assertIn(MATERIAL_RULE, rules.block("explain"))
         self.assertIn(REPORT_RULE, rules.block("quiz"))
         self.assertIn(REPORT_RULE, rules.block("explain"))
 
