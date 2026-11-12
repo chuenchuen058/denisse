@@ -2110,8 +2110,9 @@ def _after_pass(task: Task, state: dict, ts: dict, entry: dict, wt: Path, branch
     if rv["verdict"] == "unavailable":
         # Not a judgement on the diff: the reviewer couldn't sign in. Keep the PASS for a
         # merge-only re-run once the sign-in works.
-        park(task, f"reviewer couldn't run ({rv['reasons'][:200]}). The PASS stands: after signing in, "
-                   f"`python orchestra\\requeue.py {task.slug} --merge-only`. Branch {branch} kept.", report)
+        # The park text carries review_unavailable_mark: auto_requeue_review_step finds it by that.
+        park(task, C["review_unavailable_park"].format(reasons=rv["reasons"][:200], mark=C["review_unavailable_mark"],
+                                                       slug=task.slug, branch=branch), report)
         return "REVIEW-UNAVAILABLE"
     if rv["verdict"] == "block":
         PARKED.mkdir(parents=True, exist_ok=True)
@@ -2303,6 +2304,184 @@ def merge_only(task: Task, state: dict, ts: dict) -> str:
         park(task, C["merge_only_park"].format(why=f"the runner crashed during {stage} ({e!r}; traceback in "
                                                    f"runner.log)", branch=branch), report)
         return "RUNNER-CRASHED"
+
+
+def _dispatch_lock() -> "_FileLock":
+    """The one lock under which a tick picks and claims work (dispatch, auto-requeue)."""
+    return _FileLock(REVIEW / "dispatch.lock", wait=60, stale=120)
+
+
+def reviewer_slot_free(lane: str) -> bool:
+    """A slot of `lane` (lane_slots, slot locks runner.<lane>[.<n>].lock) that no live or orphaned
+    owner holds. An unreadable lock counts as held: take_lock's age rule decides those."""
+    for slot in range(1, int((C.get("lane_slots") or {}).get(lane, 1)) + 1):
+        lf = REVIEW / (f"runner.{lane}.lock" if slot == 1 else f"runner.{lane}.{slot}.lock")
+        if not lf.exists() or lock_status(read_lock(lf)) == "dead":
+            return True
+    return False
+
+
+def _parked_at(why_file: Path) -> dt.datetime | None:
+    """When park() wrote the why file: its first word."""
+    try:
+        first = (why_file.read_text(encoding="utf-8", errors="replace").splitlines() or [""])[0]
+        return dt.datetime.fromisoformat(first.split(" ", 1)[0])
+    except (OSError, ValueError):
+        return None
+
+
+def _find_header(lines: list[str], name: str) -> tuple[int | None, int]:
+    """(index of header `name` or None, index of the last header) in the task's whole header block:
+    the header/blank lines after the title, up to the first other line. Not capped at parse_task's
+    window: the auto-requeue counter is written and read through this one scan, so a task with a
+    full window (parse_task reads lines[1:20]) still has its count seen (Codex review, 12 Nov 2026)."""
+    last = 0
+    for i, line in enumerate(lines[1:], start=1):
+        m = HEADER.match(line)
+        if m and m.group(1).lower() == name.lower():
+            return i, last
+        if m:
+            last = i
+        elif line.strip():
+            break
+    return None, last
+
+
+def _header_value(path: Path, name: str) -> str:
+    """Header `name` of the task file, read by the same scan _set_header writes with ("" if none)."""
+    lines = path.read_text(encoding="utf-8", errors="replace").replace("\r\n", "\n").split("\n")
+    i, _ = _find_header(lines, name)
+    return HEADER.match(lines[i]).group(2) if i is not None else ""
+
+
+def _set_header(path: Path, name: str, value: str) -> None:
+    """Set header `name` in the task's header block (replace it, or add it after the last header)."""
+    lines = path.read_text(encoding="utf-8").replace("\r\n", "\n").rstrip("\n").split("\n")
+    i, last = _find_header(lines, name)
+    if i is not None:
+        lines[i] = f"{name}: {value}"
+    else:
+        lines.insert(last + 1, f"{name}: {value}")
+    tmp = path.with_suffix(".header.tmp")
+    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def auto_requeue_review_step(state: dict | None = None) -> list[str]:
+    """Re-queue merge-only the parked PASSes that parked only because no reviewer could run
+    (why file carries review_unavailable_mark, and the state's last review, if recorded, was
+    'unavailable'), oldest first, at most auto_requeue_review_max_per_tick, when a reviewer lane
+    for that task can run now (pick_reviewer: not limited, has allowance) and has a free slot.
+    Never one a reviewer blocked or parked for a gate, integration or merge failure (those park
+    texts carry no mark), one parked more than auto_requeue_review_max_age_days ago, or one
+    already re-queued auto_requeue_review_max_attempts times (counted in the task's
+    auto_requeue_review_header); the last stays parked with auto_requeue_review_gave_up added to
+    its reason, which hot.md "Waiting on Chuen" lists. requeue.py's own requeue_merge_only does
+    the move. Returns the slugs re-queued. Never raises."""
+    try:
+        # Under the dispatch lock, like a pick: eligibility (state, slot locks), the attempt count and
+        # the move are one step, so two overlapping ticks can't both re-queue a task off the same
+        # count, nor re-queue one the other is dispatching (Codex review, 12 Nov 2026).
+        with _dispatch_lock():
+            return _auto_requeue_review(state)
+    except Exception as e:  # noqa: BLE001 -- the auto-requeue must never stop a tick
+        log(f"AUTO-REQUEUE failed: {type(e).__name__}: {e}")
+        return []
+
+
+def _auto_requeue_review(state: dict | None) -> list[str]:
+    cap = int(C["auto_requeue_review_max_per_tick"])
+    mark = str(C["review_unavailable_mark"])
+    if cap <= 0 or not mark or not PARKED.is_dir():
+        return []
+    state = state if state is not None else load_state()
+    max_age = dt.timedelta(days=float(C["auto_requeue_review_max_age_days"]))
+    max_tries = int(C["auto_requeue_review_max_attempts"])
+    header = str(C["auto_requeue_review_header"])
+    at = now()
+    candidates = []
+    for why in PARKED.glob("*.why.txt"):
+        slug = why.name[: -len(".why.txt")]
+        task_file = PARKED / f"{slug}.md"
+        try:
+            first = (why.read_text(encoding="utf-8", errors="replace").splitlines() or [""])[0]
+        except OSError:
+            continue
+        if mark not in first or not task_file.exists() or (QUEUE / f"{slug}.md").exists():
+            continue
+        review = ((state.get("tasks") or {}).get(slug) or {}).get("review") or {}
+        if review.get("verdict") not in (None, "unavailable"):
+            continue
+        when = _parked_at(why)
+        if when is None:
+            continue
+        candidates.append((when, slug, why, task_file, first))
+    if not candidates:
+        return []
+    candidates.sort(key=lambda c: (c[0].replace(tzinfo=None), c[1]))
+    done: list[str] = []
+    gave_up = False
+    running = running_tasks()
+    for when, slug, why, task_file, first in candidates:
+        if len(done) >= cap:
+            break
+        if slug in running:
+            continue
+        try:
+            age = at.replace(tzinfo=None) - when.replace(tzinfo=None)
+        except (TypeError, ValueError):
+            continue
+        if age > max_age:
+            continue
+        task = parse_task(task_file)
+        try:
+            tries = int(_header_value(task_file, header) or 0)
+        except ValueError:
+            tries = 0
+        if tries >= max_tries:
+            note = C["auto_requeue_review_gave_up"].format(n=tries, slug=slug)
+            if note not in first:
+                lines = why.read_text(encoding="utf-8", errors="replace").splitlines()
+                lines[0] = first + note
+                why.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                log(C["auto_requeue_review_gave_up_log"].format(slug=slug, n=tries))
+                gave_up = True
+            continue
+        rp = pick_reviewer(task, state)
+        lane = rp.get("lane")
+        if not lane or not reviewer_slot_free(lane):
+            continue
+        _set_header(task_file, header, str(tries + 1))  # count before the move: a refusal still counts
+        if str(HERE) not in sys.path:
+            sys.path.insert(0, str(HERE))
+        sys.modules.setdefault("runner", sys.modules[__name__])  # requeue uses this runner, not a copy
+        import requeue
+        try:
+            requeue.requeue_merge_only(slug, C["auto_requeue_review_note"].format(
+                lane=lane, n=tries + 1, max=max_tries))
+        except requeue.RequeueError as e:
+            log(f"AUTO-REQUEUE {slug}: not re-queued: {e}")
+            continue
+        log(C["auto_requeue_review_log"].format(slug=slug, lane=lane))
+        done.append(slug)
+    if gave_up:
+        refresh_waiting()
+    return done
+
+
+def refresh_waiting() -> None:
+    """hot.md "Waiting on Chuen" regenerated now (the real repo with a vault only). Never raises."""
+    vault = Path(os.path.expandvars(os.path.expanduser(C.get("vault_dir", "") or "")))
+    if not C.get("vault_dir") or not aftercare_on() or not vault.is_dir():
+        return
+    try:
+        import aftercare
+        lines = aftercare.waiting_lines(queue_dir=QUEUE, parked_dir=PARKED, state=load_state(), now=now(),
+                                         drop_landed=drop_landed, merge_waiting=merge_waiting)
+        if aftercare.update_waiting(vault, lines):
+            log(f"hot.md waiting list updated ({len(lines)} item(s))")
+    except Exception as e:  # noqa: BLE001
+        log(f"hot.md waiting list failed: {e}")
 
 
 def _limited(task: Task, state: dict, ts: dict, hit: str, seconds: int, spent: str,
@@ -2869,6 +3048,8 @@ def _tick(dry_run: bool = False) -> str:
     for k in campaign.OVERRIDE_KEYS:
         if k in fresh:
             C[k] = fresh[k]
+    if not dry_run:  # before the state load below, so the tick sees the reset attempts
+        auto_requeue_review_step()
     state = load_state()
     tasks = route(load_queue(), state)  # off a limited lane onto its fallback, if allowed
     if dry_run:
@@ -2938,7 +3119,7 @@ def _tick(dry_run: bool = False) -> str:
         # Pick and claim under one dispatch lock, and read the other slots' locks *there*: two
         # ticks starting together each scanned before the other had written its task, took
         # different slots and both picked the same top task (race seen in review, soak 3 Nov 2026).
-        with _FileLock(REVIEW / "dispatch.lock", wait=60, stale=120):
+        with _dispatch_lock():
             running = running_tasks()
             # Then re-read the state, under the lock: the tick that just freed a slot saved its
             # entry (LIMITED, NO_REPORT, ...) after this one loaded its copy. Dispatching from the

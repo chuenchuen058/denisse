@@ -116,6 +116,16 @@ deletes or resets a `review/<slug>` branch that has commits not on master, it fi
 as `refs/keep/<slug>-<UTC time>` (config `keep_ref_prefix`) and logs `KEPT ...`; recover with
 `git branch <name> refs/keep/<slug>-<time>`.
 
+A PASS parked only because no reviewer could run (`The PASS stands` in its why file) needs
+none of this: at the start of each tick the runner re-queues it merge-only by itself once a
+reviewer lane for it is free (log `AUTO-REQUEUE <slug>: reviewer <lane> free`), oldest first,
+`auto_requeue_review_max_per_tick` per tick, never one parked more than
+`auto_requeue_review_max_age_days` ago. After `auto_requeue_review_max_attempts` tries (its
+`Auto-Requeued:` header) it stays parked with "Auto-requeue stopped after N attempt(s)" in its
+reason and is listed in hot.md "Waiting on Chuen": then run `requeue.py <slug> --merge-only`
+yourself once you know why the reviewer keeps failing. It runs under the dispatch lock, so a
+tick that is picking holds it up for a moment (and a stuck `dispatch.lock` stops both).
+
 Pause, resume and stop (`orchestra/campaign.py`; the runner itself enforces these, and
 only `resume` undoes them — no tick, watchdog or logon clears a pause):
 
@@ -238,6 +248,7 @@ because power-aware dispatch (which logs `ON BATTERY`) only landed that evening.
 | `PARKED … session said PASS, but files changed in the main checkout during the run` | Someone (you, or a chat) edited the main checkout while it ran. | If the edit was unrelated, requeue with a note to merge the kept branch. |
 | `integration … FAIL … run_checks --fast … exited 3221225786` | The combined-tree check was interrupted (0xC000013A, Ctrl+C or a closed window), not a real failure. | Requeue with a note to cherry-pick the kept branch and report PASS if the gate passes. |
 | `integration … FAIL: gate: fail … FAILED (errors=9)` | The branch passed on its own but fails on current master. If both sides changed the same files the park reason ends `follow-up <slug>-merge queued` and a merge-only task is already in the queue. | With a follow-up: nothing, unless it parks too. Without one: requeue with a note naming what changed on master. |
+| `AUTO-REQUEUE <slug>: reviewer <lane> free` | A PASS that had parked only because no reviewer could run was re-queued merge-only by the runner itself (`auto_requeue_review_*`). | Nothing. `AUTO-REQUEUE <slug>: stopped after N attempt(s); left parked` means it gave up: read the reviewer log, then `requeue.py <slug> --merge-only` by hand. |
 | `master moved while testing` | Another merge landed during the combined-tree test. | Nothing: it retries once, then parks as "master moved twice, retry". |
 | `broken gate` / `exited 5` / `exited 127` | The gate found no tests or a command doesn't exist. Never merged. | Fix the gate in the task (right path, right module), then requeue. |
 | `run_checks --fast: skipped: … has no --fast option` | An older checkout without `--fast`. | Nothing now; it exists on master. |
