@@ -296,5 +296,151 @@ exec(compile(ast.fix_missing_locations(tree), 'scripts/vault_contract.py', 'exec
         self.assertIn("warnings : 0", result.stdout)
 
 
+class LinkChatsTest(unittest.TestCase):
+    """Related lines, day-note Chats sections and the --link-existing backfill,
+    all against a fixture vault in a temp dir."""
+    DAY = "2026-10-12"
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[1] / ".review")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.vault = self.root / "vault"
+        self.inputs = self.root / "inputs"
+        self.write(f"Calendar/Log/{self.DAY}.md", f'---\nname: "{self.DAY}"\nprotection: append\n---\n\n'
+                   "# 12 October\n\n## Work\n\n- did things\n")
+        self.write(f"Calendar/Handoff-{self.DAY}.md", "---\nprotection: append\n---\n\n## Log\n")
+        self.write("Atlas/Projects/Robotic Tail/Robotic Tail.md", "---\nname: Robotic Tail\n---\n# Robotic Tail\n")
+        em = "Atlas/Academic/SEM 1 Modules/5CCYB010 Electromagnetism"
+        self.write(f"{em}/Electromagnetism notes.md", "---\naliases: [5CCYB010]\n---\n# hub\n")
+        self.write(f"{em}/Electromagnetism concepts.md", "# concepts\n")
+        self.write(f"{em}/Coursework.md", "# cw\n")
+
+    def write(self, rel, text):
+        p = self.vault / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text, encoding="utf-8", newline="\n")
+        return p
+
+    def chat(self, ask, name="session", day=DAY):
+        path = self.inputs / f"{name}.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(json.dumps(e) for e in [
+            {"timestamp": f"{day}T10:00:00Z", "sessionId": name, "type": "user",
+             "message": {"role": "user", "content": ask}},
+            {"type": "assistant", "message": {"role": "assistant", "content": "Done."}}]) + "\n",
+            encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()):
+            return importer.import_chats("claude-code", path, self.vault, apply=True)[0]
+
+    def related(self, note):
+        lines = [l for l in note.read_text(encoding="utf-8").splitlines() if l.startswith("Related:")]
+        self.assertLessEqual(len(lines), 1)
+        return lines[0] if lines else None
+
+    def day_text(self):
+        return (self.vault / f"Calendar/Log/{self.DAY}.md").read_text(encoding="utf-8")
+
+    def snapshot(self):
+        return {p: p.read_bytes() for p in self.vault.rglob("*") if p.is_file()}
+
+    def backfill(self, apply):
+        with contextlib.redirect_stdout(io.StringIO()):
+            return importer.link_existing(self.vault, apply=apply)
+
+    def test_new_chat_links_day_handoff_and_matching_project(self):
+        note = self.chat("How should the robotic tail cables be routed?")
+        line = self.related(note)
+        self.assertEqual(line, "Related: " + " · ".join([
+            f"[[Calendar/Log/{self.DAY}|{self.DAY}]]", f"[[Calendar/Handoff-{self.DAY}|Handoff-{self.DAY}]]",
+            "[[Atlas/Projects/Robotic Tail/Robotic Tail|Robotic Tail]]"]))
+        self.assertTrue(note.read_text(encoding="utf-8").endswith("\n\n" + line + "\n"))
+        self.assertNotIn("Electromagnetism", line)
+        # ...and the day hangs the chat off itself.
+        self.assertIn(f"## Chats\n\n- [[Calendar/Chats/{note.stem}|{note.stem}]]\n", self.day_text())
+
+    def test_module_alias_and_hub_name_match(self):
+        line = self.related(self.chat("5CCYB010 question: explain electromagnetism concepts"))
+        self.assertIn("|Electromagnetism concepts]]", line)
+        self.assertIn("|Electromagnetism notes]]", line)
+        self.assertNotIn("Coursework", line)  # excluded/ambiguous names link nothing
+
+    def test_no_link_when_nothing_matches_or_exists(self):
+        note = self.chat("What is a good pasta recipe?", day="2026-10-13")
+        self.assertIsNone(self.related(note))
+        self.assertNotIn("pasta", self.day_text())
+
+    def test_max_related_links_cap(self):
+        config = json.loads(Path(importer.conf.DEFAULT).read_text(encoding="utf-8-sig"))
+        config["import_chats"]["max_related_links"] = 2
+        alt = self.root / "config.json"
+        alt.write_text(json.dumps(config), encoding="utf-8")
+        with mock.patch.dict("os.environ", {"ATRIUM_CONFIG": str(alt)}):
+            note = self.chat("robotic tail and electromagnetism, 5CCYB010")
+        self.assertEqual(self.related(note).count("[["), 2)
+
+    def test_day_chats_section_added_once_and_new_chats_join_it(self):
+        first = self.chat("robotic tail", name="a")
+        text = self.day_text()
+        self.assertEqual(text.count("## Chats"), 1)
+        self.write(f"Calendar/Log/{self.DAY}.md", text + "\n## Later entry\n\nwritten after\n")
+        before = self.day_text()
+        second = self.chat("something else", name="b")
+        after = self.day_text()
+        added = f"- [[Calendar/Chats/{second.stem}|{second.stem}]]\n"
+        self.assertEqual(after.count("## Chats"), 1)
+        self.assertIn(f"|{first.stem}]]\n" + added, after)  # inside the section, not at the end
+        self.assertEqual(after.replace(added, ""), before)
+        self.assertEqual(self.backfill(True)["lines"], 0)
+        self.assertEqual(self.day_text(), after)
+
+    def test_unprotected_day_note_is_locked_and_never_written(self):
+        self.write(f"Calendar/Log/{self.DAY}.md", "---\nname: x\n---\n\n# day\n")
+        before = self.day_text()
+        note = self.chat("robotic tail")
+        self.assertEqual(self.day_text(), before)
+        self.assertIn(f"[[Calendar/Log/{self.DAY}|", self.related(note))  # linking TO it is fine
+        self.assertEqual(self.backfill(False)["locked_days"], 1)
+
+    def test_backfill_dry_run_writes_nothing_then_apply_then_idempotent(self):
+        # An old-style chat note: no Related line, no protection field, CRLF.
+        old = self.vault / f"Calendar/Chats/{self.DAY} codex tail.md"
+        old.parent.mkdir(parents=True, exist_ok=True)
+        old.write_bytes((f'---\r\nname: "{old.stem}"\r\ntype: chat\r\nsource: codex\r\ndate: {self.DAY}\r\n'
+                         "---\r\n\r\n# tail\r\n\r\n## What was asked\r\n\r\n- fix the robotic tail\r\n").encode())
+        self.write(f"Calendar/Chats/{self.DAY} codex locked.md",
+                   f"---\ntype: chat\ndate: {self.DAY}\nprotection: locked\n---\n\n# x\n")
+        self.write("Calendar/Chats/not a chat.md", "---\ntype: dated\n---\n# x\n")
+        original = old.read_bytes()
+        before = self.snapshot()
+        out = self.backfill(False)
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual((out["chats"], out["locked_chats"], out["lines"]), (1, 1, 2))
+        self.assertIn("Robotic Tail", out["sample"][0])
+        out = self.backfill(True)
+        self.assertEqual((out["chats"], out["lines"]), (1, 2))
+        data = old.read_bytes()
+        self.assertTrue(data.startswith(original))
+        self.assertTrue(data.endswith(b"|Robotic Tail]]\r\n"))
+        self.assertNotIn(b"\n", data.replace(b"\r\n", b""))
+        self.assertNotIn("not a chat", self.day_text())
+        settled = self.snapshot()
+        out = self.backfill(True)
+        self.assertEqual(self.snapshot(), settled)
+        self.assertEqual((out["chats"], out["lines"], out["already"]), (0, 0, 1))
+
+    def test_cli_backfill_dry_run(self):
+        from atrium import __main__ as atrium_main
+        self.write(f"Calendar/Chats/{self.DAY} codex tail.md",
+                   f"---\ntype: chat\ndate: {self.DAY}\n---\n\n# tail\n\n## What was asked\n\n- robotic tail\n")
+        before = self.snapshot()
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            code = atrium_main.main(["import-chats", "--link-existing", "--dry-run", "--vault", str(self.vault)])
+        self.assertEqual(code, 0)
+        self.assertEqual(self.snapshot(), before)
+        self.assertIn("dry run", output.getvalue())
+        self.assertIn("1 chat note(s) would get", output.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

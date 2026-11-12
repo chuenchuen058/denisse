@@ -9,6 +9,9 @@
   hub-save FILE          save the hub chat's digest (markdown FILE) into the vault
   live [--port N] [--open]
                          serve the live Atrium page on this laptop (loopback only, read-only)
+  import-chats --link-existing [--dry-run] [--vault DIR]
+                         link existing chat notes to their day/handoff/project notes, and list
+                         them in their day notes (any other args: python -m atrium.import_chats)
 """
 import argparse
 import sys
@@ -17,6 +20,10 @@ from . import conf, context, credits, snapshot
 
 
 def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv[:1] == ["import-chats"]:
+        from . import import_chats
+        return import_chats.main(argv[1:])
     ap = argparse.ArgumentParser(prog="python -m atrium", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
