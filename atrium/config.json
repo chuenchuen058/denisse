@@ -553,8 +553,10 @@
           {"key": "today", "label": "today · {fresh} fresh"},
           {"key": "week", "label": "last {days} days"},
           {"key": "month", "label": "this month"},
-          {"key": "all", "label": "all time · since {since}"}
+          {"key": "all", "label": "all time · since {since} (data from {first})"}
         ],
+        "_all_from": "Start date of the all-time cell and the per-agent line (Chuen, 12 Nov: from start of September). {first} = earliest run actually on record.",
+        "all_from": "2026-09-01",
         "since_format": "%d %b",
         "lane": "{label} {tokens}", "lane_unknown": "{label} n/a", "lane_join": " · ",
         "note": "most is cached re-reads; \"fresh\" = new tokens"

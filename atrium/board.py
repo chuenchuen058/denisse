@@ -441,18 +441,23 @@ def _tokens(x: dict) -> str:
         return _none(w)
     week_from = now.date() - dt.timedelta(days=c["week_days"] - 1)
     inside = {"today": lambda d: d.date() == now.date(), "week": lambda d: d.date() >= week_from,
-              "month": lambda d: (d.year, d.month) == (now.year, now.month), "all": lambda d: True}
-    since = min(end for _, end in runs).strftime(c["since_format"])
+              "month": lambda d: (d.year, d.month) == (now.year, now.month), "all": lambda d: d.date() >= all_from}
+    first = min(end for _, end in runs)
+    all_from = dt.date.fromisoformat(c["all_from"]) if c.get("all_from") else first.date()
+    since = dt.datetime.combine(all_from, dt.time()).strftime(c["since_format"])
+    first_s = first.strftime(c["since_format"])
     cells = []
     for p in c["periods"]:
         rows = [h for h, end in runs if inside[p["key"]](end)]
         total = sum(_token_sum(h["tokens"], c["all_keys"]) for h in rows)
         fresh = sum(_token_sum(h["tokens"], c["fresh_keys"]) for h in rows)
-        label = p["label"].format(fresh=_fmt_n(fresh, c), days=c["week_days"], since=since)
+        label = p["label"].format(fresh=_fmt_n(fresh, c), days=c["week_days"], since=since, first=first_s)
         cells.append(f'<div><div class="big mid">{e(_fmt_n(total, c) if rows else w["dash"])}</div>'
                      f'<div class="why">{e(label)}</div></div>')
     per = {}
-    for h, _ in runs:
+    for h, end in runs:
+        if not inside["all"](end):
+            continue
         per[h.get("lane")] = per.get(h.get("lane"), 0) + _token_sum(h["tokens"], c["all_keys"])
     lanes = c["lane_join"].join(
         (c["lane"].format(label=a["label"], tokens=_fmt_n(per[a["lane"]], c)) if a["lane"] in per

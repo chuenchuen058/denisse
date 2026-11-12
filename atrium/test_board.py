@@ -5,6 +5,7 @@ fixture .review and vault and checked section by section; nothing from the refer
 (atrium/design/mission-board-reference.html, sample data) may appear on it; an empty .review
 gives empty states and no numbers; words, colours and lanes follow atrium/config.json.
 Temp .review, temp vault, a fixed clock; no Ollama, no GPU, no network."""
+import copy
 import datetime as dt
 import json
 import re
@@ -146,6 +147,12 @@ class BoardFixtureTest(BoardBase):
             self.addCleanup(p.stop)
 
     def test_all_twelve_sections_are_on_the_page_with_real_data(self):
+        # the shipped all-time start (1 Sep 2026) is after this fixture's clock; start it at the oldest run here
+        cfg = copy.deepcopy(board._b())
+        cfg["tokens"]["all_from"] = "2026-05-01"
+        p = mock.patch.object(board, "_b", return_value=cfg)
+        p.start()
+        self.addCleanup(p.stop)
         page = self.page()
         seen = read(page)
         words, lw = BOARD["words"], SHIPPED["live"]["words"]
@@ -224,7 +231,7 @@ class BoardFixtureTest(BoardBase):
         tok = section(page, "tokens")
         self.assertEqual(re.findall(r'<div class="big mid">(.*?)</div>', tok), ["7.2M", "7.2M", "7.2M", "7.2M"])
         self.assertIn("today · 35.2k fresh", tok)
-        self.assertIn("all time · since 02 May", tok)
+        self.assertIn("all time · since 01 May (data from 02 May)", tok)
         self.assertIn("Claude 7.2M", tok)
         self.assertIn("Copilot n/a", tok)  # reports no tokens: unknown, not 0
         cr = section(page, "credits")
