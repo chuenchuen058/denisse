@@ -55,7 +55,6 @@
                 "monthly (limit|quota|allowance) (reached|exceeded|hit)",
                 "exceeded your (monthly )?(quota|limit)",
                 "you've (hit|reached|exceeded) your .{0,40}(limit|quota)",
-                "you have (hit|reached|exceeded) your .{0,40}(limit|quota)",
                 "rate limit(ed)? (reached|exceeded)", "429 too many requests"]
   },
   "limit_tail_lines": 40,
