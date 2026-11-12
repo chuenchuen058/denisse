@@ -30,7 +30,7 @@
   "parallel_lanes": true,
   "_parallel_lanes": "One task per lane at the same time (claude + codex + gemini), each with its own lock; state saves merge and merges/pushes take turns. Task Scheduler must allow parallel instances. false = one task at a time.",
 
-  "lane_slots": {"claude": 1, "codex": 1, "copilot": 1},
+  "lane_slots": {"claude": 1, "codex": 1, "copilot": 1, "gemini": 1},
   "_lane_slots": "How many tasks of one lane may run at once, normally. A campaign (.review/campaign.json, see orchestra/campaign.py) may raise it until its stop_at; the Max-plan sprint (Claude 3, 2-4 Nov 2026) ended Wed 4 Nov 18:00 London; these are the normal values again.",
 
   "lane_fallback": {"claude": "codex", "codex": "claude", "copilot": "claude"},
@@ -46,15 +46,14 @@
               "-c", "mcp_servers.desktop-commander.enabled=false",
               "-c", "mcp_servers.obsidian.enabled=false",
               "-s", "danger-full-access", "-"],
-    "gemini": ["node", "{npm:@google/gemini-cli:gemini}", "--approval-mode", "auto_edit", "-o", "text",
-               "-p", "Do the task given above."],
+    "gemini": ["agy", "-p", "Your full instructions are in the file {prompt-file}. Read that file first and follow it exactly.", "--settings", "{repo-path:orchestra/agy/coder_settings.json}", "--print-timeout", "0s"],
     "copilot": ["{npm-shim:copilot}", "-p",
                 "Your full instructions are in the file {prompt-file}. Read that file first and follow it exactly.",
                 "--allow-all-tools", "--no-ask-user", "--no-color", "--no-auto-update", "--disable-builtin-mcps",
                 "--add-dir", "{repo-path:.venv}",
                 "--deny-tool", "shell(git push)", "--deny-tool", "shell(gh)"]
   },
-  "_lane_argv": "Each lane's command; the prompt goes in on stdin. {npm-shim:<name>} = full path of npm's <name>.cmd if found (the scheduled task's PATH has no %APPDATA%\\npm), else <name>. {npm:<package>:<bin>} = that global npm CLI's JS entry, run with node; the lane is left out if it isn't installed. .review/lanes.json still overrides or adds lanes. Why each flag: comment above lane_argv in runner.py (claude stream-json for the live watch; codex full access and MCP off, Chuen 2 Nov 2026; gemini auto_edit = edits, no shell).",
+  "_lane_argv": "Each lane's command; the prompt goes in on stdin. {npm-shim:<name>} = full path of npm's <name>.cmd if found (the scheduled task's PATH has no %APPDATA%\\npm), else <name>. {npm:<package>:<bin>} = that global npm CLI's JS entry, run with node; the lane is left out if it isn't installed. .review/lanes.json still overrides or adds lanes. Why each flag: comment above lane_argv in runner.py (claude stream-json for the live watch; codex full access and MCP off, Chuen 2 Nov 2026; gemini = the Google Antigravity CLI `agy` since 12 Nov 2026: the old gemini-cli free tier was dropped by Google (IneligibleTierError); agy reads no stdin, so -p points at {prompt-file}; its tools are limited by the allow/deny list in orchestra/agy/coder_settings.json (no auto-approve-all), see orchestra/agy/README.md).",
   "unpriced_lanes": ["codex", "gemini", "copilot"],
   "npm_dirs": ["%APPDATA%/npm", "~/AppData/Roaming/npm", "%LOCALAPPDATA%/Packages/Claude_*/LocalCache/Roaming/npm"],
   "_npm_dirs": "Where global npm CLIs (codex, copilot, gemini) are looked for, in order, by the lanes ({npm-shim:..}, {npm:..}), orchestra/exams and the agent hub: one list for all three. %VAR% and ~ are expanded, * globs; an entry whose variable is unset is skipped. The scheduled task's PATH has no %APPDATA%\\npm, and npm installs made from the Claude desktop app live in its packaged AppData (3 Nov 2026: the daily exams logged copilot skipped: Copilot CLI not found).",

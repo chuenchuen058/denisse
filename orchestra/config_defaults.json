@@ -16,7 +16,7 @@
   "maint_floor_s": 900,
   "stale_days": 7,
   "parallel_lanes": true,
-  "lane_slots": {"claude": 1, "codex": 1, "copilot": 1},
+  "lane_slots": {"claude": 1, "codex": 1, "copilot": 1, "gemini": 1},
   "lane_fallback": {"claude": "codex", "codex": "claude", "copilot": "claude"},
 
   "lane_argv": {
@@ -29,8 +29,7 @@
               "-c", "mcp_servers.desktop-commander.enabled=false",
               "-c", "mcp_servers.obsidian.enabled=false",
               "-s", "danger-full-access", "-"],
-    "gemini": ["node", "{npm:@google/gemini-cli:gemini}", "--approval-mode", "auto_edit", "-o", "text",
-               "-p", "Do the task given above."],
+    "gemini": ["agy", "-p", "Your full instructions are in the file {prompt-file}. Read that file first and follow it exactly.", "--settings", "{repo-path:orchestra/agy/coder_settings.json}", "--print-timeout", "0s"],
     "copilot": ["{npm-shim:copilot}", "-p",
                 "Your full instructions are in the file {prompt-file}. Read that file first and follow it exactly.",
                 "--allow-all-tools", "--no-ask-user", "--no-color", "--no-auto-update", "--disable-builtin-mcps",
