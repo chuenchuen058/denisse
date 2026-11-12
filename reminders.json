@@ -17,6 +17,8 @@
     "default_priority": "medium",
     "id_length": 8,
     "due_soon_hours": 48,
+    "_dateparser_settings_doc": "Passed to dateparser for deadlines time_parse can't read (RELATIVE_BASE, the clock, is added by tasks.py).",
+    "dateparser_settings": {"PREFER_DATES_FROM": "future"},
     "deadline_lead_words": ["by", "before", "due", "on", "at", "until", "till", "no later than", "nlt"],
     "day_before_words": ["before"],
     "weekday_qualifiers": ["this", "next", "coming"],

@@ -12,7 +12,6 @@ Done tasks are kept, not deleted -- `list_tasks()` hides them, so they're
 out of the way, but "what did I get done this week" stays answerable.
 """
 
-import calendar
 import os
 import re
 import uuid
@@ -22,13 +21,40 @@ import reminders_config as _cfg
 import safe_json
 
 # The file name, priorities, limits, word lists and wording are in
-# reminders.json (Rule 0): "files", "priorities" and "tasks".
+# reminders.json (Rule 0): "files", "priorities" and "tasks". Weekday and
+# month names, clock separators and the end of a day are time_parse.json's,
+# so both parsers read the same words.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TASKS_FILE = os.path.join(BASE_DIR, *re.split(r"[\\/]", _cfg.get("files.tasks")))
 
-# Weekday and month names come from the calendar module, not a list here.
-_WEEKDAYS = [d.lower() for d in calendar.day_name]
-_MONTHS = [m.lower() for m in calendar.month_abbr if m]
+
+def _weekdays() -> list:
+    """Weekday names, Monday first -- time_parse.json "weekdays"."""
+    import time_parse
+
+    return list(time_parse.WEEKDAYS)
+
+
+def _month_words() -> list:
+    """Month prefixes ('nov' also matches 'november') plus the extra
+    abbreviations -- time_parse.json "months", "month_abbreviation_length"
+    and "month_abbreviations"."""
+    import time_parse
+
+    n = time_parse.CONFIG["month_abbreviation_length"]
+    return [m[:n] for m in time_parse.MONTHS] + list(time_parse.CONFIG["month_abbreviations"])
+
+
+def _clock_sep() -> str:
+    """The character class between hour and minutes ('15:30', '3.30')."""
+    import time_parse
+
+    return time_parse._CLOCK_SEP
+
+
+def _dateparser_settings(now: datetime) -> dict:
+    """tasks.dateparser_settings, measured from `now`."""
+    return {**_cfg.get("tasks.dateparser_settings"), "RELATIVE_BASE": now}
 
 
 def _words(key: str) -> str:
@@ -63,7 +89,7 @@ def _end_of_day():
 
 def _next_weekday(name: str, hour: int, minute: int, now: datetime) -> datetime:
     """Next occurrence of a named weekday, strictly in the future."""
-    target = _WEEKDAYS.index(name)
+    target = _weekdays().index(name)
     ahead = (target - now.weekday()) % 7
     if ahead == 0:
         ahead = 7
@@ -104,7 +130,7 @@ def parse_due(text: str, now: datetime | None = None) -> datetime | None:
     # "next monday 9am" / "friday" / "this friday 5pm" -- dateparser returns
     # None for several of these, so weekday names are resolved directly.
     m = re.match(
-        r"^(?:" + _words("weekday_qualifiers") + r")?\s*(" + "|".join(_WEEKDAYS) + r")"
+        r"^(?:" + _words("weekday_qualifiers") + r")?\s*(" + "|".join(map(re.escape, _weekdays())) + r")"
         r"(?:\s+(?:(?:" + _words("clock_lead_words") + r")\s+)?(\d{1,2})(?::(\d{2}))?\s*("
         + _meridiems() + r")?)?\s*$",
         cleaned, re.I,
@@ -125,10 +151,7 @@ def parse_due(text: str, now: datetime | None = None) -> datetime | None:
     try:
         import dateparser
 
-        when = dateparser.parse(
-            cleaned,
-            settings={"PREFER_DATES_FROM": "future", "RELATIVE_BASE": now},
-        )
+        when = dateparser.parse(cleaned, settings=_dateparser_settings(now))
     except Exception:
         return None
     if when is None or _has_time().search(cleaned):
@@ -149,7 +172,7 @@ def _has_time():
     am/pm hour, a clock time, a bare hour, '<clock_lead_word> <hour>', or
     one of tasks.time_words."""
     return re.compile(
-        r"\d{1,2}\s*(?:" + _meridiems() + r")\b|\d{1,2}[:.h]\d{2}\b"
+        r"\d{1,2}\s*(?:" + _meridiems() + r")\b|\d{1,2}" + _clock_sep() + r"\d{2}\b"
         r"|\b(?:" + _words("time_words") + r")\b"
         r"|^\s*\d{1,2}\s*$|\b(?:" + _words("clock_lead_words") + r")\s+\d{1,2}\b",
         re.IGNORECASE)
@@ -177,10 +200,7 @@ def due_from_text(text: str, now: datetime | None = None) -> datetime | None:
     try:
         from dateparser.search import search_dates
 
-        found = search_dates(
-            cleaned,
-            settings={"PREFER_DATES_FROM": "future", "RELATIVE_BASE": now},
-        )
+        found = search_dates(cleaned, settings=_dateparser_settings(now))
     except Exception:
         return None
     if not found:
@@ -191,7 +211,8 @@ def due_from_text(text: str, now: datetime | None = None) -> datetime | None:
         if not when or when <= now:
             continue
         if re.search(r"\d", phrase) or re.search(
-            r"(?i)\b(" + "|".join(_WEEKDAYS + _MONTHS) + "|" + _words("inferred_date_words") + ")",
+            r"(?i)\b(" + "|".join(map(re.escape, _weekdays() + _month_words())) + "|"
+            + _words("inferred_date_words") + ")",
             phrase,
         ):
             return when

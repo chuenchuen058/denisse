@@ -98,6 +98,60 @@ class DeadlineWordsFromData(unittest.TestCase):
         self.assertEqual(_fmt(tasks.parse_due("next week", now=NOW)), "2026-09-30 23:59")
 
 
+class DataChangesTaskParsing(unittest.TestCase):
+    """Rule 0, third pass (12 Nov): dateparser's settings come from
+    reminders.json tasks.dateparser_settings; weekday and month names and
+    the clock separators from time_parse.json -- not the calendar module."""
+
+    def _with_reminders(self, change):
+        import json
+        import os
+        import reminders_config
+
+        data = json.loads(Path(reminders_config.DEFAULT_FILE).read_text(encoding="utf-8"))
+        change(data)
+        path = Path(tempfile.mkdtemp()) / "reminders.json"
+        path.write_text(json.dumps(data), encoding="utf-8")
+        before = os.environ.get("DENISSE_REMINDERS")
+        os.environ["DENISSE_REMINDERS"] = str(path)
+        reminders_config.reload()
+
+        def undo():
+            if before is None:
+                os.environ.pop("DENISSE_REMINDERS", None)
+            else:
+                os.environ["DENISSE_REMINDERS"] = before
+            reminders_config.reload()
+        self.addCleanup(undo)
+
+    def test_dateparser_settings(self):
+        # "march" is read by dateparser alone; the shipped data prefers the future.
+        self.assertEqual(_fmt(tasks.parse_due("march", now=NOW)), "2027-03-23 23:59")
+        self._with_reminders(lambda d: d["tasks"]["dateparser_settings"].update(
+            PREFER_DATES_FROM="past"))
+        self.assertEqual(_fmt(tasks.parse_due("march", now=NOW)), "2026-03-23 23:59")
+
+    def test_weekday_names_are_time_parse_data(self):
+        from unittest import mock
+
+        names = ["monz", "tuez", "wedz", "thurz", "friz", "satz", "sunz"]
+        # time_parse compiled its own patterns at import, so only the tasks
+        # weekday rule sees the new names: 'friz' is the end of the coming Friday.
+        self.assertNotEqual(_fmt(tasks.parse_due("friz", now=NOW)), "2026-09-25 23:59")
+        with mock.patch.object(time_parse, "WEEKDAYS", names):
+            self.assertEqual(_fmt(tasks.parse_due("friz", now=NOW)), "2026-09-25 23:59")
+        self.assertEqual(tasks._weekdays(), time_parse.CONFIG["weekdays"])
+
+    def test_month_and_clock_words_are_time_parse_data(self):
+        n = time_parse.CONFIG["month_abbreviation_length"]
+        self.assertEqual(tasks._month_words()[:12], [m[:n] for m in time_parse.CONFIG["months"]])
+        self.assertTrue(tasks._has_time().search("15.30"))
+        from unittest import mock
+
+        with mock.patch.object(time_parse, "_CLOCK_SEP", "[:]"):
+            self.assertFalse(tasks._has_time().search("15.30"))
+
+
 class TaskStore(unittest.TestCase):
     def setUp(self):
         self._file, self._mirror = tasks.TASKS_FILE, tasks._mirror_to_vault

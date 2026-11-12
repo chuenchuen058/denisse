@@ -37,6 +37,24 @@
   "months": ["january", "february", "march", "april", "may", "june", "july",
              "august", "september", "october", "november", "december"],
   "month_abbreviations": {"sept": 9},
+  "_month_abbreviation_length_doc": "Every month is also read by its first this-many letters ('nov'), and describe() shows it that way.",
+  "month_abbreviation_length": 3,
+
+  "_dates_doc": "How written dates are read. ordinal_suffixes: the endings on '12th'; ordinal_suffix picks the one describe() and the questions write (exceptions are n % 100 values that take the default). day_month_joiners: '12th of November'; month_day_joiners: 'November the 12th'. slash_date_order: '12/11' is day_month (UK) or month_day.",
+  "ordinal_suffixes": ["st", "nd", "rd", "th"],
+  "ordinal_suffix": {"default": "th", "by_last_digit": {"1": "st", "2": "nd", "3": "rd"},
+                     "exceptions": [11, 12, 13]},
+  "day_month_joiners": ["of"],
+  "month_day_joiners": ["the"],
+  "slash_date_order": "day_month",
+
+  "_clock_doc": "clock_separators sit between hour and minutes in '15:30', '3.30', '15h30'. compact_hour_marks / compact_minute_marks are the letters in a written length like '1h30' or '1h 30m'.",
+  "clock_separators": [":", ".", "h"],
+  "compact_hour_marks": ["h"],
+  "compact_minute_marks": ["m", "min", "mins"],
+  "_punctuation_doc": "Before reading a phrase: these characters become a space, and each apostrophe_variants key becomes its value.",
+  "punctuation_to_space": [",", "!", "?"],
+  "apostrophe_variants": {"’": "'"},
 
   "number_words": {
     "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
@@ -98,7 +116,11 @@
     "weekday_is_today": "It's {weekday} today -- do you mean today ({when}) or next {weekday}, {next}?",
     "no_time_given": "end of day",
     "after_midnight": "It's after midnight -- by '{day_word}' do you mean later today ({today}) or the day after?",
-    "already_passed": "{when} has already passed -- when should it be?"
+    "already_passed": "{when} has already passed -- when should it be?",
+    "describe": "{date}, {time}",
+    "describe_date": "{weekday} {day} {month}",
+    "describe_date_other_year": "{weekday} {day} {month} {year}",
+    "time_of_day": "{hour:02d}:{minute:02d}"
   },
 
   "ambiguity": {

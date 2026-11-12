@@ -98,6 +98,17 @@ _DAY_WORDS = dict(CONFIG["day_words"])
 _AMB = CONFIG["ambiguity"]
 _BARE_PM_LO, _BARE_PM_HI = _AMB["bare_hour_pm"]
 _SMALL_HOURS_END = _AMB["small_hours_end"]
+_ABBR = CONFIG["month_abbreviation_length"]
+_ORD_SUFFIX = CONFIG["ordinal_suffix"]
+_ORD_SUFFIX_RE = r"(?:" + _alt(CONFIG["ordinal_suffixes"]) + r")"
+_DAY_MONTH_JOIN = _alt(CONFIG["day_month_joiners"])
+_MONTH_DAY_JOIN = _alt(CONFIG["month_day_joiners"])
+_SLASH_DAY_FIRST = CONFIG["slash_date_order"] == "day_month"
+_CLOCK_SEP = "[" + "".join(re.escape(c) for c in CONFIG["clock_separators"]) + "]"
+_COMPACT_H = _alt(CONFIG["compact_hour_marks"])
+_COMPACT_M = _alt(CONFIG["compact_minute_marks"])
+_TO_SPACE = list(CONFIG["punctuation_to_space"])
+_APOSTROPHES = dict(CONFIG["apostrophe_variants"])
 
 _fixed: datetime | None = None
 
@@ -203,7 +214,8 @@ def parse_duration(text: str) -> timedelta | None:
         return None
     if s in _DUR_PHRASES:
         return timedelta(seconds=_DUR_PHRASES[s])
-    m = re.fullmatch(r"(\d+)\s*h\s*(\d+)\s*(?:m|mins?)?", s)  # 1h30, 1h 30m
+    m = re.fullmatch(r"(\d+)\s*(?:" + _COMPACT_H + r")\s*(\d+)\s*(?:" + _COMPACT_M + r")?",
+                     s)  # 1h30, 1h 30m
     if m:
         return timedelta(hours=int(m.group(1)), minutes=int(m.group(2)))
     m = re.fullmatch(r"(\d+):(\d{2})", s)  # 1:30 as a length
@@ -240,12 +252,12 @@ _WORD_HOUR = {w: n for w, n in _NUMBER_WORDS.items() if n <= 12 and w.isalpha()
 _HOUR_TOKEN = r"(\d{1,2}|" + _alt(_WORD_HOUR) + r")"
 _MINS_VAL = dict(CONFIG["minute_words"])
 _MINS_TOKEN = r"(" + _alt(_MINS_VAL) + r"|\d{1,2})"
-_ORD = r"(\d{1,2})(?:st|nd|rd|th)?"
-# Each month by its full name or its first three letters, plus the extra
-# abbreviations in the JSON ("sept").
+_ORD = r"(\d{1,2})" + _ORD_SUFFIX_RE + "?"
+# Each month by its full name or its first month_abbreviation_length
+# letters, plus the extra abbreviations in the JSON ("sept").
 _MONTH_RE = r"(" + "|".join(
     [re.escape(a) for a in sorted(_MONTH_ALT, key=len, reverse=True)]
-    + [re.escape(m[:3]) + r"(?:" + re.escape(m[3:]) + r")?" for m in MONTHS]) + r")\.?"
+    + [re.escape(m[:_ABBR]) + r"(?:" + re.escape(m[_ABBR:]) + r")?" for m in MONTHS]) + r")\.?"
 _WD_RE = r"(" + _alt(WEEKDAYS) + "|" + _alt(_WD_ALT) + r")"
 _WD_NEXT = set(CONFIG["next_weekday_modifiers"])
 _WD_MODS = _WD_NEXT | set(CONFIG["this_weekday_modifiers"])
@@ -270,7 +282,7 @@ _STRIP = re.compile(r"\b(?:" + _alt(CONFIG["strip_words"]) + r")\b")
 def _month(word: str) -> int:
     if word in _MONTH_ALT:
         return _MONTH_ALT[word]
-    return [m[:3] for m in MONTHS].index(word[:3]) + 1
+    return [m[:_ABBR] for m in MONTHS].index(word[:_ABBR]) + 1
 
 
 def _hour_val(tok: str) -> int:
@@ -288,7 +300,10 @@ _MISSPELT = [(re.compile(r"\b(?:" + _alt(bad) + r")\b"), right)
 
 def _clean(text: str) -> str:
     s = (text or "").lower().strip()
-    s = s.replace("’", "'").replace(",", " ").replace("!", " ").replace("?", " ")
+    for variant, plain in _APOSTROPHES.items():
+        s = s.replace(variant, plain)
+    for ch in _TO_SPACE:
+        s = s.replace(ch, " ")
     for pattern, right in _MISSPELT:
         s = pattern.sub(right, s)
     s = _STRIP.sub(" ", s)
@@ -353,22 +368,23 @@ def _extract(s: str) -> tuple[_Bits, str]:
     if b.dom is None:
         m, s = _take(r"\b(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?\b", s)
         if m:
-            b.dom, b.month = int(m.group(1)), int(m.group(2))
+            first, second = int(m.group(1)), int(m.group(2))
+            b.dom, b.month = (first, second) if _SLASH_DAY_FIRST else (second, first)
             if m.group(3):
                 y = int(m.group(3))
                 b.year = y + 2000 if y < 100 else y
     if b.dom is None:
-        m, s = _take(r"\b" + _ORD + r"\s+(?:of\s+)?" + _MONTH_RE + r"(?:\s+(\d{4}))?\b", s)
+        m, s = _take(r"\b" + _ORD + r"\s+(?:(?:" + _DAY_MONTH_JOIN + r")\s+)?" + _MONTH_RE + r"(?:\s+(\d{4}))?\b", s)
         if m:
             b.dom, b.month = int(m.group(1)), _month(m.group(2))
             b.year = int(m.group(3)) if m.group(3) else None
     if b.dom is None:
-        m, s = _take(r"\b" + _MONTH_RE + r"\s+(?:the\s+)?" + _ORD + r"\b(?:\s+(\d{4}))?(?!\s*(?:" + _alt(CONFIG["meridiems"]) + r"|:))", s)
+        m, s = _take(r"\b" + _MONTH_RE + r"\s+(?:(?:" + _MONTH_DAY_JOIN + r")\s+)?" + _ORD + r"\b(?:\s+(\d{4}))?(?!\s*(?:" + _alt(CONFIG["meridiems"]) + r"|:))", s)
         if m:
             b.month, b.dom = _month(m.group(1)), int(m.group(2))
             b.year = int(m.group(3)) if m.group(3) else None
     if b.dom is None:
-        m, s = _take(r"\b(\d{1,2})(?:st|nd|rd|th)\b", s)
+        m, s = _take(r"\b(\d{1,2})" + _ORD_SUFFIX_RE + r"\b", s)
         if m:
             b.dom = int(m.group(1))
 
@@ -396,7 +412,7 @@ def _extract(s: str) -> tuple[_Bits, str]:
             b.hour, b.minute = hour, mins
             b.meridiem = _MER_TOKEN.get(m.group(4))
     if b.hour is None:
-        m, s = _take(r"\b(\d{1,2})[:.h](\d{2})\s*" + _MER_RE + r"?(?=\s|$)", s)
+        m, s = _take(r"\b(\d{1,2})" + _CLOCK_SEP + r"(\d{2})\s*" + _MER_RE + r"?(?=\s|$)", s)
         if m:
             b.hour, b.minute = int(m.group(1)), int(m.group(2))
             b.meridiem = _MER_TOKEN.get(m.group(3))
@@ -407,7 +423,7 @@ def _extract(s: str) -> tuple[_Bits, str]:
         if m:
             b.hour, b.meridiem = int(m.group(1)), _MER_TOKEN[m.group(2)]
     if b.hour is None:
-        m, s = _take(r"\b(?:" + _CLOCK_LEAD + r")\s+" + _HOUR_TOKEN + r"\b(?!\s*(?:st|nd|rd|th))", s)
+        m, s = _take(r"\b(?:" + _CLOCK_LEAD + r")\s+" + _HOUR_TOKEN + r"\b(?!\s*" + _ORD_SUFFIX_RE + r")", s)
         if m:
             b.hour = _hour_val(m.group(1))
             if b.hour >= 13:
@@ -453,7 +469,12 @@ def _hour24(b: _Bits) -> tuple[int, str | None]:
 
 
 def _fmt_time(t: time) -> str:
-    return f"{t.hour:02d}:{t.minute:02d}"
+    return _SAY["time_of_day"].format(hour=t.hour, minute=t.minute)
+
+
+def _month_name(n: int) -> str:
+    """'November' -- from time_parse.json "months", not the OS locale."""
+    return MONTHS[n - 1].title()
 
 
 def describe(when: datetime, now_: datetime | None = None) -> str:
@@ -461,10 +482,10 @@ def describe(when: datetime, now_: datetime | None = None) -> str:
     parse is visible. The year is added only when it isn't this one."""
     when = _aware(when)
     ref = _aware(now_) if now_ is not None else now()
-    s = f"{WEEKDAYS[when.weekday()].title()} {when.day} {when:%b}"
-    if when.year != ref.year:
-        s += f" {when.year}"
-    return f"{s}, {_fmt_time(when.time())}"
+    key = "describe_date" if when.year == ref.year else "describe_date_other_year"
+    day = _SAY[key].format(weekday=WEEKDAYS[when.weekday()].title(), day=when.day,
+                           month=_month_name(when.month)[:_ABBR], year=when.year)
+    return _SAY["describe"].format(date=day, time=_fmt_time(when.time()))
 
 
 def parse(text: str, now_: datetime | None = None) -> Parsed:
@@ -546,7 +567,7 @@ def parse(text: str, now_: datetime | None = None) -> Parsed:
             return Parsed(leftover=left)
         if b.weekday is not None and day.weekday() != b.weekday:
             return ask(_SAY["weekday_does_not_match_date"].format(
-                nth=f"{day.day}{_suffix(day.day)}", month=f"{day:%B}",
+                nth=f"{day.day}{_suffix(day.day)}", month=_month_name(day.month),
                 actual=WEEKDAYS[day.weekday()].title(), said=WEEKDAYS[b.weekday].title()))
         if b.before and not has_time:
             day -= timedelta(days=1)
@@ -611,6 +632,7 @@ def only_a_time(text: str) -> bool:
 
 
 def _suffix(n: int) -> str:
-    if 10 <= n % 100 <= 20:
-        return "th"
-    return {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    """'st' for 1, 'th' for 11 -- time_parse.json "ordinal_suffix"."""
+    if n % 100 in _ORD_SUFFIX["exceptions"]:
+        return _ORD_SUFFIX["default"]
+    return _ORD_SUFFIX["by_last_digit"].get(str(n % 10), _ORD_SUFFIX["default"])
