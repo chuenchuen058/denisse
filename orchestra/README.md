@@ -330,6 +330,28 @@ re-date the task in the queue.
 
 Tests: `python -m unittest orchestra.test_tools orchestra.test_runner`.
 
+### Reviewer-unavailable PASSes re-queue themselves
+
+A PASS that parks only because no independent reviewer could run (`REVIEW-UNAVAILABLE`: the
+park reason carries `review_unavailable_mark`, "The PASS stands") used to wait for someone to
+run `requeue.py <slug> --merge-only` (11-12 Nov 2026: several sat in `.review/parked/` overnight).
+At the start of each tick (`auto_requeue_review_step` in `runner.py`) the runner now does it
+itself, through `requeue.py`'s own `requeue_merge_only`:
+
+- only when a reviewer lane for that task can run now (`pick_reviewer`: not limited, has
+  allowance, never the author's lane) and that lane has a free slot;
+- oldest park first, at most `auto_requeue_review_max_per_tick` per tick (`0` turns it off);
+- never a task a reviewer blocked, or one parked for a gate, integration or merge failure
+  (their reasons carry no mark, and the state's last review verdict must be `unavailable` if
+  one is recorded), and never one parked more than `auto_requeue_review_max_age_days` ago;
+- each re-queue bumps the task's `Auto-Requeued:` header (`auto_requeue_review_header`); after
+  `auto_requeue_review_max_attempts` the task stays parked, `auto_requeue_review_gave_up` is
+  added to its reason, and hot.md "Waiting on Chuen" lists it with that reason;
+- one runner.log line per re-queue: `AUTO-REQUEUE <slug>: reviewer <lane> free`
+  (`auto_requeue_review_log`), after `requeue.py`'s own `REQUEUED ... merge-only` line.
+
+Tests: `python -m unittest orchestra.test_auto_requeue -v`.
+
 ## Campaigns and the dispatch controls (`campaign.py`)
 
 A campaign is a time-boxed change to the limits — e.g. the Max-plan sprint,
