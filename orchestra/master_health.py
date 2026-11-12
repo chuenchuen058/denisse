@@ -297,7 +297,7 @@ def step(R, state: dict, power_status=None, spawn_fn=None) -> str:
         if not enabled(R):
             return "off"
         import power
-        why = R.campaign.dispatch_block(R.REVIEW) or power.dispatch_block(
+        why = R.campaign.dispatch_block(R.REVIEW) or power.heavy_block(
             power_status if power_status is not None else power.power_status(), R.C)
         if why:
             return f"not now: {why}"

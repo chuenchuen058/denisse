@@ -113,6 +113,66 @@ class RunnerOnBatteryTest(unittest.TestCase):
         os.environ["ORCHESTRA_POWER"] = "battery:80"
         self.assertEqual(self.R.tick(), "PASS")
 
+    # --- light work on battery above the floor (battery_lane_slots / battery_weights, 12 Nov 2026)
+
+    def add_heavy(self, slug, title):
+        p = self.add(slug, title=title)
+        p.write_text(p.read_text().replace("Weight: light", "Weight: heavy"))
+
+    def busy_lane(self, task="busy"):
+        """Another slot running a task right now (its owner is this live process)."""
+        (self.R.REVIEW / "runner.other.lock").write_text(json.dumps(
+            {"pid": os.getpid(), "task": task, "lane": "other", "since": dt.datetime.now().isoformat()}))
+
+    def test_battery_switch_on_ac_runs_normally(self):
+        self.R.C["dispatch_on_battery"] = True
+        self.add_heavy("hac", "heavy on ac")
+        os.environ["ORCHESTRA_POWER"] = "ac"
+        self.assertEqual(self.R.tick(), "PASS", "on AC weight and battery slots don't matter")
+
+    def test_battery_above_floor_runs_one_light_task(self):
+        self.R.C["dispatch_on_battery"] = True
+        self.R.C["battery_lane_slots"] = 1
+        self.add("l1", title="light one")
+        self.add("l2", title="light two")
+        os.environ["ORCHESTRA_POWER"] = "battery:80"
+        self.assertEqual(self.R.tick(), "PASS")
+        self.assertEqual(self.attempts("l1") + self.attempts("l2"), 1, "one light task ran")
+
+    def test_battery_slots_cap_running_lanes(self):
+        self.R.C["dispatch_on_battery"] = True
+        self.R.C["battery_lane_slots"] = 1
+        self.add("lc", title="light capped")
+        self.busy_lane()
+        os.environ["ORCHESTRA_POWER"] = "battery:80"
+        self.assertEqual(self.R.tick(), "on battery", "one lane already runs: the slot is taken")
+        self.assertEqual(self.attempts("lc"), 0)
+        self.R.C["battery_lane_slots"] = 2
+        self.assertEqual(self.R.tick(), "PASS", "a second battery slot lets it start")
+
+    def test_battery_heavy_task_waits(self):
+        self.R.C["dispatch_on_battery"] = True
+        self.add_heavy("hv", "heavy waits")
+        os.environ["ORCHESTRA_POWER"] = "battery:80"
+        self.assertIn(self.R.tick(), ("idle", "on battery"))
+        self.assertEqual(self.attempts("hv"), 0, "never a heavy run on battery")
+        self.assertTrue((self.R.QUEUE / "hv.md").exists())
+        os.environ["ORCHESTRA_POWER"] = "ac"
+        self.assertEqual(self.R.tick(), "PASS", "it runs once back on AC")
+
+    def test_battery_under_floor_starts_nothing(self):
+        self.R.C["dispatch_on_battery"] = True
+        self.add("lf", title="light at floor")
+        os.environ["ORCHESTRA_POWER"] = f"battery:{self.R.C['battery_floor_percent']}"
+        self.assertEqual(self.R.tick(), "on battery")
+        self.assertEqual(self.attempts("lf"), 0)
+
+    def test_heavy_block_never_on_battery(self):
+        cfg = {"dispatch_on_battery": True, "battery_floor_percent": 30}
+        self.assertIsNone(power.heavy_block({"ac": True, "battery_percent": 50}, cfg))
+        self.assertTrue(power.heavy_block({"ac": False, "battery_percent": 90}, cfg))
+        self.assertTrue(power.heavy_block({"ac": False, "battery_percent": 90}, {}))
+
     def test_on_battery_log_is_throttled(self):
         self.add("th")
         os.environ["ORCHESTRA_POWER"] = "battery:70"
@@ -171,6 +231,54 @@ class RunnerOnBatteryTest(unittest.TestCase):
         self.assertTrue((self.R.QUEUE / "two.md").exists())
         self.assertIn("used for one", (self.R.REVIEW / "STATE_NOW.md").read_text(encoding="utf-8"))
         self.assertFalse(self.R.C["dispatch_on_battery"], "the command never turns the switch on")
+
+    def test_grant_still_starts_one_even_heavy(self):
+        self.add_heavy("gh", "granted heavy")
+        self.add("gl", title="granted light")
+        self.assertTrue(self.grant(task="gh")[0])
+        self.assertEqual(self.R.tick(), "PASS", "the override is one task, any weight")
+        self.assertEqual(self.attempts("gh"), 1)
+        self.assertEqual(self.R.tick(), "on battery")
+        self.assertEqual(self.attempts("gl"), 0)
+
+    # --- the override with dispatch_on_battery on (Codex review, 12 Nov 2026)
+
+    def test_switch_on_grant_lets_one_heavy_task_through(self):
+        self.R.C["dispatch_on_battery"] = True
+        self.add_heavy("h1", "heavy one")
+        self.add_heavy("h2", "heavy two")
+        ok, msg = self.grant()
+        self.assertTrue(ok, f"a grant is accepted while heavy work waits: {msg}")
+        self.assertEqual(self.R.tick(), "PASS")
+        self.assertEqual(self.attempts("h1") + self.attempts("h2"), 1, "one heavy task ran")
+        self.assertFalse(self.grant_file().exists(), "consumed")
+        self.assertIn("one-task override used", self.log_text())
+        self.assertIn(self.R.tick(), ("idle", "on battery"))
+        self.assertEqual(self.attempts("h1") + self.attempts("h2"), 1, "the next heavy task waits again")
+
+    def test_switch_on_light_task_does_not_use_up_the_grant(self):
+        self.R.C["dispatch_on_battery"] = True
+        self.add("lg", title="light with grant")
+        self.assertTrue(self.grant()[0])
+        self.assertEqual(self.R.tick(), "PASS", "the light task runs under the battery rules")
+        self.assertTrue(self.grant_file().exists(), "it did not need the grant")
+        self.assertNotIn("one-task override used", self.log_text())
+
+    def test_switch_on_grant_passes_the_slot_cap(self):
+        self.R.C["dispatch_on_battery"] = True
+        self.R.C["battery_lane_slots"] = 1
+        self.add("ls", title="light over cap")
+        self.busy_lane()
+        self.assertEqual(self.R.tick() if self.grant()[0] else None, "PASS", "the grant is the one extra lane")
+        self.assertEqual(self.attempts("ls"), 1)
+        self.assertFalse(self.grant_file().exists())
+
+    def test_switch_on_grant_refused_at_floor_and_on_ac(self):
+        self.R.C["dispatch_on_battery"] = True
+        ok, msg = self.grant(f"battery:{self.R.C['battery_floor_percent']}")
+        self.assertFalse(ok)
+        self.assertIn("floor", msg)
+        self.assertFalse(self.grant("ac")[0])
 
     def test_named_task_and_lane(self):
         self.add("aa", title="aa")

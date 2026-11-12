@@ -24,7 +24,9 @@ $action  = New-ScheduledTaskAction -Execute $python -Argument "`"$runner`"" -Wor
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 2)
 # Battery: Windows must not decide. It used to refuse ticks on battery and kill running ones on
 # unplug, orphaning their claude -p lanes (2 Nov 2026). The runner now decides: config
-# dispatch_on_battery / battery_floor_percent in orchestra/config.json (orchestra/power.py).
+# dispatch_on_battery / battery_floor_percent / battery_lane_slots / battery_weights in
+# orchestra/config.json (orchestra/power.py, runner.py battery_rules). So the tick may start and
+# keep running on battery; the runner chooses what, if anything, starts.
 # Parallel: parallel_lanes in orchestra/config.json runs one tick per lane at once, each with its own
 # lock. IgnoreNew would drop Orchestra to one task at a time (the installed task was changed by hand).
 $settings = New-ScheduledTaskSettingsSet -MultipleInstances Parallel -StartWhenAvailable `

@@ -18,8 +18,9 @@ What a tick does with a session's result (after Thomas's review, 31 Oct 2026):
   * timeout / no report / lane missing -> one retry in a fresh worktree, then parked
   * a task whose exact content already PASSed recently is not run again
   * daily spend cap from claude's own total_cost_usd; maintenance <= 20% of runtime
-  * on battery no new lane starts (dispatch_on_battery); running and finished lanes still
-    finish, gate, merge and push (2 Nov 2026, orchestra/power.py)
+  * on battery no new lane starts unless dispatch_on_battery; then only battery_weights tasks,
+    above battery_floor_percent, at most battery_lane_slots at once (12 Nov 2026). Running and
+    finished lanes still finish, gate, merge and push (2 Nov 2026, orchestra/power.py)
   * a campaign (.review/campaign.json) raises lane_slots / the spend cap until its stop_at,
     and Chuen's pause / stop (.review/control.json) block dispatch until he resumes; both
     are re-read every tick and enforced here (orchestra/campaign.py, 2 Nov 2026)
@@ -2910,6 +2911,17 @@ def battery_pause() -> str | None:
     return why
 
 
+def battery_rules() -> dict | None:
+    """On battery with dispatch allowed: {"weights": the task weights that may start
+    (battery_weights), "slots": how many lanes may run at once (battery_lane_slots)}. None on AC
+    or unknown power. Only asked once battery_pause() has let the tick through, so the floor and
+    dispatch_on_battery are already settled."""
+    import power
+    if not power.on_battery(power.power_status()):
+        return None
+    return {"weights": [str(w).lower() for w in C["battery_weights"]], "slots": int(C["battery_lane_slots"])}
+
+
 def power_override() -> dict | None:
     """Chuen's one-task grant (power.py allow-once) if it may be used now, else None. Only asked
     while battery_pause() blocks dispatch, so on AC a grant is never used up. An expired grant is
@@ -3083,6 +3095,12 @@ def _tick(dry_run: bool = False) -> str:
             save_state(state)
             write_state_now()
             return "on battery"
+    # Dispatching on battery (dispatch_on_battery, above the floor): light work only, at most
+    # battery_lane_slots lanes at once. A grant is its own rule: exactly one task, any weight.
+    on_batt = None if grant else battery_rules()
+    # There a grant lets one task past those rules (a heavy one, or one over the slot cap), and
+    # it is only used up if the task picked needed it (12 Nov 2026, Codex review).
+    batt_grant = power_override() if on_batt else None
     if not grant and exams_enabled():  # background; returns at once, holds no lane slot
         exams_step(state)
     master_health.step(sys.modules[__name__], state)  # background baseline run; never raises, never waits
@@ -3091,6 +3109,9 @@ def _tick(dry_run: bool = False) -> str:
     tasks =[t for t in route(load_queue(), state) if t.slug not in orphans]
     if grant:
         tasks = [t for t in tasks if granted_for(grant, t)]
+    if on_batt:
+        tasks = [t for t in tasks if t.weight in on_batt["weights"]
+                 or (batt_grant and granted_for(batt_grant, t))]
     if parallel:
         # One runner per lane at a time (Chuen, 2 Nov 2026: use Claude and Codex together).
         # Each lane has its own lock; state saves merge, and merges are serialised.
@@ -3140,11 +3161,26 @@ def _tick(dry_run: bool = False) -> str:
                     save_state(state)
                     return "on battery"
                 tasks = [t for t in tasks if granted_for(live, t)]
+            batt_ok = lambda t: True  # noqa: E731  (does the task fit the battery rules without a grant?)
+            if on_batt:  # slots read under the lock: no two ticks race past them
+                free = len(running) < on_batt["slots"]
+                batt_ok = lambda t: free and t.weight in on_batt["weights"]  # noqa: E731
+                live = None
+                if batt_grant:  # still there, unexpired, above the floor? Another tick may have used it.
+                    import power
+                    pst = power.power_status()
+                    live = power.usable_grant(REVIEW, C, pst, now())
+                    if live is not None and live.get("created") != batt_grant.get("created"):
+                        live = None
+                tasks = [t for t in tasks if batt_ok(t) or (live and granted_for(live, t))]
+                if not tasks and not free:
+                    save_state(state)
+                    return "on battery"
             task = pick(tasks, state)
             if not task:
                 save_state(state)
                 return "idle"
-            if grant:
+            if grant or (on_batt and not batt_ok(task)):
                 log(power.consume(REVIEW, C, live, task.slug, pst.get("battery_percent"), now()))
             timeout = timeout_for(task.weight, state)
             ts = task_state(state, task)
