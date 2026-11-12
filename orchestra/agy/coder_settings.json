@@ -3,6 +3,8 @@
     "allow": [
       "read_file(.)",
       "write_file(.)",
+      "write_file(.review)",
+      "read_file(.review)",
       "command(git status)",
       "command(git diff)",
       "command(git log)",

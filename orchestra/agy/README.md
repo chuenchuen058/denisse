@@ -4,3 +4,5 @@ Session settings for the Google Antigravity CLI (agy), passed with --settings; a
 
 - coder_settings.json: Session settings for the Antigravity CLI (agy) when Orchestra runs it as a coding lane (Chuen, 12 Nov 2026: Gemini in Orchestra, without auto-approving every tool). Passed with --settings <this file>; never saved into agy's own settings. Precedence in agy is Deny > Ask > Allow, and in headless print mode anything that would Ask is refused. Workspace = the task's own worktree. Commands still run inside agy's terminal sandbox (workspace only, no network) under --mode auto.
 - reviewer_settings.json: Session settings for agy as a read-only reviewer (Chuen, 12 Nov 2026). Reads the worktree and git history only; every write, URL, MCP tool and any other command is denied. Deny > Ask > Allow.
+
+- .review/ is git-ignored, and agy refuses git-ignored paths unless a rule names them, so both files allow it explicitly (Orchestra writes the prompt there and the lane writes its report there; found on the first real run, 12 Nov 2026).
