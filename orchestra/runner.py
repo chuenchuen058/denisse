@@ -737,7 +737,7 @@ def lane_busy() -> dict[str, int]:
     out: dict[str, int] = {}
     for lf in REVIEW.glob("runner*.lock"):
         info = read_lock(lf)
-        if info and info.get("task") and info.get("lane"):
+        if info and info.get("task") and info.get("lane") and not info.get("merge_only"):  # a merge runs no lane
             out[info["lane"]] = out.get(info["lane"], 0) + 1
     return out
 
@@ -781,6 +781,9 @@ def route(tasks: list[Task], state: dict) -> list[Task]:
     for t in tasks:
         if "lane-asked" in t.fields:
             continue
+        if is_merge_only(t):  # runs no lane: never re-picked (keep_author_lane)
+            keep_author_lane(t, state)
+            continue
         live = live or lane_live(state)
         asked = t.fields.get("lane", t.lane).lower()
         p = lane_pick_for(t, state, live)
@@ -798,6 +801,43 @@ def route(tasks: list[Task], state: dict) -> list[Task]:
         elif not lane_pick.is_auto(asked, C):
             t.fields["lane-routed"], t.fields["route-why"] = asked, p.why
     return tasks
+
+
+def author_lane(task: Task, state: dict) -> str | None:
+    """The lane that wrote review/<slug>: the lane of the task's last PASS in the state (a
+    fallback or re-pick is recorded there as it ran), else its last run on any lane, else its
+    Lane-Picked: header (lane_pick_headers), else Lane:. Only configured lanes count, so a
+    merge-only's own entries (lane 'runner') never do. None: nothing names one."""
+    names = set(lanes())
+    hist = ((state.get("tasks") or {}).get(task.slug) or {}).get("history") or []
+    runs = [h for h in hist if isinstance(h, dict) and str(h.get("lane") or "").lower() in names]
+    passed = [h for h in runs if h.get("result") == "PASS"]
+    picked = str((C.get("lane_pick_headers") or {}).get("picked") or "").lower()
+    for lane in ([h["lane"] for h in passed[-1:]] + [h["lane"] for h in runs[-1:]]
+                 + [task.fields.get(picked) if picked else None, task.fields.get("lane")]):
+        if lane and str(lane).lower() in names:
+            return str(lane).lower()
+    return None
+
+
+def keep_author_lane(task: Task, state: dict) -> None:
+    """A merge-only task in route(): its lane is its author's (author_lane), so the reviewer's
+    independence rule excludes the lane that really wrote the change; no pick, so no PICK line
+    and no header rewrite. With no author known its header lane stands (Lane: auto excludes none)."""
+    picked = str((C.get("lane_pick_headers") or {}).get("picked") or "").lower()
+    author = author_lane(task, state)
+    task.fields["lane-asked"] = task.fields.get("lane", task.lane).lower()
+    task.fields["pick-why"] = C["merge_only_author_why"].format(lane=author or task.lane)
+    for k in {"lane-picked", picked} - {""}:  # read from the header; record_pick must not re-record it
+        task.fields.pop(k, None)
+    if author:
+        task.fields["lane"] = author
+
+
+def slot_lane(task: Task) -> str:
+    """Whose slot locks a task dispatches through: its lane's, or merge_only_slot's for a
+    merge-only task, which starts no lane and so holds none of a lane's lane_slots."""
+    return str(C["merge_only_slot"]) if is_merge_only(task) else task.lane
 
 
 def record_pick(task: Task) -> None:
@@ -905,8 +945,13 @@ def why_not_runnable(task: Task, state: dict) -> str | None:
     if ts.get("last_end") and ts.get("last_result") in INFRA:
         if now() < dt.datetime.fromisoformat(ts["last_end"]) + dt.timedelta(minutes=C["backoff_min"]):
             return "waiting before its retry"
-    if lane_pick.is_auto(task.lane, C) and "lane-asked" not in task.fields:
-        route([task], state)  # Lane: auto, not routed by the caller: pick it now
+    merge = is_merge_only(task)
+    if (merge or lane_pick.is_auto(task.lane, C)) and "lane-asked" not in task.fields:
+        route([task], state)  # Lane: auto (or merge-only), not routed by the caller: route it now
+    if merge:  # starts no lane: no lane's limit or spend cap applies; the reviewer's own do (pick_reviewer)
+        if task.kind == "maintenance" and not maintenance_allowed(state):
+            return f"maintenance cap ({int(C['maint_share'] * 100)}%) reached today"
+        return None
     if task.fields.get("pick-none"):
         return task.fields["pick-none"]
     until = lane_limited(state, task.lane)
@@ -2448,6 +2493,7 @@ def _auto_requeue_review(state: dict | None) -> list[str]:
                 log(C["auto_requeue_review_gave_up_log"].format(slug=slug, n=tries))
                 gave_up = True
             continue
+        task.fields["lane"] = author_lane(task, state) or task.lane  # the reviewer excludes the real author
         rp = pick_reviewer(task, state)
         lane = rp.get("lane")
         if not lane or not reviewer_slot_free(lane):
@@ -3118,9 +3164,9 @@ def _tick(dry_run: bool = False) -> str:
         order = []
         for t in sorted((t for t in tasks if why_not_runnable(t, state) is None),
                         key=lambda t: (t.priority != "urgent", t.kind == "maintenance", t.slug)):
-            if t.lane not in order:
-                order.append(t.lane)
-        slots = C.get("lane_slots", {})
+            if slot_lane(t) not in order:
+                order.append(slot_lane(t))
+        slots = {**C.get("lane_slots", {}), str(C["merge_only_slot"]): C["merge_only_slots"]}
         chosen = None
         for lane in order:
             for slot in range(1, int(slots.get(lane, 1)) + 1):
@@ -3129,7 +3175,7 @@ def _tick(dry_run: bool = False) -> str:
                     chosen = lane
                     break
             if chosen:
-                tasks = [t for t in tasks if t.lane == lane]
+                tasks = [t for t in tasks if slot_lane(t) == lane]
                 break
         else:
             return "busy" if order else "idle"
@@ -3150,9 +3196,9 @@ def _tick(dry_run: bool = False) -> str:
             state = load_state()
             if parallel:
                 _BASE = json.loads(json.dumps(state))
-            lane_of = {t.slug: t.lane for t in tasks}  # the lane this slot was taken for, after route()
+            lane_of = {t.slug: slot_lane(t) for t in tasks}  # the lane this slot was taken for, after route()
             tasks = [t for t in route(load_queue(), state)
-                     if lane_of.get(t.slug) == t.lane and t.slug not in running]
+                     if lane_of.get(t.slug) == slot_lane(t) and t.slug not in running]
             if grant:  # still there, unexpired, above the floor? Another tick may have used it.
                 import power
                 pst = power.power_status()
@@ -3187,7 +3233,8 @@ def _tick(dry_run: bool = False) -> str:
             ts["attempts"] += 1
             ts["last_start"] = now().isoformat()
             save_state(state)  # count the attempt before running, so a crash still counts
-            run = set_lock_task(task.slug, task.lane, timeout=timeout)
+            run = set_lock_task(task.slug, task.lane, timeout=timeout,
+                                **({"merge_only": True} if is_merge_only(task) else {}))
         start_watchdog(timeout + C["tick_watchdog_extra_s"])
         fb = ""
         if task.fields.get("lane-from"):
