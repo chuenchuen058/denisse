@@ -89,7 +89,7 @@ work, whichever lane runs it. If he meant every task, `""` restores it.
 Tests: `orchestra/test_consult.py` (`test_narrow_to_caps_the_rule_without_editing_it`,
 `test_shipped_rule_is_narrowed_to_named_tasks`), `orchestra/test_autopilot.py`
 (`test_report_follow_ups_and_bug_fixes_from_partial_reports`, extended), `orchestra/test_visible.py`
-(`test_a_lane_with_its_own_tab_does_not_also_open_the_live_window`). Two existing tests assumed
+(`test_a_lane_with_its_own_tab_does_not_also_open_the_live_window`). Four existing tests (two more in `orchestra/test_runner.py`) assumed
 the old shipped behaviour and now set the key they are about (`consult_narrow_to=""`,
 `autopilot_sources_off=[]`); what they assert is unchanged.
 
