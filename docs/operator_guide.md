@@ -21,7 +21,7 @@ The runner's code holds no limits, patterns or lane commands of its own; they ar
 | `auth_patterns`, `auth_retry_min`, `auth_fix_hint` | The same for an expired sign-in. |
 | `review_risky_patterns`, `review_max_lines`, `review_timeout_s`, `review_diff_max_chars`, `reviewer_argv` | Which diffs get the reviewer lane, its time limit, how much diff it sees, and its command. |
 | `lane_auto_word`, `lane_strengths`, `lane_pacing`, `lane_pick_weights`, `lane_preference_bonus`, `bugfix_lane_bonus`, `lane_pick_explicit_scope`, `lane_usage_file` | How the runner picks a task's lane at dispatch (`orchestra/lane_pick.py`): `Lane: auto` (new_task.py's default) is scored over every lane by fit per work kind, pacing to each lane's reset, spend and free slots; an explicit `Lane:` is a strong preference; `Lane-Fixed: yes` never moves. The pick is written as `Lane-Picked:` / `Pick-Why:` in the task and `PICK <slug> -> <lane>: <why>` in runner.log. |
-| `auto_fix_round_max`, `auto_fix_forbidden_words`, `auto_fix_premise_words`, `auto_fix_negation_words` | How many times a reviewer's block re-queues the task itself with the findings as the note (0 = never), and the review words that park it for you instead. |
+| `auto_fix_round_max`, `auto_fix_forbidden_words`, `auto_fix_premise_words`, `auto_fix_negation_words`, `auto_fix_negation_window`, `auto_fix_safeguard_words` | How many times a reviewer's block re-queues the task itself with the findings as the note (0 = never), and the review words that park it for you instead: a negation only excuses a word a few words after it, and never across a safeguard word ("does not prevent uploads of vault contents" parks). The whole review is checked, not the `review_findings_max_chars` cut. |
 | `reviewer_lanes`, `reviewer_work`, `reviewer_override_lane` | Lanes that can review (each with its read-only command; `[]` = `reviewer_argv`), picked the same way and never the lane that wrote the change: `claude`, `codex` and `copilot`, so one limited lane no longer parks every PASS as REVIEW-UNAVAILABLE (12 Nov 2026). The reviewer's prompt goes in on stdin. Copilot's command has no `--allow-all-tools` and denies `write`, `shell`, `memory` and `url`, so it can read the worktree's files and nothing else (it judges from the diff in the prompt; it can't run `git diff`). `.review/lanes.json` `reviewer` still overrides. |
 
 A bad value never crashes a tick. A key missing from `config.json`, or one of the wrong
@@ -130,7 +130,7 @@ tick that is picking holds it up for a moment (and a stuck `dispatch.lock` stops
 A reviewer's `VERDICT: block` does the first `requeue.py --note` for you (`auto_fix_round_max`, default
 one round): the task goes back in the queue with the review's findings quoted before its gate,
 starts from the blocked branch's work, runs on a lane other than the reviewer that blocked it,
-and is reviewed again. runner.log says `AUTO-FIX <slug> round 1: <first finding>`. A second
+and is always reviewed again, even if its diff is no longer big or risky. runner.log says `AUTO-FIX <slug> round 1: <first finding>`. A second
 block parks it as before. So does a block whose review names a forbidden area (the guard, hooks,
 push, sends, the vault, credentials) or says the premise is wrong. The park reason then ends
 `No automatic fix round: <why>`, and it is listed in hot.md. From there, `requeue.py` works as

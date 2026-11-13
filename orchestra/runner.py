@@ -1369,8 +1369,10 @@ def risk(branch: str) -> str | None:
     return "; ".join(why) or None
 
 
-def parse_verdict(text: str, *, prompt_bounds: tuple[str, str] | None = None) -> tuple[str | None, str]:
-    """('ok'|'block'|None, reasons) from the reviewer's answer (JSON or plain text).
+def parse_verdict(text: str, *, prompt_bounds: tuple[str, str] | None = None,
+                  full: bool = False) -> tuple[str | None, str]:
+    """('ok'|'block'|None, reasons) from the reviewer's answer (JSON or plain text). The reasons
+    are cut at review_findings_max_chars unless `full` (the automatic fix round reads them all).
 
     When parsing a process log, pass the invocation's prompt boundaries: echoed input is
     never an answer, even if it contains VERDICT lines or JSON result objects.
@@ -1400,7 +1402,8 @@ def parse_verdict(text: str, *, prompt_bounds: tuple[str, str] | None = None) ->
     m = re.search(r"^\W*VERDICT:\W*(ok|block)\b(.*)", s, re.I | re.M | re.S)
     if not m:
         return None, s[-500:]
-    return m.group(1).lower(), m.group(2).strip()[:2000]
+    found = m.group(2).strip()
+    return m.group(1).lower(), found if full else found[:int(C["review_findings_max_chars"])]
 
 
 def pick_reviewer(task: Task, state: dict | None = None) -> dict:
@@ -1483,7 +1486,8 @@ def run_reviewer(task: Task, wt: Path, branch: str, report: Path, why: str, stat
     if timed_out:
         return {"verdict": "block", "reasons": f"reviewer timed out after {timeout}s", "seconds": seconds,
                 "cost_usd": cost, "lane": rlane, "pick": rp["why"]}
-    verdict, reasons = parse_verdict(text, prompt_bounds=prompt_bounds)
+    verdict, findings = parse_verdict(text, prompt_bounds=prompt_bounds, full=True)
+    reasons = findings if verdict is None else findings[:int(C["review_findings_max_chars"])]
     if verdict is None and detect_auth(rlane, log_path):
         return {"verdict": "unavailable", "reasons": auth_hit(detect_auth(rlane, log_path)),
                 "seconds": seconds, "cost_usd": cost, "lane": rlane, "pick": rp["why"]}
@@ -1496,8 +1500,10 @@ def run_reviewer(task: Task, wt: Path, branch: str, report: Path, why: str, stat
                 "seconds": seconds, "cost_usd": cost, "lane": rlane, "pick": rp["why"]}
     # answered: the reviewer itself gave this verdict and its findings (not a timeout or a missing
     # VERDICT line); only such a block can get an automatic fix round (auto_fix_round_max).
+    # findings: the whole review, uncut, for the fix round's refusal checks and note (12 Nov 2026:
+    # a forbidden-area finding past the 2,000-character cut of `reasons` went unseen).
     return {"verdict": verdict, "reasons": reasons, "seconds": seconds, "cost_usd": cost, "lane": rlane,
-            "pick": rp["why"], "answered": True}
+            "pick": rp["why"], "answered": True, "findings": findings}
 
 
 # ---------------------------------------------------------------- automatic fix round
@@ -1529,17 +1535,38 @@ def fix_base(task: Task) -> str:
     return _field(task, "auto_fix_base_header")
 
 
+def _word_start(words) -> re.Pattern:
+    """Any of `words` at the start of a word (push matches pushes)."""
+    alts = "|".join(re.escape(str(w).lower()) for w in words if str(w).strip())
+    return re.compile(r"(?<!\w)(?:" + (alts or r"(?!)") + ")")
+
+
 def word_hit(text: str, words: list[str]) -> str | None:
-    """The first of `words` (config) in `text`, at the start of a word, in a clause that doesn't
-    negate it first (auto_fix_negation_words, clauses by auto_fix_clause_split). None: no hit."""
+    """The first of `words` (config) in `text`, at the start of a word, that its clause doesn't
+    negate (clauses by auto_fix_clause_split). A negation (auto_fix_negation_words) excuses a word
+    only when it stands at most auto_fix_negation_window words before it and nothing from there to
+    the word's end is a safeguard (auto_fix_safeguard_words): "doesn't touch hooks" is a clean
+    diff, "does not prevent uploads of vault contents" and "no guard" are findings. Every
+    occurrence is checked, so one excused mention doesn't hide another. None: no hit."""
     neg = [re.compile(r"(?<!\w)" + re.escape(str(n).lower()) + r"(?!\w)") for n in C["auto_fix_negation_words"]]
+    guard = _word_start(C["auto_fix_safeguard_words"])
+    window = int(C["auto_fix_negation_window"])
     for clause in re.split(C["auto_fix_clause_split"], text or "", flags=re.I):
         low = clause.lower()
         for w in words:
-            m = re.search(r"(?<!\w)" + re.escape(str(w).lower()), low)
-            if m and not any(n.search(low[:m.start()]) for n in neg):
-                return str(w)
+            for m in re.finditer(r"(?<!\w)" + re.escape(str(w).lower()) + r"\w*", low):
+                ends = [x.end() for n in neg for x in n.finditer(low, 0, m.start())]
+                if not ends:
+                    return str(w)
+                gap = low[max(ends):m.start()]
+                if len(re.findall(r"[\w'’-]+", gap)) > window or guard.search(low[max(ends):m.end()]):
+                    return str(w)
     return None
+
+
+def review_findings(rv: dict) -> str:
+    """The reviewer's whole findings (run_reviewer's uncut `findings`), else its `reasons`."""
+    return str(rv.get("findings") or rv.get("reasons") or "")
 
 
 def auto_fix_refusal(task: Task, rv: dict, merge_only_run: bool = False) -> str | None:
@@ -1547,15 +1574,16 @@ def auto_fix_refusal(task: Task, rv: dict, merge_only_run: bool = False) -> str 
     cap, n = int(C["auto_fix_round_max"]), fix_round(task)
     if n >= cap:
         return C["auto_fix_why_cap"].format(n=n, max=cap)
-    if not rv.get("answered") or not str(rv.get("reasons") or "").strip():
+    review = review_findings(rv)
+    if not rv.get("answered") or not review.strip():
         return C["auto_fix_why_no_findings"]
     if merge_only_run or is_merge_only(task):
         return C["auto_fix_why_merge_only"]
-    # Only the review's own text: a worker's report correcting its premise is normal work.
-    hit = word_hit(rv["reasons"], C["auto_fix_premise_words"])
+    # Only the review's own text, all of it: a worker's report correcting its premise is normal work.
+    hit = word_hit(review, C["auto_fix_premise_words"])
     if hit:
         return C["auto_fix_why_premise"].format(word=hit)
-    hit = word_hit(rv["reasons"], C["auto_fix_forbidden_words"])
+    hit = word_hit(review, C["auto_fix_forbidden_words"])
     if hit:
         return C["auto_fix_why_forbidden"].format(word=hit)
     avoid = list(dict.fromkeys(fix_avoid(task) + [str(rv.get("lane") or "").lower()]))
@@ -1603,7 +1631,7 @@ def auto_fix_requeue(task: Task, ts: dict, entry: dict, rv: dict, branch: str, r
     lane = str(rv.get("lane") or "").lower()
     avoid = list(dict.fromkeys(fix_avoid(task) + ([lane] if lane else [])))
     base = git("rev-parse", f"refs/heads/{branch}", check=False).stdout.strip()
-    findings = str(rv["reasons"]).strip()
+    findings = review_findings(rv).strip()
     first = next((l.strip().lstrip("-*• ").strip() for l in findings.splitlines() if l.strip()), "")
     # Quoted: a finding line can't become a header, a merge-only mark, a ## Gate or a gate command.
     quoted = "\n".join("> " + l for l in findings.replace("\r\n", "\n").split("\n"))
@@ -2256,6 +2284,10 @@ def _after_pass(task: Task, state: dict, ts: dict, entry: dict, wt: Path, branch
     # Reviewer lane: risky diffs get a fresh read-only reviewer before integration.
     progress["stage"] = "review"
     why_risky = risk(branch) if C.get("review_risky", True) else None
+    if not why_risky and fix_round(task):
+        # A fix round is always reviewed again: a fix that shrinks the diff under the risky line
+        # count must not merge the work a reviewer blocked unreviewed (12 Nov 2026 review).
+        why_risky = C["auto_fix_review_why"].format(n=fix_round(task))
     if why_risky:
         log(f"review {task.slug}: {why_risky}")
         rv = run_reviewer(task, wt, branch, report, why_risky, state)
@@ -2266,7 +2298,8 @@ def _after_pass(task: Task, state: dict, ts: dict, entry: dict, wt: Path, branch
     else:
         rv = {"verdict": "skipped", "why": "review_risky is off" if not C.get("review_risky", True)
               else "not risky"}
-    ts["review"] = entry["review"] = rv
+    # The uncut findings stay out of state (they can be long); the fix-round checks below read rv.
+    ts["review"] = entry["review"] = {k: v for k, v in rv.items() if k != "findings"}
     if rv["verdict"] == "unavailable":
         # Not a judgement on the diff: the reviewer couldn't sign in. Keep the PASS for a
         # merge-only re-run once the sign-in works.
@@ -2275,7 +2308,7 @@ def _after_pass(task: Task, state: dict, ts: dict, entry: dict, wt: Path, branch
                                                        slug=task.slug, branch=branch), report)
         return "REVIEW-UNAVAILABLE"
     if rv["verdict"] == "block":
-        review_text = f"# Reviewer: VERDICT: block\nWhy reviewed: {why_risky}\n\n{rv['reasons']}\n"
+        review_text = f"# Reviewer: VERDICT: block\nWhy reviewed: {why_risky}\n\n{review_findings(rv)}\n"
         no_fix = auto_fix_refusal(task, rv, park_unmerged)
         if no_fix is None:
             auto_fix_requeue(task, ts, entry, rv, branch, report, review_text)

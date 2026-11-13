@@ -376,6 +376,54 @@ class IntegrationTest(unittest.TestCase):
                                       "but orchestra/thing.py:1 drops a test")
         self.assertEqual(self.run_tick({"orchestra/thing.py": "X = 1\n"}), "AUTO-FIX")
 
+    # 12 Nov 2026 review of the first round: three ways a block could slip past the checks.
+
+    def test_negation_only_excuses_a_word_it_negates(self):
+        hit = lambda s: self.R.word_hit(s, self.R.C["auto_fix_forbidden_words"])
+        self.assertEqual(hit("orchestra/x.py:1 does not prevent uploads of vault contents"), "upload")
+        self.assertEqual(hit("orchestra/x.py:2 has no guard on the send path"), "guard")
+        self.assertEqual(hit("it doesn't stop pushes"), "push")
+        self.assertIsNone(hit("doesn't touch hooks"))
+        self.assertIsNone(hit("no push, merge or vault edits"))
+        self.assertEqual(hit("no push here, yet it edits the hooks dir"), "hook",
+                         "one excused mention doesn't hide another")
+
+    def test_block_warning_of_a_missing_safeguard_parks(self):
+        self.add("unguarded")
+        os.environ["FAKE_VERDICT"] = "VERDICT: block\n- orchestra/thing.py:1 does not prevent uploads of vault contents"
+        self.assertEqual(self.run_tick({"orchestra/thing.py": "X = 1\n"}), "REVIEW-BLOCKED")
+        self.assertIn("forbidden area", (self.R.PARKED / "unguarded.why.txt").read_text())
+        self.assertNotIn("AUTO-FIX", self._log())
+
+    def test_forbidden_finding_past_the_findings_cut_still_parks(self):
+        self.add("longrev")
+        cut = int(self.R.C["review_findings_max_chars"])
+        filler = "".join(f"- orchestra/thing.py:{i} misses a test for branch {i}\n" for i in range(cut // 30))
+        os.environ["FAKE_VERDICT"] = "VERDICT: block\n" + filler + "- orchestra/thing.py:999 pushes the branch"
+        self.assertEqual(self.run_tick({"orchestra/thing.py": "X = 1\n"}), "REVIEW-BLOCKED")
+        self.assertIn("forbidden area (push)", (self.R.PARKED / "longrev.why.txt").read_text())
+        self.assertIn("thing.py:999 pushes", (self.R.PARKED / "longrev.review.md").read_text(),
+                      "the parked review is the whole review")
+        self.assertLessEqual(len(self.state()["tasks"]["longrev"]["review"]["reasons"]), cut)
+
+    def test_fix_round_note_carries_the_whole_review(self):
+        self.add("longnote")
+        cut = int(self.R.C["review_findings_max_chars"])
+        filler = "".join(f"- orchestra/thing.py:{i} misses a test for branch {i}\n" for i in range(cut // 30))
+        os.environ["FAKE_VERDICT"] = "VERDICT: block\n" + filler + "- orchestra/thing.py:999 the last finding"
+        self.assertEqual(self.run_tick({"orchestra/thing.py": "X = 1\n"}), "AUTO-FIX")
+        self.assertIn("> - orchestra/thing.py:999 the last finding", (self.R.QUEUE / "longnote.md").read_text())
+
+    def test_fix_round_is_reviewed_even_when_its_diff_is_not_risky(self):
+        p = self.add("smallfix")
+        p.write_text(p.read_text().replace("Lane: fake", "Lane: fake\nFix-Round: 1\nFix-Not-Lane: reviewer"))
+        os.environ["FAKE_VERDICT"] = "VERDICT: block\n- done.txt:1 still wrong"
+        self.assertIsNone(self.R.risk("HEAD"), "sanity")
+        self.assertEqual(self.run_tick({"done.txt": "x"}), "REVIEW-BLOCKED")
+        self.assertTrue(self.flag.exists(), "the reviewer ran on a non-risky fix round")
+        self.assertFalse((self.repo / "done.txt").exists(), "not merged unreviewed")
+        self.assertIn("automatic fix round 1", self.state()["tasks"]["smallfix"]["review"]["why"])
+
     def test_a_block_without_findings_parks(self):
         self.add("mute2")
         os.environ["FAKE_VERDICT"] = "Looks good to me!"
