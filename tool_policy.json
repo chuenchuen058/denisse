@@ -14,7 +14,17 @@
     "verified_document_path, known_skill, task_has_subject (the text is nothing but a time, 'Thursday', or filler, 'me'),",
     "unambiguous_time (time_parse has a question about the due phrase; {detail} is that question).",
     "groups: a turn is offered core + every group whose cues match the recent user text (tool_router.py).",
+    "confirm_first: tools that never run without his yes (safety.RISKY_TOOLS reads it; the tray dialog, the voice question,",
+    "and unattended calls decline them). tools.<name>.declined_result: what the model is told when he says no, in place of",
+    "brain.json tool_errors.declined (keep its 'User declined' opening: multistep.py reads it). nothing_reply: the sentence that",
+    "stands in when nothing_must_mention fails, instead of the tool result's own words.",
     "cues/study_commands: data for the fast paths that run before the model; edit here, not in code."
+  ],
+  "_confirm_first": "disable_startup_program changes what launches at login; draft_email is an email in his name (2026-11-07); delegate sends his words and read access to his folders to a cloud agent and uses his allowance (audit 10 Nov 2026, D2). Moved here from a literal in safety.py, 13 Nov 2026.",
+  "confirm_first": [
+    "disable_startup_program",
+    "draft_email",
+    "delegate"
   ],
   "core": [
     "calculate",
@@ -158,6 +168,13 @@
         "look_at_this"
       ],
       "cues": "e-?mails?\\b|\\bmail\\b|inbox|outlook|\\bdrafts?\\b|\\brepl(?:y|ies)\\s+to\\b|\\bsend\\b[^.?!]{0,60}\\bto\\b|\\bforward\\b"
+    },
+    "handoff": {
+      "_note": "delegate (13 Nov 2026). The cues are the old brain.json cues.delegate_patterns, which used to START a hand-off on a match; now they only put the tool in front of the model, which decides, and he is asked before anything is sent. A wider cue costs a little attention, never a hand-off.",
+      "tools": [
+        "delegate"
+      ],
+      "cues": "(?:\\bcover\\s+letter\\b)|(?:\\blinked?\\s*in\\s+post\\b)|(?:\\bpersonal\\s+statement\\b)|(?:\\b(?:change|edit|improve|update|tailor|tweak|review|rewrite|polish|fix)\\b[^.?!]{0,40}\\b(?:cv|resume|r[eé]sum[eé])\\b)|(?:\\b(?:cv|resume)\\b[^.?!]{0,30}\\b(?:change|edit|improve|tailor|tweak|review|rewrite|feedback)\\b)|(?:\\bwhat\\s+should\\s+i\\s+(?:add|change|put)\\b)|(?:\\bsearch\\s+(?:\\w+\\s+){0,2}(?:up|online)\\b)|(?:\\bsearch\\s+the\\s+web\\b)|(?:\\blook\\s+(?:\\w+\\s+){0,2}up\\b)|(?:\\bresearch\\b)|(?:\\bfind\\s+(?:me\\s+)?(?:\\d+\\s+|some\\s+|more\\s+)?(?:internships?|jobs?|roles?|companies|places)\\b)|(?:\\binternships?\\b[^.?!]{0,40}\\b(?:apply|due|deadline|open)\\b)|(?:\\bplaces\\s+(?:each\\s+)?to\\s+apply\\b)|(?:\\bpitch\\b)|(?:\\bprep(?:are)?\\s+me\\b)|(?:\\b(?:solve|prove)\\b)|(?:\\bworked\\s+solutions?\\b)|(?:\\bsolutions?\\s+(?:to|for)\\b)|(?:\\bhow\\s+(?:do|should|would)\\s+i\\s+(?:do|approach|answer|tackle)\\b)|(?:\\bhow\\s+to\\s+(?:do|approach|answer|tackle)\\b)|(?:\\b(?:ask|use|get)\\s+(?:claude|codex)\\b)|(?:\\bhand\\s+(?:it|this|that)\\s+(?:to|over)\\b)|(?:\\b(?:draft|write)\\s+(?:me\\s+)?(?:a|an|the)\\s+(?:post|letter|essay|summary|report)\\b)"
     },
     "preferences": {
       "tools": [
@@ -434,6 +451,15 @@
       "side_effect": "write",
       "once_per_turn": true,
       "reply_must_mention": "\\bdraft"
+    },
+    "delegate": {
+      "_note": "delegate.py through tools.delegate (13 Nov 2026). A write: it sends his message to a cloud agent. Offered by groups.handoff, confirmed first (confirm_first); his own message and recent turns are what is sent (tools.prepare_args). Her reply must say it went to Claude/Codex, else the tool's own sentence; a no must be said as a no.",
+      "side_effect": "write",
+      "once_per_turn": true,
+      "reply_must_mention": "\\b(?:Claude|Codex)\\b",
+      "nothing_must_mention": "\\b(?:not|nothing|didn'?t|won'?t|haven'?t)\\b",
+      "nothing_reply": "Nothing was sent to Claude or Codex -- I haven't handed it off.",
+      "declined_result": "User declined the hand-off: nothing was sent to Claude or Codex and nothing was started. Tell him that in one line, and offer to help with it here instead."
     },
     "tutor_consult": {
       "_note": "The tutor's opinion for a question (part 5). A reply that leaves the tutor out gets the tutor's opening in front, so Chuen can tell the tutor's view from Denisse's. The record of the consult goes to the tutor's own area of the vault.",

@@ -158,5 +158,11 @@
     "any_day": "any day",
     "not_connected": "No calendar is connected to Denisse, so nothing about his calendar can be seen or checked -- not for {day}, not at all. Tell him plainly you can't see his calendar; don't say it's empty or free. His reminders (list_tasks) are the nearest thing you can read.",
     "no_reader": "a calendar is configured but no calendar reader is installed. Tell him this failed."
+  },
+
+  "delegate": {
+    "_doc": "The hand-off tool (delegate.py). engine_joiner joins the engines, in delegate.json's order, in what his confirmation says ('Claude, then Codex'). handed_off_note follows delegate.py's own sentence once a job is handed off, for the model only: it starts with ' Tell him' (brain.json honesty.result_cut_markers) so it is cut from anything he is shown.",
+    "engine_joiner": ", then ",
+    "handed_off_note": " Tell him that in one line. The job is Claude's now: call no other tool for it this turn, and don't attempt it yourself."
   }
 }

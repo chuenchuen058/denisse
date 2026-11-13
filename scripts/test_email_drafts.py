@@ -239,10 +239,11 @@ class PolicyTest(unittest.TestCase):
         for text in ("send my CV and cover letter to my personal tutor",
                      "draft a reply to this email"):
             self.assertIn("draft_email", offered(text), text)
-            self.assertFalse(brain._should_delegate(text), text)
         for text in ("pull up my latest cv", "what's the weather tomorrow"):
             self.assertNotIn("draft_email", offered(text), text)
-        self.assertTrue(brain._should_delegate("could you write me a cover letter for JP Morgan London"))
+        # Writing the cover letter itself is a hand-off the model may choose
+        # and he confirms (the delegate tool, 13 Nov 2026), not a draft.
+        self.assertIn("delegate", offered("could you write me a cover letter for JP Morgan London"))
 
 
 if __name__ == "__main__":

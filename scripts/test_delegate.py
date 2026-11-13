@@ -1,4 +1,9 @@
-"""The hand-off to Claude: where the line is, and what reaches Claude.
+"""The hand-off to Claude: who decides, that he is asked, and what reaches Claude.
+
+Since 2026-11-13 (audit 10 Nov, D2) the hand-off is the `delegate` tool: the
+local model chooses it, and it never runs without his yes. The brain checks
+below use a scripted model and a patched delegate.start, so no hand-off
+starts and no model runs.
 
 No real Claude or Codex is run: shutil.which and subprocess.run are faked,
 DRAFTS and the log point at a temp folder, so nothing is spent and nothing
@@ -9,12 +14,27 @@ import subprocess
 import sys
 import tempfile
 import threading
+from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+TMP = tempfile.mkdtemp(prefix="denisse-delegate-brain-")
+os.environ["DENISSE_RULES_FILE"] = os.path.join(TMP, "rules.json")
+with open(os.environ["DENISSE_RULES_FILE"], "w", encoding="utf-8") as _f:
+    _f.write("{}")
+os.environ.setdefault("DENISSE_VAULT", os.path.join(TMP, "vault"))
 
 import brain  # noqa: E402
 import delegate  # noqa: E402
+import instincts  # noqa: E402
+import memory_store  # noqa: E402
+import safety  # noqa: E402
+import tool_router  # noqa: E402
+
+instincts.INSTINCTS_FILE = os.path.join(TMP, "instincts.json")
+instincts.INSTINCTS_MD = os.path.join(TMP, "instincts.md")
+memory_store.MEMORY_DIR = TMP
+memory_store.MEMORY_FILE = os.path.join(TMP, "conversation.json")
 
 results = []
 
@@ -24,27 +44,128 @@ def check(name, ok, detail=""):
     print(f"[{'OK  ' if ok else 'FAIL'}] {name}" + (f"  -- {detail}" if detail else ""))
 
 
-# -- the line: Claude's jobs ------------------------------------------------
-for text in ("could you write me a cover letter for JP Morgan London",
-             "what should i add or change for the current cv",
-             "could you search the web on internships due before november in singapore",
-             "give me at least 10 places each to apply to",
-             "could you check prof dario farina, search it up",
-             "prep me on what to say for the pitch",
-             "could you add the solutions to electromagnetism week 5",
-             "how to do my signal and system coursework",
-             "okay could you draft me the post",
-             "ask claude to tidy this paragraph"):
-    check(f"hand off: {text!r}", brain._should_delegate(text))
+# -- the model decides, and he is asked ----------------------------------------
+class FakeModel:
+    """A scripted model: each chat() returns the next scripted message, and
+    the last one again if the brain asks once more (an honesty retry)."""
 
-# -- ...and what stays local ------------------------------------------------
-for text in ("pull up my latest cv", "find my cv", "open a file called passport",
-             "remind me to write a cover letter tomorrow", "plan my study modules",
-             "tell me the briefing", "hows my internship tracker", "hey",
-             "what do you know about the projects im doing?",
-             "could you help me plan my internship applications",
-             "what time is it in tokyo", "improve the brightness of my screen"):
-    check(f"local: {text!r}", not brain._should_delegate(text))
+    def __init__(self, replies):
+        self.replies = list(replies)
+
+    def chat(self, model, messages, tools=None, **kw):
+        return {"message": self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]}
+
+
+def calls(name, **args):
+    return {"content": "", "tool_calls": [{"function": {"name": name, "arguments": args}}]}
+
+
+STARTED = "Handing that to Claude -- it can read your files and search the web."
+
+
+def respond(history, replies, confirm=None):
+    """One turn through the real brain; returns (reply, delegate.start calls)."""
+    fake = FakeModel(replies)
+    starts = []
+
+    def fake_start(task, context=None):
+        starts.append((task, context))
+        return STARTED
+
+    real = brain.ollama
+    brain.ollama = fake
+    try:
+        with mock.patch.object(delegate, "start", fake_start):
+            b = brain.Brain.__new__(brain.Brain)
+            reply, _ = b.respond([dict(m) for m in history], confirm=confirm)
+    finally:
+        brain.ollama = real
+    return reply, starts
+
+
+# Shaped like the requests the old cues.delegate_patterns started a hand-off
+# on, bare trigger words included.
+OLD_TRIGGERS = ("could you write me a cover letter for JP Morgan London",
+                "what should i add or change for the current cv",
+                "could you search the web on internships due before november in singapore",
+                "give me at least 10 places each to apply to",
+                "could you check prof dario farina, search it up",
+                "prep me on what to say for the pitch",
+                "could you add the solutions to electromagnetism week 5",
+                "how to do my signal and system coursework",
+                "okay could you draft me the post",
+                "ask claude to tidy this paragraph",
+                "research", "solve", "prove it", "look it up")
+
+check("no regex short-circuit is left",
+      not hasattr(brain, "_should_delegate") and not hasattr(brain, "_DELEGATE"))
+check("delegate is a tool the model can call", "delegate" in brain.tools.TOOL_FUNCTIONS
+      and "delegate" in {d["function"]["name"] for d in brain.TOOL_DEFINITIONS})
+check("delegate is confirmed first", "delegate" in safety.RISKY_TOOLS)
+
+
+def offered(text):
+    return {d["function"]["name"] for d in tool_router.select(
+        brain.TOOL_DEFINITIONS, [{"role": "user", "content": text}])}
+
+
+for text in OLD_TRIGGERS:
+    reply, starts = respond([{"role": "user", "content": text}],
+                            [{"content": "Happy to help with that here."}], confirm=lambda n, a: True)
+    check(f"old trigger words start nothing by themselves: {text!r}", not starts, starts)
+
+for text in OLD_TRIGGERS[:10]:
+    check(f"the model is offered the hand-off: {text!r}", "delegate" in offered(text))
+for text in ("what time is it in tokyo", "hey", "pull up my latest cv"):
+    check(f"not offered for local work: {text!r}", "delegate" not in offered(text))
+
+ASK = "could you write me a cover letter for JP Morgan London  "
+HISTORY = [{"role": "user", "content": "i'm applying to banks this week"},
+           {"role": "assistant", "content": "Good luck -- want a hand with anything?"},
+           {"role": "user", "content": ASK}]
+CONTEXT = [{"role": m["role"], "content": m["content"]} for m in HISTORY[:-1]]
+asked = []
+
+
+def answer(yes):
+    def confirm(name, args):
+        asked.append((name, dict(args)))
+        return yes
+    return confirm
+
+
+reply, starts = respond(HISTORY, [calls("delegate", task="cover letter for a bank"),
+                                  {"content": "Sure, I'll get started on that!"}], confirm=answer(False))
+check("the tool call asks first", [n for n, _ in asked] == ["delegate"], asked)
+shown = asked[0][1] if asked else {}
+check("...showing his own words as what is sent", shown.get("task") == ASK.strip(), shown)
+check("...and which engine it goes to", "Claude" in str(shown.get("engine")), shown)
+check("...and the turns sent with it", shown.get("context") == CONTEXT, shown.get("context"))
+check("a no starts nothing", not starts, starts)
+check("...and says so", "nothing" in reply.lower() and "claude" in reply.lower(), reply)
+
+asked.clear()
+reply, starts = respond(HISTORY, [calls("delegate", task="cover letter for a bank"),
+                                  {"content": "On it."}], confirm=answer(True))
+check("a yes asks once and calls delegate.start once", len(asked) == 1 and len(starts) == 1, starts)
+check("...with his message and the turns before it, as the old path did",
+      starts == [(ASK.strip(), CONTEXT)], starts)
+check("...and she says it went to Claude", "Claude" in reply, reply)
+
+import tray  # noqa: E402
+
+check("unattended calls decline the hand-off", tray._decline_risky_unattended("delegate", {}) is False)
+reply, starts = respond(HISTORY, [calls("delegate", task="cover letter"), {"content": "Done!"}],
+                        confirm=tray._decline_risky_unattended)
+check("...and nothing starts from the unattended path", not starts, starts)
+
+import wake_word  # noqa: E402
+
+voice_gate = wake_word.VOICE_CONFIRM_TOOLS if wake_word.VOICE_CONFIRM_ENABLED else set(safety.RISKY_TOOLS)
+check("the voice path asks too", "delegate" in voice_gate)
+spoken = wake_word._describe_action("delegate", {"task": "write me a cover letter",
+                                                 "engine": "Claude, then Codex", "context": CONTEXT})
+check("...saying what goes where", "cover letter" in spoken and "Claude" in spoken, spoken)
 
 # -- what Claude is allowed to do -------------------------------------------
 tmp = tempfile.mkdtemp(prefix="denisse-delegate-")

@@ -58,6 +58,7 @@
       "run_shell_command": "run the command: {command}",
       "write_file": "write to the file {file}",
       "disable_startup_program": "stop {name} from launching at login",
+      "delegate": "send this to {engine}: {task}",
       "_default": "run {tool}"
     },
     "arg_fallbacks": {"file": "you mentioned", "name": "that program"},

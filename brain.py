@@ -980,16 +980,12 @@ def _quick_reply(text: str, last_said: str, now: datetime.datetime | None = None
     return None
 
 
-# The jobs Denisse hands to Claude (delegate.py). From ~180 of his own
-# non-Denisse prompts to Claude Code and Codex: CV and cover-letter writing,
-# internship research, pitch prep, people lookups and coursework solutions.
-# An 8B model answers these plausibly and badly. Kept explicit, so the line
-# is testable: finding his CV is local, improving it is Claude's.
-# cues.delegate_patterns, and never cues.keep_local_patterns.
-
-
-def _should_delegate(text: str) -> bool:
-    return bool(_DELEGATE.search(text or "")) and not _KEEP_LOCAL.search(text or "")
+# The jobs Denisse hands to Claude (delegate.py) -- CV and cover-letter
+# writing, research, pitch prep, coursework solutions -- are the model's
+# call since 2026-11-13: the `delegate` tool, offered by tool_policy.json
+# groups.handoff and confirmed first (confirm_first). Until then a regex
+# over his wording (cues.delegate_patterns) started one with nothing asked,
+# from the wake-word path too (audit 10 Nov, D2).
 
 
 def _is_known_skill(name: str) -> bool:
@@ -1190,7 +1186,7 @@ def _run_tool(name: str, args: dict, confirm, used: set | None = None) -> str:
             return err["already_ran"].format(name=name)
         used.add(name)
     if confirm is not None and not confirm(name, args):
-        return err["declined"].format(name=name)
+        return tool_policy.tool(name).get("declined_result") or err["declined"].format(name=name)
     call_args = _rescue_arg_names(func, args)
     missing = [p for p in _required_params(func) if p not in call_args]
     if missing:
@@ -1380,8 +1376,6 @@ def _built(c: dict) -> dict:
         "_FOLLOW_ON": _rx(cues["follow_on_pattern"]),
         "_PLAN_YES": _rx(cues["plan_yes_pattern"]),
         "_ACK": _rx(cues["ack_pattern"]),
-        "_DELEGATE": _rx(cues["delegate_patterns"]),
-        "_KEEP_LOCAL": _rx(cues["keep_local_patterns"]),
         "_DONE_WORD": _rx(cues["done_word_pattern"]),
         "_STYLE_NOTE_EXCLUDES": _rx(cues["style_note_excludes_pattern"]),
         "_VAULT_QUERIES": [([_rx(p, cs) for p in v["all_of_patterns"]], v["query"]) for v in cues["vault_queries"]],
@@ -1841,16 +1835,11 @@ class Brain:
             answer = text + (f"\n\n{question}" if question else "")
             messages.append({"role": "assistant", "content": answer})
             return answer, messages
-        if _should_delegate(latest_user) and not getattr(self, "_in_plan", False):
-            # A writing/research/solutions job: Claude does it and the result
-            # lands in his vault -- see delegate.py. She says so plainly.
-            import delegate
-            context = [{"role": m["role"], "content": m.get("content") or ""}
-                       for m in messages[:-1]
-                       if m.get("role") in ("user", "assistant") and (m.get("content") or "").strip()]
-            answer = delegate.start(latest_user.strip(), context)
-            messages.append({"role": "assistant", "content": answer})
-            return answer, messages
+        # The turns before this one, as a hand-off (the delegate tool) sends
+        # them: tools.prepare_args puts them and his own message in its call.
+        handoff_context = [{"role": m["role"], "content": m.get("content") or ""}
+                           for m in messages[:-1]
+                           if m.get("role") in ("user", "assistant") and (m.get("content") or "").strip()]
         if latest_user.strip().lower() in _FEEDBACK_COMMANDS:
             answer = _FEEDBACK_COMMANDS[latest_user.strip().lower()]
             messages.append({"role": "assistant", "content": answer})
@@ -1944,6 +1933,9 @@ class Brain:
                         args = {**args, "query": _vault_query(latest_user)}
                 if name == "add_task" and args.get("due") and not _due_said(str(args["due"]), intent_text):
                     args = {**args, "due": ""}  # see _due_said
+                # Some calls run with what the turn says, not what the model
+                # wrote: a hand-off sends his own message (tools.prepare_args).
+                args = tools.prepare_args(name, args, latest_user.strip(), handoff_context)
                 result = str(_run_tool(name, args, confirm, used_once))
                 q = str(args.get("query") or args.get("pattern") or "")
                 if name == "find_files" and result.startswith("No files matching") and re.search(r"[*?]", q):
@@ -2207,7 +2199,7 @@ class Brain:
                         if name in successful_tools:
                             rule, own = meta.get("reply_must_mention"), meta.get("fallback_reply") or _own_words(res, 1)
                         elif _confirms_nothing(res):
-                            rule, own = meta.get("nothing_must_mention"), _own_words(res)
+                            rule, own = meta.get("nothing_must_mention"), meta.get("nothing_reply") or _own_words(res)
                         else:
                             continue
                         # A tool the model tried to follow with a refused

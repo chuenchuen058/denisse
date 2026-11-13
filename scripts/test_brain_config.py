@@ -125,25 +125,17 @@ class Cues(Base):
     def test_requests_answered_before_the_model_come_from_the_data(self):
         self.assertFalse(brain._NEWS_OFF.search("enough with the bulletins"))
         self.assertFalse(brain._PLAN_STUDY.search("sort out my modules"))
-        self.assertFalse(brain._should_delegate("ghostwrite my blog"))
         self.assertIsNone(brain._vault_query("hows my dissertation going"))
 
         def edit(d):
             c = d["cues"]
             c["news_off_pattern"] = r"\benough with the bulletins\b"
             c["plan_study_patterns"].append(r"\bsort out my modules\b")
-            c["delegate_patterns"].append(r"\bghostwrite\b")
             c["vault_queries"].append({"all_of_patterns": [r"\bdissertation\b"], "query": "dissertation"})
         self.reconfigure(edit)
         self.assertTrue(brain._NEWS_OFF.search("enough with the bulletins"))
         self.assertTrue(brain._PLAN_STUDY.search("sort out my modules"))
-        self.assertTrue(brain._should_delegate("ghostwrite my blog"))
         self.assertEqual(brain._vault_query("hows my dissertation going"), "dissertation")
-
-    def test_keep_local_overrides_delegate_from_the_data(self):
-        self.assertTrue(brain._should_delegate("write me a cover letter"))
-        self.reconfigure(lambda d: d["cues"]["keep_local_patterns"].append(r"\bcover letter\b"))
-        self.assertFalse(brain._should_delegate("write me a cover letter"))
 
     def test_study_brief_module_names_come_from_the_data(self):
         self.assertFalse(brain._STUDY_BRIEF.search("prep me for thermodynamics"))
