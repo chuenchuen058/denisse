@@ -9,6 +9,7 @@
     "don_consult": {"model": null, "today": "config.json models.chat", "what": "Don's opinion from Chuen's notes (tutor/consult.py)"},
     "denisse_brain": {"model": null, "today": "config.json models.chat", "what": "Denisse's replies and tool choice (brain.py; scored by eval/run_eval.py)"},
     "orchestra_local_team": {"model": null, "today": "orchestra/models.json local_team_model", "what": "Orchestra's scout, planner and librarian (orchestra/local_team/core.py)"},
-    "atrium_autopilot": {"model": null, "today": "orchestra/config.json autopilot_model", "what": "Atrium's autopilot classifier: is a candidate actionable, repo-only, a bug fix (atrium/autopilot.py)"}
+    "atrium_autopilot": {"model": null, "today": "orchestra/config.json autopilot_model", "what": "Atrium's autopilot classifier: is a candidate actionable, repo-only, a bug fix (atrium/autopilot.py)"},
+    "atrium_suggest": {"model": null, "today": "config.json models.chat", "what": "The Atrium live page's Do next card: ranks the facts into the 3 things to do now (atrium/suggest.py)"}
   }
 }

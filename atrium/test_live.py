@@ -97,6 +97,8 @@ class LiveBase(unittest.TestCase):
         for src in cfg["live"]["board"]["tokens"]["sources"]:  # the tokens card: no real session logs
             if "root" in src:
                 src["root"] = str(self.tmp / "logs" / src["kind"])
+        for src in cfg.get("suggest", {}).get("sources", []):  # the Do next card: no files outside the temp vault
+            src["root"] = "vault"
         (self.tmp / "atrium.json").write_text(json.dumps(cfg), encoding="utf-8")
         self.patches = [mock.patch.dict(os.environ, {"DENISSE_VAULT": str(self.vault),
                                                      "ATRIUM_CONFIG": str(self.tmp / "atrium.json"),
