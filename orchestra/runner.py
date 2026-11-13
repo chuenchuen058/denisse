@@ -1280,6 +1280,11 @@ def merged_already(branch: str) -> str | None:
     return None
 
 
+def merge_diff_digest(base: str, commit: str) -> str:
+    """A fingerprint of what landing `commit` on `base` changes: equal digests, equal diffs."""
+    return hashlib.sha256(git("diff", "--binary", base, commit).stdout.encode("utf-8")).hexdigest()
+
+
 def integrate(task: Task, branch: str, rec: dict, on_merged=None, before_land=None) -> str:
     """Test branch + current master together, then fast-forward master to that tested commit.
     Fills `rec` (stored in state) with base, commit, checks and tries. Returns the merge
@@ -1287,9 +1292,11 @@ def integrate(task: Task, branch: str, rec: dict, on_merged=None, before_land=No
     `on_merged` runs inside the merge lock right after a fast-forward (the aftercare push).
     `before_land(wt, base, commit)` (a merge-only run's reviewer) runs once, in the integration
     tree, only after the merge was clean and its checks passed; a non-None return stops here,
-    nothing lands, and that is integrate's outcome. A redo after master moved doesn't re-run it:
-    the branch's own change is what it judged, and a second review would double the cost."""
-    cleared = before_land is None
+    nothing lands, and that is integrate's outcome. A redo after master moved re-runs it (risk
+    check and reviewer) unless the rebuilt merge changes master in exactly the way the judged one
+    did: an approval covers a diff, not a branch (12 Nov 2026 review: a stacked change already on
+    master can be reverted there meanwhile, and the rebuilt merge would quietly restore it)."""
+    judged = None  # the diff before_land last cleared, as merge_diff_digest
     ahead = git("rev-list", "--count", f"HEAD..{branch}", check=False).stdout.strip()
     if ahead in ("", "0"):
         found = merged_already(branch)
@@ -1327,11 +1334,16 @@ def integrate(task: Task, branch: str, rec: dict, on_merged=None, before_land=No
             if not ok:
                 return ("parked: the combined tree (this branch merged onto current master "
                         f"{base[:8]}) fails: {rec['checks'][-1]}")  # the failing check is the last
-            if not cleared:
-                stop = before_land(wt, base, commit)
-                if stop is not None:
-                    return stop
-                cleared = True
+            if before_land is not None:
+                digest = merge_diff_digest(base, commit)
+                if digest != judged:
+                    if judged is not None:
+                        log(f"integration {task.slug}: the rebuilt merge on {base[:8]} changes master "
+                            f"differently from the one reviewed; judging it again")
+                    stop = before_land(wt, base, commit)
+                    if stop is not None:
+                        return stop
+                    judged = digest
         finally:
             remove_worktree(wt, "", delete_branch=False)
         with _FileLock(REVIEW / "merge.lock", wait=600, stale=900):  # two lanes may finish together

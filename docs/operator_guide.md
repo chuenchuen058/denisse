@@ -113,7 +113,8 @@ newest archive and marks it urgent; the runner then merges that existing branch 
 no lane: first the trial merge onto current master and its gate, then, only if that merge is
 clean and green and the diff is risky, the reviewer on that merge's diff against master, then
 the fast-forward. A conflict or red combined tree parks it before any review is paid for; a
-reviewer block parks it with nothing landed. A missing branch or a merge
+reviewer block parks it with nothing landed. If master moves during that review, the rebuilt
+merge is reviewed again unless it changes master exactly as the approved one did. A missing branch or a merge
 that can't run (conflict, dirty main checkout) parks it with the reason. Whenever the runner
 deletes or resets a `review/<slug>` branch that has commits not on master, it first saves them
 as `refs/keep/<slug>-<UTC time>` (config `keep_ref_prefix`) and logs `KEPT ...`; recover with

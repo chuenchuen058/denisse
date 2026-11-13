@@ -566,6 +566,93 @@ class IntegrationTest(unittest.TestCase):
         self.assertFalse(any(p.name.endswith("--integration") for p in self.R.WORKTREES.iterdir()),
                          "integration worktree cleaned up")
 
+    # --- merge-only: master moves while the reviewer reads; an approval covers a diff, not a branch
+
+    def stacked_with_first_on_master(self, slug):
+        """review/<slug> carries orchestra/first.py (already on master another way) and its own
+        orchestra/second.py: a stacked branch."""
+        self.add(slug)
+        task = next(t for t in self.R.load_queue() if t.slug == slug)
+        wt, branch = self.R.fresh_worktree(task)
+        for name in ("first", "second"):
+            (wt / "orchestra" / f"{name}.py").write_text(f"{name.upper()} = 1\n")
+            self.git("add", f"orchestra/{name}.py", cwd=wt)
+            self.git("commit", "-qm", name, cwd=wt)
+        self.R.remove_worktree(wt, branch, delete_branch=False)
+        (self.repo / "orchestra" / "first.py").write_text("FIRST = 1\n")
+        self.git("add", "orchestra/first.py")
+        self.git("commit", "-qm", "first, landed another way")
+        return branch
+
+    def move_master_during_first_review(self, move, second_verdict=None):
+        """Wrap run_reviewer: after its first call, `move()` commits to master (and the next
+        reviewer answers `second_verdict`). Returns the list of reviewer prompts seen."""
+        real, prompts = self.R.run_reviewer, []
+
+        def reviewing(*a, **kw):
+            rv = real(*a, **kw)
+            prompts.append(self.flag.read_text())
+            if len(prompts) == 1:
+                move()
+                if second_verdict:
+                    os.environ["FAKE_VERDICT"] = second_verdict
+            return rv
+        self.R.run_reviewer = reviewing
+        return prompts
+
+    def revert_first_on_master(self):
+        self.git("rm", "-q", "orchestra/first.py")
+        self.git("commit", "-qm", "revert first")
+
+    def test_merge_only_rebuilt_merge_that_restores_a_reverted_change_is_reviewed_again(self):
+        self.stacked_with_first_on_master("restack")
+        prompts = self.move_master_during_first_review(self.revert_first_on_master)
+        self.merge_only_task("restack")
+        self.assertEqual(self.run_tick({}), "PASS")
+        self.assertEqual(len(prompts), 2, "the rebuilt merge changes master differently: judged again")
+        self.assertNotIn("orchestra/first.py", prompts[0].split("## Diff", 1)[-1])
+        self.assertIn("orchestra/first.py", prompts[1].split("## Diff", 1)[-1],
+                      "the second reviewer sees the restored change")
+        ts = self.state()["tasks"]["restack"]
+        self.assertEqual(ts["integration"]["tries"], 2)
+        self.assertIn("first.py", ts["review"]["why"], "risk re-checked on the rebuilt diff")
+        self.assertEqual(self.head(), ts["integration"]["commit"])
+        self.assertIn("judging it again", self.R.LOG_FILE.read_text(encoding="utf-8"))
+
+    def test_merge_only_rebuilt_merge_blocked_on_second_review_lands_nothing(self):
+        self.stacked_with_first_on_master("restack-block")
+        prompts = self.move_master_during_first_review(
+            self.revert_first_on_master, "VERDICT: block\n- orchestra/first.py:1 brings back a reverted change")
+        self.merge_only_task("restack-block")
+        self.assertEqual(self.run_tick({}), "REVIEW-BLOCKED")
+        self.assertEqual(len(prompts), 2)
+        moved_to = self.head()
+        self.assertEqual(self.git("log", "-1", "--format=%s"), "revert first", "master is the reverted one")
+        self.assertFalse((self.repo / "orchestra" / "first.py").exists(), "the revert is not undone")
+        self.assertFalse((self.repo / "orchestra" / "second.py").exists())
+        self.assertEqual(moved_to, self.head())
+        ts = self.state()["tasks"]["restack-block"]
+        self.assertEqual(ts["review"]["verdict"], "block")
+        self.assertNotIn("merge", ts)
+        self.assertIn("brings back a reverted change",
+                      (self.R.PARKED / "restack-block.review.md").read_text())
+
+    def test_merge_only_rebuilt_merge_with_the_same_diff_is_not_reviewed_twice(self):
+        self.stacked_with_first_on_master("unrelated")
+
+        def unrelated():
+            (self.repo / "other.txt").write_text("o")
+            self.git("add", "other.txt")
+            self.git("commit", "-qm", "someone else")
+        prompts = self.move_master_during_first_review(unrelated)
+        self.merge_only_task("unrelated")
+        self.assertEqual(self.run_tick({}), "PASS")
+        self.assertEqual(len(prompts), 1, "same change to master: the approval stands, no second charge")
+        ts = self.state()["tasks"]["unrelated"]
+        self.assertEqual(ts["integration"]["tries"], 2)
+        self.assertEqual(self.head(), ts["integration"]["commit"])
+        self.assertTrue((self.repo / "other.txt").exists() and (self.repo / "orchestra" / "second.py").exists())
+
     def test_merge_only_branch_already_on_master_is_archived_without_a_gate(self):
         branch = self.parked_branch("landed", {"done.txt": "x"})
         self.git("merge", "-q", "--no-ff", "-m", "landed another way", branch)  # not the runner's merge
