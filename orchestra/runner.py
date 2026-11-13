@@ -3247,7 +3247,20 @@ def _tick(dry_run: bool = False) -> str:
         write_state_now()
 
 
+
+def quiet_hard_errors() -> None:
+    """Windows only: no "git.exe - Application Error (0xc0000142)" pop-ups from the many child
+    processes this starts (tests, gates, lanes). The error mode is inherited by every child, so a
+    child that fails to start (Windows ran short of desktop heap under load) just exits with an
+    error code the caller already handles, instead of opening a dialog Chuen has to click (13 Nov 2026)."""
+    if os.name == "nt":
+        import ctypes
+        k = ctypes.windll.kernel32  # SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX
+        k.SetErrorMode(k.SetErrorMode(0) | 0x0001 | 0x0002 | 0x8000)
+
+
 def main() -> None:
+    quiet_hard_errors()
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--dry-run", action="store_true", help="list tasks and what would run; run nothing")
     args = ap.parse_args()
