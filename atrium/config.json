@@ -542,7 +542,7 @@
           "digest_last": "last saved {time}"
         }
       },
-      "_tokens": "Tokens spent: summed from the runner's record of each finished run (state.json history -> tokens: in, out, cache_read, cache_write). fresh = in + out. Lanes that report no tokens are listed as unknown, never as 0. units: largest first.",
+      "_tokens": "Tokens spent: per day x agent from tokens.sources (Orchestra's state.json runs, Claude Code and Codex session logs), kept in the ledger (atrium/tokens.py); keys in, out, cache_read, cache_write. fresh = in + out. Lanes that report no tokens are listed as unknown, never as 0. units: largest first.",
       "tokens": {
         "week_days": 7,
         "fresh_keys": ["in", "out"],
@@ -558,6 +558,26 @@
         "_all_from": "Start date of the all-time cell and the per-agent line (Chuen, 12 Nov: from start of September). {first} = earliest run actually on record.",
         "all_from": "2026-09-01",
         "since_format": "%d %b",
+        "_sources": "Where tokens are counted (atrium/tokens.py). orchestra: state.json history (fields named here). claude_code / codex: session logs under root (%VARS% and ~ expanded), glob inside it; only lines containing marker are parsed; fields are dotted paths in each JSON line; keys map in/out/cache_read/cache_write to the log's names; minus: subtract those keys (Codex's input_tokens includes the cached ones). claude_code skips folders matching skip_dirs (Orchestra's worktree projects, already counted from state.json) and any session id a finished Orchestra run recorded; each message id counts once. codex lines carry the session's running total, so each file adds the difference. agent = the lane key the per-agent line shows it under.",
+        "sources": [
+          {"kind": "orchestra", "time_field": "end", "tokens_field": "tokens", "agent_field": "lane",
+           "session_field": "session_id", "agent_unknown": "unknown"},
+          {"kind": "claude_code", "agent": "claude", "root": "%USERPROFILE%/.claude/projects", "glob": "**/*.jsonl",
+           "skip_dirs": ["*-denisse-wt-*"], "marker": "\"usage\"",
+           "fields": {"id": "message.id", "usage": "message.usage", "session": "sessionId", "time": "timestamp"},
+           "keys": {"in": "input_tokens", "out": "output_tokens", "cache_read": "cache_read_input_tokens",
+                    "cache_write": "cache_creation_input_tokens"}},
+          {"kind": "codex", "agent": "codex", "root": "~/.codex/sessions", "glob": "**/*.jsonl",
+           "marker": "\"token_count\"", "type_is": "token_count",
+           "fields": {"type": "payload.type", "usage": "payload.info.total_token_usage", "time": "timestamp"},
+           "keys": {"in": "input_tokens", "out": "output_tokens", "cache_read": "cached_input_tokens",
+                    "cache_write": "cache_write_input_tokens"},
+           "minus": {"in": ["cache_read"]}}
+        ],
+        "_ledger": "Running ledger in .review (git-ignored): day x agent totals and how far each log has been read, so a refresh reads only what was appended and totals outlive Claude Code pruning its logs (~30 days). Written by python -m atrium.tokens and python -m atrium snapshot; the live page only reads it (it never writes to .review) and carries on from it in memory. scan_s: how often the board re-reads the logs. seen_keep_days: how long Claude Code message ids are remembered for dedupe (longer than its log retention).",
+        "ledger": "tokens-ledger.json",
+        "scan_s": 300,
+        "seen_keep_days": 60,
         "lane": "{label} {tokens}", "lane_unknown": "{label} n/a", "lane_join": " · ",
         "note": "most is cached re-reads; \"fresh\" = new tokens"
       },

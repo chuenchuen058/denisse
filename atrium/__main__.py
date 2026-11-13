@@ -62,7 +62,9 @@ def main(argv=None) -> int:
         return 0 if out["committed"] else 1
     if a.cmd == "snapshot":
         from pathlib import Path
+        from . import tokens
         print(snapshot.write(Path(a.out) if a.out else None))
+        tokens.save()  # the tokens ledger in .review, so totals outlive the session logs
         return 0
     bad = credits.check(a.days)
     for f, n, line in bad:

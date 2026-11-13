@@ -54,6 +54,9 @@ class CursorsTest(unittest.TestCase):
         git(self.repo, "commit", "-qm", "base")
         self.cfg = copy.deepcopy(SHIPPED)
         self.cfg["live"].update(port=0, refresh_s=3600)
+        for src in self.cfg["live"]["board"]["tokens"]["sources"]:  # the tokens card: no real session logs
+            if "root" in src:
+                src["root"] = str(self.tmp / "logs" / src["kind"])
         self.write_cfg()
         for p in (mock.patch.dict(os.environ, {"DENISSE_VAULT": str(self.vault),
                                                 "ATRIUM_CONFIG": str(self.tmp / "atrium.json"),
