@@ -138,8 +138,8 @@ def _embed(text: str, embed=None):
             return None
 
         def embed(t):
-            import ollama
-            r = ollama.embed(model=name, input=t, keep_alive=_L["embed"]["keep_alive"])
+            import local_llm  # the GPU lease and a timeout, as every local call
+            r = local_llm.embed(job="don_embed", model=name, input=t, keep_alive=_L["embed"]["keep_alive"])
             vecs = r["embeddings"] if isinstance(r, dict) else getattr(r, "embeddings", None)
             return list(vecs[0])
     try:

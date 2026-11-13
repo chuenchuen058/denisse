@@ -134,10 +134,11 @@ def local(model: str):
             body["think"] = policy["local_think"]
 
         def send(**request_body):
-            req = urllib.request.Request(f"{OLLAMA}/api/generate", data=json.dumps(request_body).encode(),
-                                         headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return Reply(text=json.load(resp).get("response", ""))
+            # local_llm: the GPU lease, the model's one num_ctx (this used to send none, so
+            # Ollama reloaded the model at its 4096 default), a reply cap, the wedge check.
+            import local_llm
+            data = local_llm.http(OLLAMA, "/api/generate", request_body, job=policy.get("local_job"), timeout=timeout)
+            return Reply(text=data.get("response", ""))
 
         try:
             return call_with_schema(send, schema=schema, enabled=policy["local_structured_output"], **body)

@@ -6,7 +6,7 @@
     "modules: how a module folder name becomes a code and a title (mirrors scripts/next_lecture.json). Modules are discovered from the vault folder names; there is no list here.",
     "match: regexes that find a week number or a module code in a folder name, a file name, or the first content_chars of a file's text. Keep capture group 1 as the number. First hit wins, folder before file name before contents.",
     "extract: which extensions are read how. audio is off unless audio.enabled is true (faster_whisper, installed already; no download happens here).",
-    "model: config_entry names the entry in config.json 'models' (model_config.py); context comes from brain.json limits.num_ctx, DENISSE_NUM_CTX winning, the same knob the brain uses. chars_per_token and reserve_tokens size the chunks a long lecture is cut into. chunk_retries: how many more times one lecture chunk is asked after a model error (Ollama ResponseError, timeout, connection) or a reply with no JSON; retry_options[i] are Ollama options laid over the defaults on retry i+1 (the last one repeats). A chunk that still fails is skipped: the week's note is written from the chunks that worked and marked incomplete, or (every chunk failed) not written; either way the week is tried again on the next run.",
+    "model: config_entry names the entry in config.json 'models' (model_config.py); context comes from brain.json limits.num_ctx, DENISSE_NUM_CTX winning, the same knob the brain uses. chars_per_token and reserve_tokens size the chunks a long lecture is cut into: num_ctx less reserve_tokens (the prompt's own words) less local_llm.json num_predict (the reply), at chars_per_token (10 Nov 2026: lecture text measured ~2.6 chars/token; 3.5 with a 2200 reserve gave an 8555-token chunk that Ollama cut and the model ran on for 20 minutes). chunk_retries: how many more times one lecture chunk is asked after a model error (Ollama ResponseError, timeout, connection) or a reply with no JSON; retry_options[i] are Ollama options laid over the defaults on retry i+1 (the last one repeats). A chunk that still fails is skipped: the week's note is written from the chunks that worked and marked incomplete, or (every chunk failed) not written; either way the week is tried again on the next run.",
     "prompt: what the local model is asked, per chunk. {module} {code} {week} {sources} {part} {parts} {text} are filled. It must answer with the JSON shape in prompt.schema; a reply that isn't JSON gets one retry with prompt.retry appended. bad_escape: a backslash in the reply that is the model's LaTeX, not a JSON escape (\\pi, \\frac, \\theta, \\neq: no escape, or a letter escape followed by a lowercase letter) -- doubled before parsing; a closing brace the reply stopped short of is put back (model.parse).",
     "note: the tutor note's name, frontmatter and section templates. {module} {code} {week} {slug} {today} {outcomes_n} ... are filled. The name slug must be unique across the vault (scripts/vault_contract.py), hence the suffix.",
     "limits: caps on what one note holds, so a long lecture gives a usable note, not a dump."
@@ -127,8 +127,8 @@
                    "teach": "don_teach", "consult": "don_consult"},
     "temperature": 0.2,
     "keep_alive": "10m",
-    "chars_per_token": 3.5,
-    "reserve_tokens": 2200,
+    "chars_per_token": 2.5,
+    "reserve_tokens": 600,
     "json_retries": 1,
     "chunk_retries": 2,
     "retry_options": [

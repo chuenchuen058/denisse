@@ -279,6 +279,42 @@ class ConsultTest(unittest.TestCase):
         with unittest.mock.patch("local_team.core.gpu_utilisation", return_value=80):
             self.assertEqual(consult.gpu_busy(self.repo, self.rule, self.cfg), "the GPU is 80% busy (limit 60%)")
 
+    def test_a_consult_that_loses_the_lease_race_queues_behind_it(self):
+        """One full consult at a time: a lease another consult took between the busy check
+        and here is waited for (up to consult_busy_wait_s), not a jump to notes-only; and the
+        tutor it runs is told the lease is its own (local_llm owner env)."""
+        class Lease:
+            released = 0
+
+            def release(self):
+                Lease.released += 1
+
+        slept, asked = [], []
+
+        def ask(repo, q, cfg, command="command", timeout_s=None, env=None):
+            asked.append((command, env))
+            return {"ok": True, "result": {"answer": "a", "confidence": "high"}, "why": "", "seconds": 0}
+
+        rule = {**self.rule, "consult_busy_wait_s": 30, "consult_busy_poll_s": 5}
+        with unittest.mock.patch.object(consult, "_lease", side_effect=[False, False, Lease()]),                 unittest.mock.patch.object(consult, "ask", ask):
+            r = consult.opinion(self.repo, "q", self.cfg, rule, busy=self.free, sleep=slept.append)
+        self.assertEqual(r["path"], "model")
+        self.assertEqual(slept, [5, 5])
+        self.assertEqual(Lease.released, 1)
+        self.assertEqual(asked[0][0], "command")
+        self.assertEqual(asked[0][1], consult._lease_owner_env())
+        self.assertTrue(asked[0][1], "the owner env names this process")
+
+    def test_a_lease_still_lost_after_the_wait_is_notes_only(self):
+        def ask(repo, q, cfg, command="command", timeout_s=None, env=None):
+            return {"ok": True, "result": {"answer": command, "confidence": "low"}, "why": "", "seconds": 0}
+
+        rule = {**self.rule, "consult_busy_wait_s": 10, "consult_busy_poll_s": 5}
+        with unittest.mock.patch.object(consult, "_lease", return_value=False),                 unittest.mock.patch.object(consult, "ask", ask):
+            r = consult.opinion(self.repo, "q", self.cfg, rule, busy=self.free, sleep=lambda s: None)
+        self.assertEqual(r["path"], "notes")
+        self.assertIn("after waiting 10s", r["how"])
+
     def test_a_failed_full_consult_falls_back_to_notes(self):
         os.environ["FAKE_DON"] = "sleep"
         extra = self.before(self.task(consult="don"))

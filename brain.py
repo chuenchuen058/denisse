@@ -20,6 +20,8 @@ import re
 import ollama
 from dotenv import load_dotenv
 
+import local_llm
+
 import learning
 import brain_rules
 import desktop_context
@@ -40,6 +42,8 @@ load_dotenv()
 # config.json's "chat" model; DENISSE_MODEL still wins (model_config.py), and
 # model_routing.json's denisse_brain entry, when set, picks another one.
 MODEL = model_routing.model_for("denisse_brain", entry="chat")
+# The job name every model call here gives local_llm (its lease policy: local_llm.json lease.by_job).
+LLM_JOB = "denisse_brain"
 
 # What this module says, matches and limits -- the reply nets, the requests
 # answered before the model, her fixed wording, every threshold -- is data
@@ -1491,7 +1495,7 @@ class Brain:
             evidence = clarify.evidence(got)
             reply = ""
             try:  # one call, with only the item he picked: it can't repeat the rejected one
-                r = ollama.chat(**_chat_extra(), model=MODEL, keep_alive=CONFIG["chat"]["keep_alive"], options=_chat_options(),
+                r = local_llm.chat(job=LLM_JOB, api=ollama, **_chat_extra(), model=MODEL, keep_alive=CONFIG["chat"]["keep_alive"], options=_chat_options(),
                                 messages=[{"role": "system", "content": SYSTEM_PROMPT},
                                           {"role": "user", "content": p["request"]},
                                           {"role": "system", "content": CONFIG["nudges"]["clarified_answer"].format(
@@ -1998,7 +2002,7 @@ class Brain:
             # next -- measured directly (get_news: inconsistent/often wrong
             # at default temperature, 4/4 clean and on-topic at 0.2, no
             # loss of personality on casual chat).
-            response = ollama.chat(**_chat_extra(), 
+            response = local_llm.chat(job=LLM_JOB, api=ollama, **_chat_extra(), 
                 model=MODEL, messages=full_messages, tools=round_tools, keep_alive=CONFIG["chat"]["keep_alive"],
                 options=_chat_options(),
             )
@@ -2051,7 +2055,7 @@ class Brain:
                     # Same question, history left out, no tools: the clean
                     # condition, where this answer was fine. Kept only if
                     # it's an actual answer.
-                    retry = ollama.chat(**_chat_extra(), 
+                    retry = local_llm.chat(job=LLM_JOB, api=ollama, **_chat_extra(), 
                         model=MODEL,
                         messages=([full_messages[0]] + _style_examples()
                                   + [{"role": "user", "content": latest_user}]),
@@ -2066,7 +2070,7 @@ class Brain:
                     # One retry, no tools, with the nudge as a system note
                     # for this call only -- never added to `messages`, so it
                     # is never persisted. Keep the retry if it's usable.
-                    retry = ollama.chat(**_chat_extra(), 
+                    retry = local_llm.chat(job=LLM_JOB, api=ollama, **_chat_extra(), 
                         model=MODEL,
                         messages=full_messages + [{"role": "system",
                                                    "content": CONFIG["reply_nets"]["plain_reply_nudge"]}],
@@ -2091,7 +2095,7 @@ class Brain:
                     # photosynthesis", every night 3-9 Nov. One retry, no
                     # tools, nudge in this call only; kept only if it works
                     # on the text this time (brain.json looked_text).
-                    retry = ollama.chat(**_chat_extra(),
+                    retry = local_llm.chat(job=LLM_JOB, api=ollama, **_chat_extra(),
                         model=MODEL,
                         messages=full_messages + [{"role": "system", "content":
                                                    CONFIG["looked_text"]["nudge"].format(text=looked)}],

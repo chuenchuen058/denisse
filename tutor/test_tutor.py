@@ -395,6 +395,16 @@ class IngestTests(Fixture):
 
 
 class ModelTests(unittest.TestCase):
+    def test_a_chunk_leaves_room_for_the_reply(self):
+        """10 Nov 2026: a full chunk came to 8555 tokens in an 8192 context, Ollama cut it and the
+        model ran on for 20 minutes. A chunk, at local_llm's conservative chars/token, plus the
+        reply cap, fits the context."""
+        import local_llm
+        c = local_llm.config()
+        for ctx in (4096, 8192):
+            est = model.chunk_chars(ctx) / c["chars_per_token"] + model._M["reserve_tokens"]
+            self.assertLessEqual(est + c["num_predict"], ctx)
+
     def test_chunks_fit_and_cover(self):
         text = "\n\n".join(f"Paragraph {i} " + "x" * 50 for i in range(40))
         pieces = model.chunks(text, 400)

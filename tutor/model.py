@@ -57,8 +57,14 @@ def model_errors() -> tuple:
 # -- chunking ----------------------------------------------------------------
 
 def chunk_chars(num_ctx: int | None = None) -> int:
+    """Chars of material one call may carry: the context less the prompt's own reserve
+    and the reply's cap (local_llm.json num_predict), at chars_per_token. 10 Nov 2026: at
+    3.5 chars/token and no room kept for the reply, a chunk came to 8555 tokens, Ollama
+    cut it, and the model ran on for 20 minutes (local_llm.py)."""
+    import local_llm
     ctx = conf.num_ctx() if num_ctx is None else num_ctx
-    return max(1, int((ctx - _M["reserve_tokens"]) * _M["chars_per_token"]))
+    room = ctx - _M["reserve_tokens"] - int(local_llm.config()["num_predict"])
+    return max(1, int(room * _M["chars_per_token"]))
 
 
 def chunks(text: str, limit: int) -> list:
@@ -128,13 +134,16 @@ def ollama_call(system: str, user: str, options: dict | None = None, *, schema: 
     """One chat call. `options` are laid over the defaults (a retry's
     tweaks, tutor.json model.retry_options). `schema` is the same JSON
     example used in this operation's prompt, converted to types for format."""
-    import ollama
+    import functools
+    import local_llm
     extra = {} if _M.get("think") is None else {"think": _M["think"]}
     shape = schema_from_example(json.loads(schema)) if schema is not None else None
+    job = _M["route_jobs"].get(_JOB.get())
+    # local_llm: the GPU lease, the model's one num_ctx, a reply cap and a timeout.
     r = call_with_schema(
-        ollama.chat, schema=shape, enabled=_M["structured_output"], **extra,
+        functools.partial(local_llm.chat, job=job), schema=shape, enabled=_M["structured_output"], **extra,
         model=model_name(), keep_alive=_M["keep_alive"],
-        options={"temperature": _M["temperature"], "num_ctx": conf.num_ctx(), **(options or {})},
+        options={"temperature": _M["temperature"], **(options or {})},
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user}])
     msg = r["message"] if isinstance(r, dict) else getattr(r, "message", None)
     content = msg["content"] if isinstance(msg, dict) else getattr(msg, "content", "")

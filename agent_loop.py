@@ -6,12 +6,14 @@ tool takes no model-supplied arguments; its scope is bound by the caller.
 Budgets, model options and every word the model or the brief sees are data:
 the "agent" section of housekeeping.json (AGENTS.md Rule 0).
 """
+import functools
 import json
 import time
 from datetime import datetime
 from pathlib import Path
 
 import housekeeping
+import local_llm
 from ollama_output import call_with_schema
 
 CONFIG = {}
@@ -127,7 +129,8 @@ class LocalModel:
             messages = [instruction, *messages[1:]]
         else:
             messages = [instruction, *messages]
-        response = call_with_schema(ollama.Client(timeout=CONFIG["model_timeout_s"]).chat,
+        response = call_with_schema(functools.partial(local_llm.chat, job="agent_loop",
+                                                      timeout=CONFIG["model_timeout_s"]),
             schema=schema, enabled=CONFIG["structured_output"], **_chat_extra(),
             model=MODEL, messages=messages, keep_alive=CONFIG["keep_alive"],
             options={"temperature": CONFIG["temperature"], "num_ctx": NUM_CTX,

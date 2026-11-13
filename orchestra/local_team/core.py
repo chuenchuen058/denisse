@@ -244,10 +244,10 @@ def ask(ctx: Ctx, role: Role, payload: dict) -> dict:
             body["think"] = ctx.cfg["local_team_think"]
 
         def send(**request_body):
-            req = urllib.request.Request(ctx.ollama + "/api/chat", data=json.dumps(request_body).encode("utf-8"),
-                                         headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=ctx.cfg["local_team_timeout_s"]) as r:
-                return json.loads(r.read().decode("utf-8"))
+            # local_llm: the model's one num_ctx, a reply cap, the wedge check (the lease is ours).
+            import local_llm
+            return local_llm.http(ctx.ollama, "/api/chat", request_body, job=load()["routing_job"],
+                                  timeout=ctx.cfg["local_team_timeout_s"])
 
         try:
             data = call_with_schema(send, schema=role.schema,

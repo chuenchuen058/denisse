@@ -11,7 +11,11 @@ The consult is `python -m tutor consult --json` run in the main checkout, its
 opinion written into the worktree as `.review/don.md`, named in the lane
 prompt and shown to the reviewer. Quick, and never silently lost:
   * a busy GPU (the gpu.lease held by another job, or nvidia-smi at least
-    consult_gpu_busy_pct busy) is waited for, up to consult_busy_wait_s;
+    consult_gpu_busy_pct busy) is waited for, up to consult_busy_wait_s; so
+    is a lease another consult took first: one full consult at a time, the
+    rest queue behind it (10 Nov 2026, Ollama wedge);
+  * the tutor run under the lease is told it holds it (local_llm.py owner
+    env), so its own model calls don't queue behind their parent;
   * the full consult holds the gpu.lease while it runs, capped at
     consult_timeout_s; the tutor's local call is schema-constrained JSON
     (tutor.json model.structured_output);
@@ -120,21 +124,37 @@ def _python(repo: Path, cfg: dict) -> str:
     return str(p) if p.exists() else sys.executable
 
 
-def _env() -> dict:
+def _env(extra: dict | None = None) -> dict:
     # As run_lane: never a nested-claude marker, never an API key (the tutor may hand off to claude).
-    return {k: v for k, v in os.environ.items() if k != "CLAUDECODE" and not k.startswith("CLAUDE_CODE_")
-            and k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")}
+    env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE" and not k.startswith("CLAUDE_CODE_")
+           and k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")}
+    env.update(extra or {})
+    return env
 
 
-def ask(repo: Path, q: str, cfg: dict, command: str = "command", timeout_s: float | None = None) -> dict:
+def _lease_owner_env() -> dict:
+    """What tells the tutor's own model calls (local_llm.py) that the lease this process holds
+    is theirs too, so they don't queue behind their own parent. {} without local_llm."""
+    try:
+        if str(HERE.parent) not in sys.path:
+            sys.path.insert(0, str(HERE.parent))
+        import local_llm
+        return local_llm.owner_env()
+    except Exception:  # noqa: BLE001 -- no shared client here: the child takes the lease itself
+        return {}
+
+
+def ask(repo: Path, q: str, cfg: dict, command: str = "command", timeout_s: float | None = None,
+        env: dict | None = None) -> dict:
     """Run a consult command (consult.json `command`, or `notes_command`) for at most
-    timeout_s (default consult.json timeout_s). {ok, result, why, seconds}; never raises."""
+    timeout_s (default consult.json timeout_s), `env` laid over the cleaned environment.
+    {ok, result, why, seconds}; never raises."""
     timeout_s = cfg["timeout_s"] if timeout_s is None else timeout_s
     argv = [str(a).replace("{python}", _python(repo, cfg)).replace("{question}", q) for a in cfg[command]]
     start = time.time()
     try:
         p = subprocess.run(argv, cwd=repo, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                           timeout=timeout_s, stdin=subprocess.DEVNULL, env=_env())
+                           timeout=timeout_s, stdin=subprocess.DEVNULL, env=_env(env))
     except subprocess.TimeoutExpired:
         return {"ok": False, "result": None, "why": cfg["failed_timeout"].format(seconds=int(timeout_s)),
                 "seconds": int(time.time() - start)}
@@ -221,21 +241,31 @@ def opinion(repo: Path, q: str, cfg: dict, rule: dict, busy=None, sleep=time.sle
     """The tutor's answer by the quickest sound path: {ok, result, why, seconds, path, how}.
     path: model (the full consult), notes (no model: the GPU stayed busy, or the full
     consult failed) or none (neither answered). how says which and why, for log and note."""
-    still, waited = wait_free(repo, rule, cfg, busy, sleep)
-    first = None
+    first, waited, budget = None, 0, rule["consult_busy_wait_s"]
+    while True:
+        still, w = wait_free(repo, {**rule, "consult_busy_wait_s": max(0, budget - waited)}, cfg, busy, sleep)
+        waited += w
+        lease = None
+        if still is None:
+            lease = _lease(repo, rule, cfg)
+            if lease is False:  # another consult took it between the check and here: queue behind it
+                still = cfg["busy_lease"].format(holder=cfg["busy_someone"])
+                if waited < budget:
+                    step = max(1, min(rule["consult_busy_poll_s"], budget - waited))
+                    sleep(step)
+                    waited += step
+                    continue
+        break
     if still is None:
-        lease = _lease(repo, rule, cfg)
-        if lease is False:
-            still = cfg["busy_lease"].format(holder=cfg["busy_someone"])
-        else:
-            try:
-                first = ask(repo, q, cfg, "command", rule["consult_timeout_s"])
-            finally:
-                if lease:
-                    lease.release()
-            first["seconds"] += waited
-            if first["ok"]:
-                return {**first, "path": "model", "how": cfg["how"]["model"]}
+        try:
+            first = ask(repo, q, cfg, "command", rule["consult_timeout_s"],
+                        env=_lease_owner_env() if lease else None)
+        finally:
+            if lease:
+                lease.release()
+        first["seconds"] += waited
+        if first["ok"]:
+            return {**first, "path": "model", "how": cfg["how"]["model"]}
     reason = (cfg["how"]["busy"].format(why=still, waited=waited) if still is not None
               else cfg["how"]["failed"].format(why=first["why"]))
     if not rule["consult_notes_fallback"]:
