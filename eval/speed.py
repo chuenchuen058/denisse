@@ -378,6 +378,8 @@ def case_modules(case: dict) -> set:
             mods.add(m)
             if name == "get_news":
                 mods.add("news")
+            if name == "delegate":
+                mods.add("delegate")
             if name in ("add_task", "list_tasks", "complete_task", "remove_task"):
                 mods.add("tasks")
     if case.get("study") is not None:
@@ -397,8 +399,6 @@ def case_modules(case: dict) -> set:
             mods.add("news")
         if _matches(brain, "_COMPLAINT", text):
             mods.add("clarify")
-        if getattr(brain, "_should_delegate", lambda t: False)(text):
-            mods.add("delegate")
     except Exception:
         pass
     for mod, fn in (("study_brief", "match_module"), ("study_mode", "match_command"),

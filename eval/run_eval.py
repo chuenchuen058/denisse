@@ -109,6 +109,16 @@ EVAL_VETO = {
 }
 
 
+# Confirmed tools whose real work the suite switches off (delegate.DRY_RUN,
+# set in the isolation below), so a yes to them is safe to give.
+DRY_RUN_TOOLS = {"delegate"}
+
+
+def _dry_run() -> bool:
+    import delegate
+    return bool(delegate.DRY_RUN)
+
+
 def vault_eval_dir() -> Path:
     """config.json settings.eval_dir ('{vault}' = settings.vault()), read only when a full run files its report."""
     import settings
@@ -393,6 +403,11 @@ def _run_case(brain, case: dict, history: list, mode) -> dict:
         # that is how a case says "Spotify has no device" instead of the
         # veto's "user declined".
         if name in fixtures:
+            return True
+        # A hand-off is confirmed first like any RISKY_TOOLS call, but the
+        # suite runs it dry (delegate.DRY_RUN): saying yes spends nothing,
+        # and the case judges what she says once it is handed over.
+        if name in DRY_RUN_TOOLS and _dry_run():
             return True
         return name not in safety.RISKY_TOOLS and name not in EVAL_VETO
 
