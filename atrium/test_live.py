@@ -94,6 +94,9 @@ class LiveBase(unittest.TestCase):
         self.review.mkdir(), self.vault.mkdir()
         cfg = copy.deepcopy(SHIPPED)
         cfg["live"].update(port=0, poll_s=0.05, keepalive_s=0.5, refresh_s=3600)
+        for src in cfg["live"]["board"]["tokens"]["sources"]:  # the tokens card: no real session logs
+            if "root" in src:
+                src["root"] = str(self.tmp / "logs" / src["kind"])
         (self.tmp / "atrium.json").write_text(json.dumps(cfg), encoding="utf-8")
         self.patches = [mock.patch.dict(os.environ, {"DENISSE_VAULT": str(self.vault),
                                                      "ATRIUM_CONFIG": str(self.tmp / "atrium.json"),

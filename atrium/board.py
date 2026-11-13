@@ -19,7 +19,7 @@ import subprocess
 import time
 import urllib.request
 
-from . import conf, context, snapshot
+from . import conf, context, snapshot, tokens
 
 _cache: dict[str, tuple[float, object]] = {}
 
@@ -436,29 +436,31 @@ def _token_sum(tokens, keys) -> int:
 
 def _tokens(x: dict) -> str:
     c, w, now = _b()["tokens"], x["words"], x["now"]
-    runs = [(h, end) for _, h, end in _runs(x["state"]) if isinstance(h.get("tokens"), dict)]
+    # day x agent totals: Orchestra's runs plus the Claude Code and Codex logs, via the ledger
+    days = tokens.update(x["state"], now)["days"]
+    runs = [(dt.date.fromisoformat(d), agent, t) for d, agents in days.items() for agent, t in agents.items()]
     if not runs:
         return _none(w)
     week_from = now.date() - dt.timedelta(days=c["week_days"] - 1)
-    inside = {"today": lambda d: d.date() == now.date(), "week": lambda d: d.date() >= week_from,
-              "month": lambda d: (d.year, d.month) == (now.year, now.month), "all": lambda d: d.date() >= all_from}
-    first = min(end for _, end in runs)
-    all_from = dt.date.fromisoformat(c["all_from"]) if c.get("all_from") else first.date()
+    first_any = min(d for d, _, _ in runs)
+    all_from = dt.date.fromisoformat(c["all_from"]) if c.get("all_from") else first_any
+    inside = {"today": lambda d: d == now.date(), "week": lambda d: d >= week_from,
+              "month": lambda d: (d.year, d.month) == (now.year, now.month), "all": lambda d: d >= all_from}
+    first = min((d for d, _, _ in runs if d >= all_from), default=first_any)
     since = dt.datetime.combine(all_from, dt.time()).strftime(c["since_format"])
-    first_s = first.strftime(c["since_format"])
+    first_s = dt.datetime.combine(first, dt.time()).strftime(c["since_format"])
     cells = []
     for p in c["periods"]:
-        rows = [h for h, end in runs if inside[p["key"]](end)]
-        total = sum(_token_sum(h["tokens"], c["all_keys"]) for h in rows)
-        fresh = sum(_token_sum(h["tokens"], c["fresh_keys"]) for h in rows)
+        rows = [t for d, _, t in runs if inside[p["key"]](d)]
+        total = sum(_token_sum(t, c["all_keys"]) for t in rows)
+        fresh = sum(_token_sum(t, c["fresh_keys"]) for t in rows)
         label = p["label"].format(fresh=_fmt_n(fresh, c), days=c["week_days"], since=since, first=first_s)
         cells.append(f'<div><div class="big mid">{e(_fmt_n(total, c) if rows else w["dash"])}</div>'
                      f'<div class="why">{e(label)}</div></div>')
     per = {}
-    for h, end in runs:
-        if not inside["all"](end):
-            continue
-        per[h.get("lane")] = per.get(h.get("lane"), 0) + _token_sum(h["tokens"], c["all_keys"])
+    for d, agent, t in runs:
+        if inside["all"](d):
+            per[agent] = per.get(agent, 0) + _token_sum(t, c["all_keys"])
     lanes = c["lane_join"].join(
         (c["lane"].format(label=a["label"], tokens=_fmt_n(per[a["lane"]], c)) if a["lane"] in per
          else c["lane_unknown"].format(label=a["label"])) for a in x["agents"])
