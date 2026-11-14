@@ -5,6 +5,7 @@ fake COM object, and every folder (contacts, CV, cover letters, drafts) is
 a temp folder named in a temp config. His real mailbox, CV folder and
 memory/ are never touched.
 """
+import base64
 import email
 import email.policy
 import json
@@ -60,6 +61,7 @@ class DraftTest(unittest.TestCase):
         cfg["eml"]["drafts_folder"] = j("drafts")
         cfg["attachments"]["kinds"][0]["folder"] = j("cv")
         cfg["attachments"]["kinds"][1]["folder"] = j("out")
+        cfg["graph"]["token_cache"] = j("graph_cache.bin")   # never his real sign-in
         with open(j("cfg.json"), "w", encoding="utf-8") as f:
             json.dump(cfg, f)
         email_drafts.configure(j("cfg.json"))
@@ -219,6 +221,157 @@ class DraftTest(unittest.TestCase):
                             backends={"outlook_desktop": no_outlook, "eml_file": email_drafts._save_eml})
         self.assertTrue(out.startswith("Draft ready"), out)
         self.assertEqual(len(os.listdir(self.j("drafts"))), 1)
+
+
+class FakeResp:
+    def __init__(self, status=201, body=None):
+        self.status_code, self._body = status, body or {}
+        self.text = json.dumps(self._body)
+
+    def json(self):
+        return self._body
+
+
+class FakeHttp:
+    """Records every Graph call; refuses anything that would send."""
+
+    def __init__(self, create_status=201):
+        self.calls, self.create_status = [], create_status
+
+    def _check(self, url):
+        if "send" in url.rsplit("/", 1)[-1].lower():
+            raise AssertionError("draft_email must never send: " + url)
+
+    def post(self, url, headers=None, json=None, timeout=None):
+        self._check(url)
+        self.calls.append(("POST", url, headers, json))
+        if url.endswith("createUploadSession"):
+            return FakeResp(201, {"uploadUrl": "https://upload.example/session"})
+        return FakeResp(self.create_status, {"id": "MSG1"} if self.create_status < 400
+                        else {"error": {"code": "ErrorAccessDenied"}})
+
+    def put(self, url, data=None, headers=None, timeout=None):
+        self._check(url)
+        self.calls.append(("PUT", url, headers, data))
+        return FakeResp(200)
+
+
+class FakeApp:
+    def __init__(self, accounts=({"username": "chuen@example.ac.uk"},), token="TOKEN"):
+        self.accounts, self.token = list(accounts), token
+
+    def get_accounts(self):
+        return self.accounts
+
+    def acquire_token_silent(self, scopes, account=None):
+        self.scopes = scopes
+        return {"access_token": self.token} if self.token else None
+
+
+class GraphTest(unittest.TestCase):
+    """The Microsoft Graph backend: a draft in his mailbox, never a send, never a sign-in."""
+
+    setUp, tearDown, _file, draft = DraftTest.setUp, DraftTest.tearDown, DraftTest._file, DraftTest.draft
+
+    def graph(self, app=None, http=None):
+        http = http or FakeHttp()
+        backends = {"graph": lambda d: email_drafts._save_graph(d, app=app or FakeApp(), http=http),
+                    "eml_file": email_drafts._save_eml}
+        return backends, http
+
+    def test_draft_lands_in_drafts_with_attachments(self):
+        backends, http = self.graph()
+        out, _ = self.draft(to="my personal tutor", subject="CV", gist="here is my CV",
+                            attachments=["my CV"], backends=backends)
+        self.assertTrue(out.startswith("Draft ready"), out)
+        self.assertIn("chuen@example.ac.uk", out)
+        self.assertEqual(os.listdir(self.j("drafts")), [])
+        [(verb, url, headers, msg)] = http.calls
+        g = email_drafts.CONFIG["graph"]
+        self.assertEqual((verb, url), ("POST", g["api"] + g["create_path"]))
+        self.assertEqual(headers["Authorization"], "Bearer TOKEN")
+        self.assertEqual(msg["subject"], "CV")
+        self.assertEqual(msg["toRecipients"],
+                         [{"emailAddress": {"name": "Terry Example", "address": "terry@example.ac.uk"}}])
+        self.assertIn("Chuen", msg["body"]["content"])
+        [att] = msg["attachments"]
+        self.assertEqual(att["name"], "CV_new.pdf")
+        self.assertEqual(base64.b64decode(att["contentBytes"]), b"%PDF fake")
+
+    def test_big_attachment_goes_through_an_upload_session(self):
+        with open(self.j("cfg.json"), encoding="utf-8") as f:
+            cfg = json.load(f)
+        cfg["graph"]["max_inline_attachment_bytes"] = 1
+        cfg["graph"]["upload_chunk_bytes"] = 4
+        with open(self.j("cfg.json"), "w", encoding="utf-8") as f:
+            json.dump(cfg, f)
+        email_drafts.configure(self.j("cfg.json"))
+        backends, http = self.graph()
+        out, _ = self.draft(to="a@example.com", subject="CV", gist="cv attached",
+                            attachments=["my CV"], backends=backends)
+        self.assertTrue(out.startswith("Draft ready"), out)
+        self.assertNotIn("attachments", http.calls[0][3])
+        self.assertTrue(http.calls[1][1].endswith("/me/messages/MSG1/attachments/createUploadSession"))
+        puts = [c for c in http.calls if c[0] == "PUT"]
+        self.assertEqual(b"".join(c[3] for c in puts), b"%PDF fake")
+        self.assertEqual([c[2]["Content-Range"] for c in puts],
+                         ["bytes 0-3/9", "bytes 4-7/9", "bytes 8-8/9"])
+        self.assertTrue(all("Authorization" not in c[2] for c in puts))
+
+    def test_not_signed_in_falls_back_without_network(self):
+        http = FakeHttp()
+        backends = {"graph": lambda d: email_drafts._save_graph(d, http=http),
+                    "eml_file": email_drafts._save_eml}
+        with patch.object(email_drafts, "graph_app", side_effect=AssertionError("no app, no network")):
+            out, _ = self.draft(to="a@example.com", subject="hi", gist="hello", backends=backends)
+        self.assertTrue(out.startswith("Draft ready"), out)
+        self.assertEqual(http.calls, [])
+        self.assertEqual(len(os.listdir(self.j("drafts"))), 1)
+
+    def test_expired_or_refused_falls_back_to_eml(self):
+        for n, (app, http) in enumerate(((FakeApp(token=None), FakeHttp()), (FakeApp(accounts=()), FakeHttp()),
+                                         (FakeApp(), FakeHttp(create_status=403)))):
+            backends, _ = self.graph(app=app, http=http)
+            out, _ = self.draft(to="a@example.com", subject=f"hi {n}", gist="hello", backends=backends)
+            self.assertTrue(out.startswith("Draft ready"), out)
+            self.assertNotIn("chuen@example.ac.uk", out)
+        self.assertEqual(len(os.listdir(self.j("drafts"))), 3)
+
+    def test_never_asks_to_send(self):
+        app = FakeApp()
+        backends, _ = self.graph(app=app)
+        self.draft(to="a@example.com", subject="hi", gist="hello", backends=backends)
+        self.assertNotIn("mail.send", [s.lower() for s in app.scopes])
+        self.assertEqual(email_drafts.CONFIG["backends"]["order"][0], "graph")
+
+    def test_sign_in_script_saves_the_cache(self):
+        sys.path.insert(0, os.path.join(ROOT, "scripts"))
+        import graph_signin
+
+        class Cache:
+            has_state_changed = True
+
+            def serialize(self):
+                return '{"Account": {}}'
+
+        class App:
+            def initiate_device_flow(self, scopes, **kw):
+                self.scopes = scopes
+                return {"user_code": "ABC", "message": "go to the page and type ABC"}
+
+            def acquire_token_by_device_flow(self, flow):
+                return {"access_token": "T", "id_token_claims": {"preferred_username": "c@example.ac.uk"}}
+
+        said, app = [], App()
+        self.assertEqual(graph_signin.sign_in(out=said.append, app=app, cache=Cache()), "c@example.ac.uk")
+        self.assertEqual(said, ["go to the page and type ABC"])
+        self.assertNotIn("mail.send", [s.lower() for s in app.scopes])
+        path = email_drafts._cache_path()
+        self.assertTrue(path.startswith(self.tmp) and os.path.isfile(path))
+        with open(path, "rb") as f:
+            self.assertEqual(email_drafts._protect(f.read(), unprotect=True), b'{"Account": {}}')
+        self.assertTrue(graph_signin.sign_out())
+        self.assertFalse(os.path.exists(path))
 
 
 class PolicyTest(unittest.TestCase):
