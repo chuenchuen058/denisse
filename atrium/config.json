@@ -297,6 +297,8 @@
     "refresh_s": 60,
     "keepalive_s": 15,
     "page_dir": "live_page",
+    "_markets_file": "The Markets card's data, in snapshot paths.hub under the served .review (markets/ writes it).",
+    "markets_file": "markets.json",
     "tables": [
       "tasks",
       "waiting",
@@ -428,6 +430,17 @@
     "_board": "The v3 mission board (atrium/board.py builds and renders it from what live.collect() read; layout after atrium/design/mission-board-reference.html, none of its sample text). cards: the grid, in order; id = a section atrium/board.py knows, class = layout classes from style.css (span2, span4, tall; first = drawn at the top of the grid whatever its place here); \"lanes\" becomes one card per entry of \"agents\" above. Every word, colour, regex for the runner's log lines and limit lives here. theme: CSS variables per colour scheme, set by app.js. favicon: one arc per agent in its colour, centre dot = the verdict's colour (theme ok/warn/bad of favicon.scheme).",
     "board": {
       "title": "Atrium hub",
+      "_sources": "Files a card can't do without (15 Nov 2026: a bad file must say so on its own cards, never blank the page). root: review (.review) or vault; path: {ledger} = tokens.ledger; kind json = must parse to an object, text = must be readable. Each card listed shows words.cant_read with why[<reason>] when the file is missing or broken, then whatever it could still build. table_cards: the cards a snapshot table feeds, which show words.cant_table when that table's build fails. A card whose own build fails shows words.cant_build; the rest of the page is unaffected.",
+      "sources": [
+        {"name": "state.json", "root": "review", "path": "state.json", "kind": "json",
+         "cards": ["lanes", "merged", "credits", "limits", "today", "tokens"]},
+        {"name": "the token ledger", "root": "review", "path": "{ledger}", "kind": "json", "cards": ["tokens"]},
+        {"name": "hot.md", "root": "vault", "path": "hot.md", "kind": "text", "cards": ["tree", "projects"]}
+      ],
+      "source_why": {"missing": "file missing", "unreadable": "file locked or unreadable",
+                     "bad_json": "not valid JSON", "not_object": "not a JSON object"},
+      "table_cards": {"tasks": ["tree", "up_next", "needs_look"], "running": ["lanes", "cursors"],
+                      "usage": ["lanes", "limits"], "spend": ["progress"], "waiting": ["do_next"]},
       "cards": [
         {"id": "lanes", "class": ""},
         {"id": "do_next", "class": "span4 first"},
@@ -760,6 +773,9 @@
         "result_running": "running",
         "verdict_quota": "{label} limited: {status}",
         "up_next_drafts": "nothing queued ({n} draft(s) waiting for you)",
+        "cant_read": "can’t read {name}: {why}",
+        "cant_build": "can’t build this card: {why}",
+        "cant_table": "can’t read the {table} table: {why}",
         "empty": "no data yet",
         "dash": "–",
         "join": " · "

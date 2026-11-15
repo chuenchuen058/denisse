@@ -29,10 +29,89 @@ def _c() -> dict:
     return conf.section("snapshot")
 
 
+# -- reads, cached on what the file is ----------------------------------------------
+# The live page rebuilds every few seconds while anything changes; a rebuild used to read every
+# task file (~600) twice and parse the 1.4 MB state.json four times (15 Nov 2026). A file's text
+# is kept against its (mtime, size); a JSON file's parse against its bytes, so a rewrite inside
+# one clock tick is still seen. Callers treat what these return as read-only.
+_texts: dict[str, tuple[tuple, str]] = {}
+_jsons: dict[str, tuple[bytes, object]] = {}
+
+
+def _key(p: Path) -> tuple:
+    s = p.stat()
+    return s.st_mtime_ns, s.st_size
+
+
+def read_text(p: Path) -> str:
+    """p's text (utf-8, undecodable bytes replaced), re-read only when its mtime or size moved.
+    OSError as Path.read_text."""
+    key = _key(p)
+    hit = _texts.get(str(p))
+    if hit and hit[0] == key:
+        return hit[1]
+    text = p.read_text(encoding="utf-8", errors="replace")
+    _texts[str(p)] = (key, text)
+    return text
+
+
+def read_json(p: Path) -> tuple[object, str]:
+    """(parsed, "") or (None, why): why is "missing", "unreadable", "bad_json" (the words for
+    each: live board sources.why). Parsed again only when the bytes changed."""
+    try:
+        raw = p.read_bytes()
+    except FileNotFoundError:
+        return None, "missing"
+    except OSError:
+        return None, "unreadable"
+    hit = _jsons.get(str(p))
+    if hit and hit[0] == raw:
+        return hit[1], ""
+    try:
+        data = json.loads(raw.decode("utf-8-sig"))
+    except (ValueError, UnicodeDecodeError):
+        return None, "bad_json"
+    _jsons[str(p)] = (raw, data)
+    return data, ""
+
+
+def read_state() -> tuple[dict, str]:
+    """The runner's state.json and what is wrong with it ("" when nothing: the why words of
+    read_json, or "not_object"). Unreadable reads as an empty state."""
+    data, why = read_json(REVIEW / "state.json")
+    if not why and not isinstance(data, dict):
+        why = "not_object"
+    return (data if not why else {"tasks": {}, "days": {}}), why
+
+
+def tail_lines(p: Path, n: int) -> list[str]:
+    """The last n lines of p (a growing log), [] when it can't be read."""
+    try:
+        return read_text(p).splitlines()[-n:] if n else []
+    except OSError:
+        return []
+
+
+_tails: dict[str, tuple[tuple, str]] = {}
+
+
+def tail_chars(p: Path, n: int) -> str:
+    """The last n characters of p (up to 4 bytes each read from the end, not the whole log),
+    kept against its (mtime, size). OSError as Path.read_text."""
+    key = _key(p)
+    hit = _tails.get(str(p))
+    if hit and hit[0] == key:
+        return hit[1]
+    with open(p, "rb") as f:
+        f.seek(max(0, key[1] - 4 * n))
+        text = f.read().decode("utf-8", errors="replace")[-n:]
+    _tails[str(p)] = (key, text)
+    return text
+
+
 def _title(p: Path, default: str) -> str:
     """A task file's "# " heading (the task file format), else default."""
-    return next((l[2:].strip() for l in p.read_text(encoding="utf-8", errors="replace").splitlines()
-                 if l.startswith("# ")), default)
+    return next((l[2:].strip() for l in read_text(p).splitlines() if l.startswith("# ")), default)
 
 
 def _denisse_models() -> str:
@@ -51,10 +130,7 @@ def _denisse_models() -> str:
 def _task_rows() -> list[dict]:
     c = _c()
     n, dflt = c["title_chars"], c["task_defaults"]
-    try:
-        state = json.loads((REVIEW / "state.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        state = {"tasks": {}}
+    state = _state()
     rows = []
     # The lane the runner picked at dispatch (orchestra lane_pick.py writes these header names,
     # orchestra config lane_pick_headers) is the lane shown; the header's own Lane: is lane_asked.
@@ -65,10 +141,10 @@ def _task_rows() -> list[dict]:
         return m.group(1) if m else ""
 
     def add(p: Path, where: str):
-        text = p.read_text(encoding="utf-8", errors="replace")
+        text = read_text(p)
         title = _title(p, p.stem)
         f = dict(re.findall(r"^(Queue|Kind|Lane|Priority):\s*(\S+)", text, re.M))
-        ts = state.get("tasks", {}).get(p.stem, {})
+        ts = (state.get("tasks") or {}).get(p.stem) or {}
         status = where if where != "queue" else ("draft" if f.get("Queue", "").lower() != "auto" else "queued")
         asked = f.get("Lane", dflt["lane"])
         picked = header(text, heads.get("picked"))
@@ -204,10 +280,9 @@ def _learner() -> list[dict]:
 
 
 def _spend() -> list[dict]:
-    try:
-        st = json.loads((REVIEW / "state.json").read_text(encoding="utf-8"))
-        cfg = json.loads((REPO / _c()["paths"]["orchestra_config"]).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    st, why = read_state()
+    cfg, cfg_why = read_json(REPO / _c()["paths"]["orchestra_config"])
+    if why or cfg_why or not isinstance(cfg, dict):
         return []
     u = st.get("days", {}).get(dt.date.today().isoformat(), {})
     cap = cfg.get("daily_spend_cap_usd", 0)
@@ -254,17 +329,12 @@ def lane_limits(st: dict, now: dt.datetime | None = None) -> dict[str, dt.dateti
 
 
 def _state() -> dict:
-    try:
-        return json.loads((REVIEW / "state.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {"tasks": {}, "days": {}}
+    return read_state()[0]
 
 
 def _config() -> dict:
-    try:
-        return json.loads((REPO / _c()["paths"]["orchestra_config"]).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
+    data, _ = read_json(REPO / _c()["paths"]["orchestra_config"])
+    return data if isinstance(data, dict) else {}
 
 
 def _slots() -> dict:
@@ -365,7 +435,7 @@ def _usage(running: list[dict]) -> list[dict]:
     limits = {}
     for log in sorted((REVIEW / "reports").glob("*.lane.log"), key=lambda p: p.stat().st_mtime)[-c["lane_logs"]:]:
         try:
-            tail = log.read_text(encoding="utf-8", errors="replace")[-c["lane_log_chars"]:]
+            tail = tail_chars(log, c["lane_log_chars"])
         except OSError:
             continue
         slug = log.name[: -len(".lane.log")]
@@ -381,8 +451,7 @@ def _usage(running: list[dict]) -> list[dict]:
                 limits[lane] = words["until"].format(time=m.group(2).strip()) if m.group(2) else m.group(1)
     # the runner's own record (orchestra: "LIMITED <slug> lane=<lane> until <time>")
     try:
-        lines = (REVIEW / "runner.log").read_text(encoding="utf-8", errors="replace").splitlines()
-        for l in lines[-c["runner_log_lines"]:]:
+        for l in tail_lines(REVIEW / "runner.log", c["runner_log_lines"]):
             m = re.match(r"^(\S+) LIMITED \S+ lane=(\w+) until (\S+ )?(\d{1,2}:\d{2})", l)
             if m and m.group(1)[:10] == today:
                 day = (m.group(3) or today).strip()
@@ -511,9 +580,11 @@ TABLES = ("agents", "tasks", "waiting", "log", "learner", "spend", "running", "u
           "outputs", "activity", "study")
 
 
-def tables(names=TABLES) -> dict:
+def tables(names=TABLES, failed: dict | None = None) -> dict:
     """The hub's tables by name, built from local state; reads only, writes nothing
-    (`write` saves them for the claude.ai hub, atrium/live.py serves them)."""
+    (`write` saves them for the claude.ai hub, atrium/live.py serves them). With a `failed`
+    dict (the live page) a table whose build raises is empty and failed[name] says why,
+    so one bad file costs its own card, not the page."""
     memo: dict = {}
 
     def tasks():
@@ -529,7 +600,15 @@ def tables(names=TABLES) -> dict:
     build = {"agents": _agents, "tasks": tasks, "waiting": lambda: _waiting(tasks()), "log": _log,
              "learner": _learner, "spend": _spend, "running": running, "usage": lambda: _usage(running()),
              "outputs": _outputs, "activity": _activity, "study": _study}
-    return {n: build[n]() for n in names}
+    if failed is None:
+        return {n: build[n]() for n in names}
+    out = {}
+    for n in names:
+        try:
+            out[n] = build[n]()
+        except Exception as exc:  # noqa: BLE001 -- shown on the cards that use it (live board sources)
+            out[n], failed[n] = [], type(exc).__name__
+    return out
 
 
 def write(out: Path | None = None) -> Path:
