@@ -13,12 +13,17 @@ const fill = (s, f) => s.replace(/\{(\w+)\}/g, (m, k) => k in f ? f[k] : m);
 
 // -- theme: the saved choice, else the system's; colours are the config's -------------
 function scheme() {
-  const saved = D && localStorage.getItem(D.board.theme_storage_key);
-  return saved || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  let saved = null;
+  try { saved = D && localStorage.getItem(D.board.theme_storage_key); } catch (e) {}
+  if (saved && D.board.theme[saved]) return saved;
+  if (D && D.board.theme_default && D.board.theme[D.board.theme_default]) return D.board.theme_default;
+  return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 function theme() {
   const name = scheme(), vars = D.board.theme[name] || {};
   root.dataset.theme = name;
+  // a variable only one theme sets (bg-image, blur...) must not linger after switching away
+  for (const t of Object.values(D.board.theme)) for (const k of Object.keys(t)) root.style.removeProperty(`--${k}`);
   for (const [k, v] of Object.entries(vars)) root.style.setProperty(`--${k}`, v);
 }
 
@@ -152,7 +157,9 @@ function tick() { if (!document.hidden) { clock(); timers(); } setTimeout(tick, 
 // The header is redrawn with every update, so its button is caught here.
 document.addEventListener("click", e => {
   if (!D || !e.target.closest("#theme")) return;
-  localStorage.setItem(D.board.theme_storage_key, scheme() === "light" ? "dark" : "light");
+  const cycle = D.board.theme_cycle || Object.keys(D.board.theme);
+  const next = cycle[(cycle.indexOf(scheme()) + 1) % cycle.length];
+  try { localStorage.setItem(D.board.theme_storage_key, next); } catch (e) {}
   theme();
 });
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (D) theme(); });

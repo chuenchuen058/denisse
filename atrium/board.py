@@ -652,6 +652,7 @@ def build(x: dict) -> dict:
     theme = b["theme"]
     return {"title": b["title"], "verdict": verdict, "header": header, "rings": _rings(x), "cards": cards,
             "theme": theme, "theme_storage_key": b["theme_storage_key"], "clock": b["clock"],
+            "theme_default": b.get("theme_default", ""), "theme_cycle": b.get("theme_cycle") or list(theme),
             "favicon": dict(b["favicon"], arcs=[a["colour"] for a in x["agents"]],
                             dot=theme[b["favicon"]["scheme"]][verdict["level"]], dot_r=b["favicon"]["dot"]),
             "cursor_cfg": x["where"]["cursor_cfg"], "bar_full_pct": b["lane_card"]["bar_full_pct"],
