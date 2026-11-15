@@ -10,7 +10,8 @@ What a tick does with a session's result (after Thomas's review, 31 Oct 2026):
     commands in the worktree and merges only if they exit 0, the hooks loaded,
     and nothing was written into the main checkout
   * a risky diff (config review_risky_patterns, or over review_max_lines) first
-    goes to a fresh read-only reviewer lane; VERDICT: block parks it (2 Nov 2026)
+    goes to a fresh read-only reviewer lane; VERDICT: block parks it (2 Nov 2026). A
+    merge-only re-run reviews only after its merge onto master is clean and green (12 Nov 2026)
   * the branch is then merged onto *current* master in an integration worktree, the gate
     (plus run_checks --fast if it exists) re-runs there, and master is fast-forwarded to
     that exact tested commit; a red combined tree parks it, master moving twice parks it
@@ -1289,11 +1290,23 @@ def merged_already(branch: str) -> str | None:
     return None
 
 
-def integrate(task: Task, branch: str, rec: dict, on_merged=None) -> str:
+def merge_diff_digest(base: str, commit: str) -> str:
+    """A fingerprint of what landing `commit` on `base` changes: equal digests, equal diffs."""
+    return hashlib.sha256(git("diff", "--binary", base, commit).stdout.encode("utf-8")).hexdigest()
+
+
+def integrate(task: Task, branch: str, rec: dict, on_merged=None, before_land=None) -> str:
     """Test branch + current master together, then fast-forward master to that tested commit.
     Fills `rec` (stored in state) with base, commit, checks and tries. Returns the merge
     outcome: 'merged', 'no commits', a merge-by-hand note, or one starting with 'parked:'.
-    `on_merged` runs inside the merge lock right after a fast-forward (the aftercare push)."""
+    `on_merged` runs inside the merge lock right after a fast-forward (the aftercare push).
+    `before_land(wt, base, commit)` (a merge-only run's reviewer) runs once, in the integration
+    tree, only after the merge was clean and its checks passed; a non-None return stops here,
+    nothing lands, and that is integrate's outcome. A redo after master moved re-runs it (risk
+    check and reviewer) unless the rebuilt merge changes master in exactly the way the judged one
+    did: an approval covers a diff, not a branch (12 Nov 2026 review: a stacked change already on
+    master can be reverted there meanwhile, and the rebuilt merge would quietly restore it)."""
+    judged = None  # the diff before_land last cleared, as merge_diff_digest
     ahead = git("rev-list", "--count", f"HEAD..{branch}", check=False).stdout.strip()
     if ahead in ("", "0"):
         found = merged_already(branch)
@@ -1331,6 +1344,16 @@ def integrate(task: Task, branch: str, rec: dict, on_merged=None) -> str:
             if not ok:
                 return ("parked: the combined tree (this branch merged onto current master "
                         f"{base[:8]}) fails: {rec['checks'][-1]}")  # the failing check is the last
+            if before_land is not None:
+                digest = merge_diff_digest(base, commit)
+                if digest != judged:
+                    if judged is not None:
+                        log(f"integration {task.slug}: the rebuilt merge on {base[:8]} changes master "
+                            f"differently from the one reviewed; judging it again")
+                    stop = before_land(wt, base, commit)
+                    if stop is not None:
+                        return stop
+                    judged = digest
         finally:
             remove_worktree(wt, "", delete_branch=False)
         with _FileLock(REVIEW / "merge.lock", wait=600, stale=900):  # two lanes may finish together
@@ -1357,13 +1380,15 @@ def integrate(task: Task, branch: str, rec: dict, on_merged=None) -> str:
 REVIEW_DIFF_PROMPT = HERE / "review_diff_prompt.md"
 
 
-def risk(branch: str) -> str | None:
-    """Why this branch's diff (vs master) needs a reviewer, or None if it doesn't."""
-    files = git("diff", "--name-only", f"HEAD...{branch}", check=False).stdout.split()
+def risk(branch: str, rng: str | None = None) -> str | None:
+    """Why this branch's diff (vs master) needs a reviewer, or None if it doesn't. `rng` is the
+    diff to judge instead of HEAD...branch (a merge-only run: <master>..<tested merge commit>)."""
+    rng = rng or f"HEAD...{branch}"
+    files = git("diff", "--name-only", rng, check=False).stdout.split()
     pats = C["review_risky_patterns"]
     hits = [f for f in files if any(re.search(p, f) for p in pats)]
     lines = 0
-    for row in git("diff", "--numstat", f"HEAD...{branch}", check=False).stdout.splitlines():
+    for row in git("diff", "--numstat", rng, check=False).stdout.splitlines():
         a, d, *_ = row.split("\t") + ["", ""]
         lines += (int(a) if a.isdigit() else 0) + (int(d) if d.isdigit() else 0)
     why = []
@@ -1429,13 +1454,15 @@ def pick_reviewer(task: Task, state: dict | None = None) -> dict:
     return {"lane": p.lane, "argv": list(argv) if argv else None, "why": p.why}
 
 
-def run_reviewer(task: Task, wt: Path, branch: str, report: Path, why: str, state: dict | None = None) -> dict:
+def run_reviewer(task: Task, wt: Path, branch: str, report: Path, why: str, state: dict | None = None,
+                 base: str | None = None, head: str | None = None) -> dict:
     """A fresh read-only reviewer lane on the actual diff. Returns {verdict, reasons, seconds,
     cost_usd, lane, pick}. Fails closed: an answer with no verdict or a missing lane is a block.
     The review not happening is not a block: no output at all is 'retry' (_after_pass runs it
     again, review_infra_retries times); no independent reviewer now, a sign-in failure, a usage
     limit (with limited_until, the reset) or a timeout is 'unavailable' (the PASS is kept for
-    --merge-only)."""
+    --merge-only). `base` + `head` (a merge-only run): review exactly base..head, the tested merge
+    commit against the master it was built on, instead of the branch against its merge-base."""
     rp = pick_reviewer(task, state)
     rlane = rp["lane"]
     if rlane is None:
@@ -1446,8 +1473,12 @@ def run_reviewer(task: Task, wt: Path, branch: str, report: Path, why: str, stat
     if not Path(exe).exists() and not shutil.which(exe):
         return {"verdict": "block", "reasons": f"reviewer lane missing: {argv[0]} not on PATH",
                 "seconds": 0, "cost_usd": None, "lane": rlane, "pick": rp["why"]}
-    base = git("merge-base", "HEAD", branch, check=False).stdout.strip() or "HEAD"
-    diff = git("diff", f"{base}...{branch}", check=False).stdout
+    if head:
+        base = base or git("rev-parse", "HEAD", check=False).stdout.strip() or "HEAD"
+        diff = git("diff", f"{base}..{head}", check=False).stdout
+    else:
+        base = git("merge-base", "HEAD", branch, check=False).stdout.strip() or "HEAD"
+        diff = git("diff", f"{base}...{branch}", check=False).stdout
     cut = int(C["review_diff_max_chars"])
     if len(diff) > cut:
         diff = diff[:cut] + f"\n[... diff cut at {cut} chars; run `git diff {base[:12]}...HEAD` for the rest]\n"
@@ -2094,7 +2125,8 @@ def indent(text: str) -> str:
 
 def _after_pass(task: Task, state: dict, ts: dict, entry: dict, wt: Path, branch: str, report: Path,
                 stray: list[str], hooks_loaded: bool, progress: dict, park_unmerged: bool = False) -> str:
-    """Gate re-run, reviewer, combined-tree integration, archive. `progress["stage"]` names the
+    """Gate re-run, reviewer, combined-tree integration, archive (a merge-only run: integration's
+    merge and gate, then the reviewer, then the fast-forward). `progress["stage"]` names the
     step under way, for the crash log if one of them raises. `park_unmerged` (a merge-only run):
     a merge that needs doing by hand parks the task instead of archiving it, and the gate is not
     re-run on the branch alone -- it can be days behind master (9 Nov 2026: four re-queues failed a
@@ -2118,47 +2150,71 @@ def _after_pass(task: Task, state: dict, ts: dict, entry: dict, wt: Path, branch
             park(task, "session said PASS, but " + "; ".join(problems) + f". Branch {branch} kept.", report)
             return "PASS-REJECTED"
 
-    # Reviewer lane: risky diffs get a fresh read-only reviewer before integration.
-    progress["stage"] = "review"
-    why_risky = risk(branch) if C.get("review_risky", True) else None
-    if why_risky:
-        log(f"review {task.slug}: {why_risky}")
-        # "retry" (the reviewer printed nothing) is not a verdict: run the reviewer again up to
-        # review_infra_retries times, then wait like a reviewer that couldn't run.
-        for tries_left in range(int(C["review_infra_retries"]), -1, -1):
-            rv = run_reviewer(task, wt, branch, report, why_risky, state)
-            rv["spent"] = charge(state, task, rv["seconds"], rv.pop("cost_usd", None), lane=rv.get("lane") or task.lane)
-            rv["why"] = why_risky
-            log(f"review {task.slug}: {rv['verdict']} by {rv.get('lane') or 'no lane'} after {rv['seconds']}s "
-                f"({rv['spent']}); reviewer pick: {rv.get('pick', '')}")
-            if rv["verdict"] != "retry" or not tries_left:
-                break
-            log(f"review {task.slug}: no verdict ({rv['reasons']}); trying again")
-        if rv["verdict"] == "retry":
-            rv["verdict"] = "unavailable"
-        if rv.get("limited_until") and rv.get("lane"):
-            # The reviewer lane waits for its reset like a limited task lane: the auto re-queue
-            # (and any task routed to that lane) holds off until then.
-            state.setdefault("lanes", {})[rv["lane"]] = {"limited_until": rv["limited_until"],
-                                                        "since": now().isoformat(), "message": rv.get("message", "")}
+    def review(rwt: Path, rng: str | None = None, base: str | None = None, head: str | None = None) -> dict:
+        """Risky diffs get a fresh read-only reviewer; the verdict goes into state."""
+        why_risky = risk(branch, rng) if C.get("review_risky", True) else None
+        if why_risky:
+            log(f"review {task.slug}: {why_risky}")
+            # "retry" (the reviewer printed nothing) is not a verdict: run the reviewer again up to
+            # review_infra_retries times, then wait like a reviewer that couldn't run.
+            for tries_left in range(int(C["review_infra_retries"]), -1, -1):
+                rv = run_reviewer(task, rwt, branch, report, why_risky, state, base=base, head=head)
+                rv["spent"] = charge(state, task, rv["seconds"], rv.pop("cost_usd", None), lane=rv.get("lane") or task.lane)
+                rv["why"] = why_risky
+                log(f"review {task.slug}: {rv['verdict']} by {rv.get('lane') or 'no lane'} after {rv['seconds']}s "
+                    f"({rv['spent']}); reviewer pick: {rv.get('pick', '')}")
+                if rv["verdict"] != "retry" or not tries_left:
+                    break
+                log(f"review {task.slug}: no verdict ({rv['reasons']}); trying again")
+            if rv["verdict"] == "retry":
+                rv["verdict"] = "unavailable"
+            if rv.get("limited_until") and rv.get("lane"):
+                # The reviewer lane waits for its reset like a limited task lane: the auto re-queue
+                # (and any task routed to that lane) holds off until then.
+                state.setdefault("lanes", {})[rv["lane"]] = {"limited_until": rv["limited_until"],
+                                                            "since": now().isoformat(), "message": rv.get("message", "")}
+        else:
+            rv = {"verdict": "skipped", "why": "review_risky is off" if not C.get("review_risky", True)
+                  else "not risky"}
+        ts["review"] = entry["review"] = rv
+        return rv
+
+    def review_stops(rv: dict) -> str | None:
+        """Park for a reviewer that couldn't run or blocked; the result, or None to carry on."""
+        if rv["verdict"] == "unavailable":
+            # Not a judgement on the diff: the reviewer couldn't sign in. Keep the PASS for a
+            # merge-only re-run once the sign-in works.
+            # The park text carries review_unavailable_mark: auto_requeue_review_step finds it by that.
+            park(task, C["review_unavailable_park"].format(reasons=rv["reasons"][:200], mark=C["review_unavailable_mark"],
+                                                           slug=task.slug, branch=branch), report)
+            return "REVIEW-UNAVAILABLE"
+        if rv["verdict"] == "block":
+            PARKED.mkdir(parents=True, exist_ok=True)
+            (PARKED / f"{task.slug}.review.md").write_text(
+                f"# Reviewer: VERDICT: block\nWhy reviewed: {rv['why']}\n\n{rv['reasons']}\n", encoding="utf-8")
+            park(task, f"reviewer blocked it ({rv['reasons'].splitlines()[0][:200] if rv['reasons'] else 'no reason'});"
+                       f" review in {task.slug}.review.md. Branch {branch} kept.", report)
+            return "REVIEW-BLOCKED"
+        return None
+
+    # A lane run: the reviewer reads the branch before integration (today's order). A merge-only
+    # run: integration first, and the reviewer only once the merge is clean and its combined-tree
+    # gate passes, on that merge commit against master (11 Nov 2026 18:17: a $1.64 review passed,
+    # then the merge conflicted two seconds later). Nothing lands until the reviewer says ok.
+    before_land, held = None, {}
+    if park_unmerged:
+        ts.pop("review", None)  # an older run's verdict is not this one's
+
+        def before_land(iwt: Path, base: str, commit: str) -> str | None:
+            progress["stage"] = "review"
+            held["stop"] = review_stops(review(iwt, f"{base}..{commit}", base, commit))
+            progress["stage"] = "integration"
+            return held["stop"]
     else:
-        rv = {"verdict": "skipped", "why": "review_risky is off" if not C.get("review_risky", True)
-              else "not risky"}
-    ts["review"] = entry["review"] = rv
-    if rv["verdict"] == "unavailable":
-        # Not a judgement on the diff: the reviewer couldn't sign in. Keep the PASS for a
-        # merge-only re-run once the sign-in works.
-        # The park text carries review_unavailable_mark: auto_requeue_review_step finds it by that.
-        park(task, C["review_unavailable_park"].format(reasons=rv["reasons"][:200], mark=C["review_unavailable_mark"],
-                                                       slug=task.slug, branch=branch), report)
-        return "REVIEW-UNAVAILABLE"
-    if rv["verdict"] == "block":
-        PARKED.mkdir(parents=True, exist_ok=True)
-        (PARKED / f"{task.slug}.review.md").write_text(
-            f"# Reviewer: VERDICT: block\nWhy reviewed: {why_risky}\n\n{rv['reasons']}\n", encoding="utf-8")
-        park(task, f"reviewer blocked it ({rv['reasons'].splitlines()[0][:200] if rv['reasons'] else 'no reason'});"
-                   f" review in {task.slug}.review.md. Branch {branch} kept.", report)
-        return "REVIEW-BLOCKED"
+        progress["stage"] = "review"
+        stopped = review_stops(review(wt))
+        if stopped:
+            return stopped
 
     progress["stage"] = "integration"
     ts.pop("push", None)
@@ -2185,8 +2241,11 @@ def _after_pass(task: Task, state: dict, ts: dict, entry: dict, wt: Path, branch
 
     integ: dict = {}
     touched = set(git("diff", "--name-only", f"HEAD...{branch}", check=False).stdout.split())
-    merge = integrate(task, branch, integ, on_merged=push)
+    merge = integrate(task, branch, integ, on_merged=push, before_land=before_land)
     ts["integration"] = entry["integration"] = integ
+    if held.get("stop"):  # the reviewer stopped a clean, green merge: parked already
+        log(f"merge {branch}: not landed: {held['stop']}")
+        return held["stop"]
     try:
         # conflicts.py: learn title words -> files from a merge; after a merge conflict (or a red
         # combined tree where both sides changed the same files) queue one <slug>-merge follow-up.
@@ -2276,7 +2335,8 @@ def is_merge_only(task: Task) -> bool:
 
 
 def merge_only(task: Task, state: dict, ts: dict) -> str:
-    """Merge the existing review/<slug> branch -- gate, reviewer, combined-tree integration --
+    """Merge the existing review/<slug> branch -- combined-tree integration, then the reviewer on
+    that tested merge, then the fast-forward --
     with no lane run. The branch missing, or a merge that can't run, parks the task: it never
     falls through to a fresh worktree, whose new branch would replace the one to be merged."""
     branch = f"review/{task.slug}"
