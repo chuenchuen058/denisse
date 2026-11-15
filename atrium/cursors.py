@@ -15,6 +15,7 @@ from __future__ import annotations
 import fnmatch
 import os
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -88,14 +89,50 @@ def touched(wt: Path) -> list[dict]:
     return rows
 
 
+# The live server (live.serve) turns this on: a worktree whose files are due for a re-read is
+# re-read by git in a thread and the page goes on with what it had (nothing, the first time), so
+# a page build never waits on git (3 git calls per running worktree, ~1 s each on this laptop,
+# held the page for 2-3 s every refresh_s; 15 Nov 2026). generation() moves when a re-read
+# finds something new, so the page rebuilds with it.
+_bg = {"on": False, "gen": 0, "busy": set()}
+_lock = threading.Lock()
+
+
+def background(on: bool = True) -> None:
+    _bg["on"] = bool(on)
+
+
+def generation() -> int:
+    return _bg["gen"]
+
+
+def _refresh(wt: Path, key: str, old: list[dict] | None) -> None:
+    try:
+        rows = touched(wt)
+    except Exception:  # noqa: BLE001 -- keep what it had; tried again after the ttl
+        rows = old or []
+    with _lock:
+        _cache[key] = (time.monotonic(), rows)
+        if rows != old:
+            _bg["gen"] += 1
+        _bg["busy"].discard(key)
+
+
 def touched_cached(wt: Path, ttl: float) -> list[dict]:
     key = str(wt)
     hit = _cache.get(key)
     if hit and time.monotonic() - hit[0] < ttl:
         return hit[1]
-    rows = touched(wt)
-    _cache[key] = (time.monotonic(), rows)
-    return rows
+    if not _bg["on"]:
+        rows = touched(wt)
+        _cache[key] = (time.monotonic(), rows)
+        return rows
+    with _lock:
+        if key not in _bg["busy"]:
+            _bg["busy"].add(key)
+            threading.Thread(target=_refresh, args=(wt, key, hit[1] if hit else None),
+                             name="atrium-cursor-git", daemon=True).start()
+    return hit[1] if hit else []
 
 
 def collect(running: list[dict], agents: list[dict], ttl: float, words: dict) -> dict:

@@ -324,7 +324,8 @@ class Hub:
         """(version, data). A build that fails keeps the last good copy (tried again next poll);
         with none yet it raises, and /data answers 503 with the reason."""
         with self.lock:
-            fp = (fingerprint(), usage_ledger.generation())  # a token scan that landed: rebuild
+            # a token scan or a worktree re-read that landed in the background: rebuild
+            fp = (fingerprint(), usage_ledger.generation(), cursors.generation())
             if self.data is None or fp != self.fp or time.monotonic() - self.at >= _c()["refresh_s"]:
                 try:
                     data = collect()
@@ -502,7 +503,9 @@ def url(port: int | None = None) -> str:
 
 def serve(port: int | None = None, open_browser: bool = False, browser: str | None = None) -> int:
     srv = make_server(port=port)
-    usage_ledger.background(True)  # the first page is not held up by a catch-up through the session logs
+    # a page build waits on neither the catch-up through the session logs nor git in the worktrees
+    usage_ledger.background(True)
+    cursors.background(True)
     where = url(srv.server_address[1])
     print(where, flush=True)
     if open_browser:

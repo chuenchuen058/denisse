@@ -197,6 +197,33 @@ class CachingTest(BoardBase):
         self.assertEqual(self.live.collect()["markets"], [])
 
 
+class BackgroundCursorsTest(BoardBase):
+    """live.serve() turns on background git for the cursors: a build never waits on git."""
+
+    def test_git_runs_behind_the_page_and_lands(self):
+        from atrium import cursors
+        gate, rows = threading.Event(), [{"path": "atrium/live.py", "mtime": 1.0}]
+
+        def slow(_wt):
+            gate.wait(5)
+            return rows
+        wt = self.tmp / "wt"
+        with mock.patch.dict(cursors._cache, clear=True), \
+                mock.patch.dict(cursors._bg, {"on": True, "gen": 0, "busy": set()}), \
+                mock.patch.object(cursors, "touched", side_effect=slow):
+            t = time.monotonic()
+            self.assertEqual(cursors.touched_cached(wt, 60), [])  # nothing yet, and no wait
+            self.assertLess(time.monotonic() - t, 1)
+            self.assertEqual(cursors.touched_cached(wt, 60), [])  # one re-read at a time
+            gate.set()
+            deadline = time.monotonic() + 5
+            while cursors.generation() == 0 and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertEqual(cursors.generation(), 1)
+            self.assertEqual(cursors.touched_cached(wt, 60), rows)
+            self.assertEqual(cursors.touched.call_count, 1)
+
+
 class BackgroundScanTest(BoardBase):
     """live.serve() turns on the background token scan: update() answers from the saved ledger
     at once, and the scan's result lands as a new generation."""
