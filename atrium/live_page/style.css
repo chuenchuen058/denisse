@@ -4,10 +4,10 @@
 :root{color-scheme:light dark;--r:22px;--font:-apple-system,"SF Pro Display","Segoe UI Variable","Segoe UI",system-ui,sans-serif;
   --mono:ui-monospace,"SF Mono",Consolas,monospace}
 *{box-sizing:border-box;margin:0}
-body{background-color:var(--bg);background-image:var(--bg-image,none);background-attachment:fixed;color:var(--text);font:15px/1.35 var(--font);padding:28px;max-width:1280px;margin:auto}
+body{background-color:var(--bg);background-image:var(--bg-image,none);background-attachment:fixed;color:var(--text);font:15px/1.35 var(--font);padding:28px;max-width:var(--ix-page-max,1280px);margin:auto}
 .top{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:22px}
 .date{color:var(--sub);font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.4px}
-.date .warn{color:var(--warn)}.date .bad{color:var(--bad)}
+.date .warn{color:var(--warn-text,var(--warn))}.date .bad{color:var(--bad-text,var(--bad))}
 h1{font-size:34px;font-weight:700;letter-spacing:-.5px;margin-top:2px}
 .right{display:flex;align-items:center;gap:10px}
 .pill{display:inline-flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--card-border,transparent);backdrop-filter:blur(var(--blur,0px));border-radius:999px;padding:8px 14px;font-weight:600;font-size:14px;box-shadow:0 1px 2px var(--shadow)}
@@ -22,15 +22,15 @@ button.theme{background:var(--card);border:1px solid var(--card-border,transpare
 .span2{grid-column:span 2}.span4{grid-column:span 4}.tall{grid-row:span 2}.first{order:-1}
 .none{color:var(--sub);font-size:13.5px;padding:6px 0}
 .why{color:var(--sub);font-size:12.5px}
-.why.ok{color:var(--ok)}.why.warn{color:var(--warn)}.why.bad{color:var(--bad)}
+.why.ok{color:var(--ok-text,var(--ok))}.why.warn{color:var(--warn-text,var(--warn))}.why.bad{color:var(--bad-text,var(--bad))}
 .sub{color:var(--sub)}
-.big{font-size:44px;font-weight:700;letter-spacing:-1px}
+.big{font-size:44px;font-weight:700;letter-spacing:-1px;font-variant-numeric:tabular-nums}
 .big.mid{font-size:30px}
 .alert{background:color-mix(in srgb,var(--warn) 12%,var(--card))}
 /* rings */
 .rg{display:flex;align-items:center;gap:14px}
 .rg svg{width:64px;height:64px;transform:rotate(-90deg);flex:none}
-.rg .v{font-size:22px;font-weight:700}.rg .l{font-size:12.5px;color:var(--sub)}
+.rg .v{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums}.rg .l{font-size:12.5px;color:var(--sub)}
 /* lane cards */
 .agent{display:flex;flex-direction:column;gap:8px;min-height:150px}
 .agent .name{font-size:20px;font-weight:700;display:flex;align-items:center;gap:8px}
@@ -38,8 +38,9 @@ button.theme{background:var(--card);border:1px solid var(--card-border,transpare
 .badge{font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:color-mix(in srgb,var(--c) 14%,transparent);color:var(--c)}
 .task{font-size:14px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .file{font:12.5px var(--mono);color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.meta{font-size:12.5px;color:var(--sub)}
+.meta{font-size:12.5px;color:var(--sub);font-variant-numeric:tabular-nums}
 .meta.end{margin-top:auto}
+.agent.idle .meta.end{margin-top:0}
 .prog{height:4px;border-radius:4px;background:var(--line);margin-top:4px;overflow:hidden}
 .prog i{display:block;height:100%;width:0;background:var(--c);transition:width 1s linear}
 .prog.over i{background:var(--bad)}
@@ -49,7 +50,7 @@ button.theme{background:var(--card);border:1px solid var(--card-border,transpare
 .where .row:first-child{border-top:0}
 .where .row.task-row{font-family:var(--font)}
 .where .row .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-right:auto}
-.where .warn{font-size:12px;color:var(--warn);padding:0 4px 6px}
+.where .warn{font-size:12px;color:var(--warn-text,var(--warn));padding:0 4px 6px}
 .where .more{color:var(--sub);font-size:12px;padding:6px 4px}
 .cur{display:inline-flex;align-items:center;gap:3px;flex:none}
 .cur svg{height:var(--cur-arrow);width:auto;fill:var(--c)}
@@ -68,26 +69,28 @@ button.theme{background:var(--card);border:1px solid var(--card-border,transpare
 .card-today li,.card-projects li,.card-markets li{display:flex;gap:12px;padding:7px 0;font-size:14px}
 .card-today li b,.card-projects li b,.card-markets li b{width:56px;flex:none;color:var(--sub);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .card-today li .t,.card-markets li .t{margin-right:auto}
-.card-activity li{display:flex;gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:13.5px;animation:in .5s ease}
+.card-activity li{display:flex;gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:13.5px}
+.card-activity li:first-child{animation:in var(--ix-feed) ease}
 .card-activity li .t{color:var(--sub);width:48px;flex:none;font-variant-numeric:tabular-nums}
 @keyframes in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
 /* what to work on */
-.tree{display:flex;flex-wrap:wrap;gap:22px 36px;padding:6px 2px 4px}
+.tree{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,var(--ix-tree-col)),1fr));align-items:start;gap:22px 28px;padding:6px 2px 4px}
+.tree>ul{min-width:0}
 .tree ul{list-style:none;padding-left:18px;margin:0;position:relative}
 .tree>ul{padding-left:0}
-.tree li{position:relative;padding:5px 0 5px 16px;font-size:13.5px;white-space:nowrap}
+.tree li{position:relative;padding:5px 0 5px 16px;font-size:13.5px;min-width:0}
 .tree li::before{content:"";position:absolute;left:0;top:0;bottom:0;border-left:1.5px solid var(--line)}
 .tree li:last-child::before{bottom:auto;height:16px}
 .tree li::after{content:"";position:absolute;left:0;top:16px;width:12px;border-top:1.5px solid var(--line)}
 .tree>ul>li{padding-left:0;font-weight:700;font-size:15px}
 .tree>ul>li>ul{font-weight:400}
 .tree>ul>li::before,.tree>ul>li::after{display:none}
-.nd{display:inline-flex;align-items:center;gap:7px;padding:4px 10px;border-radius:10px;background:var(--bg)}
-.nd i{width:8px;height:8px;border-radius:50%;flex:none;display:none}
+.nd{display:inline-flex;align-items:flex-start;gap:7px;max-width:100%;padding:4px 10px;border-radius:10px;background:var(--bg);overflow-wrap:anywhere}
+.nd i{width:8px;height:8px;border-radius:50%;flex:none;display:none;margin-top:.38em}
 .nd.u i,.nd.s i,.nd.l i,.nd.d i{display:block}
 .u i{background:var(--bad)}.s i{background:var(--warn)}.l i{background:var(--later)}.d i{background:var(--ok)}
 .nd.d{color:var(--sub);text-decoration:line-through}
-.nd small{color:var(--sub);font-weight:500}
+.nd small{color:var(--sub);font-weight:500;flex:none;white-space:nowrap;margin-top:.12em}
 .leg{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--sub);margin-top:10px}.leg .nd{padding:0;background:none;text-decoration:none}
 /* local agents */
 .local{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
@@ -108,7 +111,7 @@ h3+.reset{border-top:0}
 .bar{height:8px;border-radius:8px;background:var(--line);overflow:hidden}
 .bar i{display:block;height:100%;border-radius:8px;background:var(--c);transition:width .6s ease}
 .cd{font-variant-numeric:tabular-nums;font-weight:600;text-align:right;font-size:13px}
-.cd.bad{color:var(--bad)}.cd.sub{color:var(--sub);font-weight:500}
+.cd.bad{color:var(--bad-text,var(--bad))}.cd.sub{color:var(--sub);font-weight:500}
 .foot{margin-top:14px;color:var(--sub);font-size:12px;text-align:center}
 [hidden]{display:none!important}
 @media (max-width:900px){.grid,.rings{grid-template-columns:1fr 1fr}.span4{grid-column:span 2}.local,.cells{grid-template-columns:1fr 1fr}}
@@ -116,13 +119,14 @@ h3+.reset{border-top:0}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 /* Do next (atrium/suggest.py) */
 .sg-mode{float:right;margin-top:-28px;font-size:12px;color:var(--sub)}
-.do-next{list-style:none;padding:0;display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
-.do-next .sg{display:flex;flex-direction:column;gap:6px;padding:14px;border-radius:16px;background:color-mix(in srgb,var(--text) 4%,transparent)}
+.do-next{list-style:none;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.do-next .sg{min-width:0;display:flex;flex-direction:column;gap:6px;padding:14px;border-radius:16px;background:color-mix(in srgb,var(--text) 4%,transparent)}
 .do-next .sg.gone{opacity:.35}
-.do-next .t{font-size:16px}
+.do-next .sg .t{font-size:16px;white-space:normal;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:var(--ix-title-lines);line-clamp:var(--ix-title-lines)}
+.do-next .sg:hover .t,.do-next .sg:focus-within .t{-webkit-line-clamp:unset;line-clamp:unset}
 .do-next .meta{display:flex;align-items:center;gap:10px;font-size:12.5px}
 .do-next .meta .pill{padding:3px 10px;font-size:12px}
-.do-next .src{color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.do-next .src{color:var(--sub);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .do-next .acts{display:flex;gap:8px;margin-top:auto}
 .do-next button{background:var(--card);border:0;color:var(--text);border-radius:999px;padding:6px 12px;cursor:pointer;font:inherit;font-size:12.5px;font-weight:600;box-shadow:0 1px 2px var(--shadow)}
 .why-these{margin-top:10px;font-size:12.5px;color:var(--sub)}
@@ -134,7 +138,8 @@ h3+.reset{border-top:0}
    "board" -> "interactive" and "theme". Only transform, opacity, colour and one grid row are
    animated, and only while something is hovered or clicked: nothing here runs on the 1 s tick. */
 .w{transition:transform var(--ix-hover) ease,box-shadow var(--ix-hover) ease,border-color var(--ix-hover) ease}
-.w:hover{transform:translateY(calc(-1*var(--ix-lift)));border-color:var(--edge,var(--card-border,transparent));box-shadow:0 10px 30px var(--glow,var(--shadow));z-index:2}
+.w:hover{border-color:var(--edge,var(--card-border,transparent));z-index:2}
+.w[role=button]:hover{transform:translateY(calc(-1*var(--ix-lift)));box-shadow:0 10px 30px var(--glow,var(--shadow))}
 .w:focus-visible,.seg button:focus-visible,.q:focus-visible,.drawer .x:focus-visible{outline:2px solid var(--accent,var(--sub));outline-offset:2px}
 .w li,.where .row,.lg,.reset{border-radius:10px;transition:background-color var(--ix-hover) ease}
 .card-activity li:hover,.where .row:hover,[data-task]:hover{background-color:var(--hover,color-mix(in srgb,var(--text) 6%,transparent))}
