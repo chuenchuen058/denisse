@@ -43,9 +43,21 @@ LANES = tuple(_C["lanes"])
 BUDGET = dict(_C["budget"])
 
 
+_reads: dict[str, tuple[tuple, str]] = {}
+
+
 def _read(rel: str) -> str:
+    """A vault note's text ("" when it can't be read), re-read only when its mtime or size moved:
+    the live page reads hot.md once per section it draws from, every rebuild."""
+    p = VAULT / rel
     try:
-        return (VAULT / rel).read_text(encoding="utf-8")
+        s = p.stat()
+        hit = _reads.get(str(p))
+        if hit and hit[0] == (s.st_mtime_ns, s.st_size):
+            return hit[1]
+        text = p.read_text(encoding="utf-8", errors="replace")
+        _reads[str(p)] = ((s.st_mtime_ns, s.st_size), text)
+        return text
     except OSError:
         return ""
 

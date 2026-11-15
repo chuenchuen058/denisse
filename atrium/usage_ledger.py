@@ -30,6 +30,7 @@ import datetime as dt
 import fnmatch
 import json
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -214,6 +215,55 @@ READERS = {"claude_code": _read_claude_code, "codex": _read_codex}
 
 # ledger path -> (when its logs were last read, the ledger file's mtime then, the ledger in memory)
 _mem: dict[str, tuple[float, float | None, dict]] = {}
+_lock = threading.RLock()
+# The live server (live.serve) turns this on: a due log scan then runs in a thread on a copy of
+# the ledger and update() answers from what is already in memory, so the page's first build is
+# not held up by a catch-up through every session log since the ledger was last saved (5-26 s,
+# 15 Nov 2026). generation() moves when such a scan lands, so the page rebuilds with it.
+_bg = {"on": False, "thread": None, "gen": 0}
+
+
+def background(on: bool = True) -> None:
+    _bg["on"] = bool(on)
+
+
+def generation() -> int:
+    return _bg["gen"]
+
+
+def _scan(c: dict, data: dict, all_from: str, sessions: set, now: dt.datetime) -> None:
+    for src in c["sources"]:
+        if src["kind"] in READERS:
+            READERS[src["kind"]](src, data, all_from, sessions)
+    keep_from = (now.date() - dt.timedelta(days=c["seen_keep_days"])).isoformat()
+    data["seen"] = {k: d for k, d in data["seen"].items() if d >= keep_from}
+
+
+def _scan_later(key: str, c: dict, all_from: str, sessions: set, now: dt.datetime) -> None:
+    """Scan on a copy in a daemon thread and swap it in; one at a time. A scan that fails
+    leaves the ledger as it was (and is tried again after scan_s)."""
+    t = _bg["thread"]
+    if t is not None and t.is_alive():
+        return
+
+    def run():
+        try:
+            with _lock:
+                _, seen_mtime, data = _mem[key]
+                work = json.loads(json.dumps(data))
+            _scan(c, work, all_from, sessions, now)
+            with _lock:
+                _, cur_mtime, cur = _mem.get(key, (None, seen_mtime, data))
+                work["orchestra"] = cur["orchestra"]  # update() keeps this part current
+                _mem[key] = (time.monotonic(), cur_mtime, work)
+                _bg["gen"] += 1
+        except Exception:  # noqa: BLE001 -- the tokens card keeps what it had
+            with _lock:
+                last, m, d = _mem[key]
+                _mem[key] = (time.monotonic(), m, d)
+
+    _bg["thread"] = threading.Thread(target=run, name="atrium-token-scan", daemon=True)
+    _bg["thread"].start()
 
 
 def _mtime(path: Path) -> float | None:
@@ -228,7 +278,13 @@ def update(state: dict, now: dt.datetime, save: bool = False) -> dict:
     Orchestra). Orchestra's runs are read every call; the logs at most every scan_s, from where
     the last read stopped. save=False (the live page, which never writes to .review) keeps the
     progress in memory only; save=True writes the ledger. Never raises on a bad log: a line that
-    does not parse is skipped."""
+    does not parse is skipped. With background() on and save=False, a due scan runs in a
+    thread (_scan_later) and this call answers from memory."""
+    with _lock:
+        return _update(state, now, save)
+
+
+def _update(state: dict, now: dt.datetime, save: bool) -> dict:
     c = _cfg()
     all_from = c.get("all_from") or ""
     path = ledger_path(c)
@@ -240,12 +296,9 @@ def update(state: dict, now: dt.datetime, save: bool = False) -> dict:
         seen_mtime = disk_mtime
     orch = next((s for s in c["sources"] if s["kind"] == "orchestra"), None)
     sessions = _orchestra(state or {}, orch, c["all_keys"])[1] if orch else set()
-    if scan:
-        for src in c["sources"]:
-            if src["kind"] in READERS:
-                READERS[src["kind"]](src, data, all_from, sessions)
-        keep_from = (now.date() - dt.timedelta(days=c["seen_keep_days"])).isoformat()
-        data["seen"] = {k: d for k, d in data["seen"].items() if d >= keep_from}
+    later = scan and _bg["on"] and not save
+    if scan and not later:
+        _scan(c, data, all_from, sessions, now)
         last = time.monotonic()
     # session ids a log held are kept for good (not pruned like "seen"): a run whose log is
     # gone must not come back from state.json on top of the day total its log already gave
@@ -260,6 +313,8 @@ def update(state: dict, now: dt.datetime, save: bool = False) -> dict:
         except OSError:
             pass
     _mem[str(path)] = (last, seen_mtime, data)
+    if later:
+        _scan_later(str(path), c, all_from, sessions, now)
     days: dict = {}
     for part in (data["logs"], data["orchestra"]):
         for day, agents in part.items():

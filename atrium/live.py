@@ -24,7 +24,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import board, conf, context, cursors, snapshot
+from . import board, conf, context, cursors, snapshot, usage_ledger
 
 HERE = Path(__file__).resolve().parent
 
@@ -62,12 +62,12 @@ def _titles() -> dict:
     return out
 
 
-def _timeline(state: dict, running: list[dict], now: dt.datetime) -> list[dict]:
+def _timeline(state: dict, running: list[dict], now: dt.datetime, titles: dict | None = None) -> list[dict]:
     """Today's runs as blocks: start/end in hours since midnight, the result's class."""
     c = _c()["timeline"]
     n = snapshot._c()["title_chars"]
     midnight = dt.datetime.combine(now.date(), dt.time())
-    titles = _titles()
+    titles = _titles() if titles is None else titles
     rows = []
     for slug, ts in state.get("tasks", {}).items():
         for h in ts.get("history", []):
@@ -167,13 +167,41 @@ def _power() -> dict:
         return {"ac": None, "battery_percent": None}
 
 
+def _safe(make, default, *args):
+    """make(*args), or default when it raises: one bad read costs its own figure, not the page
+    (the cards that need the file say so: board.source_problems)."""
+    try:
+        return make(*args)
+    except Exception:  # noqa: BLE001
+        return default
+
+
+def _markets() -> tuple[list, dict | None]:
+    """The Markets card's tickers and insiders block from markets_file under the hub folder
+    (markets/ writes it); nothing when it is absent or not the expected shape. Read from the
+    served .review, not the working directory (it was Path(".review") before 15 Nov 2026)."""
+    data, _ = snapshot.read_json(_review() / snapshot._c()["paths"]["hub"] / _c()["markets_file"])
+    if not isinstance(data, dict):
+        return [], None
+    tickers = data.get("tickers") if isinstance(data.get("tickers"), list) else []
+    return tickers, data.get("insiders") if isinstance(data.get("insiders"), dict) else None
+
+
 def collect() -> dict:
-    """Everything the page shows, as one JSON-able dict (no clock in it: see payload())."""
+    """Everything the page shows, as one JSON-able dict (no clock in it: see payload()).
+    config.json is read once for the whole build (conf.held)."""
+    with conf.held():
+        return _collect()
+
+
+def _collect() -> dict:
     c = _c()
     words = c["words"]
     now = dt.datetime.now()
-    t = snapshot.tables(c["tables"])
+    failed: dict = {}
+    t = snapshot.tables(c["tables"], failed)
     state = snapshot._state()
+    titles = _safe(_titles, {})
     pw = _power()
     usage = {u["lane"]: u for u in t["usage"]}
     lanes = state.get("lanes") if isinstance(state.get("lanes"), dict) else {}
@@ -209,18 +237,22 @@ def collect() -> dict:
                        "held": words["held"] if n and limited else "", "why": why,
                        "until": lim.isoformat(timespec="minutes") if lim and lim > now else "", "quota": quota})
     icons = c["needs_icons"]
-    where = dict(cursors.collect(t["running"], agents, c["refresh_s"], words), icon=icons.get("overlap", ""))
+    nobody = {"cursors": [], "files": [], "overlaps": [], "more_files": "",
+              "cursor_cfg": {k: c["cursors"][k] for k in c["cursors"]["page"]}}
+    where = dict(_safe(cursors.collect, None, t["running"], agents, c["refresh_s"], words) or nobody,
+                 icon=icons.get("overlap", ""))
     needs = [{"icon": icons.get("overlap", ""), "item": o["text"], "kind": "overlap"} for o in where["overlaps"]]
     needs += [{"icon": icons.get(w["kind"], ""), "item": w["item"], "kind": w["kind"]}
-              for w in snapshot.waiting_items(t["tasks"])]
+              for w in _safe(snapshot.waiting_items, [], t["tasks"])]
     needs = needs[:c["needs_max"]]
-    timeline = _timeline(state, t["running"], now)
+    timeline = _safe(_timeline, [], state, t["running"], now, titles)
     # one count of the day for the rings, Progress and Merged cards (board.day_counts)
-    counts = board.day_counts(state, now, board.log_lines(), *board._open_ids(t))
+    counts = _safe(lambda: board.day_counts(state, now, board.log_lines(), *board._open_ids(t)),
+                   board.day_counts({}, now))
     spend = (t["spend"] or [{}])[0]
     labels = c["board"]["counts"]["labels"]
     values = {"tasks": {"v": counts["tasks_done"], "m": counts["tasks_today"]},
-              "study": _study_weeks(),
+              "study": _safe(_study_weeks, {"v": 0, "m": 0}),
               "spend": {"v": spend.get("cost_usd", 0) or 0, "m": spend.get("cap_usd", 0) or 0}}
     progress = []
     for b in c["progress"]["bars"]:
@@ -228,20 +260,10 @@ def collect() -> dict:
         progress.append({"key": b["key"], "label": b["label"], "colour": b["colour"],
                          "pct": round(min(100, 100 * v["v"] / v["m"]), 1) if v["m"] else 0,
                          "text": labels.get(f'progress_{b["key"]}', b["text"]).format(**v)})
-    markets_path = (snapshot.REPO / "markets" / "config.json") if getattr(snapshot, "REPO", None) else (Path.cwd() / "markets" / "config.json")
-    markets, insiders = [], None
-    try:
-        p = Path(".review") / "hub" / "markets.json"
-        if p.exists():
-            payload = json.loads(p.read_text(encoding="utf-8"))
-            if isinstance(payload, dict):
-                markets = payload.get("tickers", [])
-                insiders = payload.get("insiders") if isinstance(payload.get("insiders"), dict) else None
-    except (OSError, ValueError, TypeError):
-        markets, insiders = [], None
+    markets, insiders = _safe(_markets, ([], None))
     mission = board.build({"now": now, "t": t, "state": state, "agents": agents, "usage": usage, "where": where,
                            "timeline": timeline, "progress": progress, "markets": markets, "insiders": insiders, "power": pw,
-                           "live_words": words, "titles": _titles(), "counts": counts})
+                           "live_words": words, "titles": titles, "counts": counts, "failed": failed})
     return {"title": c["title"], "subtitle": c["subtitle"], "panels": c["panels"], "headings": c["headings"],
             "board": mission,
             "power": {"ac": pw.get("ac"), "battery_percent": pw.get("battery_percent")},
@@ -299,10 +321,17 @@ class Hub:
         self.at = 0.0
 
     def get(self) -> tuple[int, dict]:
+        """(version, data). A build that fails keeps the last good copy (tried again next poll);
+        with none yet it raises, and /data answers 503 with the reason."""
         with self.lock:
-            fp = fingerprint()
+            fp = (fingerprint(), usage_ledger.generation())  # a token scan that landed: rebuild
             if self.data is None or fp != self.fp or time.monotonic() - self.at >= _c()["refresh_s"]:
-                data = collect()
+                try:
+                    data = collect()
+                except Exception:
+                    if self.data is None:
+                        raise
+                    return self.version, self.data
                 body = json.dumps(data, sort_keys=True, ensure_ascii=False)
                 if body != self.body:
                     self.version += 1
@@ -336,7 +365,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/events":
             return self._events()
         if path == "/data":
-            v, data = self.hub.get()
+            try:
+                v, data = self.hub.get()
+            except Exception as exc:  # noqa: BLE001 -- nothing built yet: say why, not a dropped socket
+                why = _c()["board"]["words"]["cant_build"].format(why=type(exc).__name__)
+                return self._send(503, why.encode("utf-8"), "text/plain; charset=utf-8")
             return self._send(200, payload(data, v).encode("utf-8"), "application/json; charset=utf-8")
         if path == _c()["board"]["interactive"]["drawer"]["path"]:  # one task's drawer: read-only
             from urllib.parse import parse_qs
@@ -390,7 +423,10 @@ class Handler(BaseHTTPRequestHandler):
         sent, quiet = -1, 0.0
         try:
             while not self._gone():
-                v, data = self.hub.get()
+                try:
+                    v, data = self.hub.get()
+                except Exception:  # noqa: BLE001 -- nothing built yet: tried again next poll
+                    v = sent
                 if v != sent:
                     self.wfile.write(f"event: update\ndata: {payload(data, v)}\n\n".encode("utf-8"))
                     self.wfile.flush()
@@ -466,6 +502,7 @@ def url(port: int | None = None) -> str:
 
 def serve(port: int | None = None, open_browser: bool = False, browser: str | None = None) -> int:
     srv = make_server(port=port)
+    usage_ledger.background(True)  # the first page is not held up by a catch-up through the session logs
     where = url(srv.server_address[1])
     print(where, flush=True)
     if open_browser:

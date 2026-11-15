@@ -65,12 +65,8 @@ def _none(words: dict) -> str:
 def log_lines() -> list[tuple[dt.datetime, str]]:
     """(time, rest) of the runner.log's newest lines, oldest first; other lines are skipped."""
     c = _b()["runner_log"]
-    try:
-        raw = (snapshot.REVIEW / c["file"]).read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
-        return []
     out = []
-    for l in raw[-c["lines"]:]:
+    for l in snapshot.tail_lines(snapshot.REVIEW / c["file"], c["lines"]):
         stamp, _, rest = l.partition(" ")
         when = _dt(stamp)
         if when and rest:
@@ -116,11 +112,48 @@ def _gpu() -> dict | None:
 
 
 def _json_file(path) -> dict:
-    try:
-        d = json.loads(path.read_text(encoding="utf-8"))
-        return d if isinstance(d, dict) else {}
-    except (OSError, ValueError):
-        return {}
+    d, _ = snapshot.read_json(path)
+    return d if isinstance(d, dict) else {}
+
+
+def source_problems(b: dict | None = None) -> dict[str, list[str]]:
+    """card id -> the "can't read X" lines for the files it needs (config "sources") that are
+    missing or broken. state.json's own read is shared with every other reader of it."""
+    b = b or _b()
+    w, why = b["words"], b.get("source_why") or {}
+    out: dict[str, list[str]] = {}
+    for src in b.get("sources") or []:
+        root = snapshot.REVIEW if src["root"] == "review" else context.VAULT
+        p = root / src["path"].format(ledger=b["tokens"]["ledger"])
+        if src["kind"] == "json":
+            data, bad = snapshot.read_state() if p == snapshot.REVIEW / "state.json" else snapshot.read_json(p)
+            if not bad and not isinstance(data, dict):
+                bad = "not_object"
+        else:
+            try:
+                snapshot.read_text(p)
+                bad = ""
+            except FileNotFoundError:
+                bad = "missing"
+            except OSError:  # a folder in its place, a lock, no permission
+                bad = "unreadable"
+        if bad and w.get("cant_read"):
+            line = w["cant_read"].format(name=src["name"], why=why.get(bad, bad))
+            for cid in src["cards"]:
+                out.setdefault(cid, []).append(line)
+    return out
+
+
+def _note(lines: list[str]) -> str:
+    return "".join(f'<div class="none cant">{e(l)}</div>' for l in lines)
+
+
+def _with_note(body: str, lines: list[str]) -> str:
+    """The card's html with its "can't read" lines under its heading (first, when it has none)."""
+    if not lines:
+        return body
+    head, sep, rest = body.partition("</h3>")
+    return f"{head}{sep}{_note(lines)}{rest}" if sep else _note(lines) + body
 
 
 # -- figures ----------------------------------------------------------------------
@@ -681,8 +714,29 @@ def build(x: dict) -> dict:
     x = dict(x, words=b["words"], log=log_lines())
     if "counts" not in x:
         x["counts"] = day_counts(x["state"], x["now"], x["log"], *_open_ids(x["t"]))
-    runs = _running(x)
-    verdict, header = _header(x, runs)
+    problems = source_problems(b)
+    for table, why in (x.get("failed") or {}).items():
+        for cid in (b.get("table_cards") or {}).get(table, []):
+            if b["words"].get("cant_table"):
+                problems.setdefault(cid, []).append(b["words"]["cant_table"].format(table=table, why=why))
+
+    def guard(make, *args):
+        """One card's html; its own failure is a line on that card, never the page's."""
+        try:
+            return make(*args)
+        except Exception as exc:  # noqa: BLE001 -- the rest of the board still renders
+            return f'<div class="none cant">{e(b["words"].get("cant_build", "{why}").format(why=type(exc).__name__))}</div>'
+
+    try:
+        runs = _running(x)
+    except Exception:  # noqa: BLE001 -- no timers, but every card still renders
+        runs = []
+    try:
+        verdict, header = _header(x, runs)
+    except Exception as exc:  # noqa: BLE001
+        verdict = {"level": "bad", "text": b["words"].get("cant_build", "{why}").format(why=type(exc).__name__), "pill": ""}
+        header = f'<div><h1 data-section="title">{e(b["title"])}</h1><div class="none cant">{e(verdict["text"])}</div></div>'
+
     plain = {"tree": _tree, "local": _local, "merged": _merged, "up_next": _up_next, "tokens": _tokens,
              "credits": _credits, "limits": _limits, "activity": _activity, "today": _today,
              "projects": _projects, "progress": _progress, "markets": _markets}
@@ -696,27 +750,30 @@ def build(x: dict) -> dict:
         cid, cls = card["id"], card.get("class", "")
         heading = b["headings"].get(cid, "")
         h3 = f"<h3>{e(heading)}</h3>"
+        note = problems.get(cid, [])
         if cid == "lanes":
             for a in x["agents"]:
                 busy = any(r["lane"] == a["lane"] for r in runs)
                 cards.append({"key": f'lane:{a["lane"]}', "section": "lane",
                               "cls": f'agent {cls}{"" if busy else " idle"}'.strip(),
-                              "style": f'--c:{a["colour"]}', "html": _lane_card(a, x, runs)})
+                              "style": f'--c:{a["colour"]}', "html": _with_note(guard(_lane_card, a, x, runs), note)})
         elif cid == "cursors":
-            rows = _cursor_rows(x)
+            rows = _note(note) + guard(_cursor_rows, x)
             cards.append({"key": cid, "section": cid, "cls": f"ws {cls}".strip(), "style": "", "heading": heading,
                           "rows": rows,
                           "html": f'{h3}<div class="where"><div class="rows">{rows}</div>'
                                   f'<div class="layer" aria-hidden="true"></div></div>'})
         elif cid == "needs_look":
-            body, on = _needs_look(x)
+            body, on = guard(_needs_look, x), False
+            if isinstance(body, tuple):
+                body, on = body
             cards.append({"key": cid, "section": cid, "cls": f'{cls}{" alert" if on else ""}'.strip(), "style": "",
-                          "html": h3 + body})
+                          "html": h3 + _note(note) + body})
         elif cid in plain:
             cards.append({"key": cid, "section": cid, "cls": f"card-{cid} {cls}".strip(), "style": "",
-                          "html": h3 + plain[cid](x)})
+                          "html": h3 + _note(note) + guard(plain[cid], x)})
     theme = b["theme"]
-    return {"title": b["title"], "verdict": verdict, "header": header, "rings": _rings(x), "cards": cards,
+    return {"title": b["title"], "verdict": verdict, "header": header, "rings": guard(_rings, x), "cards": cards,
             "theme": theme, "theme_storage_key": b["theme_storage_key"], "clock": b["clock"],
             "theme_default": b.get("theme_default", ""), "theme_cycle": b.get("theme_cycle") or list(theme),
             "favicon": dict(b["favicon"], arcs=[a["colour"] for a in x["agents"]],
