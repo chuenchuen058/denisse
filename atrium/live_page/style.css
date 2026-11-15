@@ -66,9 +66,11 @@ button.theme{background:var(--card);border:1px solid var(--card-border,transpare
 .card-up_next li:first-child,.card-credits li:first-child,.card-activity li:first-child{border-top:0}
 .w li .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .w li .why{flex:none}
-.card-today li,.card-projects li,.card-markets li{display:flex;gap:12px;padding:7px 0;font-size:14px}
-.card-today li b,.card-projects li b,.card-markets li b{width:56px;flex:none;color:var(--sub);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card-today li,.card-projects li,.card-markets li,.card-funds li{display:flex;gap:12px;padding:7px 0;font-size:14px}
+.card-today li b,.card-projects li b,.card-markets li b,.card-funds li b{width:56px;flex:none;color:var(--sub);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .card-today li .t,.card-markets li .t{margin-right:auto}
+.card-funds li b{width:auto;min-width:56px;max-width:40%}.card-funds li.watch b{color:var(--accent)}
+.card-funds h4.date{margin-top:10px}.fine{color:var(--sub);font-size:12px;line-height:1.45;margin:10px 0 0}
 .card-activity li{display:flex;gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:13.5px}
 .card-activity li:first-child{animation:in var(--ix-feed) ease}
 .card-activity li .t{color:var(--sub);width:48px;flex:none;font-variant-numeric:tabular-nums}

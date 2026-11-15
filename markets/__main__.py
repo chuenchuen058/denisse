@@ -1,7 +1,7 @@
 import argparse
 import json
 
-from . import insiders
+from . import funds, insiders
 from .core import CONFIG, build_snapshot_data, collect_alerts, snapshot, weekly_note
 
 
@@ -34,6 +34,15 @@ def _insiders_cli(args):
     return 0
 
 
+def _funds_cli(args):
+    if not args.cached and not args.dry_run:
+        funds.refresh(CONFIG)
+    print(funds.text_summary(CONFIG), end="")
+    if not args.dry_run:
+        funds.write_hub(CONFIG)
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="python -m markets", description="Market snapshot, alerts, and weekly summary.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -54,6 +63,11 @@ def main(argv=None):
     insiders_parser = subparsers.add_parser("insiders", help="Fetch recent SEC Form 4 purchases by officers/directors")
     insiders_parser.add_argument("--cached", action="store_true", help="Show the cache only, no EDGAR requests")
     insiders_parser.set_defaults(func=_insiders_cli)
+
+    funds_parser = subparsers.add_parser("funds", help="Big funds' 13F-HR moves; writes .review/hub/funds.json")
+    funds_parser.add_argument("--cached", action="store_true", help="Use the cache only, no EDGAR requests")
+    funds_parser.add_argument("--dry-run", action="store_true", help="No EDGAR requests and no files written")
+    funds_parser.set_defaults(func=_funds_cli)
 
     ns = parser.parse_args(argv)
     return ns.func(ns)

@@ -706,6 +706,51 @@ def _insiders(ins, c: dict) -> str:
     return (f'<h4 class="date">{e(head)}</h4>' + body + (f'<div class="none">{e(note)}</div>' if note else ""))
 
 
+def _read_funds(c: dict):
+    try:
+        data = json.loads((snapshot.REVIEW / c["path"]).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _funds(x: dict) -> str:
+    """Who's trading what: big funds' 13F-HR moves from .review/hub/funds.json (markets/funds.py,
+    each move already worded there). Watchlist moves first, then each fund's newest filing and
+    its top moves, every one with the quarter it covers and the date it was filed; then the
+    Form 4 insiders list; then the small print on how late 13F filings are."""
+    c = _b()["funds"]
+    data = x["funds"] if "funds" in x else _read_funds(c)
+    if not isinstance(data, dict):
+        return _none(x["words"])
+    out = []
+    if data.get("message"):
+        out.append(f'<div class="none">{e(data["message"])}</div>')
+    watch = [m for m in data.get("watch") or [] if isinstance(m, dict)][: c["max_watch"]]
+    if watch:
+        rows = "".join(f'<li class="watch"><b>{e(m.get("label", ""))}</b><span>'
+                       f'{e(c["watch_row"].format(fund=m.get("fund", ""), text=m.get("text", ""), quarter=m.get("quarter", ""), filed=m.get("filed", "")))}'
+                       f'</span></li>' for m in watch)
+        out.append(f'<h4 class="date">{e(c["watch_heading"])}</h4><ul>{rows}</ul>')
+    for f in [f for f in data.get("funds") or [] if isinstance(f, dict)][: c["max_funds"]]:
+        latest = f.get("latest")
+        if not isinstance(latest, dict):
+            out.append(f'<h4 class="date">{e(c["fund_none"].format(name=f.get("name", "")))}</h4>')
+            continue
+        out.append(f'<h4 class="date">{e(c["fund_head"].format(name=f.get("name", ""), **{k: latest.get(k, "") for k in ("quarter", "filed", "period")}))}</h4>')
+        moves = [m for m in f.get("card_moves") or [] if isinstance(m, dict)]
+        if moves:
+            watch_cls = ' class="watch"'
+            out.append("<ul>" + "".join(f'<li{watch_cls if m.get("on_watchlist") else ""}>'
+                                        f'<b>{e(m.get("label", ""))}</b><span>{e(m.get("text", ""))}</span></li>'
+                                        for m in moves) + "</ul>")
+        else:
+            out.append(f'<div class="none">{e(c["no_moves"])}</div>')
+    out.append(_insiders(data.get("insiders"), _b()["markets"]))
+    out.append(f'<p class="fine">{e(data.get("small_print") or c["small_print"])}</p>')
+    return "".join(out)
+
+
 # -- the board --------------------------------------------------------------------
 def build(x: dict) -> dict:
     """The board for live.collect()'s data. x: now, t (snapshot tables), state, agents, usage,
@@ -739,7 +784,7 @@ def build(x: dict) -> dict:
 
     plain = {"tree": _tree, "local": _local, "merged": _merged, "up_next": _up_next, "tokens": _tokens,
              "credits": _credits, "limits": _limits, "activity": _activity, "today": _today,
-             "projects": _projects, "progress": _progress, "markets": _markets}
+             "projects": _projects, "progress": _progress, "markets": _markets, "funds": _funds}
     if any(card["id"] == "do_next" for card in b["cards"]):
         from . import suggest  # the Do next card: atrium/suggest.py
         up = _cached("ollama", b["local"]["cache_s"], _ollama) is not None

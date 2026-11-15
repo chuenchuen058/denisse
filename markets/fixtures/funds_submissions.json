@@ -1,0 +1,8 @@
+{"cik": "0009999901", "name": "EXAMPLE FUND MANAGEMENT LTD",
+ "filings": {"recent": {
+  "accessionNumber": ["0009999901-26-000005", "0009999901-26-000004", "0009999901-26-000003", "0009999901-26-000002", "0009999901-26-000001"],
+  "filingDate":      ["2026-11-14",           "2026-11-02",           "2026-08-14",           "2026-08-20",           "2026-05-15"],
+  "reportDate":      ["2026-09-30",           "2026-11-01",           "2026-06-30",           "2026-06-30",           "2026-03-31"],
+  "form":            ["13F-HR",               "SC 13G",               "13F-HR",               "13F-HR/A",             "13F-HR"],
+  "primaryDocument": ["xslForm13F_X02/primary_doc.xml", "xslSC13G_X01/primary_doc.xml", "xslForm13F_X02/primary_doc.xml", "xslForm13F_X02/primary_doc.xml", "xslForm13F_X02/primary_doc.xml"]
+ }}}

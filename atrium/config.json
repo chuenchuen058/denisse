@@ -474,7 +474,8 @@
         {"id": "tokens", "class": "span4"},
         {"id": "credits", "class": "span4"},
         {"id": "projects", "class": "span2"},
-        {"id": "markets", "class": "span2"}
+        {"id": "markets", "class": "span2"},
+        {"id": "funds", "class": "span4"}
       ],
       "_cards_order": "15 Nov 2026 design pass: what is happening now and what needs him (who is editing what, merged, needs a look, up next) sits straight under the lane cards; then the long 'What to work on' tree, the day (today, activity, limits, progress); the accounting (local agents, tokens, credits) and the slow-moving cards (projects, markets) last. Before, the tree and the local tiles pushed 'Needs a look' two screens down.",
       "headings": {
@@ -482,7 +483,8 @@
         "tree": "What to work on", "local": "Local agents · on this laptop", "cursors": "Live · who's editing what",
         "merged": "Merged today", "needs_look": "⚠︎ Needs a look", "up_next": "Up next", "tokens": "Tokens spent",
         "credits": "Credits per task · today", "limits": "Limits & resets", "activity": "Live activity",
-        "today": "Today", "projects": "Projects", "progress": "Progress", "markets": "Markets"
+        "today": "Today", "projects": "Projects", "progress": "Progress", "markets": "Markets",
+        "funds": "Who's trading what"
       },
       "theme": {
         "light": {"bg": "#f2f2f7", "card": "#ffffff", "text": "#1c1c1e", "sub": "#636368", "line": "#e5e5ea",
@@ -678,6 +680,14 @@
                                "row": "{who} ({role}) · {date} · {shares} sh at {price} = ${value}",
                                "shares_fmt": "{:,.0f}", "price_fmt": "{:,.2f}", "value_fmt": "{:,.0f}",
                                "empty": "No officer or director open-market purchases over the threshold."}},
+      "_funds": "Who's trading what (Chuen, 15 Nov 2026): big funds' 13F-HR moves from .review/<path> (written by python -m markets funds and by the markets snapshot; markets/funds.py), each move already worded there. Moves in a watchlist ticker come first, under watch_heading; then each fund's newest filing (fund_head) and its top moves; then the Form 4 insiders list (the markets card's insiders words). small_print is a fallback when the file has none. Information only.",
+      "funds": {"path": "hub/funds.json", "max_funds": 10, "max_watch": 6,
+                "watch_heading": "On your watchlist",
+                "watch_row": "{fund} · {text} · {quarter}, filed {filed}",
+                "fund_head": "{name} · {quarter} · filed {filed}",
+                "fund_none": "{name}: no 13F filing fetched yet",
+                "no_moves": "No moves over the threshold.",
+                "small_print": "13F filings come up to 45 days after the quarter they cover: old news by design. Information only."},
       "_interactive": "What makes the page interactive (Chuen, 15 Nov 2026: 'a little interactive'). atrium/interact.py renders the HTML and atrium/live_page/app.js acts on the selectors, keys and words below; nothing is written anywhere, and under prefers-reduced-motion nothing animates.",
       "interactive": {
         "_about": "vars: sent to the page as CSS variables --ix-<name> (how long each movement takes, how far a hovered card lifts, the drawer's width, how long a tooltip waits). expand: which cards open in place when clicked (a CSS selector) and what the opened lane card lists. drawer: which rows open the side drawer (any element carrying a task id), the read-only path atrium/live.py serves it on, where a task's files are under .review ({id} = the task id; first match wins, newest first), which report fields are shown and in what order not_task = name endings in those folders that are a task's report or review, never a task; (hide = read as a field so its lines are not glued to the one above, but not shown; skip_values = a field that only says this is left out). filter: the segmented control over 'What to work on' (groups = tree group keys; [] = all) and the quick filter (rows = what it hides when the text is not in them). count: numbers inside these elements run to their new value. tips: a tooltip for each element matching selector. keys: one key each (KeyboardEvent.key).",

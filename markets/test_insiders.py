@@ -59,6 +59,7 @@ class InsidersTests(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp(prefix="markets-insiders-"))
         self.cfg = copy.deepcopy(core.load_config(core.DEFAULTS_PATH))
         self.cfg["insiders"]["cache_path"] = str(self.tmp / "cache.json")
+        self.cfg["funds"]["cache_path"] = str(self.tmp / "funds_cache.json")  # the weekly note reads it: never the real one
         self.cfg["watchlist"]["edgar_user_agent"] = "Test Person test@example.com"
         self.export = (FIX / "watchlist_export.txt").read_text(encoding="utf-8")
 

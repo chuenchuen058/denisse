@@ -9,10 +9,69 @@ sell or hold.
 .venv\Scripts\python.exe -m markets snapshot --dry-run  # print, no network, no writes
 .venv\Scripts\python.exe -m markets insiders [--cached] # fetch Form 4s (or show the cache) as JSON
 .venv\Scripts\python.exe -m markets weekly [--dry-run]  # weekly vault note
+.venv\Scripts\python.exe -m markets funds [--cached|--dry-run]  # big funds' 13F moves: print + .review/hub/funds.json
 ```
 
 Config: `config_defaults.json` holds every default; `config.json` overrides
 (deep-merged). Keys starting with `_` are notes.
+
+## The SEC contact stays out of the repo
+
+SEC EDGAR asks every request to carry a User-Agent with a name and a contact email.
+This repo is public, so `watchlist.edgar_user_agent` stays `""` in the committed config.
+The real value goes in one of these places (both are read only by the live config, i.e.
+`load_config()` with no path):
+
+- `.review/markets.local.json` (git-ignored; `local_config_path`), deep-merged over the
+  config, e.g. `{"watchlist": {"edgar_user_agent": "Your Name you@example.com"}}`;
+- the environment variable named by `user_agent_env` (`DENISSE_EDGAR_USER_AGENT`), which
+  wins over both.
+
+With neither set, nothing is fetched (insiders and funds) and the panels say so.
+
+## Who's trading what (`funds` block)
+
+Big funds' 13F-HR filings, quarter on quarter. For each fund in `funds.list` (name,
+manager, SEC CIK of the 13F filer) the two newest 13F-HR filings for different quarters
+are read from EDGAR (the submissions JSON, the filing folder's `index.json`, its
+information-table XML; each filing once, cached) and compared: new positions, exits,
+and adds/trims over the thresholds, plus the largest positions with their share of the
+portfolio. Positions are summed per CUSIP (puts and calls separately). Tickers come from
+matching the issuer name to sec.gov `company_tickers.json` titles (one match only;
+share classes such as GOOGL/GOOG show the issuer name), or `cusip_tickers`.
+
+13F is filed up to 45 days after the quarter ends: every row says the quarter it covers
+and the date it was filed. It shows US-listed long positions and listed options only.
+Information only: no buy/sell/hold wording anywhere.
+
+Where it shows: `python -m markets funds` prints it and writes `.review/hub/funds.json`
+(also written by `snapshot`, which refreshes at most every `refresh_hours`); the Atrium
+hub's "Who's trading what" card (`atrium/config.json` → `live.board.funds`) shows moves in
+watchlist tickers first, each fund's newest filing and top moves, then the Form 4 insiders
+list; the weekly note has one `###` section per fund that filed in the last `weekly_days`.
+
+The request settings it does not set itself (`min_request_interval_s`,
+`max_requests_per_run`, `timeout_s`, `ticker_map_url`, `ticker_map_max_age_days`,
+`submissions_url`) are the `insiders` block's: one SEC fair-access policy for both.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `true` | Master switch. |
+| `list` | 10 funds (TCI, Berkshire, Pershing Square, Scion, Appaloosa, Third Point, Baupost, Duquesne, Viking, Lone Pine) | `name`, `manager`, `cik`, optional `note`. CIKs checked on EDGAR 15 Nov 2026. A `list` in `config.json` replaces this one. |
+| `forms` | `["13F-HR"]` | Filing types read (amendments left out). |
+| `filings_per_fund` | `2` | Newest filings kept, one per quarter. |
+| `index_url` / `filing_url` | sec.gov Archives | Filing folder index and a document in it. |
+| `info_table_ext` / `skip_documents` / `info_row_tag` | `.xml` / `primary_doc.xml` / `infoTable` | How the information table is found in the folder. |
+| `value_multiplier` | `1` | 13F `value` is whole dollars since 2023. |
+| `move_min_pct` / `move_min_usd` | `10` / `25000000` | An add/trim is listed when shares moved by at least this % and the money moved (shares moved × this quarter's price) by at least this. |
+| `new_exit_min_usd` | `1000000` | New positions and exits at or over this. |
+| `top_positions` / `card_moves` / `cli_moves` / `weekly_moves` | `5` / `3` / `10` / `5` | How many of each are shown. |
+| `weekly_days` | `7` | Window for the weekly note's fund sections. |
+| `refresh_hours` | `24` | `snapshot` refreshes at most this often. |
+| `cusip_tickers` | `{}` | CUSIP → ticker, wins over the name match. |
+| `name_abbreviations` / `name_drop_words` | — | Name normalisation for the issuer → ticker match. |
+| `cache_path` / `hub_path` | `.review/markets_funds_cache.json` / `.review/hub/funds.json` | Never tracked. |
+| `words` | — | Every line of wording (CLI, card payload, weekly note). |
 
 ## Insiders buying (`insiders` block)
 
