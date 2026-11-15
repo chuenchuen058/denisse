@@ -197,7 +197,7 @@ class BoardFixtureTest(BoardBase):
         self.assertEqual(re.findall(r'data-ring="(\w+)"', page), [r["key"] for r in BOARD["rings"]])
         rings = dict(zip([r["key"] for r in BOARD["rings"]], re.findall(r'<div class="v">(.*?)</div>', page)))
         self.assertEqual(rings, {"pass": "50%", "slots": "1 of 3", "ready": "1 of 4", "spend": "$17"})
-        self.assertIn("pass rate today · 1 of 2", seen.chunks)
+        self.assertIn(BOARD["counts"]["labels"]["ring_pass"].format(v=1, m=2), seen.chunks)  # runs, and says so
         self.assertIn("of $58 today · notional", seen.chunks)
         # 4 one card per configured lane
         self.assertEqual(seen.sections.count("lane"), len(SHIPPED["live"]["agents"]))
@@ -221,7 +221,8 @@ class BoardFixtureTest(BoardBase):
         self.assertIn('class="layer"', cur)
         # 6 merged today, needs a look, up next
         self.assertIn('<div class="big">1</div>', section(page, "merged"))
-        self.assertIn(words["merged_of"].format(n=2), section(page, "merged"))
+        self.assertIn(BOARD["counts"]["labels"]["merged_of"].format(runs=2, tasks_done=1, merged=1, passed=1, tasks=2,
+                                                                     tasks_today=5), section(page, "merged"))
         look = section(page, "needs_look")
         self.assertIn('<div class="big">1</div>', look)
         self.assertIn(words["needs_sub"].format(parked=1, drafts=1), look)
@@ -232,11 +233,10 @@ class BoardFixtureTest(BoardBase):
         self.assertIn(lw["why_limited"], nxt)
         # 7 what to work on: hot.md and the queue
         tr = section(page, "tree")
-        for text in ("Sign the heron permit", "Order the otter tags", "Otter holt census", "Badger sett repair",
-                     "Vole run sketch"):
+        for text in ("Sign the heron permit", "Otter holt census", "Badger sett repair", "Vole run sketch"):
             self.assertIn(text, tr)
+        self.assertNotIn("Order the otter tags", tr)  # struck through = done, not waiting on you
         self.assertEqual(tr.count("Vole run sketch"), 1)  # Orchestra's own block in hot.md is not repeated
-        self.assertIn('class="nd d"><i></i>Order the otter tags', tr)
         self.assertIn('class="nd u"><i></i>Otter holt census', tr)
         # 8 local agents: Ollama, GPU, Don, local evals, digest
         loc = section(page, "local")
@@ -359,6 +359,105 @@ class BoardFixtureTest(BoardBase):
                          [f"lane:{a['lane']}" for a in SHIPPED["live"]["agents"]])
         cursors = next(c for c in b["cards"] if c["key"] == "cursors")
         self.assertIn(cursors["rows"], cursors["html"])  # app.js keeps the pointer layer, swaps the rows
+
+
+class CrossCheckTest(BoardBase):
+    """The 15 Nov 2026 cross-check of the hub against state.json, runner.log, the queue and hot.md:
+    one test per number that was wrong or misleading (the tokens one is in test_tokens)."""
+
+    def setUp(self):
+        super().setUp()
+        fixture(self.review, self.vault, self.now)
+
+    def state(self, change) -> None:
+        st = json.loads((self.review / "state.json").read_text(encoding="utf-8"))
+        change(st)
+        w(self.review, "state.json", json.dumps(st))
+
+    def test_1_a_limit_that_is_not_today_shows_its_day(self):
+        until = self.now + dt.timedelta(days=3, hours=4)
+        self.state(lambda st: st.update(lanes={"codex": {"limited_until": until.isoformat(timespec="seconds")}}))
+        d = self.live.collect()
+        day = until.strftime(BOARD["limits"]["time_other"])
+        self.assertEqual(d["board"]["verdict"]["text"], BOARD["words"]["verdict_limited"].format(label="Codex", time=day))
+        codex = next(a for a in d["agents"] if a["lane"] == "codex")
+        self.assertEqual(codex["status"], SHIPPED["live"]["words"]["until"].format(time=day))
+        self.assertIn(BOARD["words"]["limit_until"].format(time=day), section(board.render(d), "limits"))
+
+    def test_2_needs_a_look_counts_parked_tasks_not_their_side_files(self):
+        for side in ("t-parked.report.md", "t-parked.review.md"):
+            w(self.review, f"parked/{side}", "# a side file\n")
+        w(self.review, f"archive/{self.now.date().isoformat()}/t-pass.review.md", "# review\n")
+        page = self.page()
+        look = section(page, "needs_look")
+        self.assertIn('<div class="big">1</div>', look)
+        self.assertIn(BOARD["words"]["needs_sub"].format(parked=1, drafts=1), look)
+        ids = [t["id"] for t in self.snap.tables(["tasks"])["tasks"]]
+        self.assertEqual(sorted(i for i in ids if i.startswith("t-p")), ["t-parked", "t-partial", "t-pass"])
+
+    def test_3_every_card_counts_the_day_from_one_helper(self):
+        day = self.now.date().isoformat()
+
+        def more(st):  # a merge-only rerun in the runner's own lane, and a second PASS of t-pass
+            st["tasks"]["t-pass"]["history"].append({"end": f"{day}T10:30:00", "seconds": 60, "result": "PASS",
+                                                     "lane": "runner"})
+        self.state(more)
+        d = self.live.collect()
+        n = board.day_counts(json.loads((self.review / "state.json").read_text(encoding="utf-8")), self.now,
+                             board.log_lines(), *board._open_ids(self.snap.tables(["tasks", "running"])))
+        self.assertEqual((n["runs"], n["passed"], n["tasks"], n["tasks_done"], n["merged"]), (3, 2, 2, 1, 1))
+        page = board.render(d)
+        labels = BOARD["counts"]["labels"]
+        self.assertIn(labels["ring_pass"].format(v=2, m=3), read(page).chunks)  # every lane's runs, runner too
+        self.assertIn(labels["merged_of"].format(**n), section(page, "merged"))
+        tasks = next(p for p in d["progress"] if p["key"] == "tasks")
+        self.assertEqual(tasks["text"], next(b for b in SHIPPED["live"]["progress"]["bars"]
+                                             if b["key"] == "tasks")["text"].format(v=n["tasks_done"], m=n["tasks_today"]))
+
+    def test_4_struck_and_done_lines_are_not_waiting_on_you(self):
+        w(self.vault, "hot.md", "\n".join([
+            "## Waiting on Chuen", "- Sign the heron permit", "- ~~Resume the night run when done gaming~~ (resumed)",
+            "- <s>Feed the owls</s>", "- Book the van (done 10 Nov)", ""]))
+        d = self.live.collect()
+        tr = section(board.render(d), "tree")
+        self.assertIn("Sign the heron permit", tr)
+        needs = " ".join(n["item"] for n in d["needs"]) + " ".join(r["item"] for r in self.snap.waiting_items([]))
+        for gone in ("Resume the night run", "Feed the owls", "Book the van"):
+            self.assertNotIn(gone, tr)
+            self.assertNotIn(gone, needs)
+
+    def test_5_up_next_with_only_drafts_says_so(self):
+        for name in ("t-next.md", "t-codex.md"):
+            (self.review / "queue" / name).unlink()
+        nxt = section(self.page(), "up_next")
+        self.assertIn(BOARD["words"]["up_next_drafts"].format(n=1), nxt)
+        self.assertNotIn(BOARD["words"]["empty"], nxt)
+
+    def test_6_a_lane_whose_last_run_hit_its_quota_is_limited(self):
+        day = self.now.date().isoformat()
+        msg = "You have exceeded your monthly quota (Request ID: 1)"
+
+        def quota(st):
+            st["tasks"]["t-q"] = {"history": [{"end": f"{day}T11:00:00", "seconds": 20, "result": "LIMITED",
+                                               "lane": "copilot", "note": f"lane copilot limited until 11:00: {msg}"}]}
+            st["lanes"]["copilot"] = {"limited_until": f"{day}T11:30:00", "since": f"{day}T10:30:00", "message": msg}
+        self.state(quota)
+        d = self.live.collect()
+        page = board.render(d)
+        q = BOARD["quota"]["unknown"]
+        cop = section(page, "lane:copilot")
+        self.assertIn(f'>{BOARD["words"]["state_limited"]}', cop)
+        self.assertIn(q, cop)
+        self.assertNotIn(BOARD["words"]["state_free"], cop)
+        lim = section(page, "limits")
+        self.assertIn(q, lim)
+        self.assertEqual(lim.count(BOARD["words"]["limit_none"]), len(SHIPPED["live"]["agents"]) - 2)
+        self.assertEqual(next(a for a in d["agents"] if a["lane"] == "copilot")["state"], "bad")
+        # a later run that got through lifts it
+        self.state(lambda st: st["tasks"].update({"t-ok": {"history": [
+            {"end": f"{day}T11:45:00", "seconds": 60, "result": "PASS", "lane": "copilot"}]}}))
+        cop = section(self.page(), "lane:copilot")
+        self.assertNotIn(q, cop)
 
 
 class BoardEmptyTest(BoardBase):

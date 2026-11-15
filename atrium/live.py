@@ -53,7 +53,7 @@ def _titles() -> dict:
     r = _review()
     out = {}
     for p in [*r.glob("queue/*.md"), *r.glob("parked/*.md"), *r.glob("archive/*/*.md")]:
-        if not p.name.endswith(".report.md"):
+        if snapshot.is_task_file(p):
             try:
                 out[p.stem] = snapshot._title(p, p.stem)
             except OSError:
@@ -183,17 +183,22 @@ def collect() -> dict:
         if r["status"] == "queued" and r["id"] not in held:
             queued[r["lane"]] = queued.get(r["lane"], 0) + 1
     agents = []
+    lc = c["board"]["limits"]  # a reset not today shows its day, as on the Limits card
     for a in c["agents"]:
         u = usage.get(a["lane"], {})
         busy, slots = u.get("busy", 0), u.get("slots", 0)
         lim = limits.get(a["lane"])
-        limited = u.get("state") == "bad" or bool(lim and lim > now)
+        # a quota hit with no run since: still limited after the runner's own reset guess passed
+        quota = "" if (lim and lim > now) or busy else board.lane_quota(state, a["lane"], now)
+        limited = u.get("state") == "bad" or bool(lim and lim > now) or bool(quota)
         n = queued.get(a["lane"], 0)
         why = (words["why_limited"] if limited else words["why_full"] if slots and busy >= slots
                else words["why_battery"] if pw.get("ac") is False else words["why_none"]) if n else ""
         # the runner's record: the usage row marks it (limited_until) or, older rows, doesn't know it
         if lim and lim > now and (u.get("state") != "bad" or u.get("limited_until")):
-            status = words["until"].format(time=lim.strftime(words["until_format"]))
+            status = words["until"].format(time=board._when(lim, now, lc["time_today"], lc["time_other"]))
+        elif quota:
+            status = quota
         else:
             status = (u.get("status") or "") if limited else words["working"] if busy else words["free"]
         agents.append({"lane": a["lane"], "label": a["label"], "colour": a["colour"],
@@ -201,7 +206,7 @@ def collect() -> dict:
                        "status": status, "state": "bad" if limited else "busy" if busy else "ok",
                        "queued": words["queued"].format(n=n) if n else "",
                        "held": words["held"] if n and limited else "", "why": why,
-                       "until": lim.isoformat(timespec="minutes") if lim and lim > now else ""})
+                       "until": lim.isoformat(timespec="minutes") if lim and lim > now else "", "quota": quota})
     icons = c["needs_icons"]
     where = dict(cursors.collect(t["running"], agents, c["refresh_s"], words), icon=icons.get("overlap", ""))
     needs = [{"icon": icons.get("overlap", ""), "item": o["text"], "kind": "overlap"} for o in where["overlaps"]]
@@ -209,19 +214,11 @@ def collect() -> dict:
               for w in snapshot.waiting_items(t["tasks"])]
     needs = needs[:c["needs_max"]]
     timeline = _timeline(state, t["running"], now)
-    today = now.date().isoformat()
-    done_res = set(c["progress"]["done_results"])
-    touched, done = set(), set()
-    for slug, ts in state.get("tasks", {}).items():
-        for h in ts.get("history", []):
-            if str(h.get("end", "")).startswith(today):
-                touched.add(slug)
-                if h.get("result") in done_res:
-                    done.add(slug)
-    touched |= {r["id"] for r in t["running"] if r["task"]}
-    touched |= {r["id"] for r in t["tasks"] if r["status"] == "queued"}
+    # one count of the day for the rings, Progress and Merged cards (board.day_counts)
+    counts = board.day_counts(state, now, board.log_lines(), *board._open_ids(t))
     spend = (t["spend"] or [{}])[0]
-    values = {"tasks": {"v": len(done), "m": len(touched)},
+    labels = c["board"]["counts"]["labels"]
+    values = {"tasks": {"v": counts["tasks_done"], "m": counts["tasks_today"]},
               "study": _study_weeks(),
               "spend": {"v": spend.get("cost_usd", 0) or 0, "m": spend.get("cap_usd", 0) or 0}}
     progress = []
@@ -229,7 +226,7 @@ def collect() -> dict:
         v = values.get(b["key"], {"v": 0, "m": 0})
         progress.append({"key": b["key"], "label": b["label"], "colour": b["colour"],
                          "pct": round(min(100, 100 * v["v"] / v["m"]), 1) if v["m"] else 0,
-                         "text": b["text"].format(**v)})
+                         "text": labels.get(f'progress_{b["key"]}', b["text"]).format(**v)})
     markets_path = (snapshot.REPO / "markets" / "config.json") if getattr(snapshot, "REPO", None) else (Path.cwd() / "markets" / "config.json")
     markets, insiders = [], None
     try:
@@ -243,7 +240,7 @@ def collect() -> dict:
         markets, insiders = [], None
     mission = board.build({"now": now, "t": t, "state": state, "agents": agents, "usage": usage, "where": where,
                            "timeline": timeline, "progress": progress, "markets": markets, "insiders": insiders, "power": pw,
-                           "live_words": words, "titles": _titles()})
+                           "live_words": words, "titles": _titles(), "counts": counts})
     return {"title": c["title"], "subtitle": c["subtitle"], "panels": c["panels"], "headings": c["headings"],
             "board": mission,
             "power": {"ac": pw.get("ac"), "battery_percent": pw.get("battery_percent")},

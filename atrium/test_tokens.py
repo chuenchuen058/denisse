@@ -3,8 +3,8 @@
 The tokens collector (atrium/usage_ledger.py) and the card it feeds: small fixture Claude Code and Codex
 logs in a temp folder, a temp .review for the ledger, a temp config pointing at them. Each
 Claude Code message counts once; nothing before all_from counts; the ledger keeps a day whose log
-was deleted; Orchestra's own Claude runs are not counted again from the logs; logs are read from
-where the last read stopped. No real logs, no network."""
+was deleted; Orchestra's own Claude runs count once, from their log when there is one, else from
+state.json; logs are read from where the last read stopped. No real logs, no network."""
 import copy
 import datetime as dt
 import json
@@ -93,16 +93,55 @@ class Collector(TokensBase):
         tokens._mem.clear()  # a fresh process: from the ledger on disk alone
         self.assertEqual(self.days(), before)
 
-    def test_orchestra_runs_not_counted_again_from_the_logs(self):
+    def _orchestra_fixture(self):
         state = {"tasks": {"t": {"history": [{"end": "2026-11-12T10:00:00", "lane": "claude", "session_id": "s-orch",
                                               "tokens": {"in": 1, "out": 2, "cache_read": 3, "cache_write": 4}}]}}}
         # its session in an ordinary project folder (matched by session id) ...
         self.log(self.cc_root, "C--home/orch.jsonl", cc("o1", "2026-11-12", session="s-orch"))
-        # ... and an unrecorded run in a worktree project (skipped by folder)
+        # ... and an unrecorded run in a worktree project
         self.log(self.cc_root, "C--Users-x-GitHub-denisse-wt-2026-11-12T0900-task/w.jsonl",
                  cc("w1", "2026-11-12", session="s-killed"))
         self.log(self.cc_root, "C--home/mine.jsonl", cc("c1", "2026-11-12"))
+        return state
+
+    def test_the_logs_win_over_state_json_for_claude_code_runs(self):
+        # 15 Nov 2026: state.json recorded 0.61B where the worktree logs held ~0.9B. With
+        # prefer_logs (shipped) every log counts, worktrees too, and the run its log holds is
+        # not counted again from state.json
+        got = self.days(self._orchestra_fixture())["2026-11-12"]["claude"]
+        self.assertEqual(got, {"in": 30, "out": 60, "cache_read": 900, "cache_write": 120})
+
+    def test_a_run_with_no_log_still_counts_from_state_json(self):
+        state = {"tasks": {"t": {"history": [
+            {"end": "2026-11-12T10:00:00", "lane": "claude", "session_id": "s-gone",
+             "tokens": {"in": 1, "out": 2, "cache_read": 3, "cache_write": 4}},
+            {"end": "2026-11-12T11:00:00", "lane": "claude",
+             "tokens": {"in": 100, "out": 200, "cache_read": 300, "cache_write": 400}}]}}}
+        self.log(self.cc_root, "C--home/mine.jsonl", cc("c1", "2026-11-12"))
         got = self.days(state)["2026-11-12"]["claude"]
+        self.assertEqual(got, {"in": 111, "out": 222, "cache_read": 603, "cache_write": 444})
+
+    def test_a_logged_run_stays_out_after_its_log_is_pruned(self):
+        state = self._orchestra_fixture()
+        before = self.days(state)
+        shutil.rmtree(self.cc_root)  # Claude Code prunes its old logs
+        tokens._mem.clear()
+        self.assertEqual(self.days(state), before)  # the ledger kept the log's total and its session
+
+    def test_an_older_state_json_total_for_a_day_is_replaced(self):
+        # a ledger written the old way holds state.json's total for the day; the logs now cover it
+        state = self._orchestra_fixture()
+        ledger = self.review / SHIPPED["live"]["board"]["tokens"]["ledger"]
+        ledger.write_text(json.dumps({"orchestra": {"2026-11-12": {"claude": {"in": 1, "out": 2, "cache_read": 3,
+                                                                               "cache_write": 4}}}}), encoding="utf-8")
+        self.assertEqual(self.days(state)["2026-11-12"]["claude"]["in"], 30)
+
+    def test_without_prefer_logs_orchestra_runs_are_not_counted_again_from_the_logs(self):
+        cfg = json.loads((self.tmp / "atrium.json").read_text(encoding="utf-8"))
+        for src in cfg["live"]["board"]["tokens"]["sources"]:
+            src.pop("prefer_logs", None)
+        (self.tmp / "atrium.json").write_text(json.dumps(cfg), encoding="utf-8")
+        got = self.days(self._orchestra_fixture())["2026-11-12"]["claude"]
         self.assertEqual(got, {"in": 11, "out": 22, "cache_read": 303, "cache_write": 44})
 
     def test_logs_read_from_where_they_stopped(self):

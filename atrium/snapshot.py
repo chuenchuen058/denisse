@@ -78,16 +78,39 @@ def _task_rows() -> list[dict]:
                      "last_result": ts.get("last_result") or "", "id": p.stem})
 
     for p in sorted((REVIEW / "queue").glob("*.md")):
-        add(p, "queue")
+        if is_task_file(p):
+            add(p, "queue")
     for p in sorted((REVIEW / "parked").glob("*.md")):
-        if not p.name.endswith(".report.md"):
+        if is_task_file(p):
             add(p, "parked")
     days = sorted((REVIEW / "archive").glob("*"))[-c["archive_days"]:] if (REVIEW / "archive").is_dir() else []
     for d in days:
         for p in sorted(d.glob("*.md")):
-            if not p.name.endswith(".report.md"):
+            if is_task_file(p):
                 add(p, "done")
     return rows
+
+
+def is_task_file(p: Path) -> bool:
+    """A task file, not one of its side files (<slug>.report.md, <slug>.review.md, ...: config
+    snapshot task_side_suffixes), which share its folder and its .md ending."""
+    return not p.name.endswith(tuple(_c()["task_side_suffixes"]))
+
+
+def done_line(text: str) -> bool:
+    """A bullet that is done: struck through (it opens with one of waiting.struck_open) or
+    matching one of waiting.done_markers (case-insensitive; one that does not compile is ignored)."""
+    w = _c()["waiting"]
+    t = re.sub(r"^\s*[-*]\s*", "", text).strip()
+    if any(t.startswith(s) for s in w["struck_open"]):
+        return True
+    for pat in w["done_markers"]:
+        try:
+            if re.search(pat, t, re.I):
+                return True
+        except re.error:
+            continue
+    return False
 
 
 def _probe(spec: dict, timeout: float, unknown: str) -> str:
@@ -123,7 +146,7 @@ def waiting_items(tasks: list[dict]) -> list[dict]:
     rows = []
     for l in _bullets(_section(_read(w["from"]), w["section"])).splitlines():
         t = re.sub(r"^\s*[-*]\s*", "", l).strip()
-        if t and t.upper() not in skip:
+        if t and t.upper() not in skip and not done_line(t):
             row = {"item": t[:w["item_chars"]], "from": w["from"], "kind": "note"}
             m = re.match(w["limit_line"], t, re.I)
             if m:  # aftercare's "Lane codex limited until 2026-11-11 12:08": gone once it lifts
