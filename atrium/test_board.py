@@ -126,6 +126,26 @@ class BoardBase(LiveBase):
         p = mock.patch.object(board, "dt", self.live.dt)  # the same fixed clock as live.py
         p.start()
         self.addCleanup(p.stop)
+        # With Ollama faked as up, the Do next card ranks in a daemon thread through the real
+        # local model; whether it reached 127.0.0.1:11434 before the process exited was a race
+        # (the checks guard flagged it about 1 run in 3 under -j 8, 15 Nov 2026). Never asked here:
+        # rank() falls back to the rules ranking, which is what these tests already see. The ranking
+        # runs inline, so no thread outlives this patch and finds the real ask_model again.
+        from atrium import suggest
+
+        def refuse(*_a, **_k):
+            raise RuntimeError("real local model refused in tests")
+
+        class Inline:
+            def __init__(self, target, args=(), kwargs=None, daemon=None):
+                self.run = lambda: target(*args, **(kwargs or {}))
+
+            def start(self):
+                self.run()
+        for name, value in (("ask_model", refuse), ("threading", mock.Mock(Thread=Inline))):
+            p = mock.patch.object(suggest, name, value)
+            p.start()
+            self.addCleanup(p.stop)
 
     def page(self) -> str:
         return board.render(self.live.collect())
