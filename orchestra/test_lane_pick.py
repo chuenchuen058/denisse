@@ -227,6 +227,30 @@ class ReviewerTest(unittest.TestCase):
         self.assertEqual(p.lane, "beta", "alpha is far behind its pace")
 
 
+class FixRoundTest(unittest.TestCase):
+    """A fix round (runner auto_fix_*) never goes to a lane whose review blocked the task."""
+
+    def test_an_avoided_header_lane_moves_to_another(self):
+        p = LP.choose(ask(asked="alpha", avoid=("alpha",)), cfg(), live())
+        self.assertTrue(p.available)
+        self.assertNotEqual(p.lane, "alpha")
+        row = next(r for r in p.scores if r["lane"] == "alpha")
+        self.assertTrue(row["unavailable"])
+
+    def test_avoid_holds_after_fallback(self):
+        # beta is limited and its fallback hint gamma blocked it: the fallback must not hand the
+        # fix round to gamma; it waits for beta instead.
+        st = live(limited={"beta": NOW + dt.timedelta(hours=1)})
+        p = LP.choose(ask(asked="beta", avoid=("gamma",)), cfg(), st)
+        self.assertFalse(p.available, p.why)
+        self.assertEqual(p.lane, "beta")
+        self.assertTrue(next(r for r in p.scores if r["lane"] == "gamma")["unavailable"])
+
+    def test_every_lane_avoided_is_unavailable(self):
+        p = LP.choose(ask(asked="auto", avoid=("alpha", "beta", "gamma")), cfg(), live())
+        self.assertFalse(p.available)
+
+
 class HeaderTest(unittest.TestCase):
     def test_lane_fixed_is_honoured(self):
         st = live(limited={"gamma": NOW + dt.timedelta(hours=1)})
