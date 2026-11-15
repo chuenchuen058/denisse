@@ -377,6 +377,18 @@
   "autopilot_gate": [".venv\\Scripts\\python.exe scripts\\run_checks.py --fast"],
   "autopilot_weight": "light",
   "autopilot_source": "autopilot",
+  "_autopilot_acts_as_chuen": "Cues that a candidate would act as Chuen (task 2026-11-13T1851; Chuen, 13 Nov 2026: code runs on its own, things done in his name wait for him). On 13 Nov the model judged \"send the Bergeles email\", \"turn on the hub refresh scheduled task\" and \"unregister the digest Windows task\" repo-only and they were written Queue: auto. Before a task is written auto, its title, source line and context (the parts of the prompt that are not autopilot_body boilerplate, which names these things itself) are searched, case-insensitively, for each regex here; any match makes it Queue: draft, said in the task as autopilot_acts_as_chuen_why with the key as {cue}. Keys are what it would do; values are regexes. A pattern that does not compile counts as a match (draft is the safe side) and is logged. {} = no cue check.",
+  "autopilot_acts_as_chuen": {
+    "send": ["\\be-?mails?\\b", "\\brepl(y|ies)\\b", "\\bmessages?\\b", "\\bwhats ?app\\b", "\\bcv\\b", "\\bapplications?\\b", "\\bapply\\b", "\\bpost\\b", "\\bsubmit\\b", "\\bsend\\b"],
+    "spend": ["\\bbuy\\b", "\\bpay\\b", "\\bsubscri(be|ption)\\b", "\\btop[- ]?up\\b"],
+    "sign in": ["\\bsign[- ]?in\\b", "\\blog[- ]?in\\b", "\\bcredentials?\\b", "\\bpassword\\b"],
+    "delete or uninstall": ["\\bdelete\\b", "\\bunregister\\b", "\\buninstall\\b", "\\breinstall\\b"],
+    "change a scheduled task or system setting": ["\\bscheduled[- ]tasks?\\b", "\\btask scheduler\\b", "\\bschtasks\\b", "\\b(un)?register-scheduledtask\\b", "\\bwindows (scheduled )?task\\b", "\\bregistry\\b", "\\bstart-?up\\b", "\\bsettings\\b"]
+  },
+  "autopilot_acts_as_chuen_why": "draft: would {cue} as Chuen ('{match}')",
+  "_autopilot_chuen_sources": "Sources whose items are by definition Chuen's own actions (hot.md \"Waiting on Chuen\"). One of these is Queue: auto only when it is plainly a code change in the repo: the model says repo-only AND it names at least one file that exists in the repo (the model's files or conflicts.py's predictor). Else draft, said as autopilot_chuen_source_why. [] = no extra rule.",
+  "autopilot_chuen_sources": ["waiting"],
+  "autopilot_chuen_source_why": "draft: a {source} item is Chuen's own action and this one names no repo file",
   "master_health": true,
   "_master_health": "Master's own health (orchestra/master_health.py; audit 10 Nov 2026, H1). One test red on master made every session PARTIAL whatever it worked on: 6 tasks on 4 Nov (a config default out of step), 7 on 5 Nov (a test that failed on Thursdays). The runner keeps one record per master commit of master_health_baseline's result; while the record for master's current commit is red, why_not_runnable holds every task whose Kind: is not in bugfix_kinds, and one urgent bug-fix task is written. An unchecked commit counts as green. false = off: nothing is checked or held.",
   "master_health_file": "master_health.json",
