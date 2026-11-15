@@ -140,6 +140,8 @@
   "git_timeout_s": 120,
   "taskkill_timeout_s": 60,
   "process_exit_wait_timeout_s": 30,
+  "state_now_fresh_timeout_s": 60,
+  "state_now_fresh_log": "state_now_fresh.log",
   "tick_watchdog_extra_s": 900,
   "keep_ref_prefix": "refs/keep/",
   "keep_ref_log": "KEPT {branch}: {count} commit(s) not on master saved as {ref} before {why}; recover with `git branch <name> {ref}`",

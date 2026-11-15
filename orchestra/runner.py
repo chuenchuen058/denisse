@@ -2944,11 +2944,26 @@ def granted_for(grant: dict, task) -> bool:
 
 
 def write_state_now() -> None:
+    """Write STATE NOW in-process; if that fails, once more in a fresh process. A tick that merged a
+    change to both runner.py and state_now.py still holds its old runner module but imports the new
+    state_now.py, which may name runner attributes the old module lacks (runner.log 10 Nov 2026:
+    "module 'runner' has no attribute 'merge_waiting'"). A fresh process loads both from disk."""
     try:
         import state_now
         state_now.write()
+        return
     except Exception as e:  # STATE NOW must never break the runner
-        log(f"state_now failed: {e}")
+        first = e
+    try:
+        code, output = run_bounded([sys.executable, "-c", "import state_now; state_now.write()"], HERE,
+                                   REVIEW / C["state_now_fresh_log"], C["state_now_fresh_timeout_s"])
+    except Exception as e:
+        log(f"state_now failed: {first}; fresh process could not start: {e}")
+        return
+    if code != 0:
+        tail = output.strip().splitlines()[-1:] or [""]
+        log(f"state_now failed: {first}; fresh process "
+            + (f"timed out after {C['state_now_fresh_timeout_s']}s" if code is None else f"exit {code}: {tail[0]}"))
 
 
 # ---------------------------------------------------------------- daily exams
