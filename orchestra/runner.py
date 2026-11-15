@@ -79,6 +79,7 @@ import campaign  # noqa: E402  deadline + pause/stop; reads .review/campaign.jso
 import consult  # noqa: E402  the study tutor's opinion before a lane starts; data in consult.json, advisory
 import lane_pick  # noqa: E402  the lane (and reviewer) chosen at dispatch from config + live state (11 Nov 2026)
 import master_health  # noqa: E402  master's own baseline check; while it is red only bug fixes run (audit 10 Nov, H1)
+import unattended  # noqa: E402  a non-human source's task runs only on a guarded lane with a known gate (audit 10 Nov, O5)
 import visible  # noqa: E402  the live window and toasts, so Chuen sees a lane run (config live_window, toasts)
 
 REPO = Path(os.environ.get("ORCHESTRA_REPO", HERE.parent))
@@ -874,6 +875,16 @@ def premise_moved(task: Task) -> str | None:
     return None
 
 
+def unattended_problem(task: Task) -> str | None:
+    """A queued task from a non-human source (its From:/Source: header, config
+    unattended_source_headers) on a lane that isn't guarded, or with a gate command not of a
+    known shape: why it may not run unattended. new_task.create() writes such a task as a
+    draft; this catches a file written some other way. None for anyone else's task."""
+    source = unattended.task_source(task.fields, C)
+    why = unattended.problem(source, task.lane, task.gate_commands, C) if source else None
+    return f"not run unattended: {why}. {C.get('unattended_draft_note') or ''}".strip() if why else None
+
+
 def why_not_runnable(task: Task, state: dict) -> str | None:
     bad = header_problem(task)
     if bad:
@@ -909,6 +920,9 @@ def why_not_runnable(task: Task, state: dict) -> str | None:
         route([task], state)  # Lane: auto, not routed by the caller: pick it now
     if task.fields.get("pick-none"):
         return task.fields["pick-none"]
+    refused = unattended_problem(task)  # after the pick: the lane it would run on now
+    if refused:
+        return refused
     until = lane_limited(state, task.lane)
     # A routed task already had its fallback considered by the scorer (lane_pick).
     if until and ("lane-asked" in task.fields or not fallback_lane(task, state)):

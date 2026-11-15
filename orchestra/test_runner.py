@@ -437,6 +437,49 @@ class RunnerTest(unittest.TestCase):
         self.assertIn("CONSULT busy: ", log)
         self.assertIn("path=notes", log)
 
+    # --- a non-human source runs unattended only on a guarded lane with a known gate (audit 10 Nov, O5)
+
+    KNOWN_GATE = ".venv\\Scripts\\python.exe scripts\\run_checks.py --fast"
+
+    def test_hand_placed_task_from_a_non_human_source_on_an_unguarded_lane_is_refused(self):
+        self.lanes_with("codex", "claude")
+        for slug, lane, header in (("ap-fake", "fake", "From: autopilot\n"),
+                                   ("hub-codex", "codex", "From: agent hub\n"),
+                                   ("team-fake", "fake", "Source: local-team (llama3.1:8b; scout v1)\n"),
+                                   ("autopilot-codex", "codex", "From: Autopilot\n")):
+            with self.subTest(slug=slug):
+                self.add(slug, lane=lane, headers=header, gate=self.KNOWN_GATE)
+                why = self.why(slug)
+                self.assertIsNotNone(why)
+                self.assertIn("not run unattended", why)
+                self.assertIn(f"lane {lane} is not guarded", why)
+                self.assertIn(self.R.C["unattended_draft_note"], why)
+
+    def test_hand_placed_task_with_a_gate_of_unknown_shape_is_refused(self):
+        self.lanes_with("claude")
+        self.add("ap-gate", lane="claude", headers="From: autopilot\n")  # GATE_OK: python -c "pass"
+        self.assertIn("not of a known shape", self.why("ap-gate"))
+        self.add("hub-del", lane="claude", headers="From: agent hub\n",
+                 gate=self.KNOWN_GATE + " && del /q orchestra\\*.py")
+        why = self.why("hub-del")
+        self.assertIn("not run unattended", why)
+        self.assertIn("'&'", why)
+
+    def test_hand_placed_task_on_a_guarded_lane_with_a_known_gate_runs(self):
+        self.lanes_with("claude")
+        self.add("ap-ok", lane="claude", headers="From: autopilot\n", gate=self.KNOWN_GATE)
+        self.assertIsNone(self.why("ap-ok"))
+
+    def test_a_human_task_is_untouched_by_the_unattended_rule(self):
+        self.add("mine", lane="fake")  # no From:, an unguarded lane, a python -c gate
+        self.assertIsNone(self.why("mine"))
+        self.add("exam", lane="fake", headers="From: exam\n")
+        self.assertIsNone(self.why("exam"))
+
+    def test_a_non_human_draft_is_just_a_draft(self):
+        self.add("ap-draft", queue="draft", headers="From: autopilot\n")
+        self.assertEqual(self.why("ap-draft"), "Queue is not auto")
+
     def test_claude_lane_gets_the_guard_settings(self):
         wt = self.tmp / "wt"
         (wt / ".review").mkdir(parents=True)

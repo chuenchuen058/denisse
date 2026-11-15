@@ -20,6 +20,10 @@ import re
 import sys
 from pathlib import Path
 
+if str(Path(__file__).resolve().parent) not in sys.path:  # imported as orchestra.new_task too
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+import unattended  # noqa: E402  (orchestra/unattended.py: who may run unattended)
+
 # ORCHESTRA_REPO: the checkout whose queue it is, as for the runner (the hub's tests point it at a temp repo).
 REVIEW = Path(os.environ.get("ORCHESTRA_REPO") or Path(__file__).resolve().parent.parent) / ".review"
 PRIORITIES = ("urgent", "normal")
@@ -47,6 +51,14 @@ def auto_lane() -> str | None:
     """The Lane: word that has the runner pick the lane at dispatch (config lane_auto_word), or None."""
     word = _config_value("lane_auto_word", lambda v: isinstance(v, str) and v.strip())
     return word.strip().lower() if word else None
+
+
+def unattended_rules() -> dict:
+    """The config keys orchestra/unattended.py reads, plus the keys unattended_source_keys names."""
+    rules = {k: _config_value(k, lambda v: v is not None) for k in unattended.KEYS}
+    for k in rules.get("unattended_source_keys") or []:
+        rules[k] = _config_value(k, lambda v: isinstance(v, str))
+    return rules
 
 
 def work_header() -> str | None:
@@ -151,10 +163,18 @@ def create(title: str, *, body: str | None = None, gate: list[str] | None = None
     """Write a new task into <review>/queue and return its path. Never overwrites a task
     someone else wrote. `lane` None: Lane: auto (config lane_auto_word: the runner picks the
     lane at dispatch, scored by `work`), else the best-scoring lane for `work` (exam scores).
-    `source` names the agent that handed the work over (a From: header)."""
+    `source` names the agent that handed the work over (a From: header). With a non-human
+    source (config, orchestra/unattended.py) and auto, a lane that is not guarded or a gate
+    command not of a known shape makes the task Queue: draft, and say() is told why; with no
+    lane given such a task gets a guarded lane rather than the runner's pick."""
     say = say or (lambda _s: None)
     review = Path(review) if review else REVIEW
     work_kind = None
+    rules = unattended_rules()
+    if auto and lane is None and unattended.is_unattended(source, rules) and unattended.first_guarded(rules):
+        # Not a person's task: the runner's own pick could land on an unguarded lane.
+        lane = unattended.first_guarded(rules)
+        say(f"lane: {lane} (a guarded lane: the task is from {source}, not a person)")
     if lane is None and auto_lane():
         lane, work_kind = auto_lane(), work_category(work)
         say(f"lane: {lane} (the runner picks it at dispatch; --lane to choose)")
@@ -163,6 +183,10 @@ def create(title: str, *, body: str | None = None, gate: list[str] | None = None
         say(f"lane: {lane} (from exam scores; --lane to choose)")
     for p in same_title(title, review):
         say(f"note: same title as {p}; fine if this is a follow-up")
+    refused = unattended.problem(source, lane, gate, rules) if auto else None
+    if refused:  # the one place every writer goes through (audit 10 Nov 2026, O5)
+        auto = False
+        say(f"queue: draft, not auto: {refused}")
     when = dt.datetime.now()
     text = render(title, body=body, gate=gate, priority=priority, weight=weight, kind=kind, lane=lane,
                   auto=auto, source=source, review=review, when=when, work=work_kind)
