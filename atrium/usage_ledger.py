@@ -1,6 +1,6 @@
 """Tokens spent, per day and per agent, from every source on this laptop, kept in a running ledger.
 
-    python -m atrium.tokens          # bring the ledger up to date and print its totals
+    python -m atrium.usage_ledger          # bring the ledger up to date and print its totals
 
 Sources (atrium/config.json "live" -> "board" -> "tokens" -> "sources", each with its notes):
 - "orchestra": the runner's own record of each finished run (state.json history -> tokens).
@@ -19,7 +19,7 @@ been read (size and byte offset), so each refresh reads only what was appended, 
 survive Claude Code pruning its old logs. Orchestra's days are rewritten from state.json on each
 refresh; a day state.json no longer has is kept from the ledger. The live page never writes to
 .review, so it reads the ledger and carries on from it in memory; the ledger is written by
-`python -m atrium.tokens` and `python -m atrium snapshot` (the hub refresh).
+`python -m atrium.usage_ledger` and `python -m atrium snapshot` (the hub refresh).
 """
 from __future__ import annotations
 
@@ -254,7 +254,7 @@ def update(state: dict, now: dt.datetime, save: bool = False) -> dict:
 
 
 def save() -> dict:
-    """Read what is new in the logs and write the ledger; the day table. (python -m atrium.tokens,
+    """Read what is new in the logs and write the ledger; the day table. (python -m atrium.usage_ledger,
     and python -m atrium snapshot, which already writes the hub tables into .review.)"""
     return update(snapshot._state(), dt.datetime.now(), save=True)["days"]
 

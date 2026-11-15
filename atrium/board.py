@@ -19,7 +19,7 @@ import subprocess
 import time
 import urllib.request
 
-from . import conf, context, snapshot, tokens
+from . import conf, context, snapshot, usage_ledger as tokens
 
 _cache: dict[str, tuple[float, object]] = {}
 

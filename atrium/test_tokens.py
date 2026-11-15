@@ -1,6 +1,6 @@
 """python -m unittest atrium.test_tokens -v
 
-The tokens collector (atrium/tokens.py) and the card it feeds: small fixture Claude Code and Codex
+The tokens collector (atrium/usage_ledger.py) and the card it feeds: small fixture Claude Code and Codex
 logs in a temp folder, a temp .review for the ledger, a temp config pointing at them. Each
 Claude Code message counts once; nothing before all_from counts; the ledger keeps a day whose log
 was deleted; Orchestra's own Claude runs are not counted again from the logs; logs are read from
@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from atrium import board, snapshot, tokens
+from atrium import board, snapshot, usage_ledger as tokens
 
 SHIPPED = json.loads((Path(__file__).with_name("config.json")).read_text(encoding="utf-8-sig"))
 NOW = dt.datetime(2026, 11, 13, 12, 0, 0)
