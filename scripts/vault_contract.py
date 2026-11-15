@@ -49,7 +49,8 @@ GENERATED = (
     "Templates/",
     "Calendar/Handoff-",   # agent hub's daily log, one line per hand-off
     "Calendar/Chats/",     # bounded historical chat summaries, not hand-curated
-    "STATE NOW.md",        # Orchestra, rewritten every tick
+    "STATE NOW.md",        # Orchestra, rewritten every tick ...
+    "Denisse/STATE NOW.md",  # ... and its home since the 15 Nov 2026 tidy (orchestra vault_state_note)
 )
 ATTACH = (".pdf", ".m", ".png", ".jpg", ".jpeg", ".svg", ".xlsx", ".docx", ".pptx", ".csv", ".zip")
 

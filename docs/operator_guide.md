@@ -197,7 +197,8 @@ touching the runner's locking or integration. Details and the bugs it found:
 - **Vault, `Calendar/Orchestra/<date>.md`**: one section per finished task (result,
   merged or not, pushed or not, lane, minutes, cost, and the report's Done / Not done /
   Odd). Committed in the vault repo by the runner.
-- **Vault, `STATE NOW.md`** (and `.review/STATE_NOW.md`): regenerated after every tick.
+- **Vault, `Denisse/STATE NOW.md`** (config `vault_state_note`; at the vault root before the
+  15 Nov 2026 tidy) and `.review/STATE_NOW.md`: regenerated after every tick.
   Running, limited lanes, power, what's waiting on you, open queue, today's spend.
 - **Atrium Hub page**: shows the JSON tables `python -m atrium snapshot` writes to
   `.review/hub/` (agents, tasks, waiting, log, spend).
