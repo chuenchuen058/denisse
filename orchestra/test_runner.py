@@ -88,23 +88,26 @@ FAKE_ENV = ("FAKE_RESULT", "FAKE_HUMAN", "FAKE_SLEEP", "FAKE_COMMIT", "FAKE_STRA
             "FAKE_PROMPT_OUT", "ORCHESTRA_LANE_FALLBACK", "ORCHESTRA_CONSULT_FILE")
 
 
+def build_runner_repo(repo):
+    """The repo every RunnerTest starts from (built once per class, copied per test)."""
+    g = lambda *a: subprocess.run(["git", *a], cwd=repo, check=True, capture_output=True)
+    g("init", "-q", "-b", "main")
+    g("config", "user.name", "t"); g("config", "user.email", "t@t")
+    (repo / ".gitignore").write_text(".review/*\n.venv\n")
+    (repo / "orchestra").mkdir()
+    shutil.copy(HERE / "review_prompt.md", repo / "orchestra" / "review_prompt.md")
+    g("add", "."); g("commit", "-qm", "init")
+    (repo / ".venv").mkdir()
+    (repo / ".venv" / "keep.txt").write_text("real venv")
+    (repo / ".review").mkdir()
+    (repo / ".review" / "lanes.json").write_text(json.dumps({"fake": [sys.executable, "-c", FAKE]}))
+
+
 class RunnerTest(unittest.TestCase):
     def setUp(self):
         testing_git.hermetic_git(self)  # before any git call: a leaked GIT_DIR would hit the real repo
         self.tmp = Path(tempfile.mkdtemp())
-        self.repo = self.tmp / "repo"
-        self.repo.mkdir()
-        g = lambda *a: subprocess.run(["git", *a], cwd=self.repo, check=True, capture_output=True)
-        g("init", "-q", "-b", "main")
-        g("config", "user.name", "t"); g("config", "user.email", "t@t")
-        (self.repo / ".gitignore").write_text(".review/*\n.venv\n")
-        (self.repo / "orchestra").mkdir()
-        shutil.copy(HERE / "review_prompt.md", self.repo / "orchestra" / "review_prompt.md")
-        g("add", "."); g("commit", "-qm", "init")
-        (self.repo / ".venv").mkdir()
-        (self.repo / ".venv" / "keep.txt").write_text("real venv")
-        (self.repo / ".review").mkdir()
-        (self.repo / ".review" / "lanes.json").write_text(json.dumps({"fake": [sys.executable, "-c", FAKE]}))
+        self.repo = testing_git.from_template(self, self.tmp / "repo", build_runner_repo)
         os.environ["ORCHESTRA_REPO"] = str(self.repo)
         os.environ["ORCHESTRA_BACKOFF_MIN"] = "0"
         os.environ["ORCHESTRA_DAILY_SPEND_CAP_USD"] = "5"  # the spend test is written for a $5 cap
@@ -118,7 +121,7 @@ class RunnerTest(unittest.TestCase):
     def tearDown(self):
         for wt in (self.R.WORKTREES.glob("*") if self.R.WORKTREES.exists() else []):
             self.R.unlink_link(wt / ".venv")
-        subprocess.run(["git", "worktree", "prune"], cwd=self.repo, capture_output=True)
+        # No `git worktree prune`: the worktrees (R.WORKTREES) and the repo both live in self.tmp.
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def add(self, slug, title="t", queue="auto", priority="normal", kind="work", written=None,

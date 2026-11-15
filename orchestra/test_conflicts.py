@@ -87,30 +87,34 @@ CHECK_LIB = 'import unittest, lib\n\nclass T(unittest.TestCase):\n    def test(s
 ENV = ("FAKE_EDITS", "FAKE_RESOLVE")
 
 
+def build_conflicts_repo(repo):
+    """The repo every ConflictsTest starts from (built once per class, copied per test)."""
+    g = lambda *a: subprocess.run(["git", *a], cwd=repo, check=True, capture_output=True)
+    g("init", "-q", "-b", "main")
+    g("config", "user.name", "t")
+    g("config", "user.email", "t@t")
+    (repo / ".gitignore").write_text(".review/*\n.venv\n")
+    for rel, text in {"orchestra/review_prompt.md": (HERE / "review_prompt.md").read_text(encoding="utf-8"),
+                      "orchestra/runner.py": "# runner\n", "orchestra/README.md": "# orchestra\n",
+                      "eval/cases.py": "CASES = []\n", "scripts/x.py": "x = 1\n", "README.md": "# repo\n",
+                      "lib.py": LIB, "check_lib.py": CHECK_LIB, "done.txt": "base\n"}.items():
+        (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+        (repo / rel).write_text(text, encoding="utf-8")
+    g("add", ".")
+    g("commit", "-qm", "init")
+    (repo / ".venv").mkdir()
+    (repo / ".review").mkdir()
+    (repo / ".review" / "lanes.json").write_text(json.dumps({
+        "fake": [sys.executable, "-c", FAKE_WORKER],
+        "claude": [sys.executable, "-c", FAKE_MERGER],
+        "reviewer": [sys.executable, "-c", FAKE_REVIEWER]}))
+
+
 class ConflictsTest(unittest.TestCase):
     def setUp(self):
         testing_git.hermetic_git(self)  # first: no inherited GIT_* reaches a real repo
         self.tmp = Path(tempfile.mkdtemp())
-        self.repo = self.tmp / "repo"
-        self.repo.mkdir()
-        self.git("init", "-q", "-b", "main")
-        self.git("config", "user.name", "t")
-        self.git("config", "user.email", "t@t")
-        (self.repo / ".gitignore").write_text(".review/*\n.venv\n")
-        for rel, text in {"orchestra/review_prompt.md": (HERE / "review_prompt.md").read_text(encoding="utf-8"),
-                          "orchestra/runner.py": "# runner\n", "orchestra/README.md": "# orchestra\n",
-                          "eval/cases.py": "CASES = []\n", "scripts/x.py": "x = 1\n", "README.md": "# repo\n",
-                          "lib.py": LIB, "check_lib.py": CHECK_LIB, "done.txt": "base\n"}.items():
-            (self.repo / rel).parent.mkdir(parents=True, exist_ok=True)
-            (self.repo / rel).write_text(text, encoding="utf-8")
-        self.git("add", ".")
-        self.git("commit", "-qm", "init")
-        (self.repo / ".venv").mkdir()
-        (self.repo / ".review").mkdir()
-        (self.repo / ".review" / "lanes.json").write_text(json.dumps({
-            "fake": [sys.executable, "-c", FAKE_WORKER],
-            "claude": [sys.executable, "-c", FAKE_MERGER],
-            "reviewer": [sys.executable, "-c", FAKE_REVIEWER]}))
+        self.repo = testing_git.from_template(self, self.tmp / "repo", build_conflicts_repo)
         os.environ["ORCHESTRA_REPO"] = str(self.repo)
         os.environ["ORCHESTRA_DAILY_SPEND_CAP_USD"] = "50"
         os.environ["ORCHESTRA_TIMEOUT_S"] = json.dumps({"light": 30, "heavy": 60})
@@ -125,7 +129,7 @@ class ConflictsTest(unittest.TestCase):
     def tearDown(self):
         for wt in (self.R.WORKTREES.glob("*") if self.R.WORKTREES.exists() else []):
             self.R.unlink_link(wt / ".venv")
-        subprocess.run(["git", "worktree", "prune"], cwd=self.repo, capture_output=True)
+        # No `git worktree prune`: the worktrees (R.WORKTREES) and the repo both live in self.tmp.
         shutil.rmtree(self.tmp, ignore_errors=True)
         for k in ENV:
             os.environ.pop(k, None)

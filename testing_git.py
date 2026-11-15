@@ -103,3 +103,36 @@ def init_repo(repo, *init_args: str, name: str = NAME, email: str = EMAIL) -> Pa
     _git(repo, "init", "-q", *init_args)
     identity(repo, name, email)
     return repo
+
+
+# (test class, build function) -> the folder its template was built in. A class's templates are
+# deleted by its class cleanup, after its last test.
+_TEMPLATES: dict[tuple[type, object], Path] = {}
+
+
+def from_template(test, dest, build) -> Path:
+    """Put a copy of the temp folder ``build(folder)`` makes at ``dest`` and return ``dest``.
+
+    ``build`` runs once per test class (on its first test) and every test gets its own copy, so
+    each still starts from an identical, independent folder, without re-running the git init /
+    config / add / commit that dominates a temp-repo fixture's setUp on Windows (~5 git
+    processes, ~0.4 s, per test). ``build`` must be deterministic and must not write anything
+    that depends on where the folder ends up (no absolute paths of it), and must be a function
+    defined once (module level or a staticmethod), since it is the cache key. Call after
+    ``hermetic_git(test)``: the build's git runs refuse a leaked GIT_* like ``init_repo`` does.
+    """
+    cls = type(test)
+    key = (cls, build)
+    src = _TEMPLATES.get(key)
+    if src is None or not src.exists():
+        folder = Path(tempfile.mkdtemp(prefix="git-template-"))
+        src = folder / "t"
+        src.mkdir()
+        _refuse_if_leaked(src)
+        build(src)
+        _TEMPLATES[key] = src
+        cls.addClassCleanup(_TEMPLATES.pop, key, None)
+        cls.addClassCleanup(shutil.rmtree, folder, True)
+    dest = Path(dest)
+    shutil.copytree(src, dest, symlinks=True, dirs_exist_ok=True)
+    return dest

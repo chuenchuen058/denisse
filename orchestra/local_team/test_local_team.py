@@ -70,7 +70,8 @@ class FakeOllama:
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), H)
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        # A short poll: close() -> shutdown() waits up to one poll interval (0.5 s by default).
+        threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True).start()
 
     def chats(self, role=None):
         out = [b for m, p, b in self.requests if p == "/api/chat"]
