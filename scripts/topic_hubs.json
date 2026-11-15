@@ -1,0 +1,225 @@
+{
+  "_about": "scripts/topic_hubs.py: the Calendar/Topics hubs that link every chat and session log, rebuilt each night (Chuen, 15 Nov 2026: 'categorise' the orphans in graph view). Every topic word, pattern, anchor note and limit lives here, not in the code. A log goes to the FIRST topic whose patterns match; 'title' patterns test the file name, 'asked' patterns test the file name plus the asked section. The topic with \"fallback\": true takes everything else. Anchors that don't exist in the vault are left out, so a renamed note never becomes a broken link.",
+  "folder": "Calendar/Topics",
+  "sources": [
+    "Calendar/Chats",
+    "Calendar/Sessions"
+  ],
+  "skip_dirs": [
+    ".obsidian",
+    ".git",
+    ".trash"
+  ],
+  "asked_headings": [
+    "What was asked",
+    "Asked"
+  ],
+  "date_pattern": "^(\\d{4}-\\d{2}-\\d{2})",
+  "frontmatter_date_key": "date",
+  "unescape_pattern": "\\\\([^A-Za-z0-9\\s])",
+  "alias_chars": 70,
+  "alias_drop_chars": "[]`|\\#^",
+  "target_forbidden_chars": "[]|#^\\",
+  "split_over": 150,
+  "week_format": "{year}-W{week:02d}",
+  "separator": " · ",
+  "type": "index",
+  "tags": [
+    "folder-hub",
+    "topic-hub"
+  ],
+  "logs_heading": "Logs",
+  "weeks_heading": "Weeks",
+  "related_label": "Related:",
+  "index": {
+    "name": "Topics",
+    "description": "Index of the topic hubs that group every chat and session log.",
+    "back_label": "Back to",
+    "back_to": [
+      "Calendar-Index"
+    ]
+  },
+  "describe": {
+    "flat": "Topic hub: every chat and session log about {lower} ({count}).",
+    "split": "Topic hub: {prefix} chats and sessions ({count}), split by week.",
+    "week": "{prefix} logs, week {week} ({count})."
+  },
+  "commit_message": "Nightly topic hubs: Calendar/Topics rebuilt from the chat and session logs",
+  "topics": [
+    {
+      "name": "Atrium hub",
+      "week_prefix": "Atrium hub",
+      "anchors": [
+        "Calendar-Index"
+      ],
+      "title": [
+        "atrium",
+        "mission[- ]?board",
+        "\\bhub[- ]v\\d",
+        "claude hub"
+      ]
+    },
+    {
+      "name": "Orchestra runs",
+      "week_prefix": "Orchestra",
+      "anchors": [
+        "Orchestra",
+        "Dev-Index"
+      ],
+      "title": [
+        "orchestra",
+        "review_diff_prompt",
+        "^\\d{4}-\\d{2}-\\d{2} \\d{4}-\\d{2}-\\d{2}T\\d{4}-"
+      ],
+      "asked": [
+        "running one Orchestra task",
+        "Codex agent history",
+        "review_diff_prompt",
+        "\\.review/task\\.md"
+      ]
+    },
+    {
+      "name": "Study and Don",
+      "week_prefix": "Study and Don",
+      "anchors": [
+        "Don",
+        "Academic-Index",
+        "Signals and Systems summary",
+        "Electromagnetism summary",
+        "Computational Methods summary",
+        "Computational Applied Biomathematics summary"
+      ],
+      "asked": [
+        "\\bDon\\b",
+        "\\banki\\b",
+        "\\bstudy\\b",
+        "lecture",
+        "tutorial",
+        "electromagnetism",
+        "signals and systems",
+        "computational methods",
+        "biomathematics",
+        "\\bkeats\\b",
+        "pomodoro",
+        "pamodoro"
+      ]
+    },
+    {
+      "name": "Career and applications",
+      "week_prefix": "Career and applications",
+      "anchors": [
+        "Projects-Index",
+        "People-Index"
+      ],
+      "asked": [
+        "intern(?:ship)?s?\\b",
+        "interships",
+        "\\burop\\b",
+        "\\bcv\\b",
+        "cover letter",
+        "application",
+        "linkedin",
+        "linkdln",
+        "recruit"
+      ]
+    },
+    {
+      "name": "Clubs and MSoc",
+      "week_prefix": "Clubs and MSoc",
+      "anchors": [
+        "KCLMSoc"
+      ],
+      "asked": [
+        "msoc",
+        "\\bclubs?\\b",
+        "society",
+        "committee"
+      ]
+    },
+    {
+      "name": "Markets and money",
+      "week_prefix": "Markets and money",
+      "anchors": [],
+      "asked": [
+        "\\bsec\\b",
+        "\\bcik\\b",
+        "stocks?\\b",
+        "markets?\\b",
+        "invest",
+        "portfolio",
+        "trading",
+        "hackathon",
+        "\\blseg\\b",
+        "streamlit"
+      ]
+    },
+    {
+      "name": "Projects and hardware",
+      "week_prefix": "Projects and hardware",
+      "anchors": [
+        "BlueBand",
+        "Robotic Tail",
+        "UnibotsMarkII",
+        "Projects-Index"
+      ],
+      "asked": [
+        "blueband",
+        "wristband",
+        "robotic tail",
+        "tail_",
+        "\\bpcb\\b",
+        "datasheet",
+        "unibots",
+        "robot",
+        "hardware",
+        "firmware",
+        "arduino",
+        "esp32"
+      ]
+    },
+    {
+      "name": "Denisse assistant",
+      "week_prefix": "Denisse assistant",
+      "anchors": [
+        "Denisse",
+        "Denisse-Index"
+      ],
+      "asked": [
+        "denisse",
+        "\\btray\\b",
+        "ollama",
+        "keyboard",
+        "thinkterm",
+        "pull these fields out",
+        "hi\\.txt"
+      ]
+    },
+    {
+      "name": "GitHub and coding",
+      "week_prefix": "GitHub and coding",
+      "anchors": [
+        "Dev-Index"
+      ],
+      "asked": [
+        "github",
+        "graphify",
+        "\\bgit\\b",
+        "python",
+        "\\bcode\\b",
+        "model (?:name|id)",
+        "reply with",
+        "\\brepo\\b",
+        "pip install",
+        "ptbxl"
+      ]
+    },
+    {
+      "name": "Everything else",
+      "week_prefix": "Everything else",
+      "anchors": [
+        "Calendar-Index"
+      ],
+      "fallback": true
+    }
+  ]
+}
