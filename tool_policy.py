@@ -62,6 +62,9 @@ def _validate(data) -> dict:
         for chk in meta.get("checks", []):
             if "kind" not in chk or "argument" not in chk or "refusal" not in chk:
                 raise ValueError(f"tools.{name}: every check needs kind, argument and refusal")
+    confirm_first = data.get("confirm_first", [])
+    if not isinstance(confirm_first, list) or not all(isinstance(n, str) for n in confirm_first):
+        raise ValueError("confirm_first must be a list of tool names")
     for name, g in data["groups"].items():
         if not isinstance(g.get("tools"), list) or not isinstance(g.get("cues"), str):
             raise ValueError(f"groups.{name} needs a tools list and a cues pattern")
@@ -115,6 +118,17 @@ def groups() -> dict:
 
 def core() -> set:
     return set(load()["core"])
+
+
+def confirm_first() -> set:
+    """Tools that never run without his yes (safety.RISKY_TOOLS). A policy
+    file without the key (DENISSE_TOOL_POLICY pointing at a sandbox copy)
+    keeps the shipped list: dropping it would silently ungate them."""
+    names = load().get("confirm_first")
+    if names is None:
+        with open(DEFAULT_FILE, encoding="utf-8-sig") as f:
+            names = json.load(f).get("confirm_first", ())
+    return set(names)
 
 
 def skills_tools() -> set:

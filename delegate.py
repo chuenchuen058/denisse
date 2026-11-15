@@ -9,7 +9,8 @@ confident -- the "reply to satisfy me" he said he doesn't want.
 So Denisse doesn't attempt them. She hands the job to Claude Code on his
 laptop, headless, and saves what comes back as a note in his vault under
 Denisse/Drafts/. Local, checkable work (files, notes, tasks, deadlines)
-still never leaves the machine -- see brain._DELEGATE for the line.
+still never leaves the machine: the local model chooses the `delegate`
+tool (tools.py) and he says yes before anything is sent (13 Nov 2026).
 
 Claude gets read-only access plus web search: it can read his vault,
 documents and GitHub folder and search online. It cannot edit files or

@@ -4,28 +4,31 @@ the calls a prompt injection hidden in something Denisse reads (a file,
 a web page) could try to trigger without you actually asking for it, so
 they get a human check before running.
 
+Which tools are gated is data: tool_policy.json `confirm_first` (moved out
+of a literal here on 2026-11-13, AGENTS.md Rule 0), with the reason for
+each beside it there.
+
 run_shell_command, write_file, and open_application are all auto-allowed
 per user request (run_shell_command/write_file on 2026-09-02,
 open_application on 2026-09-03 -- the popup asking to confirm opening
 Spotify) -- none of them prompt anymore. To re-gate any of them, add its
-name back to RISKY_TOOLS below.
+name to confirm_first.
 
 That applies to typed requests. Hands-free (wake_word.py) is different:
 since 2026-10-18 it asks out loud before run_shell_command, write_file and
 anything in RISKY_TOOLS, and takes a spoken yes/no -- a misheard phrase in
 a room shouldn't become a shell command. DENISSE_VOICE_CONFIRM=0 turns that
-back off (RISKY_TOOLS are still asked about, by voice).
+back off (RISKY_TOOLS are still asked about, by voice). A call nobody is
+there to answer (tray._decline_risky_unattended) declines them.
 
-disable_startup_program is still gated -- it's reversible
-(restore_startup_program undoes it), but changes what launches at login,
-which is worth a human glance rather than running silently.
-
-draft_email is gated too (2026-11-07): it only saves a draft and never
-sends, but an email in his name is his to start -- he says yes before she
-writes one.
+delegate is gated since 2026-11-13 (audit 10 Nov, D2): it sends his words
+and read access to his folders to Claude or Codex and uses his allowance,
+so he sees what goes to which engine and says yes first.
 """
 
-RISKY_TOOLS = {"disable_startup_program", "draft_email"}
+import tool_policy
+
+RISKY_TOOLS = tool_policy.confirm_first()
 
 
 def confirm_risky_tool(name: str, args: dict) -> bool:

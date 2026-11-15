@@ -907,6 +907,49 @@ def draft_email(to: str = "", subject: str = "", gist: str = "", replying_to: st
                                     replying_to=replying_to, attachments=attachments)
 
 
+def delegate(task: str, engine: str = "", context=None) -> str:
+    """Hand a big job to Claude (then Codex) in the background (delegate.py).
+
+    Chosen by the model like any tool since 2026-11-13 (audit 10 Nov, D2);
+    before, a regex over his wording started it with nothing asked. It is in
+    tool_policy.json confirm_first, so it runs only after his yes. `task` and
+    `context` are his own message and the recent turns (prepare_args), the
+    same arguments the old short-circuit passed; `engine` is only there so
+    the confirmation can say where it goes."""
+    import delegate as handoff
+    said = handoff.start(task, context or [])
+    if said == handoff.CONFIG["say"]["not_installed"]:
+        return said
+    # Eval 13 Nov: with the hand-off done the model went on to read_file and
+    # search_vault for the same job. The note is cut off what he hears.
+    return said + config()["delegate"]["handed_off_note"]
+
+
+def _handoff_engines() -> str:
+    """Where a hand-off goes, in delegate.json's order: 'Claude, then Codex'."""
+    import delegate as handoff
+    return config()["delegate"]["engine_joiner"].join(
+        handoff._label(name) for name in handoff.CONFIG["engines"])
+
+
+def _delegate_args(args: dict, request: str, context: list) -> dict:
+    # What is sent is what he said, not the model's paraphrase of it: the
+    # confirmation shows exactly that, and delegate.start gets it unchanged.
+    return {"task": request or str(args.get("task") or ""), "engine": _handoff_engines(),
+            "context": list(context or [])}
+
+
+# Tools whose arguments are filled in from the turn itself before he is
+# asked and the tool runs (brain.execute). Anything else is passed as is.
+_PREPARE_ARGS = {"delegate": _delegate_args}
+
+
+def prepare_args(name: str, args: dict, request: str, context: list) -> dict:
+    """The arguments a call actually runs (and is confirmed) with."""
+    prep = _PREPARE_ARGS.get(name)
+    return prep(dict(args or {}), request, context) if prep else args
+
+
 TOOL_FUNCTIONS = {
     "run_shell_command": run_shell_command,
     "open_application": open_application,
@@ -965,4 +1008,6 @@ TOOL_FUNCTIONS = {
     "tutor_consult": tutor_consult,
     # Email drafts (email_drafts.py, 2026-11-07): saved, never sent.
     "draft_email": draft_email,
+    # The hand-off to Claude/Codex (delegate.py, 2026-11-13): asked first.
+    "delegate": delegate,
 }
