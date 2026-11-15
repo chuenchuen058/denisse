@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from orchestra.aftercare import SECRET_TEXT
-from . import chatlog, conf
+from . import chatlog, conf, months
 from .capture import _short as short
 
 SOURCES = ("claude-code", "codex", "claude-export")
@@ -53,9 +53,29 @@ def markdown(text: str) -> str:
     return re.sub(r"([\\`*\[\]()<>_])", r"\\\1", text)
 
 
-def title(text: str) -> str:
+def title(text: str, words: int | None = None) -> str:
+    t = conf.section("import_chats")["title"]
     text = re.sub(r'[<>:"/\\|?*\x00-\x1f\x7f]', " ", clean(text))
-    return short(text, 60).rstrip(" .") or "Untitled chat"
+    if words:
+        text = " ".join(text.split()[:words])
+    return short(text, t["max_chars"]).rstrip(" .") or t["untitled"]
+
+
+def ask_title(asks: list[str]) -> str:
+    """The title for a chat from its asks: the first one that is not a machine
+    preamble (import_chats "title" -> "skip"), or the Orchestra task a skipped
+    preamble names; trimmed to "words" words. The fix for ~200 Codex notes named
+    after the AGENTS.md block every Codex session starts with."""
+    t = conf.section("import_chats")["title"]
+    skip = [re.compile(p, re.I) for p in t["skip"]]
+    task = None
+    for ask in asks:
+        if any(r.match(ask.lstrip()) for r in skip):
+            if task is None and (m := re.search(t["task_from_preamble"], ask)):
+                task = m.group(1)
+            continue
+        return title(task or ask, t["words"])
+    return title(task or "", t["words"])
 
 
 @dataclass
@@ -444,6 +464,7 @@ def import_chats(source: str, path: Path, vault: Path, *, apply: bool = False,
                                              for k, v in state.items()):
         raise ValueError("invalid chat import state; refusing to overwrite it")
     written, reserved, dates = [], set(), {}
+    taken = months.names(vault / CHATS)
     index = note_index(vault)
     for chat in conversations(source, path, settled_before):
         if limit is not None and len(written) >= limit:
@@ -458,20 +479,23 @@ def import_chats(source: str, path: Path, vault: Path, *, apply: bool = False,
         chat.answers = [clean(a) for a in chat.answers]
         if not chat.asks:
             continue
-        label = title(chat.title or chat.asks[0])
+        label = title(chat.title) if chat.title else ask_title(chat.asks)
         stem = f"{chat.date} {source} {label}"
-        note = checked(vault, CHATS / (stem + ".md"))
+        month = CHATS / months.folder(chat.date)
+        note = checked(vault, month / (stem + ".md"))
+        cap = conf.section("import_chats")["title"]["max_chars"]
         n = 1
-        while note.exists() or note.name.casefold() in reserved:
+        # Unique across the chats folder and every month folder, not just this month's.
+        while note.exists() or note.name.casefold() in reserved or note.name.casefold() in taken:
             suffix = f" ({n})"
-            note = checked(vault, CHATS / f"{chat.date} {source} {label[:60-len(suffix)].rstrip(' .')}{suffix}.md")
+            note = checked(vault, month / f"{chat.date} {source} {label[:cap-len(suffix)].rstrip(' .')}{suffix}.md")
             n += 1
         reserved.add(note.name.casefold())
         text = render(chat, source, note.stem)
         if related := related_line(vault, note, chat.date, text, index):
             text += "\n" + related + "\n"
         if apply:
-            checked(vault, CHATS).mkdir(parents=True, exist_ok=True)
+            checked(vault, note.parent.relative_to(vault)).mkdir(parents=True, exist_ok=True)
             checked(vault, STATE.parent).mkdir(parents=True, exist_ok=True)
             checked(vault, note.relative_to(vault))
             with note.open("x", encoding="utf-8", newline="\n") as f:
@@ -502,7 +526,7 @@ def link_existing(vault: Path, *, apply: bool = False) -> dict:
         return out
     index = note_index(vault)
     by_date: dict[str, list[Path]] = {}
-    for note in sorted(folder.glob("*.md")):
+    for note in months.notes(folder):
         text = note.read_text(encoding="utf-8-sig", errors="replace")
         fm, body = frontmatter(text)
         if _scalar(fm, "type") != c["chat_type"]:

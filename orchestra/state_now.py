@@ -2,7 +2,8 @@
 archive, state.json) so a new chat starts from live state, not from memory.
 
     .venv\\Scripts\\python.exe orchestra\\state_now.py          # print + write
-Writes .review/STATE_NOW.md, and also "<vault>/STATE NOW.md" when the
+Writes .review/STATE_NOW.md, and also "<vault>/<vault_state_note>" (shipped:
+Denisse/STATE NOW.md, off the vault root since the 15 Nov 2026 tidy) when the
 DENISSE_VAULT environment variable (else config.json vault_dir) points at the
 Obsidian vault.
 
@@ -157,7 +158,7 @@ def write() -> str:
 
 
 def write_vault(vault: Path, text: str) -> bool:
-    """<vault>/STATE NOW.md under the vault lock (vaultlock.py), via a temp file + os.replace, and
+    """<vault>/<vault_state_note> under the vault lock (vaultlock.py), via a temp file + os.replace, and
     only if nobody saved it since it was read (else False; the next tick writes it). Line ends
     follow the file already there, else the platform's, as write_text gave before."""
     import vaultlock
@@ -167,7 +168,9 @@ def write_vault(vault: Path, text: str) -> bool:
         return text.replace("\r\n", "\n").replace("\n", nl)
     try:
         with vaultlock.VaultLock():
-            return vaultlock.replace_if_unchanged(vault / "STATE NOW.md", render)
+            target = vault / R.C["vault_state_note"]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            return vaultlock.replace_if_unchanged(target, render)
     except TimeoutError:
         return False
 

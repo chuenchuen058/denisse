@@ -118,7 +118,7 @@ class ImportChatsTest(unittest.TestCase):
                 self.assertEqual(self.run_import(source, path, apply=True)[0], [])
                 self.assertEqual(self.run_import(source, path)[0], [])
                 self.assertEqual(text, note.read_text(encoding="utf-8"))
-        notes = list((self.vault / "Calendar" / "Chats").glob("*.md"))
+        notes = list((self.vault / "Calendar" / "Chats").rglob("*.md"))
         state = json.loads((self.vault / importer.STATE).read_text(encoding="utf-8"))
         self.assertEqual(len(notes), 3)
         self.assertEqual(set(state), {f"{s}:same-id" for s in importer.SOURCES})
@@ -268,7 +268,7 @@ class ImportChatsTest(unittest.TestCase):
         self.assertFalse(self.vault.exists())
         applied = subprocess.run(command + ["--apply"], capture_output=True, text=True, timeout=30)
         self.assertEqual(applied.returncode, 0, applied.stderr)
-        self.assertEqual(len(list((self.vault / importer.CHATS).glob("*.md"))), 1)
+        self.assertEqual(len(list((self.vault / importer.CHATS).rglob("*.md"))), 1)
         repeated = subprocess.run(command + ["--apply"], capture_output=True, text=True, timeout=30)
         self.assertEqual(repeated.returncode, 0, repeated.stderr)
         self.assertIn("0 chat(s)", repeated.stdout)
@@ -357,7 +357,7 @@ class LinkChatsTest(unittest.TestCase):
         self.assertTrue(note.read_text(encoding="utf-8").endswith("\n\n" + line + "\n"))
         self.assertNotIn("Electromagnetism", line)
         # ...and the day hangs the chat off itself.
-        self.assertIn(f"## Chats\n\n- [[Calendar/Chats/{note.stem}|{note.stem}]]\n", self.day_text())
+        self.assertIn(f"## Chats\n\n- [[Calendar/Chats/{self.DAY[:7]}/{note.stem}|{note.stem}]]\n", self.day_text())
 
     def test_module_alias_and_hub_name_match(self):
         line = self.related(self.chat("5CCYB010 question: explain electromagnetism concepts"))
@@ -387,7 +387,7 @@ class LinkChatsTest(unittest.TestCase):
         before = self.day_text()
         second = self.chat("something else", name="b")
         after = self.day_text()
-        added = f"- [[Calendar/Chats/{second.stem}|{second.stem}]]\n"
+        added = f"- [[Calendar/Chats/{self.DAY[:7]}/{second.stem}|{second.stem}]]\n"
         self.assertEqual(after.count("## Chats"), 1)
         self.assertIn(f"|{first.stem}]]\n" + added, after)  # inside the section, not at the end
         self.assertEqual(after.replace(added, ""), before)

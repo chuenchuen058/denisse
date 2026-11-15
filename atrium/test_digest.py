@@ -107,7 +107,8 @@ class DigestTest(unittest.TestCase):
         return self.d.run(repo=self.r, vault=self.v, now=kw.pop("now", self.now), **kw)
 
     def note(self):
-        return self.v / "Calendar" / "Chats" / f"{self.now.date().isoformat()} claude hub.md"
+        d = self.now.date().isoformat()
+        return self.v / "Calendar" / "Chats" / d[:7] / f"{d} claude hub.md"  # its month folder
 
     def handoff(self):
         return self.v / "Calendar" / f"Handoff-{self.now.date().isoformat()}.md"
@@ -142,7 +143,7 @@ class DigestTest(unittest.TestCase):
         files = git(self.v, "show", "--name-only", "--format=%s", "HEAD").split("\n")
         self.assertTrue(files[0].startswith("Atrium: laptop digest"))
         self.assertEqual(sorted(f for f in files[1:] if f), sorted([
-            f"Calendar/Chats/{self.now.date().isoformat()} claude hub.md",
+            f"Calendar/Chats/{self.now.date().isoformat()[:7]}/{self.now.date().isoformat()} claude hub.md",
             f"Calendar/Handoff-{self.now.date().isoformat()}.md"]))
         status = git(self.v, "status", "--porcelain")
         self.assertIn("hot.md", status)
@@ -202,7 +203,7 @@ class DigestTest(unittest.TestCase):
         self.chatlog.save("atrium", "laptop did that", vault=self.v, now=at.replace(minute=5),
                           since="x", lines=1, sections="Orchestra")
         self.chatlog.save("hub", "hub said more", vault=self.v, now=at.replace(minute=9))
-        text = (self.v / "Calendar" / "Chats" / f"{at.date().isoformat()} claude hub.md").read_text(encoding="utf-8")
+        text = (self.v / "Calendar" / "Chats" / at.date().isoformat()[:7] / f"{at.date().isoformat()} claude hub.md").read_text(encoding="utf-8")
         self.assertIn("## Saved 10:00\n\nhub said this\n\n## Laptop digest 10:05", text)
         self.assertIn("laptop did that\n\n## Saved 10:09\n\nhub said more\n", text)
         h = self.handoff().read_text(encoding="utf-8")

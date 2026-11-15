@@ -371,7 +371,7 @@ class TestVaultLock(LockedVault):
                 self.assertTrue(self.lock.exists())  # someone else's lock is never removed
                 import state_now
                 self.assertFalse(state_now.write_vault(self.v, "## STATE NOW\n"))
-                self.assertFalse((self.v / "STATE NOW.md").exists())
+                self.assertFalse((self.v / state_now.R.C["vault_state_note"]).exists())
         finally:
             holder.kill()
             holder.wait()
@@ -385,7 +385,7 @@ class TestVaultLock(LockedVault):
 
     def test_state_now_write_vault(self):
         import state_now
-        target = self.v / "STATE NOW.md"
+        target = self.v / state_now.R.C["vault_state_note"]  # off the vault root since the 15 Nov tidy
         self.assertTrue(state_now.write_vault(self.v, "---\nname: STATE NOW\n---\n\n## STATE NOW\n- a\n"))
         target.write_bytes(target.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
         self.assertTrue(state_now.write_vault(self.v, "---\nname: STATE NOW\n---\n\n## STATE NOW\n- b\n"))
@@ -400,7 +400,7 @@ class TestVaultLock(LockedVault):
         with vaultlock.VaultLock():
             self.assertFalse(vaultlock.replace_if_unchanged(target, meanwhile))
         self.assertEqual(target.read_bytes(), b"someone else's\r\n")
-        self.assertEqual(sorted(p.name for p in self.v.iterdir()), ["STATE NOW.md"])
+        self.assertEqual([p for p in self.v.rglob("*") if p.is_file()], [target])
 
 
 class TestParallelState(unittest.TestCase):

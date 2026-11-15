@@ -39,7 +39,7 @@ class AtriumTest(unittest.TestCase):
         self.assertIn("### Format", out)
 
     def test_budget_is_respected(self):
-        w(self.v, "STATE NOW.md", "## STATE NOW\n" + "x" * 9000)
+        w(self.v, "Denisse/STATE NOW.md", "## STATE NOW\n" + "x" * 9000)
         self.assertEqual(self.ctx.show("claude").count("## STATE NOW"), 1)
         out = self.ctx.show("copilot")
         self.assertLess(len(out), self.ctx.BUDGET["copilot"] + 300)
@@ -79,13 +79,13 @@ class AtriumTest(unittest.TestCase):
         self.assertEqual(cap.handle(ev), "below threshold")
         say(5)
         self.assertTrue(cap.handle(ev).startswith("saved"))
-        note = next((self.v / "Calendar" / "Sessions").glob("*abcdef12.md")).read_text(encoding="utf-8")
+        note = next((self.v / "Calendar" / "Sessions").glob("*/*abcdef12.md")).read_text(encoding="utf-8")  # in its month folder
         self.assertTrue(note.startswith("---\nname: Session-abcdef12\ndescription: "))
         self.assertIn("please fix the tray bug number 4", note)
         self.assertIn("`C:/x/tray.py`", note)
         self.assertEqual(cap.handle(ev), "below threshold")  # nothing new since
         self.assertTrue(cap.handle(dict(ev, hook_event_name="PreCompact")).startswith("saved"))  # always
-        self.assertEqual(len(list((self.v / "Calendar" / "Sessions").glob("*.md"))), 1)  # one note per session
+        self.assertEqual(len(list((self.v / "Calendar" / "Sessions").rglob("*.md"))), 1)  # one note per session
         self.assertIn("session abcdef12 in denisse saved", handoff.path().read_text(encoding="utf-8"))
 
     def test_credits_flags_untagged_decisions(self):

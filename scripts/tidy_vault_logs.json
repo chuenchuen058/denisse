@@ -1,0 +1,38 @@
+{
+  "_note": "scripts/tidy_vault_logs.py (vault tidy, Chuen 15 Nov 2026). Paths under folders/rename_in/root are vault-relative; manifest_dir is repo-relative. The month folder pattern and the chat title rules are atrium/config.json \"months\" and \"import_chats\" -> \"title\" (the importer's own, so old and new notes are named alike). State files whose paths are rewritten are read from atrium/config.json (section, key).",
+  "folders": ["Calendar/Chats", "Calendar/Sessions"],
+  "_rename_in": "Chat notes here whose first ask is a machine preamble (import_chats title skip) are renamed '<date> <source> <title>'.",
+  "rename_in": ["Calendar/Chats"],
+  "asks_heading": "## What was asked",
+  "source_field": "source",
+  "date_field": "date",
+  "skip_dirs": [".obsidian", ".git", ".trash"],
+  "link_files": [".md"],
+  "state_files": [["import_chats", "state_file"], ["capture", "state_file"]],
+  "manifest_dir": ".review/vault-tidy",
+  "manifest_name": "manifest.json",
+  "time_format": "%Y-%m-%dT%H%M%S",
+  "dry_run_sample": 30,
+  "_root": "--root: these vault-root files move into dest. keep = root files left where they are, with why (an external tool reads them from the vault root). A file already at the destination is never overwritten: the old copy gets a ' (n)' name beside it.",
+  "root": {
+    "dest": "Denisse",
+    "move": ["STATE NOW.md"],
+    "keep": {
+      "CLAUDE.md": "not empty (a locked pointer note) and Claude Code reads CLAUDE.md from the folder it is started in",
+      "GEMINI.md": "not empty (a locked pointer note) and Gemini CLI reads GEMINI.md from the folder it is started in"
+    }
+  },
+  "messages": {
+    "dry_header": "(dry run: nothing written)",
+    "counts": "{moves} file(s) to move ({renames} renamed), {files} note(s) to edit ({links} link(s) rewritten, plus each renamed note's own name and H1), {states} state file(s) to update.",
+    "by_folder": "  {folder}: {n} file(s) into {months} month folder(s)",
+    "sample_header": "First {n} move(s):",
+    "move_line": "  {old} -> {new}",
+    "kept": "  left at the root: {name} ({why})",
+    "done": "Moved {moves} file(s), rewrote {files} note(s) and {states} state file(s). Manifest: {manifest} (undo: --undo \"{manifest}\")",
+    "skipped": "  skipped: {what}",
+    "nothing": "Nothing to tidy.",
+    "undo_done": "Undo: {moves} file(s) moved back, {edits} note(s) restored, {skipped} skipped.",
+    "locked": "The vault lock is held by someone else; nothing was changed. Try again in a minute."
+  }
+}
