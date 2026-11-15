@@ -958,5 +958,28 @@
         "minutes": "{n} min",
         "no_facts": "no facts read"
     }
+  },
+  "gamemode": {
+    "_note": "The hub's Game mode switch (orchestra/gamemode.py does the work; Chuen 15 Nov 2026). A button in the header next to Theme, and key; while on, one line under the header. It POSTs {\"on\": true|false} to http_path through the same guard as the Do next card (loopback Host, same-origin, JSON body). Before ON, and only while tasks are running, the page asks confirm_one / confirm_many first. While game mode is on the page rebuilds nothing (no snapshot tables, no git in the worktrees, no token log scans): it shows the last board with this line. time_format is strftime for the since time (Europe/London).",
+    "http_path": "/gamemode",
+    "key": "g",
+    "label_off": "🎮 Game mode: off",
+    "label_on": "🎮 Game mode: on",
+    "title_off": "Pause Orchestra, park running tasks and unload Ollama, so a game gets the whole laptop (key g)",
+    "title_on": "Turn everything back on: resume Orchestra and requeue the paused tasks (key g)",
+    "line": "Game mode since {time} · {paused} · {ollama}",
+    "paused_none": "no tasks paused",
+    "paused_one": "1 task paused",
+    "paused_many": "{n} tasks paused",
+    "ollama_unloaded": "Ollama unloaded",
+    "ollama_stopped": "Ollama stopped",
+    "ollama_kept": "Ollama left as it was",
+    "confirm_one": "1 task is running; it'll be paused and resume later. Turn game mode on?",
+    "confirm_many": "{n} tasks are running; they'll be paused and resume later. Turn game mode on?",
+    "busy": "Switching…",
+    "failed": "Game mode didn't switch: {why}",
+    "time_format": "%H:%M",
+    "colour_on": "#4fd1a5",
+    "colour_on_text": "#0b1a14"
   }
 }

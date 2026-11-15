@@ -290,6 +290,48 @@ def _header(x: dict, runs: list[dict]) -> tuple[dict, str]:
     return {"level": level, "text": text, "pill": pill}, head
 
 
+# -- game mode: the header's switch and its line (orchestra/gamemode.py; atrium/config.json "gamemode")
+def gamemode_cfg() -> dict | None:
+    """The "gamemode" section, or None (a config without one shows no switch)."""
+    c = conf.load().get("gamemode")
+    return c if isinstance(c, dict) else None
+
+
+def gamemode_line(gm: dict) -> str:
+    """'Game mode since 21:14 · 2 tasks paused · Ollama unloaded' from gamemode.summary()."""
+    c = gamemode_cfg()
+    if not c or not gm.get("on"):
+        return ""
+    since = _dt(gm.get("since"))
+    n = int(gm.get("paused") or 0)
+    paused = c["paused_none"] if n == 0 else c["paused_one"] if n == 1 else c["paused_many"].format(n=n)
+    ollama = c["ollama_stopped"] if gm.get("stopped") else c["ollama_unloaded"] if gm.get("unloaded") else c["ollama_kept"]
+    return c["line"].format(time=since.strftime(c["time_format"]) if since else "?", paused=paused, ollama=ollama)
+
+
+def gamemode_button(gm: dict, running: int) -> str:
+    c = gamemode_cfg()
+    if not c:
+        return ""
+    on = bool(gm.get("on"))
+    return (f'<button class="theme gm{" on" if on else ""}" id="gamemode" type="button" '
+            f'aria-pressed="{"true" if on else "false"}" data-on="{1 if on else 0}" data-running="{int(running)}" '
+            f'title="{e(c["title_on"] if on else c["title_off"])}" '
+            f'style="--gm:{e(c["colour_on"])};--gm-text:{e(c["colour_on_text"])}">'
+            f'{e(c["label_on"] if on else c["label_off"])}</button>')
+
+
+def dress_header(header: str, gm: dict, running: int) -> str:
+    """The header with the switch just before Theme and, while game mode is on, its line under it."""
+    btn = gamemode_button(gm, running)
+    if not btn:
+        return header
+    theme = '<button class="theme" id="theme"'
+    header = header.replace(theme, btn + theme, 1) if theme in header else header + btn
+    line = gamemode_line(gm)
+    return header + (f'<div class="gm-line" id="gm-line" data-section="gamemode">{e(line)}</div>' if line else "")
+
+
 def _rings(x: dict) -> str:
     b = _b()
     g, figures, out = b["ring"], _ring_figures(x), []
@@ -818,7 +860,8 @@ def build(x: dict) -> dict:
             cards.append({"key": cid, "section": cid, "cls": f"card-{cid} {cls}".strip(), "style": "",
                           "html": h3 + _note(note) + guard(plain[cid], x)})
     theme = b["theme"]
-    return {"title": b["title"], "verdict": verdict, "header": header, "rings": guard(_rings, x), "cards": cards,
+    return {"title": b["title"], "verdict": verdict, "header": header, "running_n": len(runs),
+            "rings": guard(_rings, x), "cards": cards,
             "theme": theme, "theme_storage_key": b["theme_storage_key"], "clock": b["clock"],
             "theme_default": b.get("theme_default", ""), "theme_cycle": b.get("theme_cycle") or list(theme),
             "favicon": dict(b["favicon"], arcs=[a["colour"] for a in x["agents"]],

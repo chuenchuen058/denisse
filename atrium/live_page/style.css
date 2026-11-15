@@ -15,6 +15,11 @@ h1{font-size:34px;font-weight:700;letter-spacing:-.5px;margin-top:2px}
 .dot{width:10px;height:10px;border-radius:50%;background:var(--ok);transition:background .3s}
 .dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}.dot.off{background:var(--later)}
 button.theme{background:var(--card);border:1px solid var(--card-border,transparent);backdrop-filter:blur(var(--blur,0px));color:var(--text);border-radius:999px;padding:8px 14px;cursor:pointer;font:inherit;font-size:13px;font-weight:600;box-shadow:0 1px 2px var(--shadow)}
+/* Game mode (orchestra/gamemode.py): the switch beside Theme, its colours from config; while on, one line under the header */
+button.theme.gm.on{background:var(--gm);color:var(--gm-text);border-color:var(--gm)}
+button.theme.gm:disabled{opacity:.6;cursor:progress}
+.top:has(.gm-line){flex-wrap:wrap}
+.top .gm-line{flex-basis:100%;order:3;font-size:13px;font-weight:600;color:var(--sub)}
 .grid,.rings{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
 .rings{margin-bottom:18px}
 .w{background:var(--card);border:1px solid var(--card-border,transparent);-webkit-backdrop-filter:blur(var(--blur,0px));backdrop-filter:blur(var(--blur,0px));border-radius:var(--r);padding:18px 20px;box-shadow:0 1px 3px var(--shadow);min-width:0}
