@@ -141,6 +141,8 @@
   "review_risky": true,
   "review_max_lines": 400,
   "review_timeout_s": 900,
+  "_review_infra_retries": "How many more times a reviewer that printed nothing at all is run straight away (10 Nov 2026: a non-answer is not VERDICT: block). Still nothing after that, a timeout, or a usage limit: the PASS waits as REVIEW-UNAVAILABLE for the auto --merge-only re-run (auto_requeue_review_*), after the reset the limit message names. 0 = no immediate retry.",
+  "review_infra_retries": 1,
   "review_diff_max_chars": 150000,
   "review_risky_patterns": ["^orchestra/", "^atrium/hook\\.py$", "\\.git/hooks", "(^|/)install_[^/]*\\.ps1$"],
   "reviewer_argv": ["claude", "-p", "--permission-mode", "default", "--permission-prompts", "none",

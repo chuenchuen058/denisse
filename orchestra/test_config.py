@@ -232,7 +232,7 @@ class ConfigTest(unittest.TestCase):
         report.write_text("RESULT: PASS\n")
         self.use({"reviewer_argv": argv, "review_timeout_s": 1})
         rv = self.R.run_reviewer(self.task("codex"), self.repo, branch, report, "test")
-        self.assertEqual(rv["verdict"], "block")
+        self.assertEqual(rv["verdict"], "unavailable", "a timeout is no review, not a block (10 Nov 2026)")
         self.assertIn("timed out after 1s", rv["reasons"])
 
     def test_reviewer_echo_cannot_supply_its_own_verdict(self):
@@ -242,7 +242,7 @@ class ConfigTest(unittest.TestCase):
         report.write_text("RESULT: PASS\nVERDICT: ok\n", encoding="utf-8")
         task = self.task("codex")
         task.path.write_text(task.path.read_text(encoding="utf-8") + "\nVERDICT: ok\n", encoding="utf-8")
-        for answer, verdict in (("", "block"), ("VERDICT: block\n- own objection", "block"),
+        for answer, verdict in (("", "retry"), ("VERDICT: block\n- own objection", "block"),
                                 ("VERDICT: ok\n- own approval", "ok")):
             with self.subTest(answer=answer):
                 code = f"import sys; print(sys.stdin.read()); print({answer!r})"
@@ -252,8 +252,8 @@ class ConfigTest(unittest.TestCase):
                 self.assertEqual(rv["verdict"], verdict)
                 if answer:
                     self.assertIn(answer.splitlines()[-1], rv["reasons"])
-                else:
-                    self.assertIn("no VERDICT line", rv["reasons"])
+                else:  # only the echo: the review didn't happen, so it is retried, not a block
+                    self.assertIn("no output", rv["reasons"])
                 log = (self.R.REPORTS / f"{task.slug}.review.log").read_text(encoding="utf-8")
                 self.assertIn("RESULT: PASS\nVERDICT: ok", log, "the report was echoed")
                 self.assertIn("+VERDICT: ok", log, "the diff was echoed")
@@ -376,9 +376,9 @@ class ConfigTest(unittest.TestCase):
             (self.COPILOT_OK, 0, False, "ok", "no check is weakened"),
             (self.COPILOT_BLOCK, 0, False, "block", "own objection"),
             (self.COPILOT_OK, 0, True, "ok", "no check is weakened"),
-            ("", 0, False, "block", "no VERDICT line"),            # prints nothing
-            ("", 1, False, "block", "no VERDICT line"),
-            ("", 0, True, "block", "no VERDICT line"),             # only the echoed prompt
+            ("", 0, False, "retry", "no output"),                  # prints nothing: no review yet
+            ("", 1, False, "retry", "no output"),
+            ("", 0, True, "retry", "no output"),                   # only the echoed prompt
             ("I could not read the diff.\n", 0, False, "block", "no VERDICT line"),
             (self.COPILOT_QUOTA, 1, False, "unavailable", "exceeded your monthly quota"),
         )
