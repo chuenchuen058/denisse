@@ -102,6 +102,9 @@
   "campaign_stopped_by_chuen_status": "stopped by Chuen",
   "_campaign_stopped_by_chuen_status": "Status text shown in a campaign summary when Chuen has ended the active sprint.",
   "auto_push": true,
+  "default_branch": "master",
+  "default_remote": "origin",
+  "_default_branch": "The branch the runner dispatches from, merges onto and pushes when the remote has no HEAD (refs/remotes/<default_remote>/HEAD wins when set; a name that does not exist locally means unknown, and nothing is blocked). While the main checkout is on another branch or a detached HEAD no lane starts and no PASS is merged: it parks for requeue.py <slug> --merge-only (audit 10 Nov 2026, O1: a `git switch` there sent tasks and merges to the wrong branch, and the log still read merged). default_remote: the remote whose HEAD names it, and the one auto_push pushes to.",
 
   "review_risky": true,
   "review_max_lines": 400,

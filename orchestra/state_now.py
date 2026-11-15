@@ -71,6 +71,12 @@ def build() -> str:
     master = R.master_health.state_line(R)  # red master holds every task but bug fixes (audit 10 Nov, H1)
     if master:
         out += [master, ""]
+    try:  # off the default branch: nothing dispatches or merges (audit 10 Nov, O1)
+        off = R.default_branch.off_default(R.REPO, R.C)
+        if off:
+            out += [f"**Default branch:** {off}: no dispatch and no merge until it is switched back", ""]
+    except Exception as e:  # git trouble must never break STATE NOW
+        out += [f"**Default branch:** unknown ({e})", ""]
 
     try:
         import power

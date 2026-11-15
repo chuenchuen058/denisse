@@ -57,12 +57,16 @@ def privacy_problems(repo: Path, upstream: str) -> list[str]:
     return problems
 
 
-def push(repo: Path, remote: str = "origin") -> str:
-    branch = _git(repo, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
-    default = _git(repo, "symbolic-ref", "--short", f"refs/remotes/{remote}/HEAD").stdout.strip()
-    default = default.split("/", 1)[-1] if default else "master"
+def push(repo: Path, cfg: dict | None = None) -> str:
+    """Push the default branch (orchestra/default_branch.py: the remote's HEAD, else config
+    default_branch) to config default_remote, if the checkout is on it and the checks pass."""
+    import default_branch
+    remote = default_branch.remote_of(cfg)
+    default, branch = default_branch.status(repo, cfg)
+    if default is None:
+        return "not pushed: no default branch known (no remote HEAD, and config default_branch doesn't exist)"
     if branch != default:
-        return f"not pushed: main checkout is on {branch!r}, not {default!r}"
+        return f"not pushed: main checkout is on {default_branch.describe(branch)}, not {default!r}"
     gitdir = Path(_git(repo, "rev-parse", "--absolute-git-dir").stdout.strip())
     if any((gitdir / p).exists() for p in ("MERGE_HEAD", "rebase-merge", "rebase-apply")):
         return "not pushed: a merge or rebase is in progress"
