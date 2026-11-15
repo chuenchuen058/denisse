@@ -624,10 +624,11 @@ def _limit_text(lane_log: Path) -> str:
     return "\n".join(out)
 
 
-def detect_limit(lane: str, lane_log: Path) -> str | None:
-    """The matching line if the tail of the lane log shows a usage/rate limit, else None."""
+def detect_limit(lane: str, lane_log: Path, any_lane: bool = False) -> str | None:
+    """The matching line if the tail of the lane log shows a usage/rate limit, else None.
+    any_lane: every lane's patterns, not just this lane's (the reviewer, which gave no verdict)."""
     table = C["limit_patterns"]
-    pats = table.get(lane) or [p for ps in table.values() for p in ps]
+    pats = (not any_lane and table.get(lane)) or [p for ps in table.values() for p in ps]
     for line in reversed(_limit_text(lane_log).splitlines()):
         if any(re.search(p, line, re.I) for p in pats):
             return line.strip()
@@ -1421,8 +1422,11 @@ def pick_reviewer(task: Task, state: dict | None = None) -> dict:
 
 def run_reviewer(task: Task, wt: Path, branch: str, report: Path, why: str, state: dict | None = None) -> dict:
     """A fresh read-only reviewer lane on the actual diff. Returns {verdict, reasons, seconds,
-    cost_usd, lane, pick}. Fails closed: no verdict, a timeout or a missing lane is a block; no
-    independent reviewer available now is 'unavailable' (the PASS is kept for --merge-only)."""
+    cost_usd, lane, pick}. Fails closed: an answer with no verdict or a missing lane is a block.
+    The review not happening is not a block: no output at all is 'retry' (_after_pass runs it
+    again, review_infra_retries times); no independent reviewer now, a sign-in failure, a usage
+    limit (with limited_until, the reset) or a timeout is 'unavailable' (the PASS is kept for
+    --merge-only)."""
     rp = pick_reviewer(task, state)
     rlane = rp["lane"]
     if rlane is None:
@@ -1475,17 +1479,28 @@ def run_reviewer(task: Task, wt: Path, branch: str, report: Path, why: str, stat
     seconds = int(time.time() - start)
     text = log_path.read_text(encoding="utf-8", errors="replace")
     cost = lane_result(log_path).get("cost_usd")
-    if timed_out:
-        return {"verdict": "block", "reasons": f"reviewer timed out after {timeout}s", "seconds": seconds,
+    if timed_out:  # not a judgement on the diff; waits for a --merge-only re-run (another
+        # review_timeout_s now would not fit the tick's time budget, see _timeout_ceiling_s)
+        return {"verdict": "unavailable", "reasons": f"reviewer timed out after {timeout}s", "seconds": seconds,
                 "cost_usd": cost, "lane": rlane, "pick": rp["why"]}
     verdict, reasons = parse_verdict(text, prompt_bounds=prompt_bounds)
     if verdict is None and detect_auth(rlane, log_path):
         return {"verdict": "unavailable", "reasons": auth_hit(detect_auth(rlane, log_path)),
                 "seconds": seconds, "cost_usd": cost, "lane": rlane, "pick": rp["why"]}
-    if verdict is None and detect_limit(rlane, log_path):
-        # 4 Nov 00:30: the reviewer hit the 5-hour limit and a good PASS was parked as "blocked"
-        return {"verdict": "unavailable", "reasons": detect_limit(rlane, log_path)[:300],
+    # The lane's own patterns, then every lane's: on 10 Nov 01:53 claude's "You've hit your 5-hour
+    # limit" matched none of claude's, and the PASS was parked as "no VERDICT line".
+    hit = verdict is None and (detect_limit(rlane, log_path) or detect_limit(rlane, log_path, any_lane=True))
+    if hit:
+        # 4 Nov 00:30: the reviewer hit the 5-hour limit and a good PASS was parked as "blocked".
+        # 10 Nov 01:53: the reset time was not kept, so nothing waited for it. limited_until is
+        # when the message says to come back, else limit_default_min, as for a limited lane.
+        until = parse_limit_until(hit) or now() + dt.timedelta(minutes=C["limit_default_min"])
+        return {"verdict": "unavailable", "reasons": f"reviewer {rlane} limited until {until:%Y-%m-%d %H:%M}: {hit}"[:300],
+                "limited_until": until.isoformat(), "message": hit[:300],
                 "seconds": seconds, "cost_usd": cost, "lane": rlane, "pick": rp["why"]}
+    if verdict is None and not reasons.strip():  # no output at all: the review didn't happen
+        return {"verdict": "retry", "reasons": "reviewer gave no output", "seconds": seconds,
+                "cost_usd": cost, "lane": rlane, "pick": rp["why"]}
     if verdict is None:
         return {"verdict": "block", "reasons": "reviewer gave no VERDICT line: " + reasons[-300:],
                 "seconds": seconds, "cost_usd": cost, "lane": rlane, "pick": rp["why"]}
@@ -2099,11 +2114,24 @@ def _after_pass(task: Task, state: dict, ts: dict, entry: dict, wt: Path, branch
     why_risky = risk(branch) if C.get("review_risky", True) else None
     if why_risky:
         log(f"review {task.slug}: {why_risky}")
-        rv = run_reviewer(task, wt, branch, report, why_risky, state)
-        rv["spent"] = charge(state, task, rv["seconds"], rv.pop("cost_usd", None), lane=rv.get("lane") or task.lane)
-        rv["why"] = why_risky
-        log(f"review {task.slug}: {rv['verdict']} by {rv.get('lane') or 'no lane'} after {rv['seconds']}s "
-            f"({rv['spent']}); reviewer pick: {rv.get('pick', '')}")
+        # "retry" (the reviewer printed nothing) is not a verdict: run the reviewer again up to
+        # review_infra_retries times, then wait like a reviewer that couldn't run.
+        for tries_left in range(int(C["review_infra_retries"]), -1, -1):
+            rv = run_reviewer(task, wt, branch, report, why_risky, state)
+            rv["spent"] = charge(state, task, rv["seconds"], rv.pop("cost_usd", None), lane=rv.get("lane") or task.lane)
+            rv["why"] = why_risky
+            log(f"review {task.slug}: {rv['verdict']} by {rv.get('lane') or 'no lane'} after {rv['seconds']}s "
+                f"({rv['spent']}); reviewer pick: {rv.get('pick', '')}")
+            if rv["verdict"] != "retry" or not tries_left:
+                break
+            log(f"review {task.slug}: no verdict ({rv['reasons']}); trying again")
+        if rv["verdict"] == "retry":
+            rv["verdict"] = "unavailable"
+        if rv.get("limited_until") and rv.get("lane"):
+            # The reviewer lane waits for its reset like a limited task lane: the auto re-queue
+            # (and any task routed to that lane) holds off until then.
+            state.setdefault("lanes", {})[rv["lane"]] = {"limited_until": rv["limited_until"],
+                                                        "since": now().isoformat(), "message": rv.get("message", "")}
     else:
         rv = {"verdict": "skipped", "why": "review_risky is off" if not C.get("review_risky", True)
               else "not risky"}
@@ -2450,8 +2478,8 @@ def _auto_requeue_review(state: dict | None) -> list[str]:
             continue
         rp = pick_reviewer(task, state)
         lane = rp.get("lane")
-        if not lane or not reviewer_slot_free(lane):
-            continue
+        if not lane or lane_limited(state, lane) or not reviewer_slot_free(lane):
+            continue  # a limited reviewer (even an override one) is waited for, not retried
         _set_header(task_file, header, str(tries + 1))  # count before the move: a refusal still counts
         if str(HERE) not in sys.path:
             sys.path.insert(0, str(HERE))

@@ -106,6 +106,7 @@
   "review_risky": true,
   "review_max_lines": 400,
   "review_timeout_s": 900,
+  "review_infra_retries": 1,
   "review_diff_max_chars": 150000,
   "review_risky_patterns": ["^orchestra/", "^atrium/hook\\.py$", "\\.git/hooks", "(^|/)install_[^/]*\\.ps1$"],
   "reviewer_argv": ["claude", "-p", "--permission-mode", "default", "--permission-prompts", "none",
