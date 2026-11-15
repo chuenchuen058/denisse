@@ -38,6 +38,11 @@ class FreshProcessTest(unittest.TestCase):
         self.logged = []
         self._log = mock.patch.object(runner, "log", self.logged.append)
         self._log.start()
+        # In a full discover run `runner` may already be imported (and reloaded) by another test
+        # module with its own temp repo; the fresh child must write where this runner looks.
+        self._env = mock.patch.dict(os.environ, {"ORCHESTRA_REPO": str(runner.REPO)})
+        self._env.start()
+        self.addCleanup(self._env.stop)
 
     def tearDown(self):
         self._log.stop()
