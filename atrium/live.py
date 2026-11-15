@@ -4,7 +4,8 @@ Reads the same tables `atrium snapshot` builds (snapshot.tables, nothing collect
 twice), shapes them into the page's rows (agents + needs you, where each agent is working and
 who is about to collide (atrium/cursors.py), today's timeline, progress, and the v3 mission
 board built and rendered by atrium/board.py) and pushes a new copy down a server-sent event stream whenever a watched file
-changes. Binds loopback only. Read-only but for one POST, the Do next card's Done / Snooze
+changes. Binds loopback only. One more GET gives a single task's details for the page's
+drawer (atrium/interact.py). Read-only but for one POST, the Do next card's Done / Snooze
 (atrium/suggest.py); building the page writes nothing, and nothing runs while no tab holds
 the stream open. Every port, interval, path, label and
 colour: atrium/config.json "live".
@@ -77,7 +78,7 @@ def _timeline(state: dict, running: list[dict], now: dt.datetime) -> list[dict]:
             rows.append({"lane": h.get("lane", "?"), "start": round(_hours(start, midnight), 3),
                          "end": round(_hours(end, midnight), 3), "result": h.get("result") or "",
                          "cls": c["classes"].get(h.get("result"), c["default_class"]),
-                         "task": titles.get(slug, slug)[:n]})
+                         "task": titles.get(slug, slug)[:n], "id": slug})
     for r in running:
         if not r["task"]:
             continue
@@ -85,7 +86,7 @@ def _timeline(state: dict, running: list[dict], now: dt.datetime) -> list[dict]:
         if since is None:
             since = now - dt.timedelta(minutes=r["minutes"])
         rows.append({"lane": r["lane"], "start": round(_hours(since, midnight), 3), "end": None,
-                     "result": "", "cls": "run", "task": r["task"]})
+                     "result": "", "cls": "run", "task": r["task"], "id": r["id"]})
     rows.sort(key=lambda b: b["start"])
     return rows
 
@@ -337,6 +338,13 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/data":
             v, data = self.hub.get()
             return self._send(200, payload(data, v).encode("utf-8"), "application/json; charset=utf-8")
+        if path == _c()["board"]["interactive"]["drawer"]["path"]:  # one task's drawer: read-only
+            from urllib.parse import parse_qs
+            from . import interact
+            tid = (parse_qs(self.path.partition("?")[2]).get("id") or [""])[0]
+            found, html_text = interact.task_detail(tid)
+            return self._send(200 if found else 404, json.dumps({"html": html_text}, ensure_ascii=False).encode("utf-8"),
+                              "application/json; charset=utf-8")
         page = HERE / _c()["page_dir"]
         name = "index.html" if path in ("/", "") else path.lstrip("/")
         f = (page / name).resolve()
