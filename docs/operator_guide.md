@@ -160,6 +160,24 @@ only `resume` undoes them — no tick, watchdog or logon clears a pause):
   and shows in `status`.
 - **Hold one task** = change its `Queue: auto` back to `Queue: draft`.
 
+**Game mode** (`orchestra/gamemode.py`; the hub's "Game mode" button beside Theme, or the
+`g` key there) frees the laptop for a game and puts everything back afterwards:
+
+```commands
+.venv\Scripts\python.exe -m orchestra.gamemode status
+.venv\Scripts\python.exe -m orchestra.gamemode on
+.venv\Scripts\python.exe -m orchestra.gamemode off
+```
+
+- **on** = pause (unless you had already), kill the running sessions the way emergency-stop
+  does and park them as "paused for game mode" (branches kept), unload every Ollama model,
+  and disable Denisse's own scheduled tasks that are enabled (the list:
+  `orchestra/config.json` "gamemode"). While it is on, a tick, the night job, the hourly
+  digest and Don's consults do nothing, and the hub page rebuilds nothing.
+- **off** = undo exactly that: resume (unless you had paused first; refused after a campaign
+  deadline, like `resume`), requeue the parked tasks for a full re-run, re-enable only the
+  tasks it disabled. Pressing either twice changes nothing.
+
 A **campaign** (`.review/campaign.json`) is a time-boxed raise of the limits — the Max-plan
 sprint is Claude ×3 and a $400/day cap until Wed 4 Nov 2026 18:00 London. At its `stop_at`
 the runner goes back to `config.json`'s values by itself; nothing needs editing. STATE NOW

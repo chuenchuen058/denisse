@@ -10,6 +10,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from atrium import conf, context, live  # noqa: E402
+import no_window  # noqa: E402  pythonw: no console window for git and the like
+
+no_window.install()
 
 
 def _log(msg: str) -> None:

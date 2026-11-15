@@ -9,9 +9,25 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from atrium import conf, digest, handoff  # noqa: E402
+import no_window  # noqa: E402  pythonw: the hourly run opens no console window for its children
+
+no_window.install()
+
+
+def game_mode() -> str | None:
+    """Why not to run now: Chuen is playing (orchestra/gamemode.py); the next hour after it runs."""
+    try:
+        from orchestra import gamemode
+        return gamemode.CFG["tick_result"] if gamemode.is_on() else None
+    except Exception:  # noqa: BLE001 -- unknown: run as usual
+        return None
 
 
 def main(argv=None) -> int:
+    why = game_mode()
+    if why:
+        print(f"skipped: {why}")
+        return 0
     try:
         msg, code = digest.run(), 0
     except Exception:  # noqa: BLE001 -- logged; the next hour tries again

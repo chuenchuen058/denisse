@@ -287,6 +287,19 @@ def render_note(result: dict, q: str, reason: str, name: str, cfg: dict, when: s
                               caveats=caveats, question=q, how=how or cfg["how"]["model"])
 
 
+def _gamemode():
+    """orchestra/gamemode.py beside this file, however this module was imported; None if absent."""
+    try:
+        from orchestra import gamemode
+        return gamemode
+    except ImportError:
+        try:
+            import gamemode
+            return gamemode
+        except ImportError:
+            return None
+
+
 def before_lane(task, wt: Path, repo: Path, log=print, rule: dict | None = None, busy=None,
                 sleep=time.sleep) -> str:
     """Consult the tutor if the config rule says so, write `.review/don.md` in the
@@ -294,6 +307,10 @@ def before_lane(task, wt: Path, repo: Path, log=print, rule: dict | None = None,
     isn't consulted or the tutor couldn't answer). `rule`: the runner's config (its
     consult_* keys win over the files'); `busy`/`sleep` are for tests. Never raises."""
     try:
+        gamemode = _gamemode()  # Chuen is playing: no model is loaded into the GPU for an opinion
+        if gamemode and gamemode.is_on(repo / ".review"):
+            log(f"CONSULT {task.slug}: skipped ({gamemode.CFG['tick_result']})")
+            return ""
         cfg = load()
         rule = {**rules(), **{k: v for k, v in (rule or {}).items() if k in RULE_KEYS}}
         text = Path(task.path).read_text(encoding="utf-8", errors="replace")

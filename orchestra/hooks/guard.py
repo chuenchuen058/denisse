@@ -10,7 +10,8 @@ Real limits live here, not in the allow list (Thomas, 31 Oct: `Bash(python:*)` a
     command naming the main checkout -> denied
   * the campaign controls (.review/campaign.json, .review/control.json, orchestra/campaign_seed.json)
     and `campaign.py pause|resume|stop|emergency-stop|disable-schedule` -> denied: a worker may
-    not move the deadline, the concurrency or the spend cap, nor resume what Chuen paused
+    not move the deadline, the concurrency or the spend cap, nor resume what Chuen paused;
+    likewise game mode (.review/gamemode.json, `gamemode on|off`)
 Every call appends to <worktree>/.review/hook.log, so the runner can tell the hook loaded.
 Fails open on its own errors (a broken guard must not stall a run), and that is logged too.
 This is a guard rail, not a sandbox: `python -c` can still do anything Python can.
@@ -40,12 +41,13 @@ BASH_DENY = [
 
 # Campaign controls belong to Chuen (orchestra/campaign.py). Matched by name anywhere, so a
 # worker's own worktree copy is refused too: it has no business editing one.
-CONTROL_FILES = re.compile(r"(^|/)\.review/(campaign|control)\.json$|(^|/)campaign_seed\.json$", re.I)
-CONTROL_NAMES = re.compile(r"\b(campaign|control)\.json\b|\bcampaign_seed\.json\b", re.I)
+CONTROL_FILES = re.compile(r"(^|/)\.review/(campaign|control|gamemode)\.json$|(^|/)campaign_seed\.json$", re.I)
+CONTROL_NAMES = re.compile(r"\b(campaign|control|gamemode)\.json\b|\bcampaign_seed\.json\b", re.I)
 WRITE_HINT = re.compile(r">|\btee\b|\b(cp|mv|rm|del|copy|move|touch|truncate|ren|rename)\b|\bsed\s+-i|"
                         r"Set-Content|Add-Content|Out-File|Copy-Item|Move-Item|Remove-Item|New-Item|"
                         r"write_text|write_bytes|open\(|json\.dump|os\.replace|os\.rename|unlink|shutil", re.I)
-CONTROL_CLI = re.compile(r"campaign(\.py)?[\"']?\s+(pause|resume|stop|emergency-stop|disable-schedule)\b", re.I)
+CONTROL_CLI = re.compile(r"campaign(\.py)?[\"']?\s+(pause|resume|stop|emergency-stop|disable-schedule)\b"
+                         r"|gamemode(\.py)?[\"']?\s+(on|off)\b", re.I)  # game mode too (orchestra/gamemode.py)
 
 
 HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n.*?\n\s*\2\s*(?=\n|$)", re.S)
