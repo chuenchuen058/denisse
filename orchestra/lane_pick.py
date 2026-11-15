@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -297,6 +298,39 @@ def choose(ask: Ask, cfg: dict, live: Live, pool: list[str] | None = None) -> Pi
         else:
             moved = "picked"
     return Pick(lane, why, rows, True, moved)
+
+
+def same_model(a: str, b: str) -> bool:
+    """True when two model names mean the same model: equal, or one is a whole word of the other
+    or a run of whole words of the other (an alias such as a family name against a full model id)."""
+    norm = lambda s: "-" + "-".join(w for w in re.split(r"[^a-z0-9]+", (s or "").lower()) if w) + "-"
+    a, b = norm(a), norm(b)
+    if a == "--" or b == "--":
+        return False
+    return a in b or b in a
+
+
+def model_fallback(author: str | None, author_models: list[str], cfg: dict, live: Live,
+                   pool: list[str]) -> tuple[str | None, str]:
+    """(model, why) for reviewing in the author's own lane with a different model, used when no
+    other reviewer lane can run. model None: no fallback (why says why not). The models, their
+    order and the switch are reviewer_model_fallback_on / reviewer_model_fallback; a model the
+    author ran with (same_model) is never picked."""
+    if not cfg.get("reviewer_model_fallback_on"):
+        return None, "model fallback off"
+    if not author or author not in pool:
+        return None, f"author lane {author or '?'} is not a reviewer lane"
+    models = [str(m) for m in ((cfg.get("reviewer_model_fallback") or {}).get(author) or []) if str(m).strip()]
+    if not models:
+        return None, f"no reviewer_model_fallback for {author}"
+    blocked = availability(author, Ask(slug="", asked=author, work=""), cfg, live, False, "")
+    if blocked:
+        return None, f"{author} {blocked}"
+    ran = [m for m in author_models if m]
+    for m in models:
+        if not any(same_model(m, r) for r in ran):
+            return m, f"author {author}/{'/'.join(ran) or 'default model'}"
+    return None, f"every reviewer_model_fallback model for {author} is one the author ran with"
 
 
 def table(rows: list[dict]) -> str:

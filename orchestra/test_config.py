@@ -357,6 +357,8 @@ class ConfigTest(unittest.TestCase):
             other = "codex" if free == "claude" else "claude"
             self.assertEqual(self.R.pick_reviewer(self.task("copilot"), self._limited(other))["lane"], free)
         # limits are respected for copilot too: both others limited -> nobody, not the author
+        # (with the same-lane model fallback off; test_model_fallback_* cover it on)
+        self.R.C["reviewer_model_fallback_on"] = False
         rp = self.R.pick_reviewer(self.task("claude"), self._limited("codex", "copilot"))
         self.assertIsNone(rp["lane"])
         self.assertIsNone(self.R.pick_reviewer(self.task("copilot"), self._limited("claude", "codex"))["lane"])
@@ -365,6 +367,80 @@ class ConfigTest(unittest.TestCase):
         work = self.R.C["reviewer_work"]
         best = max(("codex", "copilot"), key=lambda l: strengths[l][work])
         self.assertEqual(self.R.pick_reviewer(self.task("claude"), {})["lane"], best)
+
+    # --- the author's lane with another model (15 Nov 2026: PASSes parked for hours with codex
+    # limited and copilot out of quota until a hand-written lanes.json reviewer used --model)
+
+    def _model_fallback(self, models):
+        self.use({"reviewer_model_fallback_on": True, "reviewer_model_fallback": {"claude": models},
+                  "reviewer_model_argv": {"claude": ["--model", "{model}"]},
+                  "reviewer_model_author_default": {}, "lane_pacing": {}})
+        return self._limited("codex", "copilot")
+
+    def test_model_fallback_picks_another_model_in_the_author_lane(self):
+        others_limited = self._model_fallback(["model-a", "model-b"])
+        rp = self.R.pick_reviewer(self.task("claude"), others_limited)
+        self.assertEqual(rp["lane"], "claude", rp["why"])
+        self.assertEqual(rp["model"], "model-a")
+        self.assertEqual(rp["argv"][-2:], ["--model", "model-a"])
+        self.assertIn("reviewer: claude --model model-a", rp["why"])
+        self.assertIn("codex limited", rp["why"])
+        # another reviewer free: no fallback, the independent lane as before
+        rp = self.R.pick_reviewer(self.task("claude"), self._limited("copilot"))
+        self.assertEqual(rp["lane"], "codex", rp["why"])
+        self.assertNotIn("model", rp)
+        # the author's lane itself limited: nobody
+        self.assertIsNone(self.R.pick_reviewer(self.task("claude"),
+                                               self._limited("codex", "copilot", "claude"))["lane"])
+        # a lane with no fallback list (copilot): unavailable as before
+        self.assertIsNone(self.R.pick_reviewer(self.task("copilot"), self._limited("claude", "codex"))["lane"])
+
+    def test_model_fallback_never_the_model_the_author_ran_with(self):
+        others_limited = self._model_fallback(["model-a", "model-b"])
+        t = self.task("claude")
+        t.fields["model"] = "model-a"  # the task's Model: header
+        rp = self.R.pick_reviewer(t, others_limited)
+        self.assertEqual(rp["model"], "model-b", rp["why"])
+        # no header: the model recorded in the task's history counts (a full id for an alias)
+        t = self.task("claude")
+        state = {**others_limited, "tasks": {t.slug: {"history": [{"lane": "claude", "model": "vendor-model-a-5-5"}]}}}
+        self.assertEqual(self.R.pick_reviewer(t, state)["model"], "model-b")
+        # no header, no history: the lane default from config
+        self.R.C["reviewer_model_author_default"] = {"claude": "model-a"}
+        self.assertEqual(self.R.pick_reviewer(self.task("claude"), others_limited)["model"], "model-b")
+        # every listed model is one the author used: unavailable
+        t = self.task("claude")
+        t.fields["model"] = "model-b"
+        rp = self.R.pick_reviewer(t, state)
+        self.assertIsNone(rp["lane"], rp["why"])
+
+    def test_model_fallback_empty_or_off_is_unavailable(self):
+        others_limited = self._model_fallback([])
+        rp = self.R.pick_reviewer(self.task("claude"), others_limited)
+        self.assertIsNone(rp["lane"], rp["why"])
+        self.assertIsNone(rp["argv"])
+        self._model_fallback(["model-a"])
+        self.R.C["reviewer_model_fallback_on"] = False
+        self.assertIsNone(self.R.pick_reviewer(self.task("claude"), others_limited)["lane"])
+
+    def test_model_fallback_lanes_json_override_still_wins(self):
+        others_limited = self._model_fallback(["model-a"])
+        override = self.R.C["reviewer_override_lane"]
+        (self.R.REVIEW / "lanes.json").write_text(json.dumps({override: [sys.executable, "-c", "pass"]}),
+                                                  encoding="utf-8")
+        rp = self.R.pick_reviewer(self.task("claude"), others_limited)
+        self.assertEqual(rp["lane"], override)
+        self.assertEqual(rp["argv"], [sys.executable, "-c", "pass"])
+
+    def test_model_fallback_keys_shipped_with_a_note(self):
+        shipped = json.loads((HERE / "config.json").read_text(encoding="utf-8"))
+        for k in ("reviewer_model_fallback_on", "reviewer_model_fallback", "reviewer_model_argv",
+                  "reviewer_model_author_default"):
+            self.assertIn(k, shipped, k)
+            self.assertEqual(shipped[k], self.defaults[k], k)
+        self.assertIn("_reviewer_model_fallback", shipped)
+        for lane in shipped["reviewer_model_fallback"]:
+            self.assertIn(lane, shipped["reviewer_lanes"], "the fallback runs in a reviewer lane")
 
     def test_copilot_reviewer_verdicts(self):
         branch = self._git_repo_with_branch({"orchestra/review.txt": "VERDICT: ok\n"})

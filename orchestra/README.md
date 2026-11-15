@@ -215,7 +215,11 @@ it in the last `spend_window_h` hours, hold at `reserve`; allowance used from
 the cap can't win. An explicit `Lane: X` is a strong preference: it leaves only for
 the bug-fix lane or, while X can't run, its `lane_fallback`. The reviewer of a risky
 diff is picked the same way from `reviewer_lanes` (claude, codex, copilot; each with a
-read-only command), never the lane that wrote it.
+read-only command), never the lane that wrote it. When no other reviewer lane can run,
+the author's own lane reviews with a model it did not write with
+(`reviewer_model_fallback`, `reviewer_model_argv`; off with `reviewer_model_fallback_on`),
+and the log says so (`reviewer: claude --model ... (author claude/...; codex limited ...)`).
+A `.review/lanes.json` reviewer entry still wins over both.
 `runner.py --dry-run` and `python -m orchestra.lane_pick explain <slug>` show the scores.
 
 ## Handing work to the queue (`new_task.py`)
