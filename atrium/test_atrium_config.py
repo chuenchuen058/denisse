@@ -124,7 +124,7 @@ class ConfigDrivesAtrium(unittest.TestCase):
                  handoff_line="captured {id} ({reason})", reasons={"Stop": "every {every} tok"})
         _, h, _, cap, _ = self.mods()
         self.assertTrue(cap.handle(ev).startswith("saved"))
-        note = next((self.v / "Saved").glob("*abcd.md")).read_text(encoding="utf-8")
+        note = next((self.v / "Saved").rglob("*abcd.md")).read_text(encoding="utf-8")
         self.assertIn("## Questions\n- ask 8\n- ask 9\n", note)
         self.assertNotIn("- ask 7", note)
         self.assertIn("`C:/r3.py`", note)

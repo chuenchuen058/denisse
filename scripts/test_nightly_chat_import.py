@@ -73,7 +73,7 @@ class NightlyChatImportTest(unittest.TestCase):
 
     def notes(self):
         chats = self.vault / "Calendar" / "Chats"
-        return sorted(p.name for p in chats.glob("*.md")) if chats.exists() else []
+        return sorted(p.relative_to(chats).as_posix() for p in chats.rglob("*.md")) if chats.exists() else []
 
     def state(self):
         return json.loads((self.vault / "Dev" / "chat-import-state.json").read_text(encoding="utf-8"))

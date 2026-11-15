@@ -26,7 +26,7 @@
        "section": "Before planning anything about Chuen", "known_only": true},
       {"title": "Active right now", "note": "hot.md", "section": "Active right now", "bullets": true},
       {"title": "Waiting on Chuen", "note": "hot.md", "section": "Waiting on Chuen", "bullets": true},
-      {"title": "STATE NOW", "note": "STATE NOW.md", "body": true, "strip_heading": "STATE NOW"},
+      {"title": "STATE NOW", "note": "Denisse/STATE NOW.md", "body": true, "strip_heading": "STATE NOW"},
       {"title": "Settled (latest)", "note": "Atlas/Settled.md", "body": true, "bullets": true, "last": 12},
       {"title": "Today's handoff ({today})", "note": "Calendar/Handoff-{today}.md", "bullets": true, "last": 15}
     ]
@@ -70,7 +70,8 @@
     "default_project": "home",
     "ellipsis": "…",
     "reasons": {"Stop": "every {every:,} tokens", "PreCompact": "before compaction", "SessionEnd": "session end"},
-    "note_name": "{day} {project} {id}.md",
+    "note_name": "{month}/{day} {project} {id}.md",
+    "_note_name": "{month} = the month folder of {day} (\"months\" -> \"folder\"), so each session note lands in Calendar/Sessions/<YYYY-MM>/.",
     "front_matter": ["name: Session-{id}",
                      "description: Claude Code session in {project} on {day}, saved automatically.",
                      "updated: {today}", "type: session", "status: done", "tags: [session, generated]",
@@ -169,9 +170,16 @@
     "activity_lanes": ["claude", "codex"]
   },
 
+  "months": {
+    "_note": "Machine-written logs (Calendar/Chats, Calendar/Sessions) live in one subfolder per month (vault tidy, 15 Nov 2026). folder = strftime pattern of the month folder; dated_name = the date a log's file name starts with (group 1, YYYY-MM-DD). Lookups (already imported? today's note?) search the base folder and every month folder.",
+    "folder": "%Y-%m",
+    "dated_name": "^(\\d{4}-\\d{2}-\\d{2})\\b"
+  },
+
   "chatlog": {
     "_note": "The day's chat note and the one handoff line per save, shared by `python -m atrium digest` and `python -m atrium hub-save` (was .review/hub_digest.py). Each writer appends under its own heading, so neither touches the other's entries. Only the chat note and the handoff note are committed. {date} = YYYY-MM-DD, {time} = time_format.",
-    "note": "Calendar/Chats/{date} claude hub.md",
+    "note": "Calendar/Chats/{month}/{date} claude hub.md",
+    "_note": "{month} = the month folder of {date} (\"months\"). A day note still at the old flat path (before scripts/tidy_vault_logs.py ran) is appended to where it is.",
     "time_format": "%H:%M",
     "new_note": "---\nname: \"{date} claude hub\"\ndescription: \"Digest of the Claude hub chat (the one chat Chuen uses to run Denisse, Orchestra, Don and UROP) and of the laptop side on {date}, saved as it goes.\"\nupdated: {date}\ntype: chat\nsource: claude-hub\ndate: {date}\ntags: [chat, claude, hub]\n---\n\n# {date} Claude hub\n",
     "never_write": [".obsidian"],
@@ -219,6 +227,15 @@
       "match_sections": ["## What was asked"]
     },
     "dry_run_sample": 5,
+    "_title": "A chat note's name is '<date> <source> <title>'. skip = patterns (matched at the start of an ask, case-insensitive) of machine preambles that are not the request: the AGENTS.md/instructions block an agent CLI sends first, and the context blocks around it. The title is the first ask that is not skipped; when a skipped preamble names an Orchestra worktree (task_from_preamble, group 1), that task's name is the title instead. Trimmed to words words and max_chars characters. untitled = when nothing is left.",
+    "title": {
+      "skip": ["#?\\s*AGENTS\\.md instructions", "<INSTRUCTIONS>", "INSTRUCTIONS\\s+#", "<environment_context>",
+               "<user_instructions>", "<external_codex_apps", "#\\s*Files mentioned by the user", "#\\s*Shared context for"],
+      "task_from_preamble": "denisse-wt[\\\\/]\\d{4}-\\d{2}-\\d{2}T\\d{4}-([^\\s\\\\/<>]+)",
+      "words": 10,
+      "max_chars": 60,
+      "untitled": "Untitled chat"
+    },
     "sample_line": "  {chat} -> {links}",
     "report": "{chats} chat note(s) {verb} a Related line ({already} already had one, {empty} with nothing to link, {locked_chats} skipped by protection); {days} day note(s) {verb} {lines} Chats line(s) ({locked_days} skipped by protection).",
     "verb_dry": "would get",

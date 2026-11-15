@@ -15,7 +15,7 @@ import datetime as dt
 import subprocess
 from pathlib import Path
 
-from . import conf, handoff
+from . import conf, handoff, months
 
 
 def _c() -> dict:
@@ -23,7 +23,11 @@ def _c() -> dict:
 
 
 def note_path(vault: Path, date: str) -> Path:
-    return vault / _c()["note"].format(date=date)
+    """The day's note in its month folder; a note for that day already in the chats
+    folder or any month folder (one written before the vault tidy) is used where it is."""
+    p = vault / _c()["note"].format(date=date, month=months.folder(date))
+    flat = vault / _c()["note"].format(date=date, month="")  # "a//b" is "a/b" to pathlib
+    return months.find(flat.parent, p.name) or p
 
 
 def _guard(vault: Path, p: Path) -> None:

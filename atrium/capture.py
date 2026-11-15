@@ -23,7 +23,7 @@ import re
 import sys
 from pathlib import Path
 
-from . import conf
+from . import conf, months
 from .context import VAULT
 from . import handoff
 
@@ -118,10 +118,11 @@ def handle(event: dict) -> str:
     meta = {"session": sid, "project": project, "started": s["started"], "tokens": size // BYTES_PER_TOKEN,
             "reason": reason}
     d = digest(tp)
-    SESS_DIR.mkdir(parents=True, exist_ok=True)
     short_id = sid[:c["id_chars"]]
+    day = s["started"][:10]
     note = s["note"] or str(SESS_DIR / c["note_name"].format(
-        day=s["started"][:10], project=re.sub(r"[^A-Za-z0-9 _-]", "", project), id=short_id))
+        day=day, month=months.folder(day), project=re.sub(r"[^A-Za-z0-9 _-]", "", project), id=short_id))
+    Path(note).parent.mkdir(parents=True, exist_ok=True)
     Path(note).write_text(render(meta, d), encoding="utf-8")
     last_ask = _short(d["asks"][-1], c["handoff_ask_chars"]) if d["asks"] else c["handoff_no_ask"]
     handoff.remember(c["handoff_agent"], [c["handoff_line"].format(
