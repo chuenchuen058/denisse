@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from . import funds as _funds
 from . import insiders as _insiders
 
 ROOT = Path(__file__).resolve().parent
@@ -206,10 +207,23 @@ def _deep_merge(base: Any, override: Any) -> Any:
 
 
 def load_config(path: str | Path | None = None) -> dict[str, Any]:
+    """Defaults, then config.json (or `path`). The live config (no `path`) also takes the
+    git-ignored local file (local_config_path, relative to the repo) and the user-agent
+    environment variable (user_agent_env), so the SEC contact is never in the public repo."""
     defaults = _load_json(DEFAULTS_PATH)
     file_path = Path(path) if path is not None else CONFIG_PATH
     payload = _load_json(file_path)
-    return _deep_merge(defaults, payload)
+    cfg = _deep_merge(defaults, payload)
+    if path is None:
+        local = str(cfg.get("local_config_path") or "")
+        if local:
+            overlay = _load_json(ROOT.parent / local)
+            if isinstance(overlay, dict):
+                cfg = _deep_merge(cfg, overlay)
+        env = os.environ.get(str(cfg.get("user_agent_env") or "")) if cfg.get("user_agent_env") else None
+        if env and env.strip():
+            cfg.setdefault("watchlist", {})["edgar_user_agent"] = env.strip()
+    return cfg
 
 
 CONFIG = load_config()
@@ -542,6 +556,8 @@ def snapshot(path: str | Path | None = None, dry_run: bool = False) -> str:
     target = Path(path) if path else Path(CONFIG.get("markets_path", ".review/hub/markets.json"))
     if not dry_run:
         _insiders.refresh(CONFIG)
+        _funds.refresh(CONFIG, force=False)  # at most every funds.refresh_hours: 13F filings are quarterly
+        _funds.write_hub(CONFIG)
     data = build_snapshot_data()
     if dry_run:
         print(json.dumps(data, ensure_ascii=False, indent=2))
@@ -655,9 +671,9 @@ def render_weekly_note(snapshot_data: dict[str, Any] | None = None, config: dict
         holding_lines.append(f"- {symbol}: since bought {owned_on} versus ^GSPC")
     lines.extend([
         "",
-        "## Big investors: new filings this week",
+        f"## {_funds.words(cfg).get('weekly_heading', '')}",
         "",
-        "- No 13F-HR changes filed this week.",
+        *_funds.weekly_section(cfg),
         "",
         f"## {(_insiders.settings(cfg).get('words') or {}).get('weekly_heading', '')}",
         "",
