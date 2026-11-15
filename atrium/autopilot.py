@@ -20,7 +20,8 @@ What decides (the model's job, not a keyword list, AGENTS.md Rule 0): each candi
 the local model (config autopilot_classifier "model") with the question in config, answered
 as JSON: is it actionable, repo-only, a bug fix, a title, the files it would touch. If the
 model can't answer, the fallback rule in config applies, and it never says repo-only: the
-task is then a draft. Queue: auto only for repo-only work whose gate can run here; anything
+task is then a draft. Queue: auto only for repo-only work whose gate can run here, on a
+guarded lane with a gate of a known shape (orchestra/unattended.py; GPU busy = the fallback); anything
 else (sends as Chuen, spends, deletes, signs in, touches the vault) is Queue: draft, which
 the runner lists in hot.md "Waiting on Chuen". The task body still tells the lane to stop
 and put such a thing on HUMAN.
@@ -243,8 +244,28 @@ def model_classify(c: Candidate, cfg: dict) -> dict:
     return out
 
 
-def classify_one(c: Candidate, cfg: dict, classify, log) -> dict:
+def gpu_busy(repo: Path, cfg: dict) -> str | None:
+    """Why the GPU is busy now, or None: the consult's own test (orchestra/consult.py gpu_busy:
+    the gpu.lease held by another job, or nvidia-smi at least consult_gpu_busy_pct busy)."""
+    orch = str(ROOT / "orchestra")
+    if orch not in sys.path:
+        sys.path.insert(0, orch)
+    try:
+        import consult
+        rule = {**consult.rules(), **{k: cfg[k] for k in consult.RULE_KEYS if k in cfg}}
+        return consult.gpu_busy(Path(repo), rule, consult.load())
+    except Exception:  # noqa: BLE001 -- no consult data: the model call's own lease still applies
+        return None
+
+
+def classify_one(c: Candidate, cfg: dict, classify, log, repo: Path = ROOT) -> dict:
     if classify is None and cfg["autopilot_classifier"] == "model":
+        busy = gpu_busy(repo, cfg)
+        if busy:  # Denisse or another job has the GPU: no model call now, so the fallback (a draft)
+            log(f"AUTOPILOT GPU busy for {c.key} ({busy}); fallback rule")
+            out = fallback_classify(c, cfg)
+            out["why"] = f"fallback rule (GPU busy: {busy})"
+            return out
         classify = model_classify
     if classify is None:
         return fallback_classify(c, cfg)
@@ -301,6 +322,25 @@ def choose_lane(bugfix: bool, available: dict, load: dict, cfg: dict) -> tuple[s
     if bugfix and want:
         why += f"; a bug fix, but {want} is {available.get(want) or 'not a planner lane'}"
     return lane, why
+
+
+def guarded_choice(lane: str, gate: list[str], available: dict, cfg: dict) -> tuple[str | None, str | None]:
+    """(lane, None) when the autopilot's task may run unattended on `lane`; else (a guarded
+    autopilot lane with allowance, None) if there is one; else (None, why it stays a draft).
+    The rule is orchestra/unattended.py's, which new_task.create() enforces again."""
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from orchestra import unattended
+    source = cfg["autopilot_source"]
+    refused = unattended.problem(source, lane, gate, cfg)
+    if not refused:
+        return lane, None
+    guarded = {str(l).lower() for l in cfg.get("guarded_lanes") or []}
+    for alt in cfg["autopilot_lanes"]:
+        free = alt in available and available[alt] is None
+        if free and alt.lower() in guarded and not unattended.problem(source, alt, gate, cfg):
+            return alt, None
+    return None, refused
 
 
 def make_title(c: Candidate, cls: dict, cfg: dict) -> str:
@@ -406,7 +446,7 @@ def refill(*, cfg: dict, review: Path, repo: Path, vault: Path | None, state: di
             break
         # A held candidate keeps its reading: the model is asked once, not every tick.
         cached = (held.get(c.key) or {}).get("cls")
-        cls = dict(cached) if isinstance(cached, dict) else classify_one(c, cfg, classify, log)
+        cls = dict(cached) if isinstance(cached, dict) else classify_one(c, cfg, classify, log, repo)
         bug = bool(cls.get("bugfix")) or c.bugfix
         if not cls.get("actionable"):
             note(c, "dropped", f"not actionable ({cls.get('why', '?')})")
@@ -438,6 +478,13 @@ def refill(*, cfg: dict, review: Path, repo: Path, vault: Path | None, state: di
         why_queue = ("auto: repo-only, gate runnable" if auto else
                      "draft: " + ("gate not runnable here" if cls.get("repo_only") else
                                   "not shown to be repo-only (may send, spend, delete, sign in or touch the vault)"))
+        if auto:  # unattended only on a guarded lane with a gate of a known shape (audit 10 Nov, O5)
+            safe, refused = guarded_choice(lane, gate, available, cfg)
+            if safe is None:
+                auto, why_queue = False, f"draft: {refused}"
+            elif safe != lane:
+                lane_why += f"; guarded lane {safe}, not {lane} (not guarded)"
+                lane = safe
         kind = cfg["bugfix_kinds"][0] if bug and cfg["bugfix_kinds"] else "work"
         path = create(title, body=make_body(c, cfg, f"{lane_why}; {why_queue}"), gate=gate, kind=kind, lane=lane,
                       auto=auto, source=cfg["autopilot_source"], review=review, weight=cfg["autopilot_weight"])
