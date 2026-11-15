@@ -118,7 +118,9 @@ merge is reviewed again unless it changes master exactly as the approved one did
 that can't run (conflict, dirty main checkout) parks it with the reason. Whenever the runner
 deletes or resets a `review/<slug>` branch that has commits not on master, it first saves them
 as `refs/keep/<slug>-<UTC time>` (config `keep_ref_prefix`) and logs `KEPT ...`; recover with
-`git branch <name> refs/keep/<slug>-<time>`.
+`git branch <name> refs/keep/<slug>-<time>`. A plain (not `--merge-only`) re-queue always
+starts the lane on a new branch from current master, never on the old one: the old commits go
+to a keep ref and the lane's prompt names it (config `rerun_from_master`, `rerun_keep_note`).
 
 A PASS parked only because no reviewer could run (`The PASS stands` in its why file) needs
 none of this: at the start of each tick the runner re-queues it merge-only by itself once a
