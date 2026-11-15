@@ -745,7 +745,7 @@
       },
       {
         "name": "draft_email",
-        "_note": "Email drafts (email_drafts.py, 2026-11-07). Denisse never sends: this saves a draft (classic Outlook's Drafts, else a .eml file Outlook opens unsent, plus the clipboard) and he presses Send. A write tool, offered only when his words are about email (tool_policy.json groups.email) and confirmed before it runs (safety.RISKY_TOOLS).",
+        "_note": "Email drafts (email_drafts.py, 2026-11-07). Denisse never sends: this saves a draft (his Outlook Drafts through Microsoft Graph once he has signed in with scripts/graph_signin.py, else classic Outlook's Drafts, else a .eml file Outlook opens unsent, plus the clipboard) and he presses Send. A write tool, offered only when his words are about email (tool_policy.json groups.email) and confirmed before it runs (safety.RISKY_TOOLS).",
         "description": "Prepare an email DRAFT for Chuen to check and send himself -- 'draft a reply to this email', 'send my CV and cover letter to my personal tutor', 'email Prof X saying I can't make Thursday'. It never sends anything. Recipients: pass exactly who he named (an email address, or the person as he said it, e.g. 'my personal tutor'); for a reply, leave 'to' empty and pass the email he is replying to as replying_to. Never invent an address; if the result asks who it goes to, ask him. Attachments: the files as he named them, in his words ('my latest CV', 'my cover letter'), or full paths from find_files. When it says the draft is ready, tell him where it is and that he presses Send; never say it was sent.",
         "parameters": {
           "type": "object",

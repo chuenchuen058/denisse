@@ -2,11 +2,30 @@
   "_doc": "Live settings for the draft_email tool (email_drafts.py). Same shape as email_drafts.defaults.json, which documents every key; a key missing or invalid here falls back to the default there.",
 
   "backends": {
-    "_doc": "Tried in this order; the first that saves wins. outlook_desktop: classic Outlook's COM object (Outlook.Application) -- the draft is saved into his Drafts folder, never sent; absent on this machine on 2026-11-07 (only the new Outlook app, which has no local automation). eml_file: a .eml file in drafts_folder that Outlook opens as an unsent message, plus the text on the clipboard.",
-    "order": ["outlook_desktop", "eml_file"],
+    "_doc": "Tried in this order; the first that saves wins. graph: a draft in his real Outlook mailbox through Microsoft Graph, once he has signed in (see graph). outlook_desktop: classic Outlook's COM object (Outlook.Application) -- the draft is saved into his Drafts folder, never sent; absent on this machine on 2026-11-07 (only the new Outlook app, which has no local automation). eml_file: a .eml file in drafts_folder that Outlook opens as an unsent message, plus the text on the clipboard.",
+    "order": ["graph", "outlook_desktop", "eml_file"],
     "outlook_progid": "Outlook.Application",
     "outlook_mail_item": 0,
     "outlook_where": "your Outlook Drafts folder"
+  },
+
+  "graph": {
+    "_doc": "Microsoft Graph backend: a real draft in his (KCL) Outlook mailbox. Chuen signs in ONCE himself with scripts/graph_signin.py (a device code typed into Microsoft's own sign-in page); Denisse never signs in, she only reuses the token that leaves in token_cache (DPAPI-encrypted for this Windows user when encrypt_cache is on and pywin32 is there; private, under memory/). Not signed in, or the sign-in expired: this backend fails and the next one saves the draft. client_id: the public client app the sign-in is for -- the default is Microsoft's own 'Microsoft Graph Command Line Tools' app (no app registration needed; a tenant may still ask for admin consent); swap in your own Entra app registration's ID (public client, delegated Mail.ReadWrite) if KCL blocks it. Empty switches the backend off. authority: 'organizations' = any work/school account. account: which signed-in account to use (empty = the first). scopes: Mail.ReadWrite creates drafts; Mail.Send is deliberately never asked for. Attachments up to max_inline_attachment_bytes in total go in the create request; bigger ones go through an upload session in upload_chunk_bytes pieces (a multiple of 327680).",
+    "client_id": "14d82eec-204b-4c2f-b7e8-296a70dab67e",
+    "authority": "https://login.microsoftonline.com/organizations",
+    "account": "",
+    "scopes": ["Mail.ReadWrite"],
+    "token_cache": "memory/graph_token_cache.bin",
+    "encrypt_cache": true,
+    "api": "https://graph.microsoft.com/v1.0",
+    "create_path": "/me/messages",
+    "upload_path": "/me/messages/{id}/attachments/createUploadSession",
+    "body_content_type": "Text",
+    "max_inline_attachment_bytes": 3000000,
+    "upload_chunk_bytes": 3276800,
+    "timeout_seconds": 30,
+    "max_error_chars": 300,
+    "where": "your Outlook Drafts folder ({account})"
   },
 
   "eml": {
@@ -90,6 +109,10 @@
     "folder_not_set": "Refused: no draft made. No folder is set for his {kind} (email_drafts.json attachments). Tell him, and ask which file to attach.",
     "writer_failed": "Error: couldn't write the email ({error}). No draft was made.",
     "save_failed": "Error: couldn't save the draft anywhere ({error}). Nothing was sent.",
+    "graph_not_set_up": "Graph drafts are off (email_drafts.json graph.client_id is empty)",
+    "graph_not_signed_in": "not signed in to Microsoft Graph -- Chuen runs scripts/graph_signin.py once",
+    "graph_expired": "the Microsoft Graph sign-in has expired or was refused ({error}) -- Chuen runs scripts/graph_signin.py again",
+    "graph_failed": "Graph couldn't {what} (HTTP {status}): {detail}",
     "list_joiner": ", "
   }
 }
