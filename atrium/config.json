@@ -450,17 +450,23 @@
       "theme": {
         "light": {"bg": "#f2f2f7", "card": "#ffffff", "text": "#1c1c1e", "sub": "#6e6e73", "line": "#e5e5ea",
                   "ok": "#34c759", "warn": "#ff9f0a", "bad": "#ff3b30", "later": "#c7c7cc", "on-accent": "#ffffff",
-                  "shadow": "rgba(0,0,0,.06)"},
+                  "shadow": "rgba(0,0,0,.06)",
+                  "accent": "#007aff", "glow": "rgba(0,0,0,.12)", "edge": "rgba(0,122,255,.35)",
+                  "hover": "rgba(0,0,0,.045)", "scrim": "rgba(0,0,0,.28)", "panel": "#ffffff"},
         "dark": {"bg": "#000000", "card": "#1c1c1e", "text": "#f5f5f7", "sub": "#98989d", "line": "#2c2c2e",
                  "ok": "#34c759", "warn": "#ff9f0a", "bad": "#ff3b30", "later": "#48484a", "on-accent": "#ffffff",
-                 "shadow": "rgba(0,0,0,.4)"},
+                 "shadow": "rgba(0,0,0,.4)",
+                 "accent": "#0a84ff", "glow": "rgba(10,132,255,.22)", "edge": "rgba(10,132,255,.5)",
+                 "hover": "rgba(255,255,255,.06)", "scrim": "rgba(0,0,0,.55)", "panel": "#1c1c1e"},
         "midnight": {"bg": "#070b1a", "card": "rgba(20,28,62,.55)", "text": "#e8ecff", "sub": "#8b93b8",
                      "line": "rgba(120,140,255,.16)", "ok": "#34d399", "warn": "#fbbf24", "bad": "#f87171",
                      "later": "#3b4266", "on-accent": "#ffffff", "shadow": "rgba(0,0,0,.45)",
                      "card-border": "rgba(130,150,255,.16)", "blur": "14px",
+                     "accent": "#4f6bff", "glow": "rgba(79,107,255,.32)", "edge": "rgba(140,160,255,.5)",
+                     "hover": "rgba(130,150,255,.1)", "scrim": "rgba(3,6,18,.6)", "panel": "#0e1533",
                      "bg-image": "radial-gradient(1100px 620px at 12% -12%, rgba(70,96,255,.38), transparent 62%), radial-gradient(900px 520px at 100% 0%, rgba(46,70,220,.24), transparent 60%), radial-gradient(800px 600px at 50% 120%, rgba(30,50,170,.22), transparent 60%), linear-gradient(180deg, #0b1230 0%, #070b1a 65%)"}
       },
-      "_theme_default": "The theme a viewer gets before choosing one with the Theme button (Chuen, 15 Nov 2026: the navy glass look from an Instagram dashboard reel). \"\" = follow the system's light/dark. theme_cycle: the order the Theme button steps through. Extra theme keys (bg-image, card-border, blur) are optional; light and dark leave them unset.",
+      "_theme_default": "The theme a viewer gets before choosing one with the Theme button (Chuen, 15 Nov 2026: the navy glass look from an Instagram dashboard reel). \"\" = follow the system's light/dark. theme_cycle: the order the Theme button steps through. Extra theme keys (bg-image, card-border, blur) are optional; light and dark leave them unset. The interactions' colours are theme keys too (15 Nov 2026): accent = the filter's sliding pill, glow = a hovered card's shadow, edge = its border, hover = a hovered row, scrim = the veil behind the drawer, panel = the drawer and the tooltips (opaque, so text stays readable over the glass).",
       "theme_default": "midnight",
       "theme_cycle": ["midnight", "light", "dark"],
       "theme_storage_key": "atrium-theme-2",
@@ -502,7 +508,7 @@
       },
       "lane_card": {"max_tasks": 2, "bar_full_pct": 100},
       "up_next": {"max": 4, "priority_order": ["urgent", "high", "normal", "low"]},
-      "_tree": "What to work on: one branch per group. source hot = the bullets of a hot.md section (struck ~~lines~~ are done; the block between skip_block markers is Orchestra's own copy of the queue and is left out); source queue = Orchestra's task files by status. classes: u urgent, s open, l later, d done (legend, in that order).",
+      "_tree": "What to work on: one branch per group. source hot = the bullets of a hot.md section (struck ~~lines~~ are done; the block between skip_block markers is Orchestra's own copy of the queue and is left out); source queue = Orchestra's task files by status. classes: u urgent, s open, l later, d done (legend, in that order). A group's key is what the filter's segments name it by (interactive.filter.segments[].groups).",
       "tree": {
         "note": "hot.md",
         "item_chars": 70,
@@ -514,9 +520,9 @@
         "open_class": "s",
         "done_class": "d",
         "groups": [
-          {"title": "Waiting on you", "source": "hot", "section": "Waiting on Chuen"},
-          {"title": "From your reels", "source": "hot", "section": "From your reels"},
-          {"title": "Orchestra", "source": "queue",
+          {"key": "you", "title": "Waiting on you", "source": "hot", "section": "Waiting on Chuen"},
+          {"key": "reels", "title": "From your reels", "source": "hot", "section": "From your reels"},
+          {"key": "orchestra", "title": "Orchestra", "source": "queue",
            "statuses": [{"status": "queued", "label": "Queued", "class": "s"},
                         {"status": "parked", "label": "Parked", "class": "u"},
                         {"status": "draft", "label": "Drafts to approve", "class": "l"}],
@@ -609,6 +615,90 @@
                                "row": "{who} ({role}) · {date} · {shares} sh at {price} = ${value}",
                                "shares_fmt": "{:,.0f}", "price_fmt": "{:,.2f}", "value_fmt": "{:,.0f}",
                                "empty": "No officer or director open-market purchases over the threshold."}},
+      "_interactive": "What makes the page interactive (Chuen, 15 Nov 2026: 'a little interactive'). atrium/interact.py renders the HTML and atrium/live_page/app.js acts on the selectors, keys and words below; nothing is written anywhere, and under prefers-reduced-motion nothing animates.",
+      "interactive": {
+        "_about": "vars: sent to the page as CSS variables --ix-<name> (how long each movement takes, how far a hovered card lifts, the drawer's width, how long a tooltip waits). expand: which cards open in place when clicked (a CSS selector) and what the opened lane card lists. drawer: which rows open the side drawer (any element carrying a task id), the read-only path atrium/live.py serves it on, where a task's files are under .review ({id} = the task id; first match wins, newest first), which report fields are shown and in what order not_task = name endings in those folders that are a task's report or review, never a task; (hide = read as a field so its lines are not glued to the one above, but not shown; skip_values = a field that only says this is left out). filter: the segmented control over 'What to work on' (groups = tree group keys; [] = all) and the quick filter (rows = what it hides when the text is not in them). count: numbers inside these elements run to their new value. tips: a tooltip for each element matching selector. keys: one key each (KeyboardEvent.key).",
+        "vars": {"hover": "160ms", "lift": "2px", "expand": "240ms", "pill": "280ms", "drawer": "260ms",
+                 "drawer-w": "460px", "ring": "700ms", "tip": "120ms", "tip-wait": "350ms"},
+        "expand": {
+          "cards": "[data-section=\"lane\"]",
+          "max_files": 6, "max_log": 5, "log_chars": 140, "log_time": "%H:%M", "max_runs": 4, "max_queued": 4,
+          "words": {"files": "Files touched", "log": "Latest from the runner", "earlier": "Finished today",
+                    "queued": "Queued for this lane"}
+        },
+        "drawer": {
+          "rows": "[data-task]",
+          "path": "/task",
+          "id_chars": 200,
+          "id_refuse": ["/", "\\", ".."],
+          "files": {
+            "task": [{"glob": "queue/{id}.md", "status": "In the queue"},
+                     {"glob": "parked/{id}.md", "status": "Parked"},
+                     {"glob": "archive/*/{id}.md", "status": "Finished"}],
+            "not_task": [".report.md", ".review.md"],
+            "report": ["archive/*/{id}.report.md", "parked/{id}.report.md", "reports/{id}.report.md"],
+            "why": ["parked/{id}.why.txt"]
+          },
+          "headers": ["Priority", "Lane", "Model"],
+          "field_chars": 600,
+          "body_chars": 700,
+          "time_today": "%H:%M",
+          "time_other": "%d %b %H:%M",
+          "run_rows": [
+            {"label": "Agent", "fields": ["agent", "model"]},
+            {"label": "Finished", "fields": ["finished", "took", "spent"]},
+            {"label": "Runner's gate", "fields": ["gate"]},
+            {"label": "Reviewer", "fields": ["reviewer", "reviewer_by", "reviewer_why"]},
+            {"label": "Premise", "fields": ["premise"]}
+          ],
+          "report": {
+            "max_items": 10,
+            "skip_values": ["none", "none."],
+            "fields": [
+              {"name": "RESULT", "label": "Result", "hide": true},
+              {"name": "HUMAN", "label": "Needs you"},
+              {"name": "DONE", "label": "Done"},
+              {"name": "NOT DONE", "label": "Not done"},
+              {"name": "GATE", "label": "Gate"},
+              {"name": "PREMISE", "label": "Premise", "hide": true},
+              {"name": "ODD", "label": "Odd"},
+              {"name": "COMMITS", "label": "Commits"}
+            ]
+          },
+          "page_words": ["close", "loading", "failed"],
+          "words": {
+            "close": "Close · Esc", "loading": "Reading…", "failed": "Could not read this task",
+            "not_found": "No such task in .review", "join": " · ", "header": "{name} {value}",
+            "took": "{m} min", "run": "Last run", "run_n": "Last run · of {n}", "report": "Report",
+            "no_report": "no report file", "parked": "Why it is parked", "task": "The task", "cut": " …",
+            "no_run": "has not run yet", "more": "+{n} more"
+          }
+        },
+        "filter": {
+          "storage_key": "atrium-filter",
+          "default": "all",
+          "segments": [
+            {"key": "all", "label": "All", "groups": []},
+            {"key": "you", "label": "Waiting on you", "groups": ["you"]},
+            {"key": "orchestra", "label": "Orchestra", "groups": ["orchestra"]},
+            {"key": "reels", "label": "Reels", "groups": ["reels"]}
+          ],
+          "rows": ".tree li:not(:has(li)), [data-key=\"up_next\"] li, [data-key=\"credits\"] li, [data-key=\"today\"] li, [data-key=\"activity\"] li",
+          "quick": {"placeholder": "Filter…  /", "label": "Filter tasks by text"}
+        },
+        "count": {"selector": ".rg .v, .big", "ms": 500},
+        "tips": [
+          {"selector": "[data-ring=\"pass\"]", "text": "Runs that ended PASS today, out of every run that finished today."},
+          {"selector": "[data-ring=\"slots\"]", "text": "Lane slots running a task right now, out of the slots Orchestra may use."},
+          {"selector": "[data-ring=\"ready\"]", "text": "Agents that are neither limited nor down, out of the agents configured."},
+          {"selector": "[data-ring=\"spend\"]", "text": "Today's notional cost of Orchestra's runs, against the daily cap."},
+          {"selector": "[data-key=\"tokens\"] .cells > div:nth-child(1)", "text": "Every token counted today: input, output, cache reads and cache writes. Fresh = input + output only."},
+          {"selector": "[data-key=\"tokens\"] .cells > div:nth-child(2)", "text": "The same count over the last week, today included."},
+          {"selector": "[data-key=\"tokens\"] .cells > div:nth-child(3)", "text": "The same count since the first of this month."},
+          {"selector": "[data-key=\"tokens\"] .cells > div:nth-child(4)", "text": "The same count since the all-time start date; the records may begin later."}
+        ],
+        "keys": {"theme": "t", "filter": "/", "close": "Escape"}
+      },
       "words": {
         "verdict_ok": "Agents OK",
         "verdict_stuck": "{n} agent(s) stuck",

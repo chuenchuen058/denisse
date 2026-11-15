@@ -129,3 +129,70 @@ h3+.reset{border-top:0}
 .why-these summary{cursor:pointer}
 .why-these ul{padding-left:18px;margin-top:6px}
 @media (max-width:900px){.do-next{grid-template-columns:1fr}}
+/* Interactions (atrium/interact.py, app.js). Every duration and size arrives as --ix-* and every
+   colour (accent, glow, edge, hover, scrim, panel) from the theme: atrium/config.json "live" ->
+   "board" -> "interactive" and "theme". Only transform, opacity, colour and one grid row are
+   animated, and only while something is hovered or clicked: nothing here runs on the 1 s tick. */
+.w{transition:transform var(--ix-hover) ease,box-shadow var(--ix-hover) ease,border-color var(--ix-hover) ease}
+.w:hover{transform:translateY(calc(-1*var(--ix-lift)));border-color:var(--edge,var(--card-border,transparent));box-shadow:0 10px 30px var(--glow,var(--shadow));z-index:2}
+.w:focus-visible,.seg button:focus-visible,.q:focus-visible,.drawer .x:focus-visible{outline:2px solid var(--accent,var(--sub));outline-offset:2px}
+.w li,.where .row,.lg,.reset{border-radius:10px;transition:background-color var(--ix-hover) ease}
+.card-activity li:hover,.where .row:hover,[data-task]:hover{background-color:var(--hover,color-mix(in srgb,var(--text) 6%,transparent))}
+[data-task]{cursor:pointer}
+.w li[data-task],.lg[data-task]{margin-inline:-8px;padding-inline:8px}
+.tree li[data-task]{margin-inline:0;padding-inline:16px 0;background:none}
+.tree li[data-task]:hover>.nd{box-shadow:0 0 0 1px var(--edge,var(--line))}
+.nd{transition:box-shadow var(--ix-hover) ease}
+[data-off]{display:none!important}
+.tree li:has(>ul):not(:has(>ul>li:not([data-off]))){display:none}
+/* a lane card opens in place */
+[role=button]{cursor:pointer}
+.agent h3{display:flex;justify-content:space-between;align-items:center}
+.agent h3::after{content:"";width:6px;height:6px;margin-right:2px;border-right:1.5px solid;border-bottom:1.5px solid;opacity:.6;transform:rotate(45deg);transition:transform var(--ix-expand) ease}
+.agent.open h3::after{transform:rotate(225deg)}
+.agent.open .task{display:block}
+.agent.open .file{white-space:normal;overflow-wrap:anywhere}
+.more{display:grid;grid-template-rows:0fr;margin-top:-8px;visibility:hidden;transition:grid-template-rows var(--ix-expand) ease,visibility 0s var(--ix-expand)}
+.more>div{overflow:hidden;min-height:0}
+.agent.open .more{grid-template-rows:1fr;margin-top:0;visibility:visible;transition-delay:0s}
+.mh{font-size:11.5px;font-weight:600;color:var(--sub);text-transform:uppercase;letter-spacing:.3px;margin:10px 0 4px}
+.more .none{padding:2px 0;font-size:12.5px}
+.lg{display:flex;gap:8px;font-size:12.5px;padding:3px 0}
+.lg .t{color:var(--sub);flex:none;font-variant-numeric:tabular-nums}
+.lg .x{min-width:0;overflow-wrap:anywhere;margin-right:auto}
+.lg .why{flex:none}
+/* the filter: one pill slides under the chosen segment */
+.tools{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.seg{position:relative;display:inline-flex;padding:3px;border-radius:999px;background:var(--hover,color-mix(in srgb,var(--text) 6%,transparent));border:1px solid var(--card-border,transparent)}
+.seg button{position:relative;z-index:1;background:none;border:0;color:var(--sub);font:inherit;font-size:13px;font-weight:600;padding:6px 14px;border-radius:999px;cursor:pointer;transition:color var(--ix-pill) ease}
+.seg button:hover{color:var(--text)}
+.seg button.on{color:var(--on-accent)}
+.seg .slide{position:absolute;left:0;top:3px;bottom:3px;width:0;border-radius:999px;background:var(--accent,var(--sub));box-shadow:0 2px 14px var(--glow,transparent);transition:transform var(--ix-pill) cubic-bezier(.2,.8,.2,1),width var(--ix-pill) cubic-bezier(.2,.8,.2,1)}
+.seg .slide.still{transition:none}
+.q{background:var(--hover,color-mix(in srgb,var(--text) 6%,transparent));border:1px solid var(--card-border,transparent);color:var(--text);border-radius:999px;padding:7px 14px;font:inherit;font-size:13px;width:190px;max-width:100%;transition:border-color var(--ix-hover) ease,width var(--ix-pill) ease}
+.q::placeholder{color:var(--sub)}
+.q:focus{width:260px;border-color:var(--edge,var(--sub))}
+/* tooltips */
+[data-tip]{position:relative}
+[data-tip]::after{content:attr(data-tip);position:absolute;left:14px;top:calc(100% + 6px);width:max-content;max-width:min(280px,80vw);padding:8px 11px;border-radius:12px;background:var(--panel,var(--card));color:var(--text);border:1px solid var(--card-border,var(--line));box-shadow:0 8px 24px var(--shadow);font-size:12px;font-weight:500;line-height:1.4;letter-spacing:0;text-transform:none;white-space:normal;pointer-events:none;z-index:5;opacity:0;visibility:hidden;transform:translateY(-4px);transition:opacity var(--ix-tip) ease,transform var(--ix-tip) ease,visibility 0s var(--ix-tip)}
+[data-tip]:hover::after{opacity:1;visibility:visible;transform:none;transition-delay:var(--ix-tip-wait)}
+/* the drawer: one task's run, report and reviewer */
+.scrim{position:fixed;inset:0;background:var(--scrim,transparent);z-index:20;opacity:0;visibility:hidden;transition:opacity var(--ix-drawer) ease,visibility 0s var(--ix-drawer)}
+.scrim.on{opacity:1;visibility:visible;transition-delay:0s}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(var(--ix-drawer-w),100vw);background:var(--panel,var(--card));border-left:1px solid var(--card-border,var(--line));box-shadow:-18px 0 48px var(--shadow);padding:20px 24px 28px;overflow:auto;z-index:21;transform:translateX(100%);visibility:hidden;transition:transform var(--ix-drawer) cubic-bezier(.2,.8,.2,1),visibility 0s var(--ix-drawer)}
+.drawer.on{transform:none;visibility:visible;transition-delay:0s}
+.drawer .x{background:var(--hover,color-mix(in srgb,var(--text) 6%,transparent));border:1px solid var(--card-border,transparent);color:var(--sub);border-radius:999px;padding:6px 12px;cursor:pointer;font:inherit;font-size:12px;font-weight:600;margin-bottom:16px}
+.drawer .x:hover{color:var(--text)}
+.drawer h2{font-size:22px;font-weight:700;letter-spacing:-.3px;margin:4px 0 6px;overflow-wrap:anywhere}
+.drawer h2 .why{font-size:12.5px;font-weight:700;letter-spacing:0;margin-left:10px;vertical-align:middle}
+.drawer section{margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}
+.drawer h3{font-size:12px;color:var(--sub);font-weight:600;text-transform:uppercase;letter-spacing:.3px;margin-bottom:8px}
+.drawer h4{font-size:13px;font-weight:700;margin:10px 0 3px}
+.drawer p,.drawer li,.drawer dd{font-size:13.5px;overflow-wrap:anywhere}
+.drawer ul{padding-left:18px}
+.drawer li{padding:2px 0}
+.drawer dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 14px}
+.drawer dt{color:var(--sub);font-size:13px}
+.drawer .pre{white-space:pre-wrap;color:var(--sub);font-size:12.5px}
+.rg circle{transition:stroke-dasharray var(--ix-ring) ease}
+@media (prefers-reduced-motion:reduce){.w:hover{transform:none}}

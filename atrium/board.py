@@ -19,7 +19,7 @@ import subprocess
 import time
 import urllib.request
 
-from . import conf, context, snapshot, usage_ledger as tokens
+from . import conf, context, interact, snapshot, usage_ledger as tokens
 
 _cache: dict[str, tuple[float, object]] = {}
 
@@ -256,7 +256,8 @@ def _lane_card(a: dict, x: dict, runs: list[dict]) -> str:
     badge = (f' <span class="badge">{e(w["slots"].format(busy=u.get("busy", 0), slots=u["slots"]))}</span>'
              if u.get("slots", 0) > 1 else "")
     return (f'<h3>{e(a["label"])}</h3><div class="name">{e(state)}{badge}</div>{body}'
-            + (f'<div class="meta end">{e(w["join"].join(meta))}</div>' if meta else ""))
+            + (f'<div class="meta end">{e(w["join"].join(meta))}</div>' if meta else "")
+            + interact.lane_detail(a, x, mine))  # what the card opens to show when clicked
 
 
 def _seat(k: dict, colours: dict, cls: str) -> str:
@@ -324,7 +325,8 @@ def _up_next(x: dict) -> str:
     for t in rows:
         a = by_lane.get(t["lane"], {})
         why = x["words"]["join"].join(s for s in (a.get("label", t["lane"]), a.get("why", "")) if s)
-        items.append(f'<li><span class="t">{e(t["task"])}</span><span class="why">{e(why)}</span></li>')
+        items.append(f'<li data-task="{e(t["id"])}"><span class="t">{e(t["task"])}</span>'
+                     f'<span class="why">{e(why)}</span></li>')
     return f'<ul>{"".join(items)}</ul>'
 
 
@@ -358,7 +360,7 @@ def _tree(x: dict) -> str:
                 if not rows:
                     continue
                 leaves = "".join(
-                    "<li>" + _node(g["urgent_class"] if t["priority"] in g["urgent_priorities"] else s["class"],
+                    f'<li data-task="{e(t["id"])}">' + _node(g["urgent_class"] if t["priority"] in g["urgent_priorities"] else s["class"],
                                    _cut(t["task"], c["item_chars"]), labels.get(t["lane"], t["lane"])) + "</li>"
                     for t in rows[:g["max_per_status"]])
                 more = len(rows) - g["max_per_status"]
@@ -366,11 +368,13 @@ def _tree(x: dict) -> str:
                     leaves += f'<li>{_node(s["class"], x["live_words"]["more_files"].format(n=more))}</li>'
                 kids.append(f'<li>{_node(s["class"], s["label"], str(len(rows)))}<ul>{leaves}</ul></li>')
         if kids:
-            branches.append(f'<ul><li><span class="nd">{e(g["title"])}</span><ul>{"".join(kids)}</ul></li></ul>')
+            branches.append(f'<ul data-group="{e(interact.group_key(g))}"><li><span class="nd">{e(g["title"])}</span>'
+                            f'<ul>{"".join(kids)}</ul></li></ul>')
     if not branches:
         return _none(x["words"])
     legend = "".join(_node(l["class"], l["text"]) for l in c["legend"])
-    return f'<div class="tree">{"".join(branches)}</div><div class="leg">{legend}</div>'
+    return (f'{interact.filter_bar()}<div class="tree">{"".join(branches)}</div>'
+            f'{interact.filter_empty(x["words"])}<div class="leg">{legend}</div>')
 
 
 def _tile(name: str, dot: str, s: str = "", m: str = "", f: str = "") -> str:
@@ -482,7 +486,8 @@ def _credits(x: dict) -> str:
              "spent": spent if any(ch.isdigit() for ch in spent) else c["spent_unknown"],
              "tokens": _fmt_n(_token_sum(h.get("tokens"), tc["all_keys"]), tc)}
         row = (c["row"] if isinstance(h.get("tokens"), dict) else c["row_no_tokens"]).format(**f)
-        items.append(f'<li><span class="t">{e(x["titles"].get(slug, slug))}</span><span class="why">{e(row)}</span></li>')
+        items.append(f'<li data-task="{e(slug)}"><span class="t">{e(x["titles"].get(slug, slug))}</span>'
+                     f'<span class="why">{e(row)}</span></li>')
     return f'<ul>{"".join(items)}</ul>'
 
 
@@ -536,7 +541,9 @@ def _today(x: dict) -> str:
     for r in rows:
         at = c["time"].format(h=int(r["start"]), m=int(round((r["start"] % 1) * 60)) % 60)
         result = r["result"] or (w["result_running"] if r["end"] is None else "")
-        items.append(f'<li><b>{e(at)}</b><span class="t">{e(r["task"])}</span>'
+        task = f' data-task="{e(r["id"])}"' if r.get("id") else ""
+        items.append(f'<li{task}>'
+                     f'<b>{e(at)}</b><span class="t">{e(r["task"])}</span>'
                      f'<span class="why {e(r["cls"])}">{e(result)}</span></li>')
     return f'<ul>{"".join(items)}</ul>'
 
@@ -656,7 +663,8 @@ def build(x: dict) -> dict:
             "favicon": dict(b["favicon"], arcs=[a["colour"] for a in x["agents"]],
                             dot=theme[b["favicon"]["scheme"]][verdict["level"]], dot_r=b["favicon"]["dot"]),
             "cursor_cfg": x["where"]["cursor_cfg"], "bar_full_pct": b["lane_card"]["bar_full_pct"],
-            "words": {k: b["words"][k] for k in ("timer", "timer_limit")}}
+            "words": {k: b["words"][k] for k in ("timer", "timer_limit")},
+            "ix": interact.page_cfg()}
 
 
 def card_html(card: dict) -> str:
