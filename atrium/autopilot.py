@@ -14,7 +14,12 @@ autopilot_sources_off are not read: shipped, not_done / odd / parked, docs/orche
   not_done  NOT DONE lines of recent reports (archive and parked)
   odd       ODD lines of recent reports
   parked    parked tasks (a follow-up, unless the runner parked it waiting on Chuen)
-  waiting   hot.md "Waiting on Chuen" items (not Orchestra's own block, which is generated)
+  waiting   hot.md "Waiting on Chuen" items (not Orchestra's own block, which is generated); off
+            unless config autopilot_waiting_source is true: those lines are Chuen's own errands
+            (15 Nov 2026), and the struck-through ones were already done
+
+From every source, a line struck through (it starts with one of config autopilot_struck_open:
+~~...~~ and the like) or marked done (a regex in autopilot_done_markers) is done, not work.
 
 What decides (the model's job, not a keyword list, AGENTS.md Rule 0): each candidate goes to
 the local model (config autopilot_classifier "model") with the question in config, answered
@@ -90,15 +95,34 @@ def section(text: str, heading: str) -> str:
     return ""
 
 
-def bullets(text: str, empty: list[str]) -> list[str]:
-    """Open bullet lines (a checked `- [x]` is done) that say something."""
+def is_done(s: str, cfg: dict) -> bool:
+    """A bullet's text is done: struck through (it opens with one of config autopilot_struck_open,
+    as hot.md's "~~Send the UROP emails ...~~ sent (Chuen, 10 Nov)") or it matches one of the
+    regexes in autopilot_done_markers (case-insensitive). A marker that will not compile is
+    skipped: it can only ever have kept a line out."""
+    s = s.strip()
+    if any(m and s.startswith(m) for m in cfg.get("autopilot_struck_open") or []):
+        return True
+    for pat in cfg.get("autopilot_done_markers") or []:
+        try:
+            if re.search(pat, s, re.I):
+                return True
+        except re.error:
+            continue
+    return False
+
+
+def bullets(text: str, cfg: dict) -> list[str]:
+    """Open bullet lines that say something: not a checked `- [x]`, not struck through or
+    marked done (is_done), not one of config autopilot_empty_bullets."""
+    empty = cfg["autopilot_empty_bullets"]
     out = []
     for line in text.splitlines():
         m = BULLET.match(line)
         if not m or (m.group(1) or "").lower() == "x":
             continue
         s = m.group(2).strip()
-        if s and s.strip(" .`").lower() not in empty:
+        if s and s.strip(" .`").lower() not in empty and not is_done(s, cfg):
             out.append(s)
     return out
 
@@ -131,7 +155,7 @@ def from_inbox(vault: Path | None, cfg: dict) -> list[Candidate]:
         return []
     note = cfg["autopilot_inbox_note"]
     body = section(_read(vault / note), cfg["autopilot_inbox_heading"])
-    return [Candidate("inbox", note, s) for s in bullets(body, cfg["autopilot_empty_bullets"])]
+    return [Candidate("inbox", note, s) for s in bullets(body, cfg)]
 
 
 def recent_reports(review: Path, cfg: dict, at: dt.datetime) -> list[Path]:
@@ -151,7 +175,7 @@ def from_reports(review: Path, cfg: dict, at: dt.datetime) -> list[Candidate]:
         sec = report_sections(_read(p))
         slug = p.name[: -len(".report.md")]
         for source, name in (("not_done", "NOT DONE"), ("odd", "ODD")):
-            for s in bullets(sec.get(name, ""), cfg["autopilot_empty_bullets"]):
+            for s in bullets(sec.get(name, ""), cfg):
                 out.append(Candidate(source, slug, s, context=f"report {slug}: RESULT {sec['RESULT'] or '?'}",
                                      bugfix=source == "not_done" and sec["RESULT"] in bug_results))
     return out
@@ -185,13 +209,15 @@ def from_waiting(vault: Path | None, cfg: dict) -> list[Candidate]:
     if a != -1 and b > a:  # Orchestra's own generated block: the runner's items, not new work
         body = body[:a] + body[b + len(cfg["autopilot_waiting_skip_close"]):]
     note = cfg["autopilot_hot_note"]
-    return [Candidate("waiting", note, s) for s in bullets(body, cfg["autopilot_empty_bullets"])]
+    return [Candidate("waiting", note, s) for s in bullets(body, cfg)]
 
 
 def candidates(*, cfg, review, vault, state, at) -> list[Candidate]:
     """Every candidate from the sources switched on in config autopilot_sources, in that order,
-    less those in autopilot_sources_off."""
+    less those in autopilot_sources_off, and less "waiting" unless autopilot_waiting_source."""
     off = set(cfg.get("autopilot_sources_off") or [])
+    if not cfg.get("autopilot_waiting_source"):
+        off.add("waiting")
     want = [s for s in cfg["autopilot_sources"] if s not in off]
     out, reports_read = [], False
     for src in want:
@@ -205,6 +231,41 @@ def candidates(*, cfg, review, vault, state, at) -> list[Candidate]:
         elif src == "waiting":
             out += from_waiting(vault, cfg)
     return [c for c in out if c.source in want]
+
+
+def archived_same_title(title: str, review: Path, cfg: dict, at: dt.datetime) -> list[Path]:
+    """Archived tasks (drafts too: any Queue) with this title, from the last
+    autopilot_dedupe_days before `at`. A folder of <review>/archive is dated by the first
+    YYYY-MM-DD in its name (2026-11-15, closed-2026-11-12), else by its files' modified time."""
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from orchestra.new_task import first_title, norm
+    archive = Path(review) / "archive"
+    if not archive.is_dir() or not norm(title):
+        return []
+    cutoff = at - dt.timedelta(days=int(cfg["autopilot_dedupe_days"]))
+    out = []
+    for d in sorted(archive.iterdir()):
+        if not d.is_dir():
+            continue
+        m = re.search(r"\d{4}-\d{2}-\d{2}", d.name)
+        try:
+            day = dt.datetime.fromisoformat(m.group(0)) if m else None
+        except ValueError:
+            day = None
+        if day is not None and day.date() < cutoff.date():
+            continue
+        for p in sorted(d.glob("*.md")):
+            if p.name.endswith(".report.md") or norm(first_title(p)) != norm(title):
+                continue
+            if day is None:
+                try:
+                    if dt.datetime.fromtimestamp(p.stat().st_mtime) < cutoff:
+                        continue
+                except OSError:
+                    continue
+            out.append(p)
+    return out
 
 
 # ---------------------------------------------------------------- deciding
@@ -441,7 +502,7 @@ def refill(*, cfg: dict, review: Path, repo: Path, vault: Path | None, state: di
             log(f"AUTOPILOT dropped {c.source} {c.key}: not actionable ({cls.get('why', '?')}): {c.text[:100]}")
             continue
         title = make_title(c, cls, cfg)
-        same = same_title(title, review)
+        same = same_title(title, review) or archived_same_title(title, review, cfg, at)
         if same:
             note(c, "exists", f"same title as {Path(same[0]).name}")
             log(f"AUTOPILOT not re-created {title!r}: open, parked or done recently ({Path(same[0]).name})")
