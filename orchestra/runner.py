@@ -1456,6 +1456,18 @@ def parse_verdict(text: str, *, prompt_bounds: tuple[str, str] | None = None) ->
     return m.group(1).lower(), m.group(2).strip()[:2000]
 
 
+def author_models(task: Task, state: dict | None) -> list[str]:
+    """The models the author lane wrote this change with, as far as known: the task's Model:
+    header (else reviewer_model_author_default for the lane: the CLI's own default, when set)
+    and the models recorded in its history for that lane."""
+    header = task.fields.get("model", "").strip()
+    out = [header or str((C.get("reviewer_model_author_default") or {}).get(task.lane) or "")]
+    ts = ((state or {}).get("tasks") or {}).get(task.slug) or {}
+    out += [str(h.get("model") or "") for h in ts.get("history") or []
+            if isinstance(h, dict) and h.get("lane") == task.lane]
+    return list(dict.fromkeys(m for m in out if m))
+
+
 def pick_reviewer(task: Task, state: dict | None = None) -> dict:
     """{lane, argv, why} of the reviewer for this task's change: .review/lanes.json's
     reviewer_override_lane entry if there is one, else the best lane of reviewer_lanes by
@@ -1467,12 +1479,26 @@ def pick_reviewer(task: Task, state: dict | None = None) -> dict:
     if custom:
         return {"lane": name, "argv": list(custom), "why": f".review/lanes.json {name!r}"}
     table = C.get("reviewer_lanes") or {}
-    live = lane_live(state if state is not None else load_state())
+    state = state if state is not None else load_state()
+    live = lane_live(state)
     ask = lane_pick.Ask(slug=task.slug, asked="", work=str(C.get("reviewer_work") or ""),
                         author=task.lane)
-    p = lane_pick.choose(ask, C, live, pool=[l for l in table if l in live.lanes])
+    pool = [l for l in table if l in live.lanes]
+    p = lane_pick.choose(ask, C, live, pool=pool)
     if not p.lane or not p.available:
-        return {"lane": None, "argv": None, "why": p.why}
+        # No other lane can review: the author's lane with a model the author didn't run with
+        # (reviewer_model_fallback; 13-15 Nov 2026 PASSes parked for hours with codex limited and
+        # copilot out of quota until a hand-written lanes.json reviewer unblocked them).
+        model, mwhy = lane_pick.model_fallback(task.lane, author_models(task, state), C, live, pool)
+        if model is None:
+            return {"lane": None, "argv": None, "why": f"{p.why}; {mwhy}"}
+        argv = resolve_argv(table[task.lane] or C["reviewer_argv"])
+        if not argv:
+            return {"lane": None, "argv": None, "why": f"{p.why}; {task.lane} reviewer argv unresolved"}
+        extra = (C.get("reviewer_model_argv") or {}).get(task.lane) or []
+        argv = list(argv) + [str(a).replace("{model}", model) for a in extra]
+        why = f"reviewer: {task.lane} {' '.join(str(a).replace('{model}', model) for a in extra)} ({mwhy}; {p.why})"
+        return {"lane": task.lane, "argv": argv, "why": why, "model": model}
     argv = resolve_argv(table[p.lane] or C["reviewer_argv"])
     return {"lane": p.lane, "argv": list(argv) if argv else None, "why": p.why}
 
@@ -1488,6 +1514,8 @@ def run_reviewer(task: Task, wt: Path, branch: str, report: Path, why: str, stat
     commit against the master it was built on, instead of the branch against its merge-base."""
     rp = pick_reviewer(task, state)
     rlane = rp["lane"]
+    if rp.get("model"):
+        log(f"{task.slug}: {rp['why']}"[:500])
     if rlane is None:
         return {"verdict": "unavailable", "reasons": f"no reviewer lane available: {rp['why']}"[:300],
                 "seconds": 0, "cost_usd": None, "lane": None, "pick": rp["why"]}
