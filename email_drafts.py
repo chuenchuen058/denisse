@@ -2,12 +2,15 @@
 Email drafts: "draft a reply to this email", "send my CV and cover letter
 to my personal tutor". Denisse prepares the draft; Chuen presses Send.
 
-Hard rule: nothing here sends. Every backend only SAVES a draft -- classic
-Outlook's Drafts folder when its COM object exists, else a .eml file that
-Outlook opens as an unsent message, plus the text on the clipboard. No
-password, token or sign-in is entered anywhere. (On 2026-11-07 this
-machine had only the new Outlook app: no COM, no local automation; a
-real mailbox draft there needs a Microsoft Graph sign-in, which is his.)
+Hard rule: nothing here sends. Every backend only SAVES a draft -- his
+real Outlook Drafts folder through Microsoft Graph once he has signed in,
+else classic Outlook's Drafts folder when its COM object exists, else a
+.eml file that Outlook opens as an unsent message; plus the text on the
+clipboard. No password is entered anywhere and this module never signs
+in: the one-time Graph sign-in is his (scripts/graph_signin.py), and only
+the token it leaves behind is reused. (On 2026-11-07 this machine had only
+the new Outlook app: no COM, no local automation; Chuen chose the Graph
+sign-in over installing classic Outlook on 2026-11-10.)
 
 What the draft holds is never guessed:
   - recipients come from what he said (an address, or a saved contact's
@@ -269,7 +272,151 @@ def _save_eml(draft: dict) -> str:
     return CONFIG["eml"]["where"].format(path=path)
 
 
-BACKENDS = {"outlook_desktop": _save_outlook, "eml_file": _save_eml}
+# -- Microsoft Graph: a draft in his real (KCL) mailbox -------------------------
+#
+# Delegated sign-in with MSAL, done ONCE by Chuen himself with
+# scripts/graph_signin.py (a device code he types into Microsoft's own page).
+# This module never signs in: it only reads the token that left behind. No
+# cached account, or a refresh token that no longer works, is an error here,
+# so the next backend (.eml) saves the draft instead. The scope asked for is
+# Mail.ReadWrite (create a draft); Mail.Send is never requested and no
+# /send endpoint is ever called.
+
+def _graph_cfg() -> dict:
+    return CONFIG["graph"]
+
+
+def _cache_path() -> str:
+    return _path(_graph_cfg()["token_cache"])
+
+
+def _protect(data: bytes, unprotect: bool = False) -> bytes:
+    """DPAPI (this Windows user only) when pywin32 has it; plain bytes otherwise."""
+    if not _graph_cfg()["encrypt_cache"]:
+        return data
+    try:
+        import win32crypt
+    except ImportError:
+        return data
+    if unprotect:
+        return win32crypt.CryptUnprotectData(data, None, None, None, 0)[1]
+    return win32crypt.CryptProtectData(data, None, None, None, None, 0)
+
+
+def load_token_cache():
+    """The MSAL token cache from disk (empty if there is none yet)."""
+    import msal
+    cache = msal.SerializableTokenCache()
+    path = _cache_path()
+    if os.path.isfile(path):
+        with open(path, "rb") as f:
+            cache.deserialize(_protect(f.read(), unprotect=True).decode("utf-8"))
+    return cache
+
+
+def save_token_cache(cache) -> None:
+    if not cache.has_state_changed:
+        return
+    path = _cache_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(_protect(cache.serialize().encode("utf-8")))
+
+
+def cached_accounts(cache) -> list:
+    """Signed-in accounts, read offline from the cache (no network)."""
+    return list(cache.search(cache.CredentialType.ACCOUNT))
+
+
+def graph_app(cache):
+    import msal
+    g = _graph_cfg()
+    if not g["client_id"].strip():
+        raise RuntimeError(_w("graph_not_set_up"))
+    return msal.PublicClientApplication(g["client_id"], authority=g["authority"],
+                                        token_cache=cache)
+
+
+def _graph_token(app=None) -> tuple[str, str]:
+    """(access token, account name) from the cache, silently, or raise."""
+    cache = load_token_cache() if app is None else None
+    if cache is not None and not cached_accounts(cache):
+        raise RuntimeError(_w("graph_not_signed_in"))   # before any network
+    app = app or graph_app(cache)
+    accounts = app.get_accounts()
+    if not accounts:
+        raise RuntimeError(_w("graph_not_signed_in"))
+    want = _graph_cfg()["account"].strip().lower()
+    account = next((a for a in accounts if a.get("username", "").lower() == want), None) \
+        if want else accounts[0]
+    if account is None:
+        raise RuntimeError(_w("graph_not_signed_in"))
+    result = app.acquire_token_silent(_graph_cfg()["scopes"], account=account)
+    if cache is not None:
+        save_token_cache(cache)
+    if not result or "access_token" not in result:
+        raise RuntimeError(_w("graph_expired", error=(result or {}).get("error_description", "")))
+    return result["access_token"], account.get("username", "")
+
+
+def _graph_message(draft: dict) -> dict:
+    return {"subject": draft["subject"],
+            "body": {"contentType": _graph_cfg()["body_content_type"], "content": draft["body"]},
+            "toRecipients": [{"emailAddress": ({"name": n, "address": a} if n else {"address": a})}
+                             for n, a in email.utils.getaddresses(draft["to"])]}
+
+
+def _graph_check(resp, what: str):
+    if resp.status_code >= 400:
+        raise RuntimeError(_w("graph_failed", what=what, status=resp.status_code,
+                              detail=(resp.text or "")[:_graph_cfg()["max_error_chars"]]))
+    return resp
+
+
+def _save_graph(draft: dict, app=None, http=None) -> str:
+    """POST /me/messages makes a draft in his Drafts folder. Never /send."""
+    import base64
+    g = _graph_cfg()
+    token, who = _graph_token(app)
+    http = http or __import__("requests")
+    auth = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    sizes = {p: os.path.getsize(p) for p in draft["attachments"]}
+    inline = sum(sizes.values()) <= g["max_inline_attachment_bytes"]
+    msg = _graph_message(draft)
+    if inline and draft["attachments"]:
+        msg["attachments"] = []
+        for p in draft["attachments"]:
+            with open(p, "rb") as f:
+                msg["attachments"].append({
+                    "@odata.type": "#microsoft.graph.fileAttachment",
+                    "name": os.path.basename(p),
+                    "contentType": mimetypes.guess_type(p)[0] or "application/octet-stream",
+                    "contentBytes": base64.b64encode(f.read()).decode("ascii")})
+    made = _graph_check(http.post(g["api"] + g["create_path"], headers=auth, json=msg,
+                                  timeout=g["timeout_seconds"]), "create the draft").json()
+    if not inline:
+        # Big files: one upload session each, in chunks (no auth header on the
+        # upload URL -- it carries its own token).
+        for p in draft["attachments"]:
+            session = _graph_check(http.post(
+                g["api"] + g["upload_path"].format(id=made["id"]), headers=auth,
+                json={"AttachmentItem": {"attachmentType": "file", "name": os.path.basename(p),
+                                         "size": sizes[p]}},
+                timeout=g["timeout_seconds"]), "start an attachment upload").json()
+            with open(p, "rb") as f:
+                start = 0
+                while start < sizes[p]:
+                    chunk = f.read(g["upload_chunk_bytes"])
+                    end = start + len(chunk) - 1
+                    _graph_check(http.put(session["uploadUrl"], data=chunk, timeout=g["timeout_seconds"],
+                                          headers={"Content-Length": str(len(chunk)),
+                                                   "Content-Range": f"bytes {start}-{end}/{sizes[p]}"}),
+                                 "upload " + os.path.basename(p))
+                    start = end + 1
+    return g["where"].format(account=who)
+
+
+BACKENDS = {"graph": _save_graph, "outlook_desktop": _save_outlook, "eml_file": _save_eml}
 
 
 def _clipboard(text: str) -> None:
