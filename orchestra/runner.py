@@ -1217,18 +1217,33 @@ def remove_worktree(wt: Path, branch: str, delete_branch: bool) -> None:
         git("branch", "-D", branch, check=False)
 
 
+# slug -> the keep ref fresh_worktree saved for this run's old branch; run_lane names it in the
+# prompt (C["rerun_keep_note"]) and drops it.
+RERUN_KEPT: dict[str, str] = {}
+
+
 def fresh_worktree(task: Task) -> tuple[Path, str]:
     """Always a clean start: a retry must not build on the failed attempt's mess. Commits on the
-    old branch that aren't on master are kept under C["keep_ref_prefix"] first, never deleted."""
+    old branch that aren't on master are kept under C["keep_ref_prefix"] first, never deleted,
+    and the new branch starts from current master (C["rerun_from_master"]; 13 Nov 2026 six
+    re-runs were blocked for unrequested changes their stacked old branches carried). With the
+    switch off the lane works on the old branch as it is (still kept first)."""
     branch = f"review/{task.slug}"
     wt = WORKTREES / task.slug
     if wt.exists():
         remove_worktree(wt, branch, delete_branch=False)
     git("worktree", "prune", check=False)
-    keep_unmerged(branch, task.slug, "a fresh worktree")
-    git("branch", "-D", branch, check=False)
+    kept = keep_unmerged(branch, task.slug, "a fresh worktree")
+    RERUN_KEPT.pop(task.slug, None)
     WORKTREES.mkdir(parents=True, exist_ok=True)
-    git("worktree", "add", "-b", branch, str(wt), "HEAD")
+    exists = git("rev-parse", "--verify", "--quiet", f"refs/heads/{branch}", check=False).returncode == 0
+    if exists and not C["rerun_from_master"]:
+        git("worktree", "add", str(wt), branch)
+    else:
+        git("branch", "-D", branch, check=False)
+        git("worktree", "add", "-b", branch, str(wt), "HEAD")
+        if kept:
+            RERUN_KEPT[task.slug] = kept
     link_venv(wt)
     return wt, branch
 
@@ -1816,6 +1831,9 @@ def run_lane(task: Task, wt: Path, report: Path, timeout: int, prov: dict | None
     env.update(ORCHESTRA_TASK=str(local / "task.md"), ORCHESTRA_REPORT=str(local_report),
                ORCHESTRA_WORKTREE=str(wt), ORCHESTRA_MAIN=str(REPO))
     prompt = build_prompt(".review/task.md", ".review/report.md")
+    kept = RERUN_KEPT.pop(task.slug, None)  # fresh_worktree saved the old branch: say where
+    if kept:
+        prompt += C["rerun_keep_note"].format(ref=kept)
     # The study tutor's opinion (consult.py): which tasks is config consult_applies (default every
     # task, any lane); the tutor is asked first, `.review/don.md` written in the worktree and named
     # in the prompt; a busy GPU means the notes-only path, and the log line says which. Advisory:

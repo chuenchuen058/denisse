@@ -27,7 +27,12 @@ import testing_git  # noqa: E402
 # Worker lane: writes FAKE_EDITS ({path: text}) into its worktree, commits, reports PASS.
 FAKE_WORKER = textwrap.dedent("""
     import os, sys, subprocess, pathlib, json
-    sys.stdin.read()
+    prompt = sys.stdin.read()
+    if os.environ.get("FAKE_PROMPT_FILE"):
+        pathlib.Path(os.environ["FAKE_PROMPT_FILE"]).write_text(prompt)
+    if os.environ.get("FAKE_START_FILE"):
+        start = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        pathlib.Path(os.environ["FAKE_START_FILE"]).write_text(start)
     for path, text in json.loads(os.environ.get("FAKE_EDITS", "{}")).items():
         p = pathlib.Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -65,7 +70,8 @@ Do {slug}.
 """
 LIB = 'def greet():\n    return "hi"\n'
 CHECK_LIB = 'import unittest, lib\n\nclass T(unittest.TestCase):\n    def test(self):\n        self.assertEqual(lib.greet(), "hi")\n'
-ENV = ("FAKE_EDITS", "FAKE_VERDICT", "FAKE_REVIEW_FLAG")
+ENV = ("FAKE_EDITS", "FAKE_VERDICT", "FAKE_REVIEW_FLAG", "FAKE_PROMPT_FILE", "FAKE_START_FILE",
+       "ORCHESTRA_RERUN_FROM_MASTER")
 
 
 class IntegrationTest(unittest.TestCase):
@@ -381,6 +387,71 @@ class IntegrationTest(unittest.TestCase):
         tip = self.git("rev-parse", branch)
         self.R.remove_worktree(wt, branch, delete_branch=True)
         self.assertEqual(list(self.keep_refs("gone").values()), [tip])
+
+    # --- a re-run starts from current master (13 Nov 2026: six re-runs blocked for unrequested
+    # changes their old, stacked branches carried)
+
+    def stacked_and_parked(self, slug):
+        """A parked task whose branch carries another task's change, and a master that moved on
+        since: what a plain requeue.py re-run finds. Returns the old branch tip."""
+        task, wt, branch = self.worked(slug, {"other_task.txt": "another task's change"})
+        self.R.remove_worktree(wt, branch, delete_branch=False)
+        (self.R.REPORTS / f"{slug}.md").unlink()
+        self.R.PARKED.mkdir(parents=True, exist_ok=True)
+        task.path.replace(self.R.PARKED / f"{slug}.md")
+        (self.repo / "moved.txt").write_text("master moved on")
+        self.git("add", "moved.txt")
+        self.git("commit", "-qm", "master moved")
+        return self.git("rev-parse", branch)
+
+    def requeue(self, slug, merge_only=False):
+        import requeue
+        Q = importlib.reload(requeue)
+        Q.requeue(slug, "re-run", merge_only=merge_only)
+
+    def test_full_requeue_starts_from_current_master_and_keeps_the_old_branch(self):
+        old_tip = self.stacked_and_parked("redo")
+        master = self.head()
+        self.requeue("redo")
+        prompt, start = self.tmp / "prompt.txt", self.tmp / "start.txt"
+        os.environ["FAKE_PROMPT_FILE"], os.environ["FAKE_START_FILE"] = str(prompt), str(start)
+        self.assertEqual(self.run_tick({"done.txt": "the fresh lane's work"}), "PASS")
+        self.assertEqual(start.read_text(), master, "the lane's branch head was current master")
+        kept = self.keep_refs("redo")
+        self.assertEqual(list(kept.values()), [old_tip], "the old commits are kept under the keep prefix")
+        ref = next(iter(kept))
+        self.assertEqual(self.git("show", f"{ref}:other_task.txt"), "another task's change")
+        self.assertIn(self.R.C["rerun_keep_note"].format(ref=ref), prompt.read_text(),
+                      "the prompt names the keep ref")
+        self.assertEqual((self.repo / "done.txt").read_text(), "the fresh lane's work")
+        self.assertFalse((self.repo / "other_task.txt").exists(), "the old branch's other change never landed")
+        self.assertEqual(self.R.RERUN_KEPT, {}, "the note is used once")
+
+    def test_first_run_prompt_names_no_keep_ref(self):
+        self.add("first")
+        prompt = self.tmp / "prompt.txt"
+        os.environ["FAKE_PROMPT_FILE"] = str(prompt)
+        self.assertEqual(self.run_tick({"done.txt": "x"}), "PASS")
+        self.assertNotIn(self.R.C["keep_ref_prefix"], prompt.read_text())
+
+    def test_switch_off_reruns_on_the_old_branch_still_kept(self):
+        old_tip = self.stacked_and_parked("reuse")
+        self.requeue("reuse")
+        self.R.C["rerun_from_master"] = False
+        start = self.tmp / "start.txt"
+        os.environ["FAKE_START_FILE"] = str(start)
+        self.assertEqual(self.run_tick({"done.txt": "more work"}), "PASS")
+        self.assertEqual(start.read_text(), old_tip, "off: the lane continued the old branch")
+        self.assertEqual(list(self.keep_refs("reuse").values()), [old_tip], "and it was kept first anyway")
+
+    def test_merge_only_requeue_merges_the_old_branch_as_today(self):
+        old_tip = self.stacked_and_parked("mo-old")
+        self.requeue("mo-old", merge_only=True)
+        self.assertEqual(self.run_tick({"done.txt": "a fresh lane's work"}), "PASS")
+        self.assertFalse((self.R.REPORTS / "mo-old.lane.log").exists(), "no lane ran")
+        self.assertEqual(self.git("rev-parse", "HEAD^2"), old_tip, "the old branch itself was merged")
+        self.assertEqual((self.repo / "other_task.txt").read_text(), "another task's change")
+        self.assertEqual(self.keep_refs("mo-old"), {}, "nothing reset, so nothing needed keeping")
 
     def merge_only_task(self, slug):
         import requeue
