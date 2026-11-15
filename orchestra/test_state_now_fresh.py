@@ -38,8 +38,13 @@ class FreshProcessTest(unittest.TestCase):
         self.logged = []
         self._log = mock.patch.object(runner, "log", self.logged.append)
         self._log.start()
+        # The fresh process finds its repo from ORCHESTRA_REPO, but `runner` may have been imported
+        # by an earlier module (unittest discover) with another repo: point the child at runner's.
+        self._env = mock.patch.dict(os.environ, ORCHESTRA_REPO=str(runner.REPO))
+        self._env.start()
 
     def tearDown(self):
+        self._env.stop()
         self._log.stop()
 
     def test_stale_module_falls_back_to_a_fresh_process(self):
