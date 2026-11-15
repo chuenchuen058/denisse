@@ -577,7 +577,36 @@ def _markets(x: dict) -> str:
             change, cls = "", ""
         items.append(f'<li><b>{e(r["ticker"])}</b><span class="t">{e(r.get("price", ""))}</span>'
                      f'<span class="why {cls}">{e(change)}</span></li>')
-    return f'<ul>{"".join(items)}</ul>' if items else _none(x["words"])
+    html = f'<ul>{"".join(items)}</ul>' if items else _none(x["words"])
+    return html + _insiders(x.get("insiders"), c)
+
+
+def _num(v, fmt: str) -> str:
+    try:
+        return fmt.format(float(v))
+    except (TypeError, ValueError):
+        return "?"
+
+
+def _insiders(ins, c: dict) -> str:
+    """The "Insiders buying" list under the tickers: markets.json's `insiders` block
+    (markets/insiders.py), newest first, already over the value threshold."""
+    if not isinstance(ins, dict):
+        return ""
+    w = c.get("insiders") or {}
+    rows = []
+    for r in ins.get("rows") or []:
+        if not isinstance(r, dict):
+            continue
+        text = w.get("row", "{who}").format(who=r.get("who", ""), role=r.get("role", ""), date=r.get("date", ""),
+                                            shares=_num(r.get("shares"), w.get("shares_fmt", "{}")),
+                                            price=_num(r.get("price"), w.get("price_fmt", "{}")),
+                                            value=_num(r.get("value"), w.get("value_fmt", "{}")))
+        rows.append(f'<li><b>{e(r.get("ticker", ""))}</b><span>{e(text)}</span></li>')
+    body = f'<ul>{"".join(rows)}</ul>' if rows else ""
+    note = ins.get("message") or ("" if rows else w.get("empty", ""))
+    head = ins.get("heading") or w.get("heading", "")
+    return (f'<h4 class="date">{e(head)}</h4>' + body + (f'<div class="none">{e(note)}</div>' if note else ""))
 
 
 # -- the board --------------------------------------------------------------------

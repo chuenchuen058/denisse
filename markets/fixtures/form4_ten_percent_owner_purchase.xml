@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<ownershipDocument>
+    <documentType>4</documentType>
+    <issuer>
+        <issuerCik>0000002488</issuerCik>
+        <issuerName>ADVANCED MICRO DEVICES INC</issuerName>
+        <issuerTradingSymbol>AMD</issuerTradingSymbol>
+    </issuer>
+    <reportingOwner>
+        <reportingOwnerId><rptOwnerCik>0001000002</rptOwnerCik><rptOwnerName>Example Fund LP</rptOwnerName></reportingOwnerId>
+        <reportingOwnerRelationship>
+            <isDirector>0</isDirector><isOfficer>0</isOfficer><isTenPercentOwner>1</isTenPercentOwner><isOther>0</isOther>
+        </reportingOwnerRelationship>
+    </reportingOwner>
+    <nonDerivativeTable>
+        <nonDerivativeTransaction>
+            <transactionDate><value>2026-11-05</value></transactionDate>
+            <transactionCoding><transactionCode>P</transactionCode></transactionCoding>
+            <transactionAmounts>
+                <transactionShares><value>100000</value></transactionShares>
+                <transactionPricePerShare><value>151.00</value></transactionPricePerShare>
+                <transactionAcquiredDisposedCode><value>A</value></transactionAcquiredDisposedCode>
+            </transactionAmounts>
+        </nonDerivativeTransaction>
+    </nonDerivativeTable>
+</ownershipDocument>

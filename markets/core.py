@@ -10,6 +10,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from . import insiders as _insiders
+
 ROOT = Path(__file__).resolve().parent
 DEFAULTS_PATH = ROOT / "config_defaults.json"
 CONFIG_PATH = ROOT / "config.json"
@@ -531,12 +533,15 @@ def build_snapshot_data(config: dict[str, Any] | None = None) -> dict[str, Any]:
         for ticker in members:
             raw = _resolve_price_record(ticker, group)
             tickers.append(_snapshot_entry(ticker, group, raw))
-    payload = {"fetched_at": _iso_now(), "tickers": tickers, "footer": "Information only, not financial advice"}
+    payload = {"fetched_at": _iso_now(), "tickers": tickers, "footer": "Information only, not financial advice",
+               "insiders": _insiders.panel(cfg)}
     return payload
 
 
 def snapshot(path: str | Path | None = None, dry_run: bool = False) -> str:
     target = Path(path) if path else Path(CONFIG.get("markets_path", ".review/hub/markets.json"))
+    if not dry_run:
+        _insiders.refresh(CONFIG)
     data = build_snapshot_data()
     if dry_run:
         print(json.dumps(data, ensure_ascii=False, indent=2))
@@ -653,6 +658,10 @@ def render_weekly_note(snapshot_data: dict[str, Any] | None = None, config: dict
         "## Big investors: new filings this week",
         "",
         "- No 13F-HR changes filed this week.",
+        "",
+        f"## {(_insiders.settings(cfg).get('words') or {}).get('weekly_heading', '')}",
+        "",
+        _insiders.weekly_line(cfg),
         "",
         f"## Watchlist source: TradingView export dated {source_date} or config",
         "",

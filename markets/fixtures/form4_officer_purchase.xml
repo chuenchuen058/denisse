@@ -1,0 +1,68 @@
+<?xml version="1.0"?>
+<ownershipDocument>
+    <schemaVersion>X0508</schemaVersion>
+    <documentType>4</documentType>
+    <periodOfReport>2026-11-03</periodOfReport>
+    <issuer>
+        <issuerCik>0000002488</issuerCik>
+        <issuerName>ADVANCED MICRO DEVICES INC</issuerName>
+        <issuerTradingSymbol>AMD</issuerTradingSymbol>
+    </issuer>
+    <reportingOwner>
+        <reportingOwnerId>
+            <rptOwnerCik>0001000001</rptOwnerCik>
+            <rptOwnerName>Example Jane Q</rptOwnerName>
+        </reportingOwnerId>
+        <reportingOwnerRelationship>
+            <isDirector>1</isDirector>
+            <isOfficer>1</isOfficer>
+            <isTenPercentOwner>0</isTenPercentOwner>
+            <isOther>0</isOther>
+            <officerTitle>Chief Financial Officer</officerTitle>
+        </reportingOwnerRelationship>
+    </reportingOwner>
+    <nonDerivativeTable>
+        <nonDerivativeTransaction>
+            <securityTitle><value>Common Stock</value></securityTitle>
+            <transactionDate><value>2026-11-03</value></transactionDate>
+            <transactionCoding><transactionFormType>4</transactionFormType><transactionCode>P</transactionCode><equitySwapInvolved>0</equitySwapInvolved></transactionCoding>
+            <transactionAmounts>
+                <transactionShares><value>2000</value></transactionShares>
+                <transactionPricePerShare><value>150.25</value></transactionPricePerShare>
+                <transactionAcquiredDisposedCode><value>A</value></transactionAcquiredDisposedCode>
+            </transactionAmounts>
+            <postTransactionAmounts><sharesOwnedFollowingTransaction><value>52000</value></sharesOwnedFollowingTransaction></postTransactionAmounts>
+            <ownershipNature><directOrIndirectOwnership><value>D</value></directOrIndirectOwnership></ownershipNature>
+        </nonDerivativeTransaction>
+        <nonDerivativeTransaction>
+            <securityTitle><value>Common Stock</value></securityTitle>
+            <transactionDate><value>2026-11-03</value></transactionDate>
+            <transactionCoding><transactionFormType>4</transactionFormType><transactionCode>A</transactionCode><equitySwapInvolved>0</equitySwapInvolved></transactionCoding>
+            <transactionAmounts>
+                <transactionShares><value>10000</value></transactionShares>
+                <transactionPricePerShare><value>0</value></transactionPricePerShare>
+                <transactionAcquiredDisposedCode><value>A</value></transactionAcquiredDisposedCode>
+            </transactionAmounts>
+        </nonDerivativeTransaction>
+        <nonDerivativeTransaction>
+            <securityTitle><value>Common Stock</value></securityTitle>
+            <transactionDate><value>2026-11-04</value></transactionDate>
+            <transactionCoding><transactionFormType>4</transactionFormType><transactionCode>M</transactionCode><equitySwapInvolved>0</equitySwapInvolved></transactionCoding>
+            <transactionAmounts>
+                <transactionShares><value>5000</value></transactionShares>
+                <transactionPricePerShare><value>40.00</value></transactionPricePerShare>
+                <transactionAcquiredDisposedCode><value>A</value></transactionAcquiredDisposedCode>
+            </transactionAmounts>
+        </nonDerivativeTransaction>
+        <nonDerivativeTransaction>
+            <securityTitle><value>Common Stock</value></securityTitle>
+            <transactionDate><value>2026-11-04</value></transactionDate>
+            <transactionCoding><transactionFormType>4</transactionFormType><transactionCode>S</transactionCode><equitySwapInvolved>0</equitySwapInvolved></transactionCoding>
+            <transactionAmounts>
+                <transactionShares><value>5000</value></transactionShares>
+                <transactionPricePerShare><value>155.10</value></transactionPricePerShare>
+                <transactionAcquiredDisposedCode><value>D</value></transactionAcquiredDisposedCode>
+            </transactionAmounts>
+        </nonDerivativeTransaction>
+    </nonDerivativeTable>
+</ownershipDocument>

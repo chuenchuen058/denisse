@@ -1,7 +1,8 @@
 import argparse
 import json
 
-from .core import build_snapshot_data, collect_alerts, snapshot, weekly_note
+from . import insiders
+from .core import CONFIG, build_snapshot_data, collect_alerts, snapshot, weekly_note
 
 
 def _snapshot_cli(args):
@@ -26,6 +27,13 @@ def _weekly_cli(args):
     return 0
 
 
+def _insiders_cli(args):
+    if not args.cached:
+        insiders.refresh(CONFIG)
+    print(json.dumps(insiders.panel(CONFIG), ensure_ascii=False, indent=2))
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="python -m markets", description="Market snapshot, alerts, and weekly summary.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -42,6 +50,10 @@ def main(argv=None):
     weekly_parser = subparsers.add_parser("weekly", help="Render the weekly vault note")
     weekly_parser.add_argument("--dry-run", action="store_true", help="Print the weekly note to stdout without writing it")
     weekly_parser.set_defaults(func=_weekly_cli)
+
+    insiders_parser = subparsers.add_parser("insiders", help="Fetch recent SEC Form 4 purchases by officers/directors")
+    insiders_parser.add_argument("--cached", action="store_true", help="Show the cache only, no EDGAR requests")
+    insiders_parser.set_defaults(func=_insiders_cli)
 
     ns = parser.parse_args(argv)
     return ns.func(ns)

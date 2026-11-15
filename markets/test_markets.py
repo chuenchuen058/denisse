@@ -21,6 +21,8 @@ class MarketsTests(unittest.TestCase):
         core.CONFIG["alert_state_path"] = str(self.tmp / "markets_alert_state.json")
         core.CONFIG["markets_path"] = str(self.tmp / "markets.json")
         self.alert_state = Path(core.CONFIG["alert_state_path"])
+        self._insiders_cache = core.CONFIG["insiders"].get("cache_path")
+        core.CONFIG["insiders"]["cache_path"] = str(self.tmp / "insiders_cache.json")
 
     def tearDown(self):
         for k, v in self._saved.items():
@@ -28,6 +30,7 @@ class MarketsTests(unittest.TestCase):
                 core.CONFIG.pop(k, None)
             else:
                 core.CONFIG[k] = v
+        core.CONFIG["insiders"]["cache_path"] = self._insiders_cache
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_snapshot_dry_run_prints_json_shape(self):
