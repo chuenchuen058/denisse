@@ -6,6 +6,7 @@ fixture .review and vault and checked section by section; nothing from the refer
 gives empty states and no numbers; words, colours and lanes follow atrium/config.json.
 Temp .review, temp vault, a fixed clock; no Ollama, no GPU, no network."""
 import copy
+import html
 import datetime as dt
 import json
 import re
@@ -558,6 +559,71 @@ class InsidersListTest(unittest.TestCase):
 
     def test_no_block_no_list(self):
         self.assertNotIn("<h4", self.card(None))
+
+
+class FundsCardTest(unittest.TestCase):
+    """The "Who's trading what" card: .review/hub/funds.json (markets/funds.py), already worded."""
+
+    def card(self, data):
+        return board._funds({"funds": data, "words": BOARD["words"]})
+
+    def payload(self):
+        move = {"label": "MLM", "text": "New position · $758M · 9.3% of portfolio", "on_watchlist": True,
+                "fund": "Example Fund", "quarter": "Q3 2026", "filed": "2026-11-14"}
+        other = {"label": "ZEBRA OBSCURE HLDGS", "text": "New position · $50M", "on_watchlist": False}
+        return {"heading": "Who's trading what", "message": None, "small_print": "Filed up to 45 days late.",
+                "watch": [move],
+                "funds": [{"name": "Example Fund", "latest": {"quarter": "Q3 2026", "filed": "2026-11-14"},
+                           "card_moves": [move, other]},
+                          {"name": "Quiet Fund", "latest": None, "card_moves": []}],
+                "insiders": {"heading": "Insiders buying", "message": None, "rows": [
+                    {"ticker": "AMD", "who": "J Person", "role": "CFO", "date": "2026-11-03",
+                     "shares": 2000, "price": 150.25, "value": 300500}]}}
+
+    def test_watchlist_moves_funds_insiders_and_small_print(self):
+        html_text = self.card(self.payload())
+        c = BOARD["funds"]
+        seen = " ".join(read(html_text).chunks)
+        self.assertIn(c["watch_heading"], seen)
+        self.assertIn('<li class="watch"><b>MLM</b>', html_text)
+        self.assertIn(c["fund_head"].format(name="Example Fund", quarter="Q3 2026", filed="2026-11-14"), seen)
+        self.assertIn("ZEBRA OBSCURE HLDGS", seen)  # no ticker: the issuer name
+        self.assertIn(c["fund_none"].format(name="Quiet Fund"), seen)
+        self.assertIn("Insiders buying", seen)
+        self.assertIn("300,500", html_text)
+        self.assertIn("Filed up to 45 days late.", seen)
+        self.assertLess(html_text.index(c["watch_heading"]), html_text.index("Insiders buying"))
+        self.assertLess(html_text.index("Insiders buying"), html_text.index("Filed up to 45 days late."))
+
+    def test_edgar_off_message_and_fallback_small_print(self):
+        html_text = self.card({"message": "SEC EDGAR is off", "funds": [], "watch": []})
+        self.assertIn("SEC EDGAR is off", html_text)
+        self.assertIn(BOARD["funds"]["small_print"], read(html_text).chunks)
+
+    def test_no_file_is_the_empty_state(self):
+        self.assertEqual(self.card(None), f'<div class="none">{BOARD["words"]["empty"]}</div>')
+
+    def test_card_is_on_the_board_with_its_heading(self):
+        self.assertIn("funds", [c["id"] for c in BOARD["cards"]])
+        self.assertTrue(BOARD["headings"]["funds"])
+
+    def test_wording_is_information_only(self):
+        text = json.dumps(BOARD["funds"]).lower() + BOARD["headings"]["funds"].lower()
+        for word in ("should", "sell", " hold", "recommend", "signal", "buy"):
+            self.assertNotIn(word, text)
+
+
+class FundsCardPageTest(BoardBase):
+    """The card on the served page reads .review/<funds.path>; without the file it is empty."""
+
+    def test_card_reads_the_hub_file(self):
+        self.assertIn(f'<div class="none">{BOARD["words"]["empty"]}</div>', section(self.page(), "funds"))
+        payload = FundsCardTest.payload(None)
+        w(self.review, BOARD["funds"]["path"], json.dumps(payload))
+        card = section(self.page(), "funds")
+        self.assertIn(f'<h3>{html.escape(BOARD["headings"]["funds"])}</h3>', card)
+        self.assertIn("MLM", card)
+        self.assertIn("2026-11-14", card)
 
 
 if __name__ == "__main__":
