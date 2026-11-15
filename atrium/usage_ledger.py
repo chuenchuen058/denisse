@@ -8,7 +8,10 @@ Sources (atrium/config.json "live" -> "board" -> "tokens" -> "sources", each wit
   message id and a usage object). Each message counts once: the same id is written once per
   content block, and resumed sessions copy old messages into a new file, so ids seen are kept.
 - "codex": Codex's session logs; each token_count event carries the session's running total, so
-  a file adds the difference from the last total read in it.
+  a file adds the difference from the last total read in it. Codex compresses its older logs to
+  .jsonl.zst (all of October 2026: 224M tokens the card had missed); a source's "compressed"
+  suffixes (CODECS) are read too, streaming, under the plain log's key so a log compressed after
+  it was read is not counted again. Without the module (zstandard) the card says how many weren't read.
 
 Orchestra's own Claude runs are in state.json AND in Claude Code's logs. With prefer_logs on the
 claude_code source (15 Nov 2026: state.json recorded 0.61B where the worktree logs held ~0.9B) the
@@ -84,7 +87,7 @@ def _load(path: Path) -> dict:
     except (OSError, ValueError):
         data = {}
     data = data if isinstance(data, dict) else {}
-    for k in ("logs", "orchestra", "files", "seen", "sessions"):
+    for k in ("logs", "orchestra", "files", "seen", "sessions", "unread"):
         data[k] = data.get(k) if isinstance(data.get(k), dict) else {}
     return data
 
@@ -119,17 +122,96 @@ def _orchestra(state: dict, src: dict, all_keys: list, logged=None) -> tuple[dic
     return days, sessions
 
 
+def _open_zst(p: Path):
+    import zstandard  # optional (requirements.txt); ImportError = the file is reported unread
+    return zstandard.ZstdDecompressor().stream_reader(open(p, "rb"), read_across_frames=True, closefd=True)
+
+
+def _open_gz(p: Path):
+    import gzip
+    return gzip.open(p, "rb")
+
+
+# compressed suffix a source may list under "compressed" -> (module it needs, opener of a
+# decompressing binary stream). Codex compresses its older rollouts to .jsonl.zst (Oct 2026).
+CODECS = {".zst": ("zstandard", _open_zst), ".gz": ("gzip", _open_gz)}
+
+
 def _files(src: dict):
+    """(path, ledger key, compressed suffix or "") for every log of src. A compressed copy has
+    the key of the plain log it was made from (the path minus the suffix), so a log that turns
+    from .jsonl into .jsonl.zst carries on from where the plain one was read, not counted twice."""
     root = _expand(src["root"])
     if not root.is_dir():
         return
     skip = [] if src.get("prefer_logs") else src.get("skip_dirs") or []
-    for p in sorted(root.glob(src["glob"])):
+    found = [(p, "") for p in root.glob(src["glob"])]
+    for suffix in src.get("compressed") or []:
+        if suffix in CODECS:
+            found += [(p, suffix) for p in root.glob(src["glob"] + suffix)]
+    for p, suffix in sorted(found, key=lambda f: str(f[0])):
         rel = p.relative_to(root).parts[:-1]
         if any(fnmatch.fnmatch(d, pat) for d in rel for pat in skip):
             continue
         if p.is_file():
-            yield p
+            yield p, (str(p)[:-len(suffix)] if suffix else str(p)), suffix
+
+
+def _logs(src: dict, data: dict):
+    """(raw line iterator, ledger mark) per log of src, plain or compressed. A compressed log
+    whose module is missing is not read; how many were left is kept in data["unread"]."""
+    unread, module = 0, ""
+    for p, key, suffix in _files(src):
+        mark = data["files"].setdefault(key, {})
+        if not suffix:
+            yield _new_lines(p, mark), mark
+            continue
+        try:
+            csize = p.stat().st_size
+        except OSError:
+            continue
+        if mark.get("csize") == csize:  # read to the end already; a compressed log does not grow
+            continue
+        name, opener = CODECS[suffix]
+        try:
+            stream = opener(p)
+        except ImportError:
+            unread, module = unread + 1, name
+            continue
+        except OSError:
+            continue
+        yield _stream_lines(stream, mark, csize, int(src["read_chunk_bytes"])), mark
+    if unread:
+        data["unread"][src["agent"]] = src["unread"].format(n=unread, module=module)
+
+
+def _stream_lines(stream, mark: dict, csize: int, chunk_n: int):
+    """The complete lines of a decompressing stream past the offset in mark (updated in place:
+    offset and size in decompressed bytes, csize = the compressed file's size once read)."""
+    offset, pos, buf = int(mark.get("offset") or 0), 0, b""
+    try:
+        with stream:
+            while True:
+                chunk = stream.read(chunk_n)
+                if not chunk:
+                    break
+                start = pos
+                pos += len(chunk)
+                if pos <= offset:
+                    continue
+                buf += chunk[max(0, offset - start):]
+                end = buf.rfind(b"\n")
+                if end >= 0:
+                    lines, buf = buf[:end].split(b"\n"), buf[end + 1:]
+                    yield from lines
+    except Exception:  # noqa: BLE001 -- a corrupt or half-written archive: try again next scan
+        return
+    if pos < offset:  # shorter than what was read of it before: read it all again (totals guard)
+        mark["offset"] = 0
+        return
+    if buf:  # a compressed log is finished, so a last line with no newline is complete
+        yield buf
+    mark["offset"], mark["size"], mark["csize"] = pos, pos, csize
 
 
 def _new_lines(p: Path, mark: dict):
@@ -160,9 +242,8 @@ def _new_lines(p: Path, mark: dict):
 def _read_claude_code(src: dict, data: dict, all_from: str, orch_sessions: set) -> None:
     marker = src["marker"].encode()
     f = src["fields"]
-    for p in _files(src):
-        mark = data["files"].setdefault(str(p), {})
-        for raw in _new_lines(p, mark):
+    for lines, mark in _logs(src, data):
+        for raw in lines:
             if marker not in raw:
                 continue
             try:
@@ -187,9 +268,8 @@ def _read_claude_code(src: dict, data: dict, all_from: str, orch_sessions: set) 
 def _read_codex(src: dict, data: dict, all_from: str, orch_sessions: set) -> None:
     marker = src["marker"].encode()
     f = src["fields"]
-    for p in _files(src):
-        mark = data["files"].setdefault(str(p), {})
-        for raw in _new_lines(p, mark):
+    for lines, mark in _logs(src, data):
+        for raw in lines:
             if marker not in raw:
                 continue
             try:
@@ -232,6 +312,7 @@ def generation() -> int:
 
 
 def _scan(c: dict, data: dict, all_from: str, sessions: set, now: dt.datetime) -> None:
+    data["unread"] = {}  # agent -> note on compressed logs left unread this scan (no module)
     for src in c["sources"]:
         if src["kind"] in READERS:
             READERS[src["kind"]](src, data, all_from, sessions)
@@ -275,8 +356,9 @@ def _mtime(path: Path) -> float | None:
 
 def update(state: dict, now: dt.datetime, save: bool = False) -> dict:
     """Bring the ledger up to date and return {"days": {day: {agent: {key: n}}}} (logs plus
-    Orchestra). Orchestra's runs are read every call; the logs at most every scan_s, from where
-    the last read stopped. save=False (the live page, which never writes to .review) keeps the
+    Orchestra) and "notes": what could not be read (compressed logs whose module is missing).
+    Orchestra's runs are read every call; the logs at most every scan_s, from where the last
+    read stopped. save=False (the live page, which never writes to .review) keeps the
     progress in memory only; save=True writes the ledger. Never raises on a bad log: a line that
     does not parse is skipped. With background() on and save=False, a due scan runs in a
     thread (_scan_later) and this call answers from memory."""
@@ -320,7 +402,7 @@ def _update(state: dict, now: dt.datetime, save: bool) -> dict:
         for day, agents in part.items():
             for agent, t in agents.items():
                 _add(days, day, agent, t)
-    return {"days": days}
+    return {"days": days, "notes": [n for n in data["unread"].values() if isinstance(n, str)]}
 
 
 def save() -> dict:
