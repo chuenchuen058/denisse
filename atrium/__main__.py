@@ -79,4 +79,8 @@ def main(argv=None) -> int:
 
 
 if __name__ == "__main__":
+    from pathlib import Path
+    sys.path.append(str(Path(__file__).resolve().parent.parent))  # no_window.py, at the repo root
+    import no_window  # no console window for git and the like
+    no_window.install()
     sys.exit(main())

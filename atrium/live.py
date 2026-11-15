@@ -273,6 +273,41 @@ def _collect() -> dict:
             "words": words}
 
 
+# -- game mode (orchestra/gamemode.py; words: atrium/config.json "gamemode") ----------
+def _gamemode():
+    """orchestra/gamemode.py, imported from this checkout."""
+    if str(snapshot.REPO) not in sys.path:
+        sys.path.insert(0, str(snapshot.REPO))
+    from orchestra import gamemode
+    return gamemode
+
+
+def gamemode_view() -> dict:
+    """gamemode.summary() of the served .review: a read of one small file. Off when unreadable."""
+    try:
+        gm = _gamemode()
+        return gm.summary(gm.status(_review()))
+    except Exception:  # noqa: BLE001 -- an unknown game mode shows as off, never a broken page
+        return {"on": False}
+
+
+def switch_gamemode(turn_on: bool) -> dict:
+    """The POST's work: gamemode.on() / off() (they stop and start the processes; tests replace this)."""
+    gm = _gamemode()
+    st = gm.on() if turn_on else gm.off()
+    return {"on": bool(st.get("on")), "lines": st.get("lines") or []}
+
+
+def dress(data: dict, gm: dict) -> dict:
+    """data with the header's Game mode switch (and its line while on) and the page's settings for it."""
+    c = board.gamemode_cfg()
+    if not c or "board" not in data:
+        return data
+    b = dict(data["board"], header=board.dress_header(data["board"]["header"], gm, data["board"].get("running_n", 0)))
+    page = {k: c[k] for k in ("http_path", "key", "confirm_one", "confirm_many", "busy", "failed")}
+    return dict(data, board=b, gamemode=dict(page, on=bool(gm.get("on"))))
+
+
 def payload(data: dict, version: int) -> str:
     now = dt.datetime.now()
     midnight = dt.datetime.combine(now.date(), dt.time())
@@ -315,30 +350,39 @@ class Hub:
     def __init__(self):
         self.lock = threading.Lock()
         self.fp = None
-        self.data = None
+        self.data = None  # what collect() built
+        self.shown = None  # that, dressed with the game mode switch: what the page gets
         self.body = None
+        self.built = 0  # builds so far
+        self.key = None  # (which build, which game mode) self.shown was made from
         self.version = 0
         self.at = 0.0
 
     def get(self) -> tuple[int, dict]:
         """(version, data). A build that fails keeps the last good copy (tried again next poll);
-        with none yet it raises, and /data answers 503 with the reason."""
+        with none yet it raises, and /data answers 503 with the reason. While game mode is on
+        nothing is rebuilt (no tables, no git, no token scans): the last board, with its line."""
         with self.lock:
-            # a token scan or a worktree re-read that landed in the background: rebuild
-            fp = (fingerprint(), usage_ledger.generation(), cursors.generation())
-            if self.data is None or fp != self.fp or time.monotonic() - self.at >= _c()["refresh_s"]:
-                try:
-                    data = collect()
-                except Exception:
-                    if self.data is None:
-                        raise
-                    return self.version, self.data
-                body = json.dumps(data, sort_keys=True, ensure_ascii=False)
+            gm = gamemode_view()
+            if not (gm.get("on") and self.data is not None):
+                # a token scan or a worktree re-read that landed in the background: rebuild
+                fp = (fingerprint(), usage_ledger.generation(), cursors.generation())
+                if self.data is None or fp != self.fp or time.monotonic() - self.at >= _c()["refresh_s"]:
+                    try:
+                        self.data = collect()
+                        self.fp, self.at, self.built = fp, time.monotonic(), self.built + 1
+                    except Exception:
+                        if self.data is None:
+                            raise
+            key = (self.built, json.dumps(gm, sort_keys=True))
+            if key != self.key:  # a new build, or game mode changed: dress and compare once
+                shown = dress(self.data, gm)
+                body = json.dumps(shown, sort_keys=True, ensure_ascii=False)
                 if body != self.body:
                     self.version += 1
-                    self.data, self.body = data, body
-                self.fp, self.at = fp, time.monotonic()
-            return self.version, self.data
+                    self.shown, self.body = shown, body
+                self.key = key
+            return self.version, self.shown
 
 
 # -- the server -----------------------------------------------------------------
@@ -392,11 +436,21 @@ class Handler(BaseHTTPRequestHandler):
     do_PUT = do_DELETE = do_PATCH = _refuse
 
     def do_POST(self):
-        """The one write: the Do next card's Done / Snooze (atrium/suggest.py), on its own path.
-        Only from this page: a loopback Host, a same-origin Origin when one is sent, a JSON body
-        (which a cross-site form cannot send without a preflight this server never answers)."""
+        """The two writes, each on its own path: the Do next card's Done / Snooze
+        (atrium/suggest.py) and the Game mode switch (orchestra/gamemode.py). Only from this
+        page: a loopback Host, a same-origin Origin when one is sent, a JSON body (which a
+        cross-site form cannot send without a preflight this server never answers)."""
         from . import suggest
-        if self.path.split("?", 1)[0] != suggest._c()["http_path"]:
+        path = self.path.split("?", 1)[0]
+        gmc = board.gamemode_cfg()
+        if path == suggest._c()["http_path"]:
+            act = lambda body: suggest.act(body.get("action"), body.get("id"), dt.datetime.now())  # noqa: E731
+        elif gmc and path == gmc["http_path"]:
+            def act(body):
+                if not isinstance(body.get("on"), bool):
+                    raise ValueError('the body must be {"on": true} or {"on": false}')
+                return switch_gamemode(body["on"])
+        else:
             return self._refuse()
         c = _c()
         host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]")
@@ -408,9 +462,11 @@ class Handler(BaseHTTPRequestHandler):
         try:
             n = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(min(n, 4096)) or b"{}")
-            out = suggest.act(body.get("action"), body.get("id"), dt.datetime.now())
+            out = act(body)
         except (ValueError, TypeError, AttributeError) as e:
             return self._send(400, str(e).encode("utf-8"), "text/plain; charset=utf-8")
+        except Exception as e:  # noqa: BLE001 -- a switch that failed half way says why, not a dropped socket
+            return self._send(500, f"{type(e).__name__}: {e}".encode("utf-8"), "text/plain; charset=utf-8")
         self._send(200, json.dumps(out).encode("utf-8"), "application/json; charset=utf-8")
 
     def _events(self):

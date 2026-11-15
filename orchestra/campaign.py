@@ -344,9 +344,18 @@ def emergency_stop(R, now: dt.datetime | None = None) -> list[str]:
     be made); then the tick, which closes its kill-on-close Job Object and takes every
     grandchild of the lane with it (orchestra/README.md, "Process supervision")."""
     now = now or utcnow()
-    review = R.REVIEW
-    lines = [stop(review, now, what="emergency-stop")]
-    for run in owned_runs(review):
+    lines = [stop(R.REVIEW, now, what="emergency-stop")]
+    status = CFG["campaign_cancelled_status"]
+    out, _ = halt_runs(R, "CANCELLED", f"{status} (emergency-stop)", status)
+    return lines + out
+
+
+def halt_runs(R, result: str, note: str, status: str) -> tuple[list[str], list[str]]:
+    """Kill the process trees named in the runner's own lock files and park each of their
+    tasks with `result` / `note`, branch and worktree kept. emergency_stop's way, also used by
+    game mode (orchestra/gamemode.py). (lines for the log, slugs parked)."""
+    lines, parked = [], []
+    for run in owned_runs(R.REVIEW):
         runner_pid, lane_pid, slug = run["pid"], run["lane_pid"], run["task"]
         runner_up = (bool(runner_pid) and runner_pid != os.getpid()
                      and proc_alive(runner_pid, run["created"]))
@@ -366,14 +375,14 @@ def emergency_stop(R, now: dt.datetime | None = None) -> list[str]:
                 R._BASE = json.loads(json.dumps(R.load_state()))  # merge with lanes saving meanwhile
                 state = R.load_state()
                 ts = R.task_state(state, task)
-                ts.update(last_end=R.now().isoformat(), last_result="CANCELLED")
-                note = f"{CFG['campaign_cancelled_status']} (emergency-stop)"
-                ts.setdefault("history", []).append({"end": R.now().isoformat(), "result": "CANCELLED", "note": note})
+                ts.update(last_end=R.now().isoformat(), last_result=result)
+                ts.setdefault("history", []).append({"end": R.now().isoformat(), "result": result, "note": note})
                 R.save_state(state)
                 R.park(task, f"{note}; branch review/{slug} and its worktree kept",
                        R.REPORTS / f"{slug}.md")
-                lines.append(f"parked {slug} as {CFG['campaign_cancelled_status']}; branch review/{slug} kept")
-    return lines
+                lines.append(f"parked {slug} as {status}; branch review/{slug} kept")
+                parked.append(slug)
+    return lines, parked
 
 
 # ---------------------------------------------------------------- display

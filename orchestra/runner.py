@@ -54,30 +54,20 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-if os.name == "nt" and not getattr(subprocess.Popen.__init__, "_orchestra_quiet", False):
-    # (the guard stops a reload, as the tests do, from wrapping the wrapper again)
-    # No console windows for anything the runner starts: the runner itself is pythonw (no
-    # console), so every claude/codex/git/gate child, and their own children (the Bash tool,
-    # hooks, tests), would otherwise open a terminal window of its own. Chuen, 2 Nov 2026:
-    # "the claude terminal keeps spamming my entire computer". CREATE_NO_WINDOW gives a child
-    # a hidden console that its children inherit.
-    _CREATE_NO_WINDOW = 0x08000000
-    _popen_init = subprocess.Popen.__init__
-
-    def _quiet_popen_init(self, *args, **kwargs):
-        flags = kwargs.get("creationflags", 0) or 0
-        if not flags & 0x00000018:  # leave DETACHED_PROCESS / CREATE_NEW_CONSOLE callers alone
-            kwargs["creationflags"] = flags | _CREATE_NO_WINDOW
-        _popen_init(self, *args, **kwargs)
-
-    _quiet_popen_init._orchestra_quiet = True
-    subprocess.Popen.__init__ = _quiet_popen_init
-
 HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
+if str(HERE.parent) not in sys.path:  # no_window.py lives at the repo root; appended, never shadows
+    sys.path.append(str(HERE.parent))
+# No console windows for anything the runner starts: the runner itself is pythonw (no console),
+# so every claude/codex/git/gate child, and their own children (the Bash tool, hooks, tests),
+# would otherwise open a terminal window of its own (Chuen, 2 Nov 2026). The one shared helper
+# (no_window.py, 15 Nov 2026); a reload, as the tests do, never wraps the wrapper again.
+import no_window  # noqa: E402
+no_window.install()
 import campaign  # noqa: E402  deadline + pause/stop; reads .review/campaign.json and control.json
 import consult  # noqa: E402  the study tutor's opinion before a lane starts; data in consult.json, advisory
+import gamemode  # noqa: E402  Chuen's game mode: while it is on a tick does nothing (orchestra/gamemode.py)
 import lane_pick  # noqa: E402  the lane (and reviewer) chosen at dispatch from config + live state (11 Nov 2026)
 import master_health  # noqa: E402  master's own baseline check; while it is red only bug fixes run (audit 10 Nov, H1)
 import visible  # noqa: E402  the live window and toasts, so Chuen sees a lane run (config live_window, toasts)
@@ -3229,6 +3219,10 @@ def _record_crash(state: dict, task: Task, e: BaseException) -> None:
 
 
 def _tick(dry_run: bool = False) -> str:
+    if gamemode.is_on(REVIEW):  # first: Chuen is playing, so no git, no lanes, no reconcile, no autopilot
+        if dry_run:
+            print(f"would run: nothing ({gamemode.CFG['tick_result']})")
+        return gamemode.CFG["tick_result"]
     for d in (QUEUE, REPORTS, ARCHIVE, PARKED):
         d.mkdir(parents=True, exist_ok=True)
     if not dry_run:  # first: the gap since the last tick is downtime that reconcile must not charge

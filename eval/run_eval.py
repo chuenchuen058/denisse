@@ -1026,4 +1026,6 @@ def _gpu_lease(wait_s: int = CFG["gpu"]["lease_wait_s"], on_busy: str = "run"):
 
 
 if __name__ == "__main__":
+    import no_window  # the scheduled eval: no console window for anything it starts
+    no_window.install()
     raise SystemExit(main())

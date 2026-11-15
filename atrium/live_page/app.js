@@ -249,6 +249,25 @@ function nextTheme() {
   theme();
 }
 
+// Game mode (orchestra/gamemode.py): one POST turns it on or off. Before ON, and only while tasks
+// are running, ask first: they will be stopped, parked and requeued when it goes off again.
+let switching = false;
+function gameMode() {
+  const g = D && D.gamemode, b = $("gamemode");
+  if (!g || !b || switching) return;
+  const turnOn = b.dataset.on !== "1", n = Number(b.dataset.running) || 0;
+  if (turnOn && n > 0 && !confirm(n === 1 ? g.confirm_one : fill(g.confirm_many, {n}))) return;
+  switching = true;
+  b.disabled = true;
+  b.textContent = g.busy;
+  fetch(g.http_path.replace(/^\//, ""), {method: "POST", headers: {"Content-Type": "application/json"},
+                                         body: JSON.stringify({on: turnOn})})
+    .then(r => r.ok ? r.json() : r.text().then(t => { throw new Error(t || r.status); }))
+    .then(() => fetch("data").then(r => r.json()).then(take))
+    .catch(err => alert(fill(g.failed, {why: err.message})))
+    .finally(() => { switching = false; if (D) draw(); });
+}
+
 function live(on) {
   online = on;
   const dot = $("dot"), state = $("state");
@@ -282,6 +301,7 @@ document.addEventListener("click", e => {
   if (!D) return;
   const t = e.target, ix = D.board.ix;
   if (t.closest("#theme")) return nextTheme();
+  if (t.closest("#gamemode")) return gameMode();
   if (t.closest("[data-close]") || t.id === "scrim") return shut();
   if (t.closest("#drawer")) return;
   const s = t.closest("[data-seg]");
@@ -297,7 +317,7 @@ document.addEventListener("click", e => {
   if (card) toggle(card);
 });
 document.addEventListener("input", e => { if (D && e.target.id === "q") { query = e.target.value; sift(false); } });
-// Keys (which ones: the config): the theme, the quick filter, closing the drawer; Enter or
+// Keys (which ones: the config): the theme, game mode, the quick filter, closing the drawer; Enter or
 // Space on a focused card opens it like a click.
 document.addEventListener("keydown", e => {
   if (!D || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -309,6 +329,7 @@ document.addEventListener("keydown", e => {
   }
   if (typing) return;
   if (e.key === k.theme) nextTheme();
+  else if (D.gamemode && e.key === D.gamemode.key) gameMode();
   else if (e.key === k.filter && $("q")) { e.preventDefault(); $("q").focus(); $("q").select(); }
   else if ((e.key === "Enter" || e.key === " ") && t.matches(D.board.ix.expand)) { e.preventDefault(); toggle(t); }
 });

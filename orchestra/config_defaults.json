@@ -336,5 +336,48 @@
   "master_health_park_only": " The runner's gate failed only on those modules: this branch is not at fault.",
   "master_health_state_red": "**Master:** RED at {commit}: {modules}. Only bug fixes run; bug-fix task: {task}.",
   "master_health_state_known": "**Master:** {status} at {commit} ({how}, {seconds}s).",
-  "master_health_state_unknown": "**Master:** {commit} not checked yet ({running}); counts as green."
+  "master_health_state_unknown": "**Master:** {commit} not checked yet ({running}); counts as green.",
+  "gamemode": {
+    "state_file": "gamemode.json",
+    "tick_result": "game mode",
+    "paused_status": "paused for game mode",
+    "paused_result": "GAME_MODE",
+    "requeue_note": "interrupted by game mode (on since {since}); a full re-run, its earlier commits kept on the old branch",
+    "unload_ollama": true,
+    "ollama_job": "gamemode",
+    "stop_ollama_server": false,
+    "scheduled_tasks": [
+      "Denisse Orchestra",
+      "Denisse Atrium Digest",
+      "Denisse Eval",
+      "Denisse Vault Nightly",
+      "Denisse Orchestra Producer",
+      "Denisse Agent Canary"
+    ],
+    "task_query_argv": [
+      "schtasks",
+      "/Query",
+      "/TN",
+      "{name}",
+      "/FO",
+      "CSV",
+      "/NH"
+    ],
+    "task_disable_argv": [
+      "schtasks",
+      "/Change",
+      "/TN",
+      "{name}",
+      "/DISABLE"
+    ],
+    "task_enable_argv": [
+      "schtasks",
+      "/Change",
+      "/TN",
+      "{name}",
+      "/ENABLE"
+    ],
+    "task_disabled_word": "Disabled",
+    "task_timeout_s": 30
+  }
 }

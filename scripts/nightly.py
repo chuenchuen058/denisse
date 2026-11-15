@@ -50,6 +50,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 sys.path.insert(0, REPO)
 import settings  # noqa: E402
+import no_window  # noqa: E402  the night job opens no console window for anything it starts
+
+no_window.install()
+from orchestra import gamemode  # noqa: E402
+
+if gamemode.is_on() and "--dry" not in sys.argv:  # Chuen is playing: the vault job waits for tomorrow
+    print(f"nightly: skipped ({gamemode.CFG['tick_result']})")
+    sys.exit(0)
 
 VAULT = settings.vault()
 MODULES = os.path.join(VAULT, "Atlas", "Academic", "SEM 1 Modules")
