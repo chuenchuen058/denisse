@@ -466,7 +466,7 @@ class PlannerTest(unittest.TestCase):
                                   "files": ["atrium/install_digest.py"] if "install_digest" in text else []}
         (self.repo / "atrium").mkdir(parents=True)
         (self.repo / "atrium" / "install_digest.py").write_text("", encoding="utf-8")
-        made = self.refill(autopilot_sources=["waiting"], autopilot_max_per_hour=3)
+        made = self.refill(autopilot_sources=["waiting"], autopilot_waiting_source=True, autopilot_max_per_hour=3)
         self.assertEqual(len(made), 3)
         self.assertEqual([self.header(p, "Queue") for p in made], ["draft"] * 3)
         bodies = [p.read_text(encoding="utf-8") for p in made]
@@ -486,12 +486,12 @@ class PlannerTest(unittest.TestCase):
             p.unlink()
         self.waiting(self.PLAIN)
         files_of = lambda text: {"orchestra/test_power.py"} if "test_power.py" in text else set()
-        self.assertEqual([self.header(p, "Queue") for p in self.refill(autopilot_sources=["waiting"],
+        self.assertEqual([self.header(p, "Queue") for p in self.refill(autopilot_sources=["waiting"], autopilot_waiting_source=True,
                                                                        files_of=files_of)], ["auto"])
 
     def test_a_waiting_item_naming_no_repo_file_is_a_draft(self):
         self.waiting("Decide the tray icon colour")
-        made = self.refill(autopilot_sources=["waiting"])
+        made = self.refill(autopilot_sources=["waiting"], autopilot_waiting_source=True)
         self.assertEqual(self.header(made[0], "Queue"), "draft")
         self.assertIn("Chuen's own action", made[0].read_text(encoding="utf-8"))
 
@@ -510,6 +510,79 @@ class PlannerTest(unittest.TestCase):
         why = AP.acts_as_chuen("anything", {**self.cfg, "autopilot_acts_as_chuen": {"x": ["("]}}, logs.append)
         self.assertTrue(why.startswith("draft: would x as Chuen"))
         self.assertTrue(any("does not compile" in l for l in logs))
+
+    # Lines of hot.md "Waiting on Chuen" on 15 Nov 2026 that became tasks on 14-15 Nov though done.
+    STRUCK = ["~~Send the UROP emails (Ang, Ning Xi, Burdet): drafts in the Claude doc~~ sent (Chuen, 10 Nov)",
+              "~~Sign in to Claude Code again~~ done 3 Nov 22:15",
+              "~~Check Google's 4 Nov security alert: OpenAI was given access~~ confirmed it was him, 5 Nov",
+              "<del>Check the new lesson time</del> Tue 17:00"]
+
+    def test_a_struck_through_line_is_never_a_source(self):
+        self.inbox(*self.STRUCK, "Fix the tray")
+        made = self.refill(autopilot_max_per_hour=5)
+        self.assertEqual([p.read_text(encoding="utf-8").splitlines()[0] for p in made], ["# Fix the tray"])
+        self.assertEqual([c.text for c in self.calls], ["Fix the tray"])  # the model is not even asked
+        # From hot.md too, with the waiting source switched on.
+        self.waiting(*self.STRUCK, "Decide the tray icon colour")
+        self.assertEqual([c.text for c in AP.from_waiting(self.vault, self.cfg)], ["Decide the tray icon colour"])
+        # A strike inside the line is an edit, not done; the markers are config.
+        self.assertFalse(AP.is_done("Call the lab ~~Tuesday~~ Wednesday", self.cfg))
+        self.assertFalse(AP.is_done(self.STRUCK[0], {**self.cfg, "autopilot_struck_open": []}))
+
+    def test_a_done_marker_line_is_never_a_source(self):
+        done = ["✅ Rename the tray menu", "Rename the tray menu ✔️", "DONE: rename the tray menu",
+                "Rename the tray menu (done 12 Nov)", "Rename the tray menu [done]"]
+        self.inbox(*done, "Make sure the tray restart is done right")
+        made = self.refill(autopilot_max_per_hour=5)
+        self.assertEqual([c.text for c in self.calls], ["Make sure the tray restart is done right"])
+        self.assertEqual(len(made), 1)
+        # Read from config: no markers, and the same lines are candidates again; a bad one is ignored.
+        cfg = {**self.cfg, "autopilot_done_markers": ["(", r"\bfinished\b"]}
+        self.assertFalse(any(AP.is_done(d, cfg) for d in done))
+        self.assertTrue(AP.is_done("finished the tray menu", cfg))
+
+    def test_the_waiting_source_is_off_as_shipped_and_the_inbox_still_works(self):
+        self.assertIs(shipped()["autopilot_waiting_source"], False)
+        self.assertIn("waiting", shipped()["autopilot_sources"])  # the list is untouched; the switch decides
+        self.waiting("Check the new engineering lesson time", "In Claude's account settings, check paid extra usage is off",
+                     self.PLAIN)
+        self.inbox("Fix the tray")
+        made = self.refill(autopilot_sources=list(shipped()["autopilot_sources"]), autopilot_max_per_hour=5)
+        self.assertEqual([p.read_text(encoding="utf-8").splitlines()[0] for p in made], ["# Fix the tray"])
+        self.assertEqual({c.source for c in self.calls}, {"inbox"})
+        self.assertNotIn("waiting", {c.source for c in AP.candidates(cfg=shipped(), review=self.review,
+                                                                    vault=self.vault, state={}, at=AT)})
+        # Switched on, hot.md is read again.
+        on = AP.candidates(cfg={**shipped(), "autopilot_waiting_source": True}, review=self.review,
+                           vault=self.vault, state={}, at=AT)
+        self.assertEqual([c.text for c in on if c.source == "waiting"][0], "Check the new engineering lesson time")
+
+    def test_an_archived_task_or_draft_with_the_same_title_is_not_rewritten(self):
+        self.inbox("Check new engineering lesson time")
+        recent = self.review / "archive" / "closed-2026-11-08"
+        recent.mkdir(parents=True)
+        (recent / "2026-11-05T0422-check-new-engineering-lesson-time.md").write_text(
+            "# Check new engineering lesson time\nQueue: draft\n", encoding="utf-8")
+        (recent / "2026-11-05T0422-check-new-engineering-lesson-time.report.md").write_text(
+            "# Check new engineering lesson time\n", encoding="utf-8")
+        self.assertEqual(self.refill(), [])
+        self.assertTrue(any("not re-created" in l and "check-new-engineering" in l for l in self.logs), self.logs)
+        found = AP.archived_same_title("Check new engineering lesson time", self.review, self.cfg, AT)
+        self.assertEqual([p.name for p in found], ["2026-11-05T0422-check-new-engineering-lesson-time.md"])
+        # Older than autopilot_dedupe_days: written again.
+        self.assertEqual(AP.archived_same_title("Check new engineering lesson time", self.review,
+                                                {**self.cfg, "autopilot_dedupe_days": 0}, AT), [])
+        # The window is autopilot_dedupe_days back from the planner's own clock, not new_task's fixed
+        # 14 days from today: a 30-day setting still sees a task archived 20 days before.
+        shutil.rmtree(recent)
+        old = self.review / "archive" / (AT - dt.timedelta(days=20)).date().isoformat()
+        old.mkdir()
+        (old / "2026-10-20T0422-check-new-engineering-lesson-time.md").write_text(
+            "# Check new engineering lesson time\nQueue: draft\n", encoding="utf-8")
+        self.review.joinpath("autopilot.json").unlink()
+        self.assertEqual(len(self.refill(autopilot_dedupe_days=30)), 0)
+        self.review.joinpath("autopilot.json").unlink()
+        self.assertEqual(len(self.refill(autopilot_dedupe_days=14)), 1)
 
     def test_off_switch(self):
         self.inbox("Fix the tray")
