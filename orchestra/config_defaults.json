@@ -378,7 +378,6 @@
       "/ENABLE"
     ],
     "task_disabled_word": "Disabled",
-    "task_timeout_s": 30,
-    "stop_live_server": false
+    "task_timeout_s": 30
   }
 }
