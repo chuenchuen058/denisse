@@ -418,10 +418,33 @@ def _io_retry(fn, tries: int = 40, pause: float = 0.05):
             time.sleep(pause)
 
 
+def _keep_corrupt_state(err: Exception) -> Path | None:
+    """state.json exists but isn't JSON. The tick carries on from an empty state, as before, and
+    its next save_state() replaces the file -- so copy the unreadable one aside first and say
+    so: it holds today's spend (the daily cap), every attempt count and the done set, and
+    without the copy nobody could tell they had been reset, or recover them. Never raises."""
+    try:
+        stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        kept = STATE_FILE.with_name(f"{STATE_FILE.stem}.corrupt-{stamp}{STATE_FILE.suffix}")
+        if not kept.exists():
+            shutil.copyfile(STATE_FILE, kept)
+        log(f"STATE UNREADABLE: {STATE_FILE.name} is not valid JSON ({err}); starting from an empty state "
+            f"(spend, attempts and done set reset). The unreadable file is kept as {kept.name}")
+        return kept
+    except OSError as e:
+        print(f"could not keep the unreadable {STATE_FILE.name}: {e!r}")
+        return None
+
+
 def load_state() -> dict:
     try:
         st = json.loads(_io_retry(lambda: STATE_FILE.read_text(encoding="utf-8")))
-    except (FileNotFoundError, json.JSONDecodeError):
+    except FileNotFoundError:
+        st = {}
+    except json.JSONDecodeError as e:
+        st = {}
+        _keep_corrupt_state(e)
+    if not isinstance(st, dict):
         st = {}
     for k in ("tasks", "days", "done", "lanes"):
         st.setdefault(k, {})

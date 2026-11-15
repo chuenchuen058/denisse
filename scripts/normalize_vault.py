@@ -17,9 +17,12 @@ Target schema, the same for every note:
     aliases: [...]       # only if the note already had them
     ---
 
-Idempotent -- safe to re-run. Prints what it changed.
+Idempotent -- safe to re-run. Prints what it would change; writes only with --apply
+(it rewrites the frontmatter of every note in the real vault, so a bare run must
+not: before 10 Nov 2026 it did).
 """
 
+import argparse
 import datetime
 import re
 import sys
@@ -75,7 +78,10 @@ def build_frontmatter(fields: dict, fallback_name: str, updated: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def main() -> int:
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--apply", action="store_true", help="write the changes (default: only list them)")
+    apply = ap.parse_args(argv).apply
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     if not VAULT.is_dir():
         print(f"vault not found: {VAULT}")
@@ -99,14 +105,16 @@ def main() -> int:
         dropped = sorted(k for k in fields if k in DROP_KEYS and fields.get(k) is not None)
         new_text = build_frontmatter(fields, path.stem, today) + body.lstrip("\n")
         if new_text != text:
-            path.write_text(new_text, encoding="utf-8")
+            if apply:
+                path.write_text(new_text, encoding="utf-8")
             changed += 1
             note = f" dropped {dropped}" if dropped else ""
-            print(f"[fix ] {path.relative_to(VAULT)}{note}")
+            print(f"[{'fix ' if apply else 'would'}] {path.relative_to(VAULT)}{note}")
         else:
             print(f"[ok  ] {path.relative_to(VAULT)}")
 
-    print(f"\n{changed} file(s) normalised")
+    print(f"\n{changed} file(s) normalised" if apply else
+          f"\n{changed} file(s) would change; nothing written. Re-run with --apply to write.")
     return 0
 
 

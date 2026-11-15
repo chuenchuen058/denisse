@@ -1,8 +1,13 @@
 """Two runner processes saving state: neither loses the other's history entry for the same task."""
+import contextlib
 import copy
+import io
 import os
 import sys
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ.setdefault("ORCHESTRA_POWER", "ac")
@@ -73,6 +78,45 @@ class MergeTest(unittest.TestCase):
         self.assertEqual(len(hist), 3)
         self.assertEqual(sum(h["seconds"] for h in hist), out["days"]["2026-11-05"]["work_s"])
         self.assertEqual(out["tasks"]["t"]["last_result"], "PASS")
+
+
+class UnreadableStateTest(unittest.TestCase):
+    """A state.json that isn't JSON used to be dropped without a word, and the next save wrote
+    over it: the day's spend, the attempt counts and the done set were gone with no trace."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+        for name, value in (("REVIEW", self.dir), ("STATE_FILE", self.dir / "state.json"),
+                            ("LOG_FILE", self.dir / "runner.log")):
+            p = mock.patch.object(runner, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_it_is_kept_aside_and_logged_before_a_save_can_replace_it(self):
+        bad = '{"days": {"2026-11-10": {"cost_usd": 4.2'
+        runner.STATE_FILE.write_text(bad, encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()):
+            st = runner.load_state()
+            self.assertEqual(st["tasks"], {})  # the tick still runs, from an empty state
+            runner.save_state(st)
+        kept = [p for p in self.dir.iterdir() if ".corrupt-" in p.name]
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(kept[0].read_text(encoding="utf-8"), bad)
+        self.assertIn("STATE UNREADABLE", runner.LOG_FILE.read_text(encoding="utf-8"))
+        self.assertIn(kept[0].name, runner.LOG_FILE.read_text(encoding="utf-8"))
+
+    def test_a_missing_or_good_file_keeps_nothing(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(runner.load_state()["done"], {})
+            runner.STATE_FILE.write_text('{"done": {"abc": "2026-11-10T00:00:00"}}', encoding="utf-8")
+            self.assertEqual(runner.load_state()["done"], {"abc": "2026-11-10T00:00:00"})
+        self.assertEqual([p.name for p in self.dir.iterdir()], ["state.json"])
+
+    def test_json_that_is_not_an_object_is_an_empty_state_not_a_crash(self):
+        runner.STATE_FILE.write_text("[]", encoding="utf-8")
+        self.assertEqual(runner.load_state()["tasks"], {})
 
 
 if __name__ == "__main__":

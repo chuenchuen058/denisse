@@ -100,6 +100,21 @@ class TestAftercare(unittest.TestCase):
         self.assertIn("key or token", p)
 
 
+class SecretTextTest(unittest.TestCase):
+    def test_a_word_that_merely_contains_sk_dash_is_not_a_key(self):
+        for text in ("wt/2026-11-09T1357-one-task-battery-override-on-request/atrium",
+                     "see docs/risk-register-for-the-autumn-term-2026.md",
+                     "+# the desk-lamp-and-monitor-arm-shopping-list note"):
+            with self.subTest(text=text):
+                self.assertIsNone(aftercare.SECRET_TEXT.search(text))
+
+    def test_a_key_is_still_a_key_wherever_it_starts(self):
+        key = "sk-" + "a1B2" * 8
+        for text in (key, f"api_key={key}", f'K = "{key}"', f"+token: {key}", f"({key})", f"x_{key}"):
+            with self.subTest(text=text):
+                self.assertIsNotNone(aftercare.SECRET_TEXT.search(text))
+
+
 HOT = ("---\r\nname: hot\r\n---\r\n# hot\r\n\r\n## Now\r\n- Chuen's line — é\r\n\r\n"
        "## Waiting on Chuen\r\n- Night review wrote this.\r\n- And this.\r\n\r\n## Open hazards\r\n- careful\r\n")
 
