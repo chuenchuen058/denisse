@@ -229,6 +229,8 @@
   "_process_exit_wait_timeout_s": "Grace period for a killed lane process to exit before treating it as timed out.",
   "tick_watchdog_extra_s": 900,
   "_tick_watchdog_extra_s": "The whole tick is killed this long after the longest possible lane timeout. Atrium hung 19 then 29 minutes on one call.",
+  "dead_lock_task_log": "RECONCILE dead owner {pid} for {task} ({lock}): left for the next tick to collect",
+  "_dead_lock_task_log": "runner.log line when a tick finds a slot lock whose owner is gone and which names a task, after its own reconcile() has run: the lock is left for the next tick's reconcile() to collect (never deleted: it is the only record of that run). Soak, 10 Nov 2026: deleting it left a merged PASS in the queue for good and re-ran a finished lane from scratch.",
   "keep_ref_prefix": "refs/keep/",
   "keep_ref_log": "KEPT {branch}: {count} commit(s) not on master saved as {ref} before {why}; recover with `git branch <name> {ref}`",
   "merge_only_mark": "Merge-only re-queue:",
