@@ -282,6 +282,16 @@
   "autopilot_gate": [".venv\\Scripts\\python.exe scripts\\run_checks.py --fast"],
   "autopilot_weight": "light",
   "autopilot_source": "autopilot",
+  "autopilot_acts_as_chuen": {
+    "send": ["\\be-?mails?\\b", "\\brepl(y|ies)\\b", "\\bmessages?\\b", "\\bwhats ?app\\b", "\\bcv\\b", "\\bapplications?\\b", "\\bapply\\b", "\\bpost\\b", "\\bsubmit\\b", "\\bsend\\b"],
+    "spend": ["\\bbuy\\b", "\\bpay\\b", "\\bsubscri(be|ption)\\b", "\\btop[- ]?up\\b"],
+    "sign in": ["\\bsign[- ]?in\\b", "\\blog[- ]?in\\b", "\\bcredentials?\\b", "\\bpassword\\b"],
+    "delete or uninstall": ["\\bdelete\\b", "\\bunregister\\b", "\\buninstall\\b", "\\breinstall\\b"],
+    "change a scheduled task or system setting": ["\\bscheduled[- ]tasks?\\b", "\\btask scheduler\\b", "\\bschtasks\\b", "\\b(un)?register-scheduledtask\\b", "\\bwindows (scheduled )?task\\b", "\\bregistry\\b", "\\bstart-?up\\b", "\\bsettings\\b"]
+  },
+  "autopilot_acts_as_chuen_why": "draft: would {cue} as Chuen ('{match}')",
+  "autopilot_chuen_sources": ["waiting"],
+  "autopilot_chuen_source_why": "draft: a {source} item is Chuen's own action and this one names no repo file",
   "master_health": true,
   "master_health_file": "master_health.json",
   "master_health_lock": "master_health.lock",

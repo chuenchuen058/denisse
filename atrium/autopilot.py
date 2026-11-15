@@ -311,6 +311,34 @@ def make_title(c: Candidate, cls: dict, cfg: dict) -> str:
     return cfg["autopilot_titles"].get(c.source, "{text}").format(text=raw)
 
 
+def acts_as_chuen(text: str, cfg: dict, log=None) -> str | None:
+    """The draft reason when `text` matches one of config autopilot_acts_as_chuen's cues (it
+    would send, spend, sign in, delete or change a system setting as Chuen), else None. The cues
+    are config, not code (AGENTS.md Rule 0). A pattern that will not compile counts as a match."""
+    why = cfg["autopilot_acts_as_chuen_why"]
+    for cue, patterns in (cfg.get("autopilot_acts_as_chuen") or {}).items():
+        for pat in [patterns] if isinstance(patterns, str) else patterns or []:
+            try:
+                m = re.search(pat, text, re.I)
+            except re.error as e:
+                if log:
+                    log(f"AUTOPILOT cue pattern {pat!r} ({cue}) does not compile ({e}); counted as a match")
+                return why.format(cue=cue, match=f"bad pattern {pat}")
+            if m:
+                return why.format(cue=cue, match=m.group(0))
+    return None
+
+
+def plainly_repo_code(files: set, repo: Path) -> bool:
+    """At least one of the files it names exists in the repo: a code change, not an errand."""
+    root = repo.resolve()
+    for f in files:
+        p = (repo / f).resolve()
+        if p.is_file() and p.is_relative_to(root):
+            return True
+    return False
+
+
 def make_body(c: Candidate, cfg: dict, why: str) -> str:
     return cfg["autopilot_body"].format(text=c.text, source=cfg["autopilot_source_names"].get(c.source, c.source),
                                         origin=c.origin, context=c.context or "-", why=why)
@@ -438,6 +466,15 @@ def refill(*, cfg: dict, review: Path, repo: Path, vault: Path | None, state: di
         why_queue = ("auto: repo-only, gate runnable" if auto else
                      "draft: " + ("gate not runnable here" if cls.get("repo_only") else
                                   "not shown to be repo-only (may send, spend, delete, sign in or touch the vault)"))
+        # Whatever the model said: anything that acts as Chuen waits for him (13 Nov 2026). Only
+        # the variable parts are searched; autopilot_body's boilerplate names these things itself.
+        cue = acts_as_chuen(f"{title}\n{c.text}\n{c.context}", cfg, log)
+        if cue:
+            auto, why_queue = False, (cue if auto else f"{why_queue}; {cue}")
+        elif auto and c.source in (cfg.get("autopilot_chuen_sources") or []) and not plainly_repo_code(files, repo):
+            auto = False
+            why_queue = cfg["autopilot_chuen_source_why"].format(
+                source=cfg["autopilot_source_names"].get(c.source, c.source))
         kind = cfg["bugfix_kinds"][0] if bug and cfg["bugfix_kinds"] else "work"
         path = create(title, body=make_body(c, cfg, f"{lane_why}; {why_queue}"), gate=gate, kind=kind, lane=lane,
                       auto=auto, source=cfg["autopilot_source"], review=review, weight=cfg["autopilot_weight"])

@@ -443,6 +443,74 @@ class PlannerTest(unittest.TestCase):
         cands = AP.from_waiting(self.vault, self.cfg)
         self.assertEqual([c.text for c in cands], ["Decide the tray icon colour"])
 
+    # The three hot.md lines of 13 Nov 2026 the model called repo-only, with the titles it gave them.
+    WAITING_13_NOV = {
+        "Bergeles email draft is in KCL Outlook: check the Plexus and '12 ball joints' lines, attach CV, "
+        "Send. Reply to Dr Gionfrida (start date + length).": "Send Bergeles email draft",
+        "Atrium hub refresh scheduled task is off (I can't switch it on): turn it on, hourly, in the "
+        "Claude app's scheduled tasks.": "Enable Atrium hub refresh scheduled task in Claude",
+        "Say yes to register the hourly \"Denisse Atrium Digest\" Windows task (built and merged 8 Nov; "
+        "`.venv\\Scripts\\python.exe atrium\\install_digest.py --register`) registered (task exists, Ready)":
+            "Unregister the hourly Denisse Atrium Digest Windows task",
+    }
+    PLAIN = "fix the flaky test in orchestra/test_power.py"
+
+    def waiting(self, *lines):
+        (self.vault / "hot.md").write_text("# hot\n\n## Waiting on Chuen\n" + "".join(f"- {l}\n" for l in lines)
+                                           + "\n## Active right now\n- other\n", encoding="utf-8")
+
+    def test_the_13_nov_waiting_items_are_drafts_whatever_the_model_says(self):
+        self.waiting(*self.WAITING_13_NOV)
+        for text, title in self.WAITING_13_NOV.items():  # the third names a real repo file
+            self.answers[text] = {"repo_only": True, "title": title,
+                                  "files": ["atrium/install_digest.py"] if "install_digest" in text else []}
+        (self.repo / "atrium").mkdir(parents=True)
+        (self.repo / "atrium" / "install_digest.py").write_text("", encoding="utf-8")
+        made = self.refill(autopilot_sources=["waiting"], autopilot_max_per_hour=3)
+        self.assertEqual(len(made), 3)
+        self.assertEqual([self.header(p, "Queue") for p in made], ["draft"] * 3)
+        bodies = [p.read_text(encoding="utf-8") for p in made]
+        self.assertIn("draft: would send as Chuen", bodies[0])
+        self.assertIn("draft: would change a scheduled task or system setting as Chuen", bodies[1])
+        self.assertIn("draft: would delete or uninstall as Chuen ('Unregister')", bodies[2])
+        self.assertFalse(any("auto: repo-only" in l for l in self.logs))
+
+    def test_a_plain_code_item_is_still_auto(self):
+        (self.repo / "orchestra").mkdir(parents=True)
+        (self.repo / "orchestra" / "test_power.py").write_text("", encoding="utf-8")
+        self.inbox(self.PLAIN)
+        self.assertEqual([self.header(p, "Queue") for p in self.refill()], ["auto"])
+        # From hot.md too, when it names a file that is in the repo...
+        self.review.joinpath("autopilot.json").unlink()
+        for p in (self.review / "queue").glob("*.md"):
+            p.unlink()
+        self.waiting(self.PLAIN)
+        files_of = lambda text: {"orchestra/test_power.py"} if "test_power.py" in text else set()
+        self.assertEqual([self.header(p, "Queue") for p in self.refill(autopilot_sources=["waiting"],
+                                                                       files_of=files_of)], ["auto"])
+
+    def test_a_waiting_item_naming_no_repo_file_is_a_draft(self):
+        self.waiting("Decide the tray icon colour")
+        made = self.refill(autopilot_sources=["waiting"])
+        self.assertEqual(self.header(made[0], "Queue"), "draft")
+        self.assertIn("Chuen's own action", made[0].read_text(encoding="utf-8"))
+
+    def test_the_cues_are_read_from_config(self):
+        self.assertIsNone(AP.acts_as_chuen(self.PLAIN, self.cfg))
+        cues = {"poke the flaky": [r"\bflaky\b"]}
+        self.assertIn("would poke the flaky as Chuen", AP.acts_as_chuen(self.PLAIN, {**self.cfg, "autopilot_acts_as_chuen": cues}))
+        self.inbox(self.PLAIN)
+        made = self.refill(autopilot_acts_as_chuen=cues)
+        self.assertEqual(self.header(made[0], "Queue"), "draft")
+        # ...and with no cues in config, the Bergeles line (from the inbox) is the model's call again.
+        self.assertIsNone(AP.acts_as_chuen(next(iter(self.WAITING_13_NOV)), {**self.cfg, "autopilot_acts_as_chuen": {}}))
+
+    def test_a_bad_cue_pattern_counts_as_a_match(self):
+        logs = []
+        why = AP.acts_as_chuen("anything", {**self.cfg, "autopilot_acts_as_chuen": {"x": ["("]}}, logs.append)
+        self.assertTrue(why.startswith("draft: would x as Chuen"))
+        self.assertTrue(any("does not compile" in l for l in logs))
+
     def test_off_switch(self):
         self.inbox("Fix the tray")
         self.assertEqual(self.refill(autopilot=False), [])
