@@ -179,6 +179,102 @@ class Collector(TokensBase):
         self.assertEqual(self.days()["2026-10-12"]["claude"]["out"], 20)
 
 
+try:
+    import zstandard
+except ImportError:  # requirements.txt lists it; the .gz tests still cover the stream reader
+    zstandard = None
+
+
+class Compressed(TokensBase):
+    """Codex compresses older rollouts to .jsonl.zst (Oct 2026: 224M tokens the card missed)."""
+
+    def pack(self, plain: Path, suffix: str, remove=True) -> Path:
+        data = plain.read_bytes()
+        out = plain.with_name(plain.name + suffix)
+        if suffix == ".zst":
+            out.write_bytes(zstandard.ZstdCompressor().compress(data))
+        else:
+            import gzip
+            out.write_bytes(gzip.compress(data))
+        if remove:
+            plain.unlink()
+        return out
+
+    def use_gz(self):
+        cfg = json.loads((self.tmp / "atrium.json").read_text(encoding="utf-8"))
+        for src in cfg["live"]["board"]["tokens"]["sources"]:
+            if src["kind"] == "codex":
+                src["compressed"] = [".zst", ".gz"]
+        (self.tmp / "atrium.json").write_text(json.dumps(cfg), encoding="utf-8")
+
+    def rollout(self, rel="2026/10/15/rollout-2026-10-15T09-00-00-abc.jsonl"):
+        return self.log(self.cx_root, rel, cx("2026-10-15", 100, 60, 10), cx("2026-10-15", 250, 160, 30))
+
+    @unittest.skipUnless(zstandard, "zstandard not installed")
+    def test_a_zst_rollout_is_read(self):
+        self.pack(self.rollout(), ".zst")
+        self.assertEqual(self.days()["2026-10-15"]["codex"], {"in": 90, "out": 30, "cache_read": 160, "cache_write": 0})
+        self.assertEqual(self.days()["2026-10-15"]["codex"]["in"], 90)  # read once, not again each scan
+
+    def test_a_gz_rollout_is_read_when_listed(self):
+        self.use_gz()
+        p = self.rollout()
+        self.log(self.cx_root, p.relative_to(self.cx_root).as_posix(), cx("2026-10-16", 300, 200, 31), end="")
+        self.pack(p, ".gz")  # the last line has no newline: a finished archive, so it counts
+        days = self.days()
+        self.assertEqual(days["2026-10-15"]["codex"]["in"], 90)
+        self.assertEqual(days["2026-10-16"]["codex"], {"in": 10, "out": 1, "cache_read": 40, "cache_write": 0})
+
+    def test_gz_is_not_read_unless_listed(self):
+        self.pack(self.rollout(), ".gz")
+        self.assertNotIn("2026-10-15", self.days())
+
+    @unittest.skipUnless(zstandard, "zstandard not installed")
+    def test_a_log_compressed_after_it_was_read_is_not_counted_twice(self):
+        p = self.rollout()
+        self.assertEqual(self.days()["2026-10-15"]["codex"]["in"], 90)
+        self.pack(p, ".zst")
+        tokens._mem.clear()  # a later refresh, from the ledger on disk
+        self.assertEqual(self.days()["2026-10-15"]["codex"]["in"], 90)
+
+    @unittest.skipUnless(zstandard, "zstandard not installed")
+    def test_both_copies_at_once_count_once(self):
+        self.pack(self.rollout(), ".zst", remove=False)
+        self.assertEqual(self.days()["2026-10-15"]["codex"]["in"], 90)
+
+    def test_lines_added_before_compression_are_picked_up(self):
+        self.use_gz()
+        p = self.rollout()
+        self.days()
+        self.log(self.cx_root, p.relative_to(self.cx_root).as_posix(), cx("2026-10-16", 300, 200, 31))
+        self.pack(p, ".gz")
+        days = self.days()
+        self.assertEqual(days["2026-10-15"]["codex"]["in"], 90)
+        self.assertEqual(days["2026-10-16"]["codex"]["in"], 10)
+
+    def test_missing_zstandard_says_so_on_the_card(self):
+        p = self.rollout()
+        p.with_name(p.name + ".zst").write_bytes(b"not read")
+        p.unlink()
+        real_import = __import__
+
+        def no_zstd(name, *a, **k):
+            if name == "zstandard":
+                raise ImportError(name)
+            return real_import(name, *a, **k)
+
+        with mock.patch("builtins.__import__", no_zstd):
+            got = tokens.update({}, NOW, save=True)
+            self.assertNotIn("2026-10-15", got["days"])
+            note = "1 compressed Codex logs not read (install zstandard)"
+            self.assertEqual(got["notes"], [note])
+            x = {"words": SHIPPED["live"]["board"]["words"], "now": NOW, "state": {"tasks": {"t": {"history": [
+                {"end": "2026-11-13T09:00:00", "lane": "claude", "tokens": {"in": 1, "out": 0, "cache_read": 0,
+                                                                            "cache_write": 0}}]}}},
+                 "agents": [{"lane": "codex", "label": "Codex"}]}
+            self.assertIn(note, board._tokens(x))
+
+
 class Card(TokensBase):
     def test_all_time_cell_and_per_agent_line(self):
         self.log(self.cc_root, "C--home/a.jsonl", cc("m1", "2026-10-12", i=1000, o=0, cr=0, cw=0))

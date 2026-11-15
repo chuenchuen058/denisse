@@ -571,7 +571,8 @@ def _token_sum(tokens, keys) -> int:
 def _tokens(x: dict) -> str:
     c, w, now = _b()["tokens"], x["words"], x["now"]
     # day x agent totals: Orchestra's runs plus the Claude Code and Codex logs, via the ledger
-    days = tokens.update(x["state"], now)["days"]
+    got = tokens.update(x["state"], now)
+    days, notes = got["days"], got.get("notes") or []
     runs = [(dt.date.fromisoformat(d), agent, t) for d, agents in days.items() for agent, t in agents.items()]
     if not runs:
         return _none(w)
@@ -599,7 +600,7 @@ def _tokens(x: dict) -> str:
         (c["lane"].format(label=a["label"], tokens=_fmt_n(per[a["lane"]], c)) if a["lane"] in per
          else c["lane_unknown"].format(label=a["label"])) for a in x["agents"])
     return (f'<div class="cells">{"".join(cells)}</div>'
-            f'<div class="why note">{e(lanes)}{e(c["lane_join"])}{e(c["note"])}</div>')
+            f'<div class="why note">{e(c["lane_join"].join([lanes, c["note"], *notes]))}</div>')
 
 
 def _credits(x: dict) -> str:
