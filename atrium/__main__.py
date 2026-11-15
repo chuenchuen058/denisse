@@ -7,6 +7,7 @@
   digest [--since HOURS] [--dry]
                          save what happened on this laptop since the last digest into the vault
   hub-save FILE          save the hub chat's digest (markdown FILE) into the vault
+  suggest [--dry-run]    print the Do next card's 3 suggestions for now (writes nothing)
   live [--port N] [--open]
                          serve the live Atrium page on this laptop (loopback only, read-only)
   import-chats --link-existing [--dry-run] [--vault DIR]
@@ -36,6 +37,7 @@ def main(argv=None) -> int:
     dg.add_argument("--since", type=float, default=None, metavar="HOURS")
     dg.add_argument("--dry", action="store_true")
     hs = sub.add_parser("hub-save"); hs.add_argument("file")
+    sg = sub.add_parser("suggest"); sg.add_argument("--dry-run", action="store_true")
     lv = sub.add_parser("live"); lv.add_argument("--port", type=int, default=None)
     lv.add_argument("--open", action="store_true")
     a = ap.parse_args(argv)
@@ -51,6 +53,9 @@ def main(argv=None) -> int:
         sys.stdout.reconfigure(encoding="utf-8")
         print(digest.run(since_hours=a.since, dry=a.dry))
         return 0
+    if a.cmd == "suggest":
+        from . import suggest
+        return suggest.main(dry_run=a.dry_run)
     if a.cmd == "live":
         from . import live
         return live.serve(port=a.port, open_browser=a.open)

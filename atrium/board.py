@@ -620,6 +620,11 @@ def build(x: dict) -> dict:
     plain = {"tree": _tree, "local": _local, "merged": _merged, "up_next": _up_next, "tokens": _tokens,
              "credits": _credits, "limits": _limits, "activity": _activity, "today": _today,
              "projects": _projects, "progress": _progress, "markets": _markets}
+    if any(card["id"] == "do_next" for card in b["cards"]):
+        from . import suggest  # the Do next card: atrium/suggest.py
+        up = _cached("ollama", b["local"]["cache_s"], _ollama) is not None
+        needs = [n for n in snapshot.waiting_items(x["t"].get("tasks", [])) if n.get("kind") != "note"]
+        plain["do_next"] = lambda x: suggest.card(suggest.current(x["now"], needs, model_up=up))
     cards = []
     for card in b["cards"]:
         cid, cls = card["id"], card.get("class", "")

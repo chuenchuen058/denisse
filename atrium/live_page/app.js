@@ -156,4 +156,15 @@ document.addEventListener("click", e => {
   theme();
 });
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (D) theme(); });
+// The suggestion card's two buttons: the page's one write (atrium/suggest.py); the update that
+// follows (its state file is watched) redraws the card without the item.
+document.addEventListener("click", e => {
+  const b = e.target.closest("button[data-suggest]");
+  if (!b) return;
+  b.disabled = true;
+  fetch(b.dataset.url.replace(/^\//, ""), {method: "POST", headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({action: b.dataset.suggest, id: b.dataset.id})})
+    .then(r => { if (r.ok) b.closest("li").classList.add("gone"); else b.disabled = false; })
+    .catch(() => { b.disabled = false; });
+});
 connect();

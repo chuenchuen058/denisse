@@ -4,8 +4,9 @@ Reads the same tables `atrium snapshot` builds (snapshot.tables, nothing collect
 twice), shapes them into the page's rows (agents + needs you, where each agent is working and
 who is about to collide (atrium/cursors.py), today's timeline, progress, and the v3 mission
 board built and rendered by atrium/board.py) and pushes a new copy down a server-sent event stream whenever a watched file
-changes. Binds loopback only. Read-only: every handler is a GET, nothing is written, and
-nothing runs while no tab holds the stream open. Every port, interval, path, label and
+changes. Binds loopback only. Read-only but for one POST, the Do next card's Done / Snooze
+(atrium/suggest.py); building the page writes nothing, and nothing runs while no tab holds
+the stream open. Every port, interval, path, label and
 colour: atrium/config.json "live".
 """
 from __future__ import annotations
@@ -349,7 +350,29 @@ class Handler(BaseHTTPRequestHandler):
     def _refuse(self):
         self._send(405, b"read-only", "text/plain; charset=utf-8")
 
-    do_POST = do_PUT = do_DELETE = do_PATCH = _refuse
+    do_PUT = do_DELETE = do_PATCH = _refuse
+
+    def do_POST(self):
+        """The one write: the Do next card's Done / Snooze (atrium/suggest.py), on its own path.
+        Only from this page: a loopback Host, a same-origin Origin when one is sent, a JSON body
+        (which a cross-site form cannot send without a preflight this server never answers)."""
+        from . import suggest
+        if self.path.split("?", 1)[0] != suggest._c()["http_path"]:
+            return self._refuse()
+        c = _c()
+        host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]")
+        origin = self.headers.get("Origin")
+        own = f"http://{self.headers.get('Host')}"
+        if (host not in c["loopback"] or (origin and origin != own)
+                or not (self.headers.get("Content-Type") or "").startswith("application/json")):
+            return self._send(403, b"forbidden", "text/plain; charset=utf-8")
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(min(n, 4096)) or b"{}")
+            out = suggest.act(body.get("action"), body.get("id"), dt.datetime.now())
+        except (ValueError, TypeError, AttributeError) as e:
+            return self._send(400, str(e).encode("utf-8"), "text/plain; charset=utf-8")
+        self._send(200, json.dumps(out).encode("utf-8"), "application/json; charset=utf-8")
 
     def _events(self):
         c = _c()

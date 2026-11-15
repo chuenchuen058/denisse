@@ -1,0 +1,241 @@
+{
+  "_note": "Defaults for atrium/config.json keys newer than a copy that ATRIUM_CONFIG (or a test) may point at: atrium/suggest.py lays config.json's \"suggest\" over this one, key by key. Edit config.json, not this file.",
+  "suggest": {
+    "_note": "atrium/suggest.py: the live page's Do next card, the 3 things to do now. Facts are read from the vault notes and plan files below plus Orchestra's needs-you items; the local model (through local_llm: the GPU lease, one num_ctx, a timeout) ranks them as strict JSON; Ollama down, the lease held, or a reply that is not valid JSON = the rules ranking (soonest deadline, then behind, then oldest waiting) under the words.mode_rules label. The model runs in the background and only while Ollama answers; the page never waits on it, and a result is kept for suggest_refresh_minutes or until a fact changes (hot.md, the queue, a note). Done/snooze state: state_file (inside .review), written only by the card's buttons. Same keys in atrium/config_defaults.json. Source roots: vault (vault-relative), repo (repo-relative) or home (home-relative); {today} = YYYY-MM-DD.",
+    "count": 3,
+    "ask_count": 6,
+    "suggest_refresh_minutes": 30,
+    "busy_retry_minutes": 5,
+    "snooze_minutes": 120,
+    "state_file": "hub/suggestions_state.json",
+    "http_path": "/suggest",
+    "kinds": [
+      "study",
+      "project",
+      "admin",
+      "reply"
+    ],
+    "study_kind": "study",
+    "minutes": {
+      "min": 5,
+      "max": 240,
+      "by_kind": {
+        "study": 45,
+        "project": 60,
+        "admin": 15,
+        "reply": 15
+      }
+    },
+    "_days_off": "Weekday names, as %A prints them. On a day off no study is suggested; only non-study items due within urgent_days, else words.day_off.",
+    "days_off": [
+      "Saturday"
+    ],
+    "urgent_days": 2,
+    "_study_slots": "His best study slots (HH:MM, local): afternoons between lectures, and after lectures before dinner. Inside one, study goes first among items equally due.",
+    "study_slots": [
+      {
+        "from": "13:00",
+        "to": "15:00"
+      },
+      {
+        "from": "17:00",
+        "to": "19:00"
+      }
+    ],
+    "_sources": "mode lines = each bullet or table row of section is one fact (hot.md's waiting list; strike true = Done strikes the exact line); note = each matching note is one fact (the sections listed, else the body; last_lines keeps the newest lines), titled by title; sections = each ## section is a fact, and only the next upcoming one (by the last date in its heading) is offered. glob may match many files; skip_between drops a generated block; rank false = the model sees it, the rules ranking never offers it.",
+    "sources": [
+      {
+        "id": "hot",
+        "label": "hot.md",
+        "root": "vault",
+        "glob": "hot.md",
+        "mode": "lines",
+        "section": "Waiting on Chuen",
+        "skip_between": [
+          "<!-- orchestra:waiting -->",
+          "<!-- /orchestra:waiting -->"
+        ],
+        "kind": "admin",
+        "strike": true
+      },
+      {
+        "id": "mock",
+        "label": "{stem}",
+        "root": "vault",
+        "glob": "Atlas/Academic/**/* mock prep.md",
+        "mode": "note",
+        "sections": [
+          "Plan",
+          "Practice set results",
+          "Progress log",
+          "Log"
+        ],
+        "title": "Study: {name}",
+        "name_strip": "^Don - ",
+        "kind": "study"
+      },
+      {
+        "id": "study",
+        "label": "{stem}",
+        "root": "vault",
+        "glob": "Atlas/Academic/Don/* progress.md",
+        "mode": "note",
+        "sections": [
+          "Anki reviews",
+          "Weak topics",
+          "Next"
+        ],
+        "title": "Study: {name}",
+        "name_strip": "^Don - | progress$",
+        "kind": "study"
+      },
+      {
+        "id": "handoff",
+        "label": "Handoff {today}",
+        "root": "vault",
+        "glob": "Calendar/Handoff-{today}.md",
+        "mode": "note",
+        "sections": [],
+        "title": "Today's handoff",
+        "kind": "admin",
+        "rank": false,
+        "last_lines": 25
+      },
+      {
+        "id": "day",
+        "label": "Day note {today}",
+        "root": "vault",
+        "glob": "Calendar/Log/{today}.md",
+        "mode": "note",
+        "sections": [],
+        "title": "Today's fixed events",
+        "kind": "admin",
+        "rank": false
+      },
+      {
+        "id": "plan",
+        "label": "Robotic tail plan",
+        "root": "home",
+        "glob": "GitHub/robotic-tail/docs/plan.md",
+        "mode": "sections",
+        "title": "Robotic tail: {heading}",
+        "kind": "project"
+      }
+    ],
+    "orchestra": {
+      "use": true,
+      "id": "orchestra",
+      "label": "Orchestra",
+      "kind": "admin"
+    },
+    "fact_chars": 900,
+    "facts_chars": 7000,
+    "_dates": "Deadlines are dates found in a fact: patterns with named groups y/m/d (numbers) or d/mon (mon = one of months, by its first three letters). No year: this year, or next year when that is more than past_grace_days ago. A fact's deadline is its soonest date not yet past (a sections fact: the last date in its heading).",
+    "dates": {
+      "patterns": [
+        "(?P<y>\\d{4})-(?P<m>\\d{2})-(?P<d>\\d{2})",
+        "\\b(?P<d>\\d{1,2})\\s+(?P<mon>[A-Za-z]{3})[a-z]*\\b"
+      ],
+      "months": [
+        "jan",
+        "feb",
+        "mar",
+        "apr",
+        "may",
+        "jun",
+        "jul",
+        "aug",
+        "sep",
+        "oct",
+        "nov",
+        "dec"
+      ],
+      "past_grace_days": 120
+    },
+    "_behind": "Only for the rules ranking (the model judges this itself): a fact matching one of these is one he is behind on.",
+    "behind_patterns": [
+      "(?i)\\bnot (?:finished|tried|started|done)\\b",
+      "(?i)\\b0 (?:card\\(s\\) )?reviewed\\b",
+      "(?i)\\bbehind\\b",
+      "(?i)\\boverdue\\b"
+    ],
+    "struck": "^\\s*[-*]\\s*~~",
+    "_guard": "Checked on every suggestion, the model's and the rules': drop = never shown (no buy/sell/hold advice: markets are information only); draft = rewritten with draft_template unless it already matches unless (nothing is sent as him).",
+    "guard": [
+      {
+        "pattern": "(?i)\\b(?:buy|sell|hold|short|invest in)\\b.*\\b(?:stock|stocks|share|shares|etf|etfs|crypto|bitcoin|position|ticker|fund)\\b",
+        "action": "drop"
+      },
+      {
+        "pattern": "(?i)\\b(?:stock|stocks|shares|etf|crypto|bitcoin|ticker)\\b.*\\b(?:buy|sell|hold)\\b",
+        "action": "drop"
+      },
+      {
+        "pattern": "(?i)\\b(?:send|post|reply to|email|message|submit)\\b",
+        "action": "draft",
+        "unless": "(?i)\\bdraft\\b"
+      }
+    ],
+    "draft_template": "Draft it, you send it: {title}",
+    "strike": {
+      "template": "{lead}~~{text}~~ (done {date})",
+      "date": "{d} {mon}"
+    },
+    "obsidian": {
+      "uri": "obsidian://open?vault={vault}&file={file}",
+      "vault_name": ""
+    },
+    "file_uri": "file:///{path}",
+    "model": {
+      "enabled": true,
+      "job": "atrium_suggest",
+      "entry": "chat",
+      "path": "/api/chat",
+      "timeout_s": 180,
+      "options": {
+        "temperature": 0.2,
+        "num_predict": 700
+      },
+      "_prompt": "Lines joined with newlines. Fields: {now} {weekday} {day_off} {in_slot} {slots} {kinds} {n} {facts}.",
+      "prompt": [
+        "You plan Chuen's next hour. It is {weekday} {now}. Day off today: {day_off}. In a study slot now: {in_slot} (his slots: {slots}).",
+        "From the facts below, pick the {n} things he should do now, most important first.",
+        "Rules: on a day off suggest no study, only urgent non-study items. Prefer study inside his study slots.",
+        "Never suggest buying, selling or holding any investment. Never suggest sending anything as him: at most 'draft a reply to X'.",
+        "Each item: title (short, an action), why (one line, blunt when he is behind), minutes (an integer), source (the id of the fact it came from, exactly as given), kind (one of {kinds}).",
+        "Answer with JSON only: {{\"items\": [...]}}.",
+        "Facts:",
+        "{facts}"
+      ],
+      "example": {
+        "items": [
+          {
+            "title": "",
+            "why": "",
+            "minutes": 0,
+            "source": "",
+            "kind": ""
+          }
+        ]
+      }
+    },
+    "why": {
+      "deadline": "due {date}, {days} day(s) left",
+      "overdue": "was due {date}: you are behind",
+      "behind": "you are behind on this",
+      "waiting": "waiting on you in {source}",
+      "date": "%a %d %b"
+    },
+    "words": {
+      "done": "Done",
+      "snooze": "Snooze 2h",
+      "why_toggle": "why these?",
+      "mode_model": "local model",
+      "mode_rules": "rules, model busy",
+      "day_off": "Day off",
+      "none": "Nothing to suggest right now",
+      "minutes": "{n} min",
+      "no_facts": "no facts read"
+    }
+  }
+}

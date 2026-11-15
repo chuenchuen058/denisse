@@ -19,7 +19,7 @@ button.theme{background:var(--card);border:0;color:var(--text);border-radius:999
 .rings{margin-bottom:18px}
 .w{background:var(--card);border-radius:var(--r);padding:18px 20px;box-shadow:0 1px 3px var(--shadow);min-width:0}
 .w h3{font-size:13px;color:var(--sub);font-weight:600;margin-bottom:10px;text-transform:uppercase;letter-spacing:.3px}
-.span2{grid-column:span 2}.span4{grid-column:span 4}.tall{grid-row:span 2}
+.span2{grid-column:span 2}.span4{grid-column:span 4}.tall{grid-row:span 2}.first{order:-1}
 .none{color:var(--sub);font-size:13.5px;padding:6px 0}
 .why{color:var(--sub);font-size:12.5px}
 .why.ok{color:var(--ok)}.why.warn{color:var(--warn)}.why.bad{color:var(--bad)}
@@ -114,3 +114,18 @@ h3+.reset{border-top:0}
 @media (max-width:900px){.grid,.rings{grid-template-columns:1fr 1fr}.span4{grid-column:span 2}.local,.cells{grid-template-columns:1fr 1fr}}
 @media (max-width:560px){body{padding:16px}.grid,.rings{grid-template-columns:1fr}.span2,.span4{grid-column:span 1}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+/* Do next (atrium/suggest.py) */
+.sg-mode{float:right;margin-top:-28px;font-size:12px;color:var(--sub)}
+.do-next{list-style:none;padding:0;display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.do-next .sg{display:flex;flex-direction:column;gap:6px;padding:14px;border-radius:16px;background:color-mix(in srgb,var(--text) 4%,transparent)}
+.do-next .sg.gone{opacity:.35}
+.do-next .t{font-size:16px}
+.do-next .meta{display:flex;align-items:center;gap:10px;font-size:12.5px}
+.do-next .meta .pill{padding:3px 10px;font-size:12px}
+.do-next .src{color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.do-next .acts{display:flex;gap:8px;margin-top:auto}
+.do-next button{background:var(--card);border:0;color:var(--text);border-radius:999px;padding:6px 12px;cursor:pointer;font:inherit;font-size:12.5px;font-weight:600;box-shadow:0 1px 2px var(--shadow)}
+.why-these{margin-top:10px;font-size:12.5px;color:var(--sub)}
+.why-these summary{cursor:pointer}
+.why-these ul{padding-left:18px;margin-top:6px}
+@media (max-width:900px){.do-next{grid-template-columns:1fr}}
