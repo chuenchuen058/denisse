@@ -10,9 +10,12 @@ Sources (atrium/config.json "live" -> "board" -> "tokens" -> "sources", each wit
 - "codex": Codex's session logs; each token_count event carries the session's running total, so
   a file adds the difference from the last total read in it.
 
-Orchestra's own Claude runs are in state.json AND in Claude Code's logs: the logs of the
-worktree projects (skip_dirs) are skipped, and so is any line whose session id a finished
-Orchestra run recorded.
+Orchestra's own Claude runs are in state.json AND in Claude Code's logs. With prefer_logs on the
+claude_code source (15 Nov 2026: state.json recorded 0.61B where the worktree logs held ~0.9B) the
+logs win: every project is read, worktrees included, the session ids found are kept in the ledger,
+and state.json counts only the runs whose session no log holds (no session id, or its log is
+gone). Without it the old way: the worktree projects (skip_dirs) and any line whose session id a
+finished Orchestra run recorded are skipped, and state.json counts every run.
 
 The ledger (.review/<ledger>, git-ignored) holds day x agent totals and how far each log file has
 been read (size and byte offset), so each refresh reads only what was appended, and totals
@@ -80,7 +83,7 @@ def _load(path: Path) -> dict:
     except (OSError, ValueError):
         data = {}
     data = data if isinstance(data, dict) else {}
-    for k in ("logs", "orchestra", "files", "seen"):
+    for k in ("logs", "orchestra", "files", "seen", "sessions"):
         data[k] = data.get(k) if isinstance(data.get(k), dict) else {}
     return data
 
@@ -92,16 +95,23 @@ def _save(path: Path, data: dict) -> None:
     os.replace(tmp, path)
 
 
-def _orchestra(state: dict, src: dict, all_keys: list) -> tuple[dict, set]:
-    """Day x agent totals of the runs state.json records, and the session ids of those runs."""
+def _orchestra(state: dict, src: dict, all_keys: list, logged=None) -> tuple[dict, set]:
+    """Day x agent totals of the runs state.json records, and the session ids of those runs.
+    A run whose session id is in logged is left out (its log already counted it); every day
+    with a run gets an entry, empty when all its runs were logged, so an older total is replaced."""
     days, sessions = {}, set()
     for ts in (state.get("tasks") or {}).values():
         for h in (ts or {}).get("history", []) or []:
             if not isinstance(h, dict):
                 continue
-            if isinstance(h.get(src["session_field"]), str):
-                sessions.add(h[src["session_field"]])
+            sid = h.get(src["session_field"]) if isinstance(h.get(src["session_field"]), str) else None
+            if sid:
+                sessions.add(sid)
             day, t = _day(h.get(src["time_field"])), h.get(src["tokens_field"])
+            if day:
+                days.setdefault(day, {})
+            if sid and logged and sid in logged:
+                continue
             if day and isinstance(t, dict):
                 _add(days, day, h.get(src["agent_field"]) or src["agent_unknown"],
                      {k: int(t.get(k) or 0) for k in all_keys})
@@ -112,7 +122,7 @@ def _files(src: dict):
     root = _expand(src["root"])
     if not root.is_dir():
         return
-    skip = src.get("skip_dirs") or []
+    skip = [] if src.get("prefer_logs") else src.get("skip_dirs") or []
     for p in sorted(root.glob(src["glob"])):
         rel = p.relative_to(root).parts[:-1]
         if any(fnmatch.fnmatch(d, pat) for d in rel for pat in skip):
@@ -161,12 +171,15 @@ def _read_claude_code(src: dict, data: dict, all_from: str, orch_sessions: set) 
             mid, usage = _get(obj, f["id"]), _get(obj, f["usage"])
             if not isinstance(mid, str) or not isinstance(usage, dict):
                 continue
-            if _get(obj, f["session"]) in orch_sessions or mid in data["seen"]:
+            sid = _get(obj, f["session"])
+            if (not src.get("prefer_logs") and sid in orch_sessions) or mid in data["seen"]:
                 continue
             day = _day(_get(obj, f["time"]))
             if not day or day < all_from:
                 continue
             data["seen"][mid] = day
+            if src.get("prefer_logs") and isinstance(sid, str):
+                data["sessions"].setdefault(sid, day)
             _add(data["logs"], day, src["agent"], _usage(usage, src["keys"], src.get("minus")))
 
 
@@ -225,12 +238,8 @@ def update(state: dict, now: dt.datetime, save: bool = False) -> dict:
     if data is None or (scan and disk_mtime != seen_mtime):  # another process saved it since
         data = _load(path)
         seen_mtime = disk_mtime
-    orch_days, sessions = {}, set()
-    for src in c["sources"]:
-        if src["kind"] == "orchestra":
-            orch_days, sessions = _orchestra(state or {}, src, c["all_keys"])
-    changed = any(data["orchestra"].get(d) != v for d, v in orch_days.items())
-    data["orchestra"].update(orch_days)
+    orch = next((s for s in c["sources"] if s["kind"] == "orchestra"), None)
+    sessions = _orchestra(state or {}, orch, c["all_keys"])[1] if orch else set()
     if scan:
         for src in c["sources"]:
             if src["kind"] in READERS:
@@ -238,6 +247,12 @@ def update(state: dict, now: dt.datetime, save: bool = False) -> dict:
         keep_from = (now.date() - dt.timedelta(days=c["seen_keep_days"])).isoformat()
         data["seen"] = {k: d for k, d in data["seen"].items() if d >= keep_from}
         last = time.monotonic()
+    # session ids a log held are kept for good (not pruned like "seen"): a run whose log is
+    # gone must not come back from state.json on top of the day total its log already gave
+    logged = data["sessions"] if any(s.get("prefer_logs") for s in c["sources"]) else None
+    orch_days = _orchestra(state or {}, orch, c["all_keys"], logged)[0] if orch else {}
+    changed = any(data["orchestra"].get(d) != v for d, v in orch_days.items())
+    data["orchestra"].update(orch_days)
     if save and (scan or changed):
         try:
             _save(path, data)

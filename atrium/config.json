@@ -128,7 +128,13 @@
                 "draft": "Approve draft task: {task} (change Queue: draft to auto)",
                 "parked": "Parked: {task} - {reason}", "orchestra": "Orchestra",
                 "_limit_line": "A note matching this (aftercare's lane-limit line) carries its time as until, and is left out once that time has passed.",
-                "limit_line": "^Lane \\w+ limited until (\\d{4}-\\d{2}-\\d{2}[ T]\\d{1,2}:\\d{2})"},
+                "limit_line": "^Lane \\w+ limited until (\\d{4}-\\d{2}-\\d{2}[ T]\\d{1,2}:\\d{2})",
+                "_struck_open": "A bullet whose text starts with one of these is struck through, i.e. done: it is not waiting on Chuen (the Needs you list, the hub's waiting table, the board's Waiting on you branch). Same markers as orchestra autopilot_struck_open. [] = no struck-through check.",
+                "struck_open": ["~~", "<s>", "<del>", "<strike>"],
+                "_done_markers": "Regexes (case-insensitive) that mark a bullet as done, like a struck line; one that does not compile is ignored. Same as orchestra autopilot_done_markers. [] = none.",
+                "done_markers": ["^\\s*(?:✅|✔|☑)", "(?:✅|✔️?|☑️?)\\s*$", "^\\s*\\(?done\\b\\s*[:)\\-–—]", "[(\\[]\\s*done\\b[^)\\]]*[)\\]]\\s*$"]},
+    "_task_side_suffixes": "Files in queue/, parked/ and archive/ that end in one of these are a task's side files (its report, its review), not tasks: they are not counted or listed (15 Nov 2026: parked/ held 31 tasks and 54 .md files).",
+    "task_side_suffixes": [".report.md", ".review.md"],
     "log_chars": 220,
     "learner_questions": 4,
     "default_slots": {"claude": 1, "codex": 1},
@@ -567,6 +573,8 @@
            "session_field": "session_id", "agent_unknown": "unknown"},
           {"kind": "claude_code", "agent": "claude", "root": "%USERPROFILE%/.claude/projects", "glob": "**/*.jsonl",
            "skip_dirs": ["*-denisse-wt-*"], "marker": "\"usage\"",
+           "_prefer_logs": "true (15 Nov 2026: state.json under-reports, 0.61B recorded where the worktree logs held ~0.9B): skip_dirs and the Orchestra-session skip are off, every project's log is read, and Orchestra's state.json counts only runs whose session id no log held (kept in the ledger's sessions). false = the old way.",
+           "prefer_logs": true,
            "fields": {"id": "message.id", "usage": "message.usage", "session": "sessionId", "time": "timestamp"},
            "keys": {"in": "input_tokens", "out": "output_tokens", "cache_read": "cache_read_input_tokens",
                     "cache_write": "cache_creation_input_tokens"}},
@@ -591,6 +599,21 @@
         "spent_unknown": "cost unknown"
       },
       "limits": {"time_today": "%H:%M", "time_other": "%a %H:%M"},
+      "_counts": "One count of the day for every card (atrium/board.py day_counts; 15 Nov 2026 the ring said 14 of 16, Progress 23 of 26, Merged 11 of 29 for the same day). runs = runs state.json records as ended today, every lane; passed = those whose result is in done_results; tasks = tasks with a run ended today; tasks_done = those with a done run today; tasks_today = tasks plus running and queued ones; merged = tasks runner.log merged today. labels say which: ring_<key> replaces that ring's label, progress_<key> that bar's text (Progress's tasks bar is already labelled Tasks today), merged_of the Merged card's line (fields: every count above).",
+      "counts": {
+        "done_results": ["PASS"],
+        "labels": {
+          "ring_pass": "run pass rate today · {v} of {m} runs",
+          "merged_of": "tasks merged · of {tasks_done} task(s) passed today ({runs} runs)"
+        }
+      },
+      "_quota": "A lane whose last run ended in one of results with a message matching pattern (state.json lanes.<lane>.message, else the run's note), and no run of it since, is limited even after the runner's own guess at the reset has passed (Copilot's monthly quota, 13-15 Nov 2026). Shown with until when the runner's reset is still ahead, else unknown.",
+      "quota": {
+        "results": ["LIMITED", "NO_REPORT"],
+        "pattern": "(?i)\\bquota\\b",
+        "until": "quota, resets {time}",
+        "unknown": "quota, reset date unknown"
+      },
       "today": {"max": 6, "time": "{h:02d}:{m:02d}"},
       "_projects": "Projects: the bullets of a hot.md section; lead_pattern splits off a leading date and [who].",
       "projects": {"note": "hot.md", "section": "Active right now", "max": 5, "item_chars": 110, "skip": ["TODO"],
@@ -625,6 +648,8 @@
         "limit_until": "until {time}",
         "limit_none": "not limited",
         "result_running": "running",
+        "verdict_quota": "{label} limited: {status}",
+        "up_next_drafts": "nothing queued ({n} draft(s) waiting for you)",
         "empty": "no data yet",
         "dash": "–",
         "join": " · "

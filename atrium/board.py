@@ -132,6 +132,54 @@ def _runs(state: dict):
                 yield slug, h, end
 
 
+def day_counts(state: dict, now: dt.datetime, log=(), running=(), queued=()) -> dict:
+    """The day's counts every card takes (config "counts"): runs / passed (runs ended today, every
+    lane), tasks / tasks_done (tasks with a run, a done run, ended today), tasks_today (those plus
+    the running and queued task ids given), merged (tasks runner.log merged today)."""
+    c = _b()
+    done = set(c["counts"]["done_results"])
+    runs = passed = 0
+    tasks, tasks_done = set(), set()
+    for slug, h, end in _runs(state or {}):
+        if end.date() != now.date():
+            continue
+        runs += 1
+        tasks.add(slug)
+        if h.get("result") in done:
+            passed += 1
+            tasks_done.add(slug)
+    merged_re = re.compile(c["runner_log"]["merged_line"])
+    merged = {m.group("task") for when, rest in log if when.date() == now.date()
+              for m in [merged_re.match(rest)] if m}
+    return {"runs": runs, "passed": passed, "tasks": len(tasks), "tasks_done": len(tasks_done),
+            "tasks_today": len(tasks | set(running) | set(queued)), "merged": len(merged)}
+
+
+def _open_ids(t: dict) -> tuple[set, set]:
+    """(running task ids, queued task ids) from the snapshot tables."""
+    running = {r["id"] for r in t.get("running", []) if r.get("task")}
+    return running, {r["id"] for r in t.get("tasks", []) if r["status"] == "queued"}
+
+
+def lane_quota(state: dict, lane: str, now: dt.datetime) -> str:
+    """'quota, resets ...' when the lane's last run ended on a quota (config "quota") and it has
+    not run since, else ''."""
+    q = _b()["quota"]
+    last = max(((end, h) for _, h, end in _runs(state or {}) if h.get("lane") == lane),
+               key=lambda r: r[0], default=None)
+    if not last or last[1].get("result") not in q["results"]:
+        return ""
+    lanes = state.get("lanes") if isinstance(state.get("lanes"), dict) else {}
+    rec = lanes.get(lane) if isinstance(lanes.get(lane), dict) else {}
+    if not re.search(q["pattern"], str(rec.get("message") or last[1].get("note") or "")):
+        return ""
+    until = _dt(rec.get("limited_until"))
+    if until and until > now:
+        lc = _b()["limits"]
+        return q["until"].format(time=_when(until, now, lc["time_today"], lc["time_other"]))
+    return q["unknown"]
+
+
 def _running(x: dict) -> list[dict]:
     """The running tasks, each with when it started and the timeout the runner gave it."""
     c = _b()["runner_log"]
@@ -166,7 +214,8 @@ def _fmt_n(n: float, c: dict) -> str:
 def _ring_figures(x: dict) -> dict:
     usage = x["t"]["usage"]
     spend = (x["t"]["spend"] or [{}])[0]
-    return {"pass": (sum(u.get("passed_today", 0) for u in usage), sum(u.get("runs_today", 0) for u in usage)),
+    n = x["counts"]
+    return {"pass": (n["passed"], n["runs"]),
             "slots": (sum(u.get("busy", 0) for u in usage), sum(u.get("slots", 0) for u in usage)),
             "ready": (sum(a["state"] != "bad" for a in x["agents"]), len(x["agents"])),
             "spend": (spend.get("cost_usd", 0) or 0, spend.get("cap_usd", 0) or 0)}
@@ -183,13 +232,14 @@ def _colour(name: str, x: dict) -> str:
 def _header(x: dict, runs: list[dict]) -> tuple[dict, str]:
     w, lw, b = x["words"], x["live_words"], _b()
     stuck = sum(r["stuck"] for r in runs)
-    limited = [a for a in x["agents"] if a["until"]]
+    limited = [a for a in x["agents"] if a["until"] or a.get("quota")]
     if stuck:
         level, text = "bad", w["verdict_stuck"].format(n=stuck)
     elif limited:
-        a = limited[0]
-        level, text = "warn", w["verdict_limited"].format(
-            label=a["label"], time=_dt(a["until"]).strftime(w["verdict_time"]))
+        a, lc = limited[0], b["limits"]
+        level, text = "warn", (w["verdict_limited"].format(
+            label=a["label"], time=_when(_dt(a["until"]), x["now"], lc["time_today"], lc["time_other"]))
+            if a["until"] else w["verdict_quota"].format(label=a["label"], status=a["quota"]))
     else:
         level, text = "ok", w["verdict_ok"]
     p = x["power"]
@@ -210,12 +260,13 @@ def _header(x: dict, runs: list[dict]) -> tuple[dict, str]:
 def _rings(x: dict) -> str:
     b = _b()
     g, figures, out = b["ring"], _ring_figures(x), []
+    labels = b["counts"]["labels"]
     circ = 2 * math.pi * g["radius"]
     for r in b["rings"]:
         v, m = figures.get(r["key"], (0, 0))
         pct = min(100, round(100 * v / m)) if m else 0
         value = r["value"].format(v=v, m=m, pct=pct) if m else x["words"]["dash"]
-        label = r["label"].format(v=v, m=m, pct=pct) if m else r["empty"]
+        label = labels.get(f'ring_{r["key"]}', r["label"]).format(v=v, m=m, pct=pct) if m else r["empty"]
         circle = (f'<circle cx="{g["box"] / 2}" cy="{g["box"] / 2}" r="{g["radius"]}" fill="none" '
                   f'stroke-width="{g["stroke"]}"')
         out.append(f'<div class="w rg" data-ring="{e(r["key"])}"><svg viewBox="0 0 {g["box"]} {g["box"]}">'
@@ -242,6 +293,9 @@ def _lane_card(a: dict, x: dict, runs: list[dict]) -> str:
         state = w["state_limited"]
         until = _dt(a["until"])
         meta.append(w["resets"].format(time=_when(until, x["now"], w["resets_today"], w["resets_other"])))
+    elif a.get("quota"):
+        state = w["state_limited"]
+        meta.append(a["quota"])
     elif a["state"] == "bad":
         state = w["state_down"]
         body = f'<div class="task">{e(a["status"])}</div>'
@@ -292,11 +346,9 @@ def _cursor_rows(x: dict) -> str:
 
 
 def _merged(x: dict) -> str:
-    w = x["words"]
-    merged_re = re.compile(_b()["runner_log"]["merged_line"])
-    merged = sum(1 for when, rest in x["log"] if when.date() == x["now"].date() and merged_re.match(rest))
-    finished = sum(1 for _, _, end in _runs(x["state"]) if end.date() == x["now"].date())
-    return f'<div class="big">{merged}</div><div class="why">{e(w["merged_of"].format(n=finished))}</div>'
+    n = x["counts"]
+    line = _b()["counts"]["labels"]["merged_of"].format(**n)
+    return f'<div class="big">{n["merged"]}</div><div class="why">{e(line)}</div>'
 
 
 def _needs_look(x: dict) -> tuple[str, bool]:
@@ -319,6 +371,9 @@ def _up_next(x: dict) -> str:
     by_lane = {a["lane"]: a for a in x["agents"]}
     rows = _queued(x)[:_b()["up_next"]["max"]]
     if not rows:
+        drafts = sum(t["status"] == "draft" for t in x["t"]["tasks"])
+        if drafts:
+            return f'<div class="none">{e(x["words"]["up_next_drafts"].format(n=drafts))}</div>'
         return _none(x["words"])
     items = []
     for t in rows:
@@ -344,7 +399,7 @@ def _tree(x: dict) -> str:
         if g["source"] == "hot":
             opened, done = [], []
             for t in _hot_bullets(c["note"], g["section"], c["skip_block"]):
-                if not t or t.upper() in skip:
+                if not t or t.upper() in skip or snapshot.done_line(t):  # struck = done: not waiting
                     continue
                 m = done_re.match(t)
                 (done if m else opened).append(_cut(m.group("text") if m else t, c["item_chars"]))
@@ -499,6 +554,8 @@ def _limits(x: dict) -> str:
             span = (until - since).total_seconds() if since and since < until else 0
             pct = round(min(100, max(0, 100 * (now - since).total_seconds() / span))) if span else 0
             text, cls = w["limit_until"].format(time=_when(until, now, c["time_today"], c["time_other"])), "cd bad"
+        elif a.get("quota"):
+            pct, text, cls = 0, a["quota"], "cd bad"
         else:
             pct, text, cls = 0, w["limit_none"], "cd sub"
         rows.append(f'<div class="reset" style="--c:{e(a["colour"])}"><b>{e(a["label"])}</b>'
@@ -615,6 +672,8 @@ def build(x: dict) -> dict:
     where, timeline, progress, markets, power, live_words, titles."""
     b = _b()
     x = dict(x, words=b["words"], log=log_lines())
+    if "counts" not in x:
+        x["counts"] = day_counts(x["state"], x["now"], x["log"], *_open_ids(x["t"]))
     runs = _running(x)
     verdict, header = _header(x, runs)
     plain = {"tree": _tree, "local": _local, "merged": _merged, "up_next": _up_next, "tokens": _tokens,
