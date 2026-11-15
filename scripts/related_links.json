@@ -1,0 +1,79 @@
+{
+  "log_roots": [
+    "Calendar/Chats",
+    "Calendar/Sessions",
+    "Calendar/Orchestra",
+    "Calendar/Log"
+  ],
+  "skip_roots": [
+    "Calendar",
+    "Templates",
+    "Archive",
+    ".obsidian",
+    ".git",
+    ".review",
+    "Denisse/Brain",
+    "Denisse/Evals"
+  ],
+  "skip_tags": [
+    "folder-hub",
+    "topic-hub"
+  ],
+  "max_links": 3,
+  "folder_note_suffixes": [
+    "summary",
+    "notes",
+    "concepts"
+  ],
+  "min_phrase_len": 4,
+  "max_doc_freq": 0.25,
+  "min_score": 1.0,
+  "code_prefix_regex": "^[A-Z0-9]{5,}\\s+",
+  "block_start": "<!-- related:auto -->",
+  "block_end": "<!-- /related:auto -->",
+  "heading": "## Related",
+  "topic_field": "topic",
+  "topics": [
+    {
+      "name": "study",
+      "prefix": "Atlas/Academic/"
+    },
+    {
+      "name": "projects",
+      "prefix": "Atlas/Projects/"
+    },
+    {
+      "name": "clubs",
+      "prefix": "Atlas/Clubs/"
+    },
+    {
+      "name": "denisse",
+      "prefix": "Denisse/"
+    },
+    {
+      "name": "dev",
+      "prefix": "Dev/"
+    },
+    {
+      "name": "efforts",
+      "prefix": "Efforts/"
+    },
+    {
+      "name": "atlas",
+      "prefix": "Atlas/"
+    },
+    {
+      "name": "other",
+      "prefix": ""
+    }
+  ],
+  "max_in_links": 40,
+  "skip_stem_regex": "^(\\d{4}-\\d{2}(-\\d{2})?.*|.*-Index|README|AGENTS|CLAUDE)$",
+  "similar_logs": 2,
+  "similar_min": 0.15,
+  "similar_max_df": 0.3,
+  "similar_top_terms": 60,
+  "similar_word_regex": "[A-Za-z][A-Za-z0-9]{3,}",
+  "similar_heading": "Similar logs:",
+  "topic_spread_passes": 6
+}
