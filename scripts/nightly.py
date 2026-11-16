@@ -16,6 +16,7 @@ Seven stages, in this order:
                    notes, committed on their own as "Nightly chat import"
                    then topic_hubs.py rebuilds the Calendar/Topics hubs that
                    link every log by topic (only changed hubs, vault lock)
+                   and link_related_logs.py refreshes each log's Related block
   4c. prep      -- next_lecture.py: a Denisse/Drafts prep note per module for
                    the next lecture still at files-only (silent if none)
   5. commit     -- commits ONLY the files this job writes
@@ -242,6 +243,18 @@ hubs = topic_hubs.nightly_step(VAULT, say, apply=not DRY, commit=not DRY)
 if hubs["commit"] == "failed":
     git_error = True
 
+# -- 4b''. related links ------------------------------------------------------
+# scripts/link_related_logs.py: every log under the log folders in
+# related_links.json gets its marked "Related" block (the notes it talks
+# about, similar logs, and topic:: <name> for the graph colours). Re-running
+# only replaces its own block; each write is replace-if-unchanged under the
+# vault lock, the old text is backed up first (newest keep_backups kept) and
+# only the logs it changed are committed. Never fatal.
+import link_related_logs  # noqa: E402
+related = link_related_logs.nightly_step(VAULT, say, apply=not DRY, commit=not DRY)
+if related["commit"] == "failed":
+    git_error = True
+
 # -- 4c. prep for the next lecture ------------------------------------------
 # scripts/next_lecture.py: one Denisse/Drafts prep note per module for the
 # newest week still at files-only (or dated in the next 3 days), from file
@@ -308,7 +321,7 @@ else:
 line = (f"{datetime.now():%Y-%m-%d %H:%M}  contract_rc={contract.returncode} "
         f"off_convention={odd} pending_writeups={len(pending)} "
         f"draft_cases={drafts} chats={chats['imported']} "
-        f"chat_failures={chats['failed']} topic_hubs={len(hubs['changed'])} prep={prep} backup={backup}{' DRY' if DRY else ''}")
+        f"chat_failures={chats['failed']} topic_hubs={len(hubs['changed'])} related={len(related['changed'])} prep={prep} backup={backup}{' DRY' if DRY else ''}")
 os.makedirs(os.path.dirname(LOG), exist_ok=True)
 with open(LOG, "a", encoding="utf-8") as f:
     f.write(line + "\n")
