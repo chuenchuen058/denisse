@@ -73,23 +73,26 @@ def wait_for_pid(path: Path, seconds: float = 20) -> int:
     raise AssertionError(f"the grandchild never wrote {path}")
 
 
+def build_supervision_repo(repo):
+    """The repo every SupervisionTest starts from (built once per class, copied per test)."""
+    g = lambda *a: subprocess.run(["git", *a], cwd=repo, check=True, capture_output=True)
+    g("init", "-q", "-b", "main")
+    g("config", "user.name", "t"); g("config", "user.email", "t@t")
+    (repo / ".gitignore").write_text(".review/*\n.venv\n")
+    (repo / "orchestra").mkdir()
+    shutil.copy(HERE / "review_prompt.md", repo / "orchestra" / "review_prompt.md")
+    g("add", "."); g("commit", "-qm", "init")
+    (repo / ".venv").mkdir()
+    (repo / ".review").mkdir()
+    (repo / ".review" / "lanes.json").write_text(json.dumps({"fake": [sys.executable, "-c", FAKE]}))
+
+
 @unittest.skipUnless(os.name == "nt", "Windows Job Objects")
 class SupervisionTest(unittest.TestCase):
     def setUp(self):
         testing_git.hermetic_git(self)  # first: no inherited GIT_* reaches a real repo
         self.tmp = Path(tempfile.mkdtemp(prefix="orch sup King's "))  # space + apostrophe round-trip
-        self.repo = self.tmp / "repo"
-        self.repo.mkdir()
-        g = lambda *a: subprocess.run(["git", *a], cwd=self.repo, check=True, capture_output=True)
-        g("init", "-q", "-b", "main")
-        g("config", "user.name", "t"); g("config", "user.email", "t@t")
-        (self.repo / ".gitignore").write_text(".review/*\n.venv\n")
-        (self.repo / "orchestra").mkdir()
-        shutil.copy(HERE / "review_prompt.md", self.repo / "orchestra" / "review_prompt.md")
-        g("add", "."); g("commit", "-qm", "init")
-        (self.repo / ".venv").mkdir()
-        (self.repo / ".review").mkdir()
-        (self.repo / ".review" / "lanes.json").write_text(json.dumps({"fake": [sys.executable, "-c", FAKE]}))
+        self.repo = testing_git.from_template(self, self.tmp / "repo", build_supervision_repo)
         self.pidfile = self.tmp / "grandchild.pid"
         self.lock_copy = self.tmp / "lock.json"
         self.env = {"ORCHESTRA_REPO": str(self.repo), "ORCHESTRA_BACKOFF_MIN": "0",
@@ -112,7 +115,7 @@ class SupervisionTest(unittest.TestCase):
             subprocess.run(["taskkill", "/PID", str(self.gc_pid), "/F"], capture_output=True)
         for wt in (self.R.WORKTREES.glob("*") if self.R.WORKTREES.exists() else []):
             self.R.unlink_link(wt / ".venv")
-        subprocess.run(["git", "worktree", "prune"], cwd=self.repo, capture_output=True)
+        # No `git worktree prune`: the worktrees (R.WORKTREES) and the repo both live in self.tmp.
         for k, v in self.saved.items():
             if v is None:
                 os.environ.pop(k, None)

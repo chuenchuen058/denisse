@@ -74,29 +74,33 @@ ENV = ("FAKE_EDITS", "FAKE_VERDICT", "FAKE_REVIEW_FLAG", "FAKE_PROMPT_FILE", "FA
        "ORCHESTRA_RERUN_FROM_MASTER")
 
 
+def build_integration_repo(repo):
+    """The repo every IntegrationTest starts from (built once per class, copied per test)."""
+    g = lambda *a: subprocess.run(["git", *a], cwd=repo, check=True, capture_output=True)
+    g("init", "-q", "-b", "main")
+    g("config", "user.name", "t")
+    g("config", "user.email", "t@t")
+    (repo / ".gitignore").write_text(".review/*\n.venv\n")
+    (repo / "orchestra").mkdir()
+    shutil.copy(HERE / "review_prompt.md", repo / "orchestra" / "review_prompt.md")
+    (repo / "lib.py").write_text(LIB)
+    (repo / "check_lib.py").write_text(CHECK_LIB)
+    g("add", ".")
+    g("commit", "-qm", "init")
+    (repo / ".venv").mkdir()
+    (repo / ".venv" / "keep.txt").write_text("real venv")
+    (repo / ".review").mkdir()
+    (repo / ".review" / "lanes.json").write_text(json.dumps({
+        "fake": [sys.executable, "-c", FAKE_WORKER],
+        "reviewer": [sys.executable, "-c", FAKE_REVIEWER]}))
+
+
 class IntegrationTest(unittest.TestCase):
     def setUp(self):
         testing_git.hermetic_git(self)  # first: no inherited GIT_* reaches a real repo
         self.tmp = Path(tempfile.mkdtemp())
-        self.repo = self.tmp / "repo"
-        self.repo.mkdir()
-        self.git("init", "-q", "-b", "main")
-        self.git("config", "user.name", "t")
-        self.git("config", "user.email", "t@t")
-        (self.repo / ".gitignore").write_text(".review/*\n.venv\n")
-        (self.repo / "orchestra").mkdir()
-        shutil.copy(HERE / "review_prompt.md", self.repo / "orchestra" / "review_prompt.md")
-        (self.repo / "lib.py").write_text(LIB)
-        (self.repo / "check_lib.py").write_text(CHECK_LIB)
-        self.git("add", ".")
-        self.git("commit", "-qm", "init")
-        (self.repo / ".venv").mkdir()
-        (self.repo / ".venv" / "keep.txt").write_text("real venv")
-        (self.repo / ".review").mkdir()
+        self.repo = testing_git.from_template(self, self.tmp / "repo", build_integration_repo)
         self.flag = self.tmp / "reviewed.txt"
-        (self.repo / ".review" / "lanes.json").write_text(json.dumps({
-            "fake": [sys.executable, "-c", FAKE_WORKER],
-            "reviewer": [sys.executable, "-c", FAKE_REVIEWER]}))
         os.environ["ORCHESTRA_REPO"] = str(self.repo)
         os.environ["ORCHESTRA_DAILY_SPEND_CAP_USD"] = "50"
         os.environ["ORCHESTRA_TIMEOUT_S"] = json.dumps({"light": 30, "heavy": 60})
@@ -110,7 +114,7 @@ class IntegrationTest(unittest.TestCase):
     def tearDown(self):
         for wt in (self.R.WORKTREES.glob("*") if self.R.WORKTREES.exists() else []):
             self.R.unlink_link(wt / ".venv")
-        subprocess.run(["git", "worktree", "prune"], cwd=self.repo, capture_output=True)
+        # No `git worktree prune`: the worktrees (R.WORKTREES) and the repo both live in self.tmp.
         shutil.rmtree(self.tmp, ignore_errors=True)
         for k in ENV:
             os.environ.pop(k, None)
