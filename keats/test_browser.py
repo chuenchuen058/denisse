@@ -65,6 +65,37 @@ class BrowserTests(unittest.TestCase):
             pass
         self.page.wait_for_timeout.assert_called_once_with(self.config["browser"]["login_poll_ms"])
 
+    def test_snapshot_waits_out_sso_navigation(self):
+        (Path(self.tmp.name) / self.config["paths"]["ready"]).touch()
+        self.page.is_closed.return_value = False
+        self.page.content.side_effect = [RuntimeError("Unable to retrieve content because the page is navigating"),
+                                         '<a href="/login/logout.php">Log out</a>']
+        with session(self.config):
+            pass
+        self.page.wait_for_load_state.assert_called_once()
+
+    def test_unattended_redirect_settles_into_signed_in_page(self):
+        (Path(self.tmp.name) / self.config["paths"]["ready"]).touch()
+        self.page.content.side_effect = ['<main>redirecting</main>', '<main>redirecting</main>',
+                                         '<a href="/login/logout.php">Log out</a>']
+        with session(self.config):
+            pass
+        self.assertEqual(self.page.wait_for_timeout.call_count, 2)
+
+    def test_login_follows_sign_in_to_another_tab(self):
+        from unittest.mock import Mock as M
+        second = M()
+        second.is_closed.return_value = False
+        second.url = "https://moodle.invalid/my/"
+        second.content.return_value = '<a href="/login/logout.php">Log out</a>'
+        self.page.content.return_value = '<main>SSO</main>'
+        self.page.is_closed.return_value = True
+        self.page.wait_for_timeout.side_effect = RuntimeError("Target page, context or browser has been closed")
+        self.context.pages = [self.page, second]
+        with session(self.config, login=True, say=lambda s: None):
+            pass
+        second.wait_for_timeout.assert_called()
+
     def test_fetch_and_download_fake_page(self):
         browser = Chrome(self.context, self.config)
         self.page.evaluate.return_value = {"url": "https://moodle.invalid/course/view.php?id=1",

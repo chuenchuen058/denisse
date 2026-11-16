@@ -2,12 +2,16 @@
   "_help": "KEATS_CONFIG may name a replacement config. DENISSE_VAULT/settings.vault() locates the vault; no personal course list or captured filenames belong in this repository. DOM queries are OR lists; within each query tag/attrs are AND, attribute values are regexes.",
   "paths": {
     "manifest": "Atlas/Academic/SEM 1 Modules/.keats-manifest.json",
-    "profile": "%LOCALAPPDATA%/Denisse/keats/chrome",
+    "profile": "%USERPROFILE%/.denisse/keats/chrome",
     "ready": "session.ready",
     "lock": "pull.lock",
-    "never_write": [".obsidian", ".git"],
+    "never_write": [
+      ".obsidian",
+      ".git"
+    ],
     "week": "Week {week}",
-    "note": "{module} Week {week}.md"
+    "note": "{module} Week {week}.md",
+    "_profile": "Outside AppData on purpose (16 Nov 2026): processes started by the Claude desktop app are MSIX-packaged, so %LOCALAPPDATA% writes land in Claude's private Packages\\Claude_*\\LocalCache copy. A sign-in done from there was invisible to the scheduled task and to Chuen's own terminal, so every run looked signed out."
   },
   "browser": {
     "channel": "chrome",
@@ -20,38 +24,154 @@
     "login_timeout_s": 600,
     "login_poll_ms": 500,
     "wait_until": "domcontentloaded",
-    "force_download": {"forcedownload": "1"},
+    "force_download": {
+      "forcedownload": "1"
+    },
     "login_url": "(?i)/login/|login\\.microsoftonline\\.com|/adfs/|/saml/",
-    "login_dom": [{"tag": "input", "attrs": {"type": "(?i)^password$"}}, {"attrs": {"id": "^page-login-index$"}}],
-    "authenticated_dom": [{"tag": "a", "attrs": {"href": "/login/logout\\.php"}}]
+    "login_dom": [
+      {
+        "tag": "input",
+        "attrs": {
+          "type": "(?i)^password$"
+        }
+      },
+      {
+        "attrs": {
+          "id": "^page-login-index$"
+        }
+      }
+    ],
+    "authenticated_dom": [
+      {
+        "tag": "a",
+        "attrs": {
+          "href": "/login/logout\\.php"
+        }
+      }
+    ],
+    "_settle": "16 Nov 2026: `keats pull` died with 'Page.content: Unable to retrieve content because the page is navigating' - KEATS bounced through the Microsoft SSO redirect after goto() returned. snapshot() now waits out navigation (snapshot_retries reads, login_poll_ms apart), and an unattended run gives a redirect up to settle_s to land on an authenticated page before deciding the session has expired.",
+    "settle_s": 20,
+    "snapshot_retries": 20
   },
   "scan": {
-    "main": [{"attrs": {"id": "^region-main$"}}, {"attrs": {"role": "^main$"}}],
-    "sections": [{"tag": ["li", "section", "div"], "attrs": {"id": "^section-\\d+$"}}, {"attrs": {"data-for": "^section$"}}],
-    "headings": [{"attrs": {"class": "(?:^|\\s)(?:sectionname|section-title)(?:\\s|$)"}}, {"tag": ["h2", "h3"]}],
+    "main": [
+      {
+        "attrs": {
+          "id": "^region-main$"
+        }
+      },
+      {
+        "attrs": {
+          "role": "^main$"
+        }
+      }
+    ],
+    "sections": [
+      {
+        "tag": [
+          "li",
+          "section",
+          "div"
+        ],
+        "attrs": {
+          "id": "^section-\\d+$"
+        }
+      },
+      {
+        "attrs": {
+          "data-for": "^section$"
+        }
+      }
+    ],
+    "headings": [
+      {
+        "attrs": {
+          "class": "(?:^|\\s)(?:sectionname|section-title)(?:\\s|$)"
+        }
+      },
+      {
+        "tag": [
+          "h2",
+          "h3"
+        ]
+      }
+    ],
     "week_pattern": "(?i)\\bWeek\\s+(\\d+)\\b",
     "section_url": "/course/section\\.php\\?|/course/view\\.php\\?.*section=",
     "resource_url": "/mod/(?:resource|folder)/view\\.php\\?",
     "folder_url": "/mod/folder/view\\.php\\?",
     "file_url": "/pluginfile\\.php/.*?/mod_(?:resource|folder)/content/",
     "ignore_url": "(?i)setcheck|/theme/|favicon",
-    "file_nodes": [{"tag": ["a", "object", "iframe", "embed"]}],
-    "url_attributes": ["href", "data", "src"],
-    "html_content_types": ["text/html", "application/xhtml+xml"],
-    "take_extensions": ["*"],
-    "skip_extensions": [".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".html", ".htm"],
+    "file_nodes": [
+      {
+        "tag": [
+          "a",
+          "object",
+          "iframe",
+          "embed"
+        ]
+      }
+    ],
+    "url_attributes": [
+      "href",
+      "data",
+      "src"
+    ],
+    "html_content_types": [
+      "text/html",
+      "application/xhtml+xml"
+    ],
+    "take_extensions": [
+      "*"
+    ],
+    "skip_extensions": [
+      ".mp4",
+      ".mov",
+      ".avi",
+      ".mkv",
+      ".webm",
+      ".m4v",
+      ".html",
+      ".htm"
+    ],
     "skip_original_names": []
   },
   "naming": {
-    "title_remove": ["^[0-9A-Z]{5,}\\s+", "\\s*\\([^)]*\\)\\s*$"],
-    "preserve_extensions": [".m"],
-    "rules": [
-      {"pattern": "(?i)\\b(solutions?|answers?)\\b", "stem": "Tutorial - Solutions (official)"},
-      {"pattern": "(?i)\\b(tutorials?|problem\\s+(?:class|sheet)|questions?)\\b", "stem": "Tutorial - Questions"},
-      {"pattern": "(?i)\\bslides?\\b", "stem": "Lecture - Slides"},
-      {"pattern": "(?i)\\b(lectures?|notes?|handouts?)\\b", "stem": "Lecture - Notes"}
+    "title_remove": [
+      "^[0-9A-Z]{5,}\\s+",
+      "\\s*\\([^)]*\\)\\s*$"
     ],
-    "clean": [{"pattern": "[<>:\"/\\\\|?*\\x00-\\x1f\\[\\]#^]", "replacement": "-"}, {"pattern": "\\s+", "replacement": " "}],
+    "preserve_extensions": [
+      ".m"
+    ],
+    "rules": [
+      {
+        "pattern": "(?i)\\b(solutions?|answers?)\\b",
+        "stem": "Tutorial - Solutions (official)"
+      },
+      {
+        "pattern": "(?i)\\b(tutorials?|problem\\s+(?:class|sheet)|questions?)\\b",
+        "stem": "Tutorial - Questions"
+      },
+      {
+        "pattern": "(?i)\\bslides?\\b",
+        "stem": "Lecture - Slides"
+      },
+      {
+        "pattern": "(?i)\\b(lectures?|notes?|handouts?)\\b",
+        "stem": "Lecture - Notes"
+      }
+    ],
+    "clean": [
+      {
+        "pattern": "[<>:\"/\\\\|?*\\x00-\\x1f\\[\\]#^]",
+        "replacement": "-"
+      },
+      {
+        "pattern": "\\s+",
+        "replacement": " "
+      }
+    ],
     "trim": " .",
     "reserved": "(?i)^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\\.|$)",
     "reserved_prefix": "_",
@@ -79,12 +199,42 @@
   },
   "ingest": {
     "enabled": false,
-    "worker_command": ["{python}", "-m", "keats.ingest", "--vault", "{vault}", "--modules", "{modules}"],
+    "worker_command": [
+      "{python}",
+      "-m",
+      "keats.ingest",
+      "--vault",
+      "{vault}",
+      "--modules",
+      "{modules}"
+    ],
     "cards": false,
     "anki_sync": false,
-    "command": ["{python}", "-m", "tutor", "ingest", "--vault", "{vault}"],
-    "cards_command": ["{python}", "-m", "tutor", "cards", "{module}", "--vault", "{vault}"],
-    "anki_command": ["{python}", "-m", "tutor", "anki-sync", "--vault", "{vault}"],
+    "command": [
+      "{python}",
+      "-m",
+      "tutor",
+      "ingest",
+      "--vault",
+      "{vault}"
+    ],
+    "cards_command": [
+      "{python}",
+      "-m",
+      "tutor",
+      "cards",
+      "{module}",
+      "--vault",
+      "{vault}"
+    ],
+    "anki_command": [
+      "{python}",
+      "-m",
+      "tutor",
+      "anki-sync",
+      "--vault",
+      "{vault}"
+    ],
     "log": "ingest.log"
   },
   "schedule": {
@@ -93,7 +243,15 @@
     "python": ".venv/Scripts/pythonw.exe",
     "script": "keats/task.py",
     "execution_limit": "PT1H",
-    "register_command": ["schtasks", "/Create", "/TN", "{name}", "/XML", "{xml}", "/F"],
+    "register_command": [
+      "schtasks",
+      "/Create",
+      "/TN",
+      "{name}",
+      "/XML",
+      "{xml}",
+      "/F"
+    ],
     "register_timeout_s": 30,
     "xml_file": "task.xml",
     "task_log": "scheduled.log",
