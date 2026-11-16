@@ -81,5 +81,6 @@
   "backup_stamp": "%Y-%m-%dT%H%M%S",
   "keep_backups": 7,
   "trash_dir": "_to_delete",
-  "commit_message": "nightly: related links in new logs\n\nAutomated by Denisse (scripts/link_related_logs.py). Only the logs whose <!-- related:auto --> block changed are committed."
+  "commit_message": "nightly: related links in new logs\n\nAutomated by Denisse (scripts/link_related_logs.py). Only the logs whose <!-- related:auto --> block changed are committed.",
+  "unlinkable_chars": "`[]|#^"
 }

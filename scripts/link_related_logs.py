@@ -75,6 +75,8 @@ def targets_and_phrases(notes):
         stem = r.rsplit("/", 1)[-1][:-3]
         if re.match(CFG.get("skip_stem_regex", "(?!)"), stem):
             continue
+        if set(CFG.get("unlinkable_chars", "")) & set(r):
+            continue
         targets[r] = {stem, *fm_list(fm, "aliases")}
     # A folder's name (e.g. a module) points at that folder's main note.
     by_dir = {}
@@ -132,7 +134,8 @@ def similar(bodies):
     out = {}
     for i, n in enumerate(names):
         idx = np.argsort(-S[i])[:k]
-        out[n] = [names[j] for j in idx if S[i, j] >= CFG["similar_min"]]
+        bad = set(CFG.get("unlinkable_chars", ""))
+        out[n] = [names[j] for j in idx if S[i, j] >= CFG["similar_min"] and not (bad & set(names[j]))]
     return out
 
 
