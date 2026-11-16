@@ -119,7 +119,7 @@ class ParseAndDiffTest(FundsBase):
         self.assertEqual(got["369604301"]["change_pct"], 12.0)
         self.assertAlmostEqual(got["369604301"]["value_change"], 62400000.0)
         self.assertEqual(got["02079K305"]["change_pct"], -20.0)
-        self.assertEqual(self.diff()[0]["kind"], "exit")  # biggest money first: the $1.5 Bill exit
+        self.assertEqual(self.diff()[0]["kind"], "exit")  # biggest money first: the $1.5 Bil exit
         self.assertEqual(funds.diff(None, self.table("funds_infotable_q3.xml"), self.cfg), [])
 
     def test_thresholds_come_from_config(self):
@@ -240,7 +240,7 @@ class SummaryTest(FundsBase):
     def test_wording_money_and_cli_text(self):
         m = self.moves()
         self.assertEqual(funds.move_text(m["573284106"], self.cfg).split(" · ")[:2], ["New position", "$758 Mil at about $583.08 a share"])
-        self.assertIn("$1.5 Bill", funds.move_text(m["13646K108"], self.cfg))
+        self.assertIn("$1.5 Bil", funds.move_text(m["13646K108"], self.cfg))
         self.assertIn("12%", funds.move_text(m["369604301"], self.cfg))
         self.assertIn("put", funds.move_text(m["615369105/put"], self.cfg))
         self.assertEqual(funds.money(62400000, self.cfg), "$62.4 Mil")

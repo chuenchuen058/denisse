@@ -140,7 +140,7 @@
       "move": {"new": "New position{put_call} · {money} at about {price} a share · {share:.1f}% of portfolio", "exit": "Exited{put_call} · was {money}, about {price} a share last quarter", "add": "Added {pct:.0f}% more shares{put_call} · {money} at about {price} a share", "trim": "Trimmed {pct:.0f}% of the shares{put_call} · {money} at about {price} a share"},
       "put_call": {"put": " (put options)", "call": " (call options)"},
       "money": "{sign}${n}{unit}",
-      "money_units": [[1000000000, " Bill"], [1000000, " Mil"], [1000, "K"]],
+      "money_units": [[1000000000, " Bil"], [1000000, " Mil"], [1000, "K"]],
       "_price": "{price} in a move = value / shares from the filing on the quarter's last day (exit: last quarter's). 13Fs carry no trade prices, so it is the quarter-end price, not what they paid.",
       "price": "${n}",
       "price_decimals": 2,

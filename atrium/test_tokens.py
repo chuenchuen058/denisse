@@ -105,7 +105,7 @@ class Collector(TokensBase):
         return state
 
     def test_the_logs_win_over_state_json_for_claude_code_runs(self):
-        # 15 Nov 2026: state.json recorded 0.61 Bill where the worktree logs held ~0.9B. With
+        # 15 Nov 2026: state.json recorded 0.61 Bil where the worktree logs held ~0.9B. With
         # prefer_logs (shipped) every log counts, worktrees too, and the run its log holds is
         # not counted again from state.json
         got = self.days(self._orchestra_fixture())["2026-11-12"]["claude"]
