@@ -194,7 +194,8 @@ def diff(previous: list[dict[str, Any]] | None, current: list[dict[str, Any]], c
         share = round(100 * c["value"] / total, 2) if total else None
         base = {"key": key, "cusip": c["cusip"], "issuer": c["issuer"], "put_call": c["put_call"],
                 "shares_before": p["shares"] if p else 0.0, "shares_after": c["shares"],
-                "value_before": p["value"] if p else 0.0, "value_after": c["value"], "pct_of_portfolio": share}
+                "value_before": p["value"] if p else 0.0, "value_after": c["value"], "pct_of_portfolio": share,
+                "price_before": _per_share(p) if p else None, "price_after": _per_share(c)}
         if p is None or p["shares"] <= 0:
             if c["value"] >= min_new:
                 moves.append(dict(base, kind="new", change_pct=None, value_change=c["value"]))
@@ -209,8 +210,24 @@ def diff(previous: list[dict[str, Any]] | None, current: list[dict[str, Any]], c
             moves.append({"key": key, "cusip": p["cusip"], "issuer": p["issuer"], "put_call": p["put_call"],
                           "shares_before": p["shares"], "shares_after": 0.0, "value_before": p["value"],
                           "value_after": 0.0, "pct_of_portfolio": 0.0, "kind": "exit", "change_pct": -100.0,
-                          "value_change": -p["value"]})
+                          "value_change": -p["value"], "price_before": _per_share(p), "price_after": None})
     return sorted(moves, key=lambda m: abs(m["value_change"]), reverse=True)
+
+
+def _per_share(row):
+    """Quarter-end price a share from a filing row (value / shares); None when it can't be told."""
+    if not row or not row.get("shares"):
+        return None
+    return float(row["value"]) / float(row["shares"])
+
+
+def price(v: Any, config: dict[str, Any]) -> str:
+    """A per-share price in the config wording (words.price, words.price_decimals); '?' if unknown."""
+    w = words(config)
+    if v is None:
+        return "?"
+    d = int(w.get("price_decimals", 2))
+    return str(w.get("price", "${n}")).format(n=f"{float(v):,.{d}f}")
 
 
 def quarter(period: str, config: dict[str, Any]) -> str:
@@ -401,7 +418,8 @@ def move_text(m: dict[str, Any], config: dict[str, Any]) -> str:
     template = (w.get("move") or {}).get(m.get("kind"), "{money}")
     return str(template).format(money=money(abs(m.get("value_change") or 0), config),
                                 pct=abs(m["change_pct"]) if m.get("change_pct") is not None else 0,
-                                share=m.get("pct_of_portfolio") or 0, put_call=pc)
+                                share=m.get("pct_of_portfolio") or 0, put_call=pc,
+                                price=price(m.get("price_before") if m.get("kind") == "exit" else m.get("price_after"), config))
 
 
 def who(m: dict[str, Any]) -> str:

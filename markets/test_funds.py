@@ -119,7 +119,7 @@ class ParseAndDiffTest(FundsBase):
         self.assertEqual(got["369604301"]["change_pct"], 12.0)
         self.assertAlmostEqual(got["369604301"]["value_change"], 62400000.0)
         self.assertEqual(got["02079K305"]["change_pct"], -20.0)
-        self.assertEqual(self.diff()[0]["kind"], "exit")  # biggest money first: the $1.5B exit
+        self.assertEqual(self.diff()[0]["kind"], "exit")  # biggest money first: the $1.5 Bill exit
         self.assertEqual(funds.diff(None, self.table("funds_infotable_q3.xml"), self.cfg), [])
 
     def test_thresholds_come_from_config(self):
@@ -133,7 +133,7 @@ class ParseAndDiffTest(FundsBase):
         self.cfg["funds"]["move_min_pct"] = 13
         self.assertNotIn("369604301", keys())    # GE +12% drops out
         self.cfg["funds"]["new_exit_min_usd"] = 60000000
-        self.assertNotIn("98877X101", keys())    # the $50M new position drops out
+        self.assertNotIn("98877X101", keys())    # the $50 Mil new position drops out
         self.assertNotIn("615369105/put", keys())
 
     def test_quarter_label(self):
@@ -231,13 +231,19 @@ class SummaryTest(FundsBase):
         self.assertEqual(data["watch"][0]["filed"], "2026-11-14")
         self.assertEqual(self.fund(watch=[])["watch"], [])
 
+    def test_price_a_share(self):
+        self.assertEqual(funds.price(583.0812, self.cfg), "$583.08")
+        self.assertEqual(funds.price(None, self.cfg), "?")
+        self.assertEqual(funds._per_share({"value": 100.0, "shares": 4.0}), 25.0)
+        self.assertIsNone(funds._per_share({"value": 100.0, "shares": 0}))
+
     def test_wording_money_and_cli_text(self):
         m = self.moves()
-        self.assertEqual(funds.move_text(m["573284106"], self.cfg).split(" · ")[:2], ["New position", "$758M"])
-        self.assertIn("$1.5B", funds.move_text(m["13646K108"], self.cfg))
+        self.assertEqual(funds.move_text(m["573284106"], self.cfg).split(" · ")[:2], ["New position", "$758 Mil at about $583.08 a share"])
+        self.assertIn("$1.5 Bill", funds.move_text(m["13646K108"], self.cfg))
         self.assertIn("12%", funds.move_text(m["369604301"], self.cfg))
         self.assertIn("put", funds.move_text(m["615369105/put"], self.cfg))
-        self.assertEqual(funds.money(62400000, self.cfg), "$62.4M")
+        self.assertEqual(funds.money(62400000, self.cfg), "$62.4 Mil")
         text = funds.text_summary(self.cfg)
         for needle in ("Example Fund", "Q3 2026", "2026-11-14", self.cfg["funds"]["words"]["small_print"]):
             self.assertIn(needle, text)

@@ -250,14 +250,14 @@ class BoardFixtureTest(BoardBase):
         self.assertNotIn("codex 1/1", loc)  # not a local model
         # 9 tokens spent and credits per task
         tok = section(page, "tokens")
-        self.assertEqual(re.findall(r'<div class="big mid">(.*?)</div>', tok), ["7.2M", "7.2M", "7.2M", "7.2M"])
+        self.assertEqual(re.findall(r'<div class="big mid">(.*?)</div>', tok), ["7.2 Mil", "7.2 Mil", "7.2 Mil", "7.2 Mil"])
         self.assertIn("today · 35.2k fresh", tok)
         self.assertIn("all time · since 01 May (data from 02 May)", tok)
-        self.assertIn("Claude 7.2M", tok)
+        self.assertIn("Claude 7.2 Mil", tok)
         self.assertIn("Copilot n/a", tok)  # reports no tokens: unknown, not 0
         cr = section(page, "credits")
         self.assertIn("Zebra crossing repaint", cr)
-        self.assertIn("Claude · 7.2M tokens · $3.21", cr)
+        self.assertIn("Claude · 7.2 Mil tokens · $3.21", cr)
         self.assertIn(BOARD["credits"]["row_no_tokens"].format(label="Copilot", spent=BOARD["credits"]["spent_unknown"]), cr)
         # 10 limits and resets, from the runner's lane record
         lim = section(page, "limits")
@@ -568,9 +568,9 @@ class FundsCardTest(unittest.TestCase):
         return board._funds({"funds": data, "words": BOARD["words"]})
 
     def payload(self):
-        move = {"label": "MLM", "text": "New position · $758M · 9.3% of portfolio", "on_watchlist": True,
+        move = {"label": "MLM", "text": "New position · $758 Mil · 9.3% of portfolio", "on_watchlist": True,
                 "fund": "Example Fund", "quarter": "Q3 2026", "filed": "2026-11-14"}
-        other = {"label": "ZEBRA OBSCURE HLDGS", "text": "New position · $50M", "on_watchlist": False}
+        other = {"label": "ZEBRA OBSCURE HLDGS", "text": "New position · $50 Mil", "on_watchlist": False}
         return {"heading": "Who's trading what", "message": None, "small_print": "Filed up to 45 days late.",
                 "watch": [move],
                 "funds": [{"name": "Example Fund", "latest": {"quarter": "Q3 2026", "filed": "2026-11-14"},

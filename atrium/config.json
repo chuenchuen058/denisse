@@ -612,7 +612,7 @@
         "week_days": 7,
         "fresh_keys": ["in", "out"],
         "all_keys": ["in", "out", "cache_read", "cache_write"],
-        "units": [[1000000000, "B"], [1000000, "M"], [1000, "k"]],
+        "units": [[1000000000, " Bill"], [1000000, " Mil"], [1000, "k"]],
         "unit_format": "{n:.1f}{unit}",
         "periods": [
           {"key": "today", "label": "today · {fresh} fresh"},
