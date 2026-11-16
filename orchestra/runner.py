@@ -710,6 +710,38 @@ def parse_limit_until(text: str, at: dt.datetime | None = None) -> dt.datetime |
     return when if when > at else when + dt.timedelta(days=1)
 
 
+def period_until(text: str, at: dt.datetime | None = None) -> dt.datetime | None:
+    """Local time an allowance that names no time comes back, by config limit_periods (the
+    first rule whose pattern matches): the next month/week/day boundary at its 'at' time in
+    the rule's zone. None when no rule matches."""
+    at = at or now()
+    for rule in C.get("limit_periods") or []:
+        if not re.search(rule.get("pattern", "(?!)"), text, re.I):
+            continue
+        zone = dt.timezone(dt.timedelta(hours=float(rule.get("utc_offset_h", 0))))
+        here = at.astimezone(zone) if at.tzinfo else at.astimezone().astimezone(zone)
+        hh, mm = (int(x) for x in str(rule.get("at", "00:00")).split(":"))
+        base = here.replace(hour=hh, minute=mm, second=0, microsecond=0)
+        every = rule.get("every")
+        if every == "month":
+            y, m = (base.year + 1, 1) if base.month == 12 else (base.year, base.month + 1)
+            when = base.replace(year=y, month=m, day=1)
+            first = base.replace(day=1)
+            if first > here:
+                when = first
+        elif every == "week":
+            ahead = (int(rule.get("weekday", 0)) - base.weekday()) % 7
+            when = base + dt.timedelta(days=ahead)
+            if when <= here:
+                when += dt.timedelta(days=7)
+        elif every == "day":
+            when = base if base > here else base + dt.timedelta(days=1)
+        else:
+            continue
+        return when.astimezone().replace(tzinfo=None)
+    return None
+
+
 def lane_limited(state: dict, lane: str) -> dt.datetime | None:
     """When a limited lane may run again, or None if it isn't limited (any more)."""
     until = (state.get("lanes", {}).get(lane) or {}).get("limited_until")
@@ -1590,7 +1622,8 @@ def run_reviewer(task: Task, wt: Path, branch: str, report: Path, why: str, stat
         # 4 Nov 00:30: the reviewer hit the 5-hour limit and a good PASS was parked as "blocked".
         # 10 Nov 01:53: the reset time was not kept, so nothing waited for it. limited_until is
         # when the message says to come back, else limit_default_min, as for a limited lane.
-        until = parse_limit_until(hit) or now() + dt.timedelta(minutes=C["limit_default_min"])
+        until = (parse_limit_until(hit) or period_until(hit)
+             or now() + dt.timedelta(minutes=C["limit_default_min"]))
         return {"verdict": "unavailable", "reasons": f"reviewer {rlane} limited until {until:%Y-%m-%d %H:%M}: {hit}"[:300],
                 "limited_until": until.isoformat(), "message": hit[:300],
                 "seconds": seconds, "cost_usd": cost, "lane": rlane, "pick": rp["why"]}
@@ -2644,7 +2677,8 @@ def refresh_waiting() -> None:
 def _limited(task: Task, state: dict, ts: dict, hit: str, seconds: int, spent: str,
              provenance: dict | None = None, run: str = "") -> str:
     """The lane hit its usage limit: not an attempt. Record when the lane may run again."""
-    until = parse_limit_until(hit) or now() + dt.timedelta(minutes=C["limit_default_min"])
+    until = (parse_limit_until(hit) or period_until(hit)
+             or now() + dt.timedelta(minutes=C["limit_default_min"]))
     state.setdefault("lanes", {})[task.lane] = {"limited_until": until.isoformat(),
                                                 "since": now().isoformat(), "message": hit[:300]}
     ts["attempts"] = max(0, ts["attempts"] - 1)

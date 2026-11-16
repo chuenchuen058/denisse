@@ -78,6 +78,11 @@
   },
   "limit_tail_lines": 40,
   "limit_default_min": 60,
+  "_limit_periods": "A limit message that names no time but says which allowance ran out waits for that allowance's reset, not limit_default_min (14 Nov 2026: Copilot's monthly quota was retried every hour). every: month (1st of next month) | week (next weekday, 0 = Monday) | day; at: HH:MM in the zone utc_offset_h hours from UTC.",
+  "limit_periods": [
+    {"pattern": "monthly (quota|limit|allowance)|premium requests? (quota|limit)", "every": "month", "at": "00:00", "utc_offset_h": 0},
+    {"pattern": "daily (quota|limit)|quota exceeded for (the )?day|per[- ]day", "every": "day", "at": "00:00", "utc_offset_h": 0}
+  ],
   "_limit_patterns": "A lane's usage limit is come-back-later, not a failed attempt (2 Nov 2026: Codex's limit message was logged NO_REPORT and spent the retry). Case-insensitive regexes per lane, checked against the last limit_tail_lines lines of the lane log after a run with no report; a lane not listed is checked against all of them. The lane waits until the time the message names, else limit_default_min minutes.",
 
   "auth_patterns": {
