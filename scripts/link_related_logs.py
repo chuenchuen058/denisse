@@ -1,9 +1,12 @@
 """Add a small "Related" block to auto-generated logs, linking the real notes they talk about.
 
 Only adds links (inside marked comments at the end of each log); never deletes or moves text.
-Settings live in related_links.json next to this script.
+Settings live in related_links.json next to this script. nightly.py runs it (--apply, committed)
+after the topic hubs, so each night's new logs get their block; the newest keep_backups backup
+folders are kept and older ones are moved into trash_dir next to them, never deleted.
 
   python scripts/link_related_logs.py VAULT --dry-run OUT.json   # report only
+  python scripts/link_related_logs.py VAULT                       # count what would change
   python scripts/link_related_logs.py VAULT --apply               # write + manifest
   python scripts/link_related_logs.py VAULT --undo MANIFEST.json  # remove the blocks again
 """
@@ -201,14 +204,115 @@ def block(info, nl):
     return nl.join(lines) + nl
 
 
-def write_with(vault, r, text, info):
+def render(text, info):
+    """The log with its related block replaced (or removed when info is empty). Everything
+    outside the block is kept as it was, bar the trailing newlines before the block."""
     nl = "\r\n" if "\r\n" in text else "\n"
-    base = strip_block(text).rstrip("\r\n") + nl
-    new = base + (nl + block(info, nl) if info else "")
-    if new != text:
-        (vault / r).write_bytes(new.encode("utf-8"))
-        return True
-    return False
+    base = strip_block(text)
+    if base == text and not info:
+        return text  # no block to remove, none to add: leave the file byte-for-byte alone
+    base = base.rstrip("\r\n") + nl
+    return base + (nl + block(info, nl) if info else "")
+
+
+def backup_root(backups=None):
+    return pathlib.Path(backups) if backups else pathlib.Path(CFG["backup_dir"]).expanduser()
+
+
+def prune_backups(backups, keep=None):
+    """Keep the newest `keep` related-links backups; move the older ones into the trash folder
+    next to them (never deleted: Chuen empties it). Returns the names moved."""
+    backups = pathlib.Path(backups)
+    keep = CFG["keep_backups"] if keep is None else keep
+    if not backups.is_dir():
+        return []
+    ours = sorted(p for p in backups.iterdir() if p.is_dir() and p.name.startswith(CFG["backup_prefix"]))
+    old = ours[:-keep] if keep > 0 else ours
+    trash = backups / CFG["trash_dir"]
+    moved = []
+    for p in old:
+        trash.mkdir(exist_ok=True)
+        dest, n = trash / p.name, 1
+        while dest.exists():
+            n += 1
+            dest = trash / f"{p.name}-{n}"
+        p.rename(dest)
+        moved.append(p.name)
+    return moved
+
+
+def run(vault, *, apply=True, commit=False, backups=None, lock=None, say=print):
+    """Plan and (with apply) write every log's related block. Returns {"logs", "linked",
+    "changed": [rel paths], "backup": manifest path or None, "pruned": [...], "commit": ...}.
+    Each write is a replace-if-unchanged under the vault lock, so an edit Chuen saves mid-run is
+    left alone; the old text of every changed log is copied to a backup folder first."""
+    import contextlib, sys
+    here = pathlib.Path(__file__).resolve().parent
+    orch = str(here.parent / "orchestra")
+    if orch not in sys.path:
+        sys.path.insert(0, orch)
+    import vaultlock
+
+    vault = pathlib.Path(vault)
+    notes, out = plan(vault)
+    logs = [r for r in notes if under(r, CFG["log_roots"])]
+    result = {"logs": len(logs), "linked": len(out), "changed": [], "backup": None,
+              "pruned": [], "commit": "none", "topics": dict(Counter(i["topic"] for i in out.values()))}
+    if not apply:
+        result["changed"] = [r for r in logs if render(notes[r], out.get(r)) != notes[r]]
+        return result
+    root = backup_root(backups)
+    stamp = datetime.datetime.now().strftime(CFG["backup_stamp"])
+    bdir, n = root / f"{CFG['backup_prefix']}{stamp}", 1
+    while bdir.exists():
+        n += 1
+        bdir = root / f"{CFG['backup_prefix']}{stamp}-{n}"
+    changed = result["changed"]
+    guard = lock if lock is not None else vaultlock.VaultLock()
+    with guard:
+        for r in logs:
+            info = out.get(r)
+            if render(notes[r], info) == notes[r]:
+                continue
+
+            def make(old, r=r, info=info):
+                new = render(old, info)
+                if new != old:
+                    (bdir / r).parent.mkdir(parents=True, exist_ok=True)
+                    (bdir / r).write_bytes(old.encode("utf-8"))
+                return new
+            if vaultlock.replace_if_unchanged(vault / r, make):
+                changed.append(r)
+        if changed:
+            man = bdir / "manifest.json"
+            man.write_text(json.dumps({"backup": str(bdir), "files": changed}, indent=1), encoding="utf-8")
+            result["backup"] = str(man)
+        if commit and changed:
+            from vault_git import BackupError, commit_owned_many
+            try:
+                sha = commit_owned_many(str(vault), changed, CFG["commit_message"])
+                result["commit"] = sha[:7] if sha else "none"
+            except BackupError as exc:
+                say(f"  commit failed: {exc}")
+                result["commit"] = "failed"
+    result["pruned"] = prune_backups(root)
+    return result
+
+
+def nightly_step(vault, say, *, apply=True, commit=True, backups=None):
+    """nightly.py's stage, after the topic hubs: never raises, so a failure here doesn't stop
+    the rest of the night."""
+    say("== related ==")
+    try:
+        res = run(vault, apply=apply, commit=commit, backups=backups, say=say)
+    except Exception as exc:  # noqa: BLE001 -- logged, never fatal
+        say(f"  related links failed: {type(exc).__name__}: {exc}")
+        return {"logs": 0, "linked": 0, "changed": [], "backup": None, "pruned": [], "commit": "failed"}
+    say(f"  {res['logs']} logs, {res['linked']} with a related block; {len(res['changed'])} "
+        f"{'rewritten' if apply else 'would change'}"
+        + (f"; commit {res['commit']}" if res["commit"] != "none" else "")
+        + (f"; {len(res['pruned'])} old backup(s) moved to {CFG['trash_dir']}" if res["pruned"] else ""))
+    return res
 
 
 def main():
@@ -219,7 +323,6 @@ def main():
     ap.add_argument("--undo", metavar="MANIFEST")
     a = ap.parse_args()
     vault = pathlib.Path(a.vault)
-    backups = pathlib.Path(CFG.get("backup_dir", str(pathlib.Path.home() / "git" / "vault-backups")))
 
     if a.undo:
         man = json.loads(pathlib.Path(a.undo).read_text(encoding="utf-8"))
@@ -233,29 +336,20 @@ def main():
         print(f"restored {restored}, skipped {skipped} (changed since)")
         return
 
-    notes, out = plan(vault)
-    logs = [r for r in notes if under(r, CFG["log_roots"])]
-    topics = Counter(i["topic"] for i in out.values())
-    print(f"logs {len(logs)}, linked {len(out)}, links {sum(len(i['links']) for i in out.values())}, topics {dict(topics)}")
     if a.dry_run:
+        notes, out = plan(vault)
+        logs = [r for r in notes if under(r, CFG["log_roots"])]
+        topics = Counter(i["topic"] for i in out.values())
+        print(f"logs {len(logs)}, linked {len(out)}, links {sum(len(i['links']) for i in out.values())}, topics {dict(topics)}")
         pathlib.Path(a.dry_run).write_text(json.dumps(out, indent=1), encoding="utf-8")
         return
+    res = run(vault, apply=a.apply)
+    print(f"logs {res['logs']}, linked {res['linked']}, topics {res['topics']}")
     if a.apply:
-        stamp = datetime.datetime.now().strftime("%Y-%m-%dT%H%M%S")
-        bdir = backups / f"related-links-{stamp}"
-        changed = []
-        for r in logs:
-            text = notes[r]
-            info = out.get(r)
-            if not info and CFG["block_start"] not in text:
-                continue
-            (bdir / r).parent.mkdir(parents=True, exist_ok=True)
-            (bdir / r).write_bytes(text.encode("utf-8"))
-            if write_with(vault, r, text, info):
-                changed.append(r)
-        man = bdir / "manifest.json"
-        man.write_text(json.dumps({"backup": str(bdir), "files": changed}, indent=1), encoding="utf-8")
-        print(f"changed {len(changed)} files; undo with --undo \"{man}\"")
+        print(f"changed {len(res['changed'])} files"
+              + (f"; undo with --undo \"{res['backup']}\"" if res["backup"] else ""))
+    else:
+        print(f"would change {len(res['changed'])} files (use --apply)")
 
 
 if __name__ == "__main__":

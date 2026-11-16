@@ -75,5 +75,11 @@
   "similar_top_terms": 60,
   "similar_word_regex": "[A-Za-z][A-Za-z0-9]{3,}",
   "similar_heading": "Similar logs:",
-  "topic_spread_passes": 6
+  "topic_spread_passes": 6,
+  "backup_dir": "~/git/vault-backups",
+  "backup_prefix": "related-links-",
+  "backup_stamp": "%Y-%m-%dT%H%M%S",
+  "keep_backups": 7,
+  "trash_dir": "_to_delete",
+  "commit_message": "nightly: related links in new logs\n\nAutomated by Denisse (scripts/link_related_logs.py). Only the logs whose <!-- related:auto --> block changed are committed."
 }

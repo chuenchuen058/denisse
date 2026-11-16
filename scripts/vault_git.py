@@ -37,6 +37,45 @@ def commit_owned(vault, paths, message):
     return run(vault, "git", "rev-parse", "HEAD")
 
 
+def _check_paths(paths):
+    for path in paths:
+        if (not path or path.startswith(("/", "\\", ":")) or ":" in path
+                or ".." in path.replace("\\", "/").split("/")):
+            raise BackupError("Checkpoint paths must be relative literal file names")
+
+
+def commit_owned_many(vault, paths, message):
+    """commit_owned for any number of paths: the pathspecs go through a file, not the command
+    line (a night's related-links pass can touch over a thousand logs; Windows caps a command
+    line at 32k characters). Unrelated staged changes are preserved the same way (--only)."""
+    import tempfile
+    if not paths:
+        return None
+    _check_paths(paths)
+    # Which of them git sees as changed: one whole-tree status, read NUL-separated (no quoting).
+    tokens = run(vault, "git", "status", "--porcelain", "-z", "--untracked-files=all").split("\0")
+    dirty, skip = set(), False
+    for tok in tokens:
+        if skip or len(tok) < 4:
+            skip = False
+            continue
+        dirty.add(tok[3:])
+        skip = tok[0] in "RC"  # a rename/copy is followed by its old name
+    wanted = [p.replace("\\", "/") for p in paths if p.replace("\\", "/") in dirty]
+    if not wanted:
+        return None
+    fd, spec = tempfile.mkstemp(prefix="pathspec-", suffix=".txt")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
+            f.write("".join(":(literal)" + p + "\0" for p in wanted))
+        common = ("--pathspec-from-file=" + spec, "--pathspec-file-nul")
+        run(vault, "git", "add", *common)
+        run(vault, "git", "commit", "--only", "-m", message, *common)
+    finally:
+        os.unlink(spec)
+    return run(vault, "git", "rev-parse", "HEAD")
+
+
 def push_private(vault):
     """Push committed history only, after explicit opt-in and privacy check.
 
