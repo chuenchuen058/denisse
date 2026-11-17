@@ -78,6 +78,11 @@ Day-to-day operation: [docs/operator_guide.md](docs/operator_guide.md).
   ([`atrium/snapshot.py`](atrium/snapshot.py)), and an hourly digest of the
   laptop into the vault ([`atrium/digest.py`](atrium/digest.py)).
 
+Every limit, path, word and selector lives in
+[`atrium/config.json`](atrium/config.json) and
+[`orchestra/config.json`](orchestra/config.json), each with its reason. Tests
+fail if a page file writes its own colours or text.
+
 ## Obsidian vault
 
 Orchestra and Atrium write into one Obsidian vault, which is the system's
@@ -108,11 +113,6 @@ private and never in this repository; the code that keeps it in shape is.
   and study sessions, answering only from the vault
   ([docs/tutor.md](docs/tutor.md)). Its evals run on a small fixture vault
   ([`eval/fixture_vault/`](eval/fixture_vault/README.md)), never the real one.
-
-Every limit, path, word and selector lives in
-[`atrium/config.json`](atrium/config.json) and
-[`orchestra/config.json`](orchestra/config.json), each with its reason. Tests
-fail if a page file writes its own colours or text.
 
 ## How it is tested
 
