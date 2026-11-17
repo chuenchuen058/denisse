@@ -78,7 +78,7 @@ Day-to-day operation: [docs/operator_guide.md](docs/operator_guide.md).
   ([`atrium/snapshot.py`](atrium/snapshot.py)), and an hourly digest of the
   laptop into the vault ([`atrium/digest.py`](atrium/digest.py)).
 
-## The Obsidian vault: where it all lands
+## Obsidian vault
 
 Orchestra and Atrium write into one Obsidian vault, which is the system's
 long-term memory and the place a person actually reads. The vault itself is
