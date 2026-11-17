@@ -144,6 +144,9 @@
 
   "auto_push": true,
   "_auto_push": "After a merge the runner (never the task session) pushes the default branch, unless the checkout is mid-merge, origin is ahead, or the commits touch private-looking paths or add key-like strings. The repo is public. false turns it off.",
+  "default_branch": "master",
+  "default_remote": "origin",
+  "_default_branch": "The branch the runner dispatches from, merges onto and pushes when the remote has no HEAD (refs/remotes/<default_remote>/HEAD wins when set; a name that does not exist locally means unknown, and nothing is blocked). While the main checkout is on another branch or a detached HEAD no lane starts and no PASS is merged: it parks for requeue.py <slug> --merge-only (audit 10 Nov 2026, O1: a `git switch` there sent tasks and merges to the wrong branch, and the log still read merged). default_remote: the remote whose HEAD names it, and the one auto_push pushes to.",
 
   "credits_ledger_file": "credits.jsonl",
   "_credits_ledger_file": "One JSON object per finished lane run, review pass or merge-only check. Stored under .review/, one line each; the ledger is append-only and the runner writes it right next to the result log line.",

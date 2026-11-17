@@ -69,6 +69,7 @@ import no_window  # noqa: E402
 no_window.install()
 import allowance  # noqa: E402  each lane's allowance, resets and the spend-down/conserve plan (config allowance)
 import campaign  # noqa: E402  deadline + pause/stop; reads .review/campaign.json and control.json
+import default_branch  # noqa: E402  is the main checkout on the default branch? Off it: no dispatch, no merge (audit 10 Nov, O1)
 import consult  # noqa: E402  the study tutor's opinion before a lane starts; data in consult.json, advisory
 import gamemode  # noqa: E402  Chuen's game mode: while it is on a tick does nothing (orchestra/gamemode.py)
 import lane_pick  # noqa: E402  the lane (and reviewer) chosen at dispatch from config + live state (11 Nov 2026)
@@ -1588,6 +1589,9 @@ def integrate(task: Task, branch: str, rec: dict, on_merged=None, before_land=No
             if on_merged:
                 on_merged()
         return "merged"
+    off = default_branch.off_default(REPO, C)  # before the combined-tree run: it would test the wrong base
+    if off:
+        return default_branch.park_reason(off, task.slug)
     clash = dirty_clash(branch)
     if clash:
         return f"main checkout has uncommitted changes to {', '.join(clash)}; merge by hand"
@@ -1628,6 +1632,9 @@ def integrate(task: Task, branch: str, rec: dict, on_merged=None, before_land=No
             clash = dirty_clash(branch)
             if clash:
                 return f"main checkout has uncommitted changes to {', '.join(clash)}; merge by hand"
+            off = default_branch.off_default(REPO, C)  # switched while the combined tree was tested
+            if off:
+                return default_branch.park_reason(off, task.slug)
             r = git("merge", "--ff-only", commit, check=False)
             if r.returncode != 0:
                 return f"fast-forward to the tested merge failed: {(r.stderr or r.stdout).strip()[:200]}; merge by hand"
@@ -2749,7 +2756,7 @@ def _after_pass(task: Task, state: dict, ts: dict, entry: dict, wt: Path, branch
         if C.get("auto_push") and aftercare_on():
             try:
                 import aftercare
-                ts["push"] = aftercare.push(REPO)
+                ts["push"] = aftercare.push(REPO, C)
             except Exception as e:  # a push problem must never lose the merge
                 ts["push"] = f"push step crashed: {e}"
             log(f"push {task.slug}: {ts['push']}")
@@ -3731,7 +3738,10 @@ def _tick(dry_run: bool = False) -> str:
             if why is None and p is not None:  # the scores per lane and the winner (lane_pick)
                 print(lane_pick.table(p.scores))
                 print(f"    -> {p.lane}: {p.why}")
-        t = pick(tasks, state, dry_run=True)
+        off = default_branch.off_default(REPO, C)
+        t = None if off else pick(tasks, state, dry_run=True)
+        if off:
+            print(f"nothing would run or merge: {off}")
         print(f"would run: {t.slug if t else 'nothing'}; spend left today ${spend_left(state):.2f}; "
               f"power: {power.describe(power.power_status(), C)}")
         return "dry-run"
@@ -3743,6 +3753,12 @@ def _tick(dry_run: bool = False) -> str:
     # Reconcile before dispatching: a killed tick's orphaned lane or leftover report.
     # Allowed on battery: collecting a finished lane is short and saves its work.
     orphans = {s for s, r in reconcile(state).items() if r == "orphan running"}
+    # Off the default branch (someone ran `git switch` in the main checkout): start no lane. A
+    # finished lane was collected above; integrate() parked it unmerged, branch kept.
+    if default_branch.dispatch_block(REPO, REVIEW, C, log):
+        save_state(state)
+        write_state_now()
+        return "off default branch"
     # On battery a one-task grant (power.py allow-once) lets exactly one new lane start; it is
     # re-checked and consumed under the dispatch lock below, so two ticks can't both use it.
     grant = None
@@ -3879,7 +3895,8 @@ def _tick(dry_run: bool = False) -> str:
             save_state(state)
             visible.lane_finished(task, "WORKTREE_FAILED", C, log)
             return "WORKTREE_FAILED"
-        block = campaign.dispatch_block(REVIEW)  # paused while the worktree was being made
+        # paused, or the checkout switched off the default branch, while the worktree was being made
+        block = campaign.dispatch_block(REVIEW) or default_branch.off_default(REPO, C)
         if block:
             log(f"{task.slug}: not started, {block}")
             ts["attempts"] -= 1
