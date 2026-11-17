@@ -328,6 +328,20 @@ def lane_limits(st: dict, now: dt.datetime | None = None) -> dict[str, dt.dateti
     return out
 
 
+def _credits() -> list[dict]:
+    try:
+        from orchestra.credits import load_config, ledger_path, read_ledger, totals_by_slug
+        cfg = load_config()
+        ledger = read_ledger(ledger_path(cfg))
+        rows = []
+        for row in totals_by_slug(ledger):
+            rows.append({"slug": row["slug"], "runs": row["runs"], "cost_usd": row["cost_usd"],
+                         "duration_s": row["duration_s"], "tokens": row["tokens"]})
+        return rows
+    except Exception:  # pragma: no cover - hub must never fail because of missing credits logs
+        return []
+
+
 def _state() -> dict:
     return read_state()[0]
 

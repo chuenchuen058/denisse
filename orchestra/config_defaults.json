@@ -73,6 +73,10 @@
   "auth_retry_min": 15,
   "auth_fix_hint": "sign-in expired: open a terminal, run the lane's CLI (e.g. `claude`) and sign in (`/login`)",
 
+  "credits_ledger_file": "credits.jsonl",
+  "credits_runner_log": ".review/runner.log",
+  "credits_review_label": "review",
+  "credits_usage_keys": ["in", "out", "cache_read", "cache_write"],
   "daily_spend_cap_usd": 5.0,
   "unknown_cost_per_min_usd": 0.10,
   "tick_gap_counts_as_downtime_s": 900,
