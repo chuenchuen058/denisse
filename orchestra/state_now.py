@@ -73,6 +73,12 @@ def build() -> str:
     if master:
         out += [master, ""]
 
+    try:  # the allowance plan (orchestra/allowance.py): left, next reset, held / conserved / spent down
+        rows = R.allowance_rows(state)
+        out += ["**Allowance:** " + ("; ".join(f"{a['why']} [{a['mode']}]" for a in rows) or "no model"), ""]
+    except Exception as e:  # never break STATE NOW
+        out += [f"**Allowance:** unknown ({e})", ""]
+
     try:
         import power
         out += ["**Power:** " + power.describe(power.power_status(), R.C), ""]

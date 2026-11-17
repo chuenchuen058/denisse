@@ -18,10 +18,14 @@ How a lane is scored (higher wins; only *available* lanes can win):
              at or under `reserve` of the allowance left (reserve 1 = keep it all), hold
   cost       a priced lane (not in unpriced_lanes) costs the share of daily_spend_cap_usd spent
   busy       a lane with no free slot loses a little, so work spreads
+  allowance  allowance_spend_bonus for a lane orchestra/allowance.py is spending down before
+             its reset (Lane: auto only)
   hint       the lane_fallback of the asked (or best-fit) lane, when that one is unavailable
 A lane is unavailable when it is not configured, limited (state lanes.<lane>.limited_until),
-over the spend cap (priced lanes), or held by pacing (except the lane the header names:
-naming a lane is Chuen's own pacing decision). Lane-Fixed: yes never moves.
+over the spend cap (priced lanes), held by pacing (except the lane the header names:
+naming a lane is Chuen's own pacing decision), or held by the allowance plan for this task
+(named lane included: it moves to its lane_fallback; a bug fix on bugfix_lane never is).
+Lane-Fixed: yes never moves.
 """
 from __future__ import annotations
 
@@ -56,6 +60,10 @@ class Live:
     slots: dict[str, int] = field(default_factory=dict)
     spend_left: float | None = None                         # None: no cap known
     usage: dict[str, dict] = field(default_factory=dict)    # .review/<lane_usage_file>, per lane
+    # orchestra/allowance.py's plan for this task: lanes it holds (lane -> why: conserved, or too
+    # little left for the task's weight) and lanes it is spending down before a reset (lane -> why)
+    held: dict[str, str] = field(default_factory=dict)
+    spend: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -68,6 +76,9 @@ class Pick:
 
 
 # ---------------------------------------------------------------- small helpers
+
+ALLOWANCE_PREFIX = "allowance: "  # an availability reason from the allowance plan (moves like a limit)
+
 
 def auto_word(cfg: dict) -> str:
     return str(cfg.get("lane_auto_word") or "").lower()
@@ -202,6 +213,11 @@ def availability(lane: str, ask: Ask, cfg: dict, live: Live, held: bool, held_wh
     # Pacing still weighs on both through the score.
     if held and not ask.author and lane != ask.asked:
         return f"conserving: {held_why}"
+    # The allowance plan's hold applies to the named lane too (the task moves to its
+    # lane_fallback), but never to a bug fix on bugfix_lane, nor to a review.
+    plan_hold = (live.held or {}).get(lane)
+    if plan_hold and not ask.author and not (ask.bugfix and lane == str(cfg.get("bugfix_lane") or "")):
+        return f"{ALLOWANCE_PREFIX}{plan_hold}"
     if ask.author and lane == ask.author:
         return "wrote the change (the review must be independent)"
     return None
@@ -246,9 +262,12 @@ def score(ask: Ask, cfg: dict, live: Live, pool: list[str] | None = None) -> lis
         cap = float(cfg.get("daily_spend_cap_usd", 0) or 0)
         if lane not in cfg.get("unpriced_lanes", []) and cap > 0 and live.spend_left is not None:
             parts["cost"] = -float(w.get("cost", 0)) * max(0.0, min(1.0, 1 - live.spend_left / cap))
+        if not explicit and lane in (live.spend or {}):  # the allowance plan: use it before the reset
+            parts["allowance"] = float(cfg.get("allowance_spend_bonus", 0))
         if live.busy.get(lane, 0) >= int(live.slots.get(lane, 1) or 1):
             parts["busy"] = -float(w.get("busy", 0))
         rows.append({"lane": lane, "parts": parts, "pacing_why": pace_why,
+                     "allowance_why": (live.spend or {}).get(lane, "") if "allowance" in parts else "",
                      "unavailable": availability(lane, ask, cfg, live, held, pace_why)})
     # The lane_fallback hint: a tie-break toward the fallback of the asked (or best-fit) lane
     # when that lane can't run.
@@ -268,6 +287,8 @@ def _why(row: dict) -> str:
     bits = [f"{k} {v:+.2f}" for k, v in row["parts"].items() if v]
     if row.get("pacing_why"):
         bits.append(row["pacing_why"])
+    if row.get("allowance_why"):
+        bits.append(row["allowance_why"])
     return f"score {row['total']:.2f} ({', '.join(bits) or 'no score'})"
 
 
@@ -291,7 +312,7 @@ def choose(ask: Ask, cfg: dict, live: Live, pool: list[str] | None = None) -> Pi
         asked_row = next((r for r in rows if r["lane"] == ask.asked), None)
         if is_auto(ask.asked, cfg):
             moved = "picked"
-        elif asked_row and (asked_row["unavailable"] or "").startswith("limited"):
+        elif asked_row and (asked_row["unavailable"] or "").startswith(("limited", ALLOWANCE_PREFIX)):
             moved = "fallback"
         elif ask.bugfix and lane == cfg.get("bugfix_lane"):
             moved = "bugfix"

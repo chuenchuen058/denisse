@@ -51,6 +51,7 @@ import threading
 import time
 import traceback
 import uuid
+import dataclasses
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -65,6 +66,7 @@ if str(HERE.parent) not in sys.path:  # no_window.py lives at the repo root; app
 # (no_window.py, 15 Nov 2026); a reload, as the tests do, never wraps the wrapper again.
 import no_window  # noqa: E402
 no_window.install()
+import allowance  # noqa: E402  each lane's allowance, resets and the spend-down/conserve plan (config allowance)
 import campaign  # noqa: E402  deadline + pause/stop; reads .review/campaign.json and control.json
 import consult  # noqa: E402  the study tutor's opinion before a lane starts; data in consult.json, advisory
 import gamemode  # noqa: E402  Chuen's game mode: while it is on a tick does nothing (orchestra/gamemode.py)
@@ -751,12 +753,82 @@ def lane_limited(state: dict, lane: str) -> dt.datetime | None:
     return when if now() < when else None
 
 
-def fallback_lane(task: Task, state: dict) -> str | None:
-    """The lane to run on while the task's own lane is limited, if config and header allow."""
+def allowance_path() -> Path:
+    return REVIEW / str(C["allowance_file"])
+
+
+def choose_model(task: Task, lane: str | None = None) -> tuple[str | None, str]:
+    """(model for `claude --model`, why). The task's Model: header wins; else config
+    claude_model_by_kind (e.g. bugfix), then claude_model_by_weight; "" = the CLI's default.
+    Chuen, 9 Nov 2026: stretch the Max plan, a smaller model for light work. Claude lane only."""
+    if (lane or task.lane) != "claude":
+        return None, ""
+    model = task.fields.get("model", "").strip()
+    if model:
+        return (model, "Model: header") if re.fullmatch(r"[A-Za-z0-9._-]{2,64}", model) else (None, "bad Model: header ignored")
+    for key, table in (("kind", C["claude_model_by_kind"]), ("weight", C["claude_model_by_weight"])):
+        val = getattr(task, key)
+        if str(table.get(val) or "").strip():
+            return str(table[val]).strip(), f"{val} task (claude_model_by_{key})"
+    return None, "CLI default"
+
+
+def allowance_hold(task: Task, state: dict, lane: str | None = None, data: dict | None = None) -> str | None:
+    """Why the allowance plan keeps `lane` (default the task's) from this task now: conserved
+    (low, reset far), or not enough left for its weight. A LIMITED wait is not checked here."""
+    lane = lane or task.lane
+    if not allowance.windows(C, lane):
+        return None
+    try:
+        return allowance.hold(C, data if data is not None else allowance.load(allowance_path()), lane, now(),
+                              priority=task.priority, weight=task.weight, model=choose_model(task, lane)[0])
+    except Exception as e:  # noqa: BLE001 -- a bad allowance file must never stop dispatch
+        log(f"allowance: {e!r}; not holding {lane}")
+        return None
+
+
+def allowance_rows(state: dict) -> list[dict]:
+    """Every lane with an allowance model, estimated now, for status.py and STATE NOW."""
+    names = [l for l in C["allowance"] if l in lanes()] or list(C["allowance"])
+    try:
+        return allowance.rows(C, allowance.load(allowance_path()), names, now(),
+                              {l: lane_limited(state, l) for l in names})
+    except Exception as e:  # noqa: BLE001
+        return [{"lane": "?", "mode": "?", "why": f"allowance unreadable: {e!r}", "text": "", "windows": {},
+                 "left_pct": None, "resets": None, "window": None}]
+
+
+def allowance_note(task: Task) -> str:
+    """The allowance plan's word on the lane a task starts on, for its START line."""
+    if not allowance.windows(C, task.lane):
+        return f"Lane: {task.lane}; no allowance model"
+    try:
+        est = allowance.estimate(C, allowance.load(allowance_path()), task.lane, now())
+    except Exception as e:  # noqa: BLE001
+        return f"Lane: {task.lane}; allowance unreadable ({e!r})"
+    return f"Lane: {task.lane}; {est['why']}"
+
+
+def lane_of_log(path: Path, text: str = "") -> str | None:
+    """Which lane wrote <slug>.lane.log: the last run of that task in state.json, else claude if
+    it is stream-json."""
+    slug = Path(path).name.split(".lane.log")[0]
+    hist = (load_state()["tasks"].get(slug) or {}).get("history") or []
+    for h in reversed(hist):
+        if h.get("lane"):
+            return h["lane"]
+    return "claude" if '"session_id"' in text or "rate_limit_event" in text else None
+
+
+def fallback_lane(task: Task, state: dict, data: dict | None = None) -> str | None:
+    """The lane to run on while the task's own lane is limited or held by the allowance plan,
+    if config and header allow, and the fallback is neither limited nor held for this task."""
     if task.fields.get("lane-fixed", "").lower() in ("yes", "true", "1"):
         return None
     fb = (C.get("lane_fallback", {"codex": "claude"}) or {}).get(task.lane)
     if not fb or fb == task.lane or fb not in lanes() or lane_limited(state, fb):
+        return None
+    if allowance_hold(task, state, fb, data):
         return None
     return fb
 
@@ -815,7 +887,30 @@ def lane_ask(task: Task) -> "lane_pick.Ask":
 
 
 def lane_pick_for(task: Task, state: dict, live=None) -> "lane_pick.Pick":
-    return lane_pick.choose(lane_ask(task), C, live or lane_live(state))
+    """lane_pick's choice for this task, with the allowance plan's word on every lane for it
+    (held: conserved or too little left for its weight/model; spend: spending down before a reset)."""
+    live = live or lane_live(state)
+    held, spend = {}, {}
+    try:
+        data = allowance.load(allowance_path())
+        for lane in live.lanes:
+            if not allowance.windows(C, lane) or live.limited.get(lane):
+                continue
+            why = allowance_hold(task, state, lane, data)
+            if why:
+                held[lane] = why
+            else:
+                est = allowance.estimate(C, data, lane, now())
+                if est["mode"] == "spend":
+                    spend[lane] = est["why"]
+    except Exception as e:  # noqa: BLE001 -- a bad allowance file must never stop dispatch
+        log(f"allowance: {e!r}; picking without the plan")
+    return lane_pick.choose(lane_ask(task), C, dataclasses.replace(live, held=held, spend=spend))
+
+
+def bugfix_exempt(task: Task) -> bool:
+    """A bug fix on bugfix_lane is never held by the allowance plan, only by a LIMITED wait."""
+    return is_bugfix(task) and bool(C["bugfix_lane"]) and task.lane == str(C["bugfix_lane"]).lower()
 
 
 def route(tasks: list[Task], state: dict) -> list[Task]:
@@ -840,6 +935,9 @@ def route(tasks: list[Task], state: dict) -> list[Task]:
         t.fields["lane"] = t.fields["lane-picked"] = p.lane
         if p.moved == "fallback":
             t.fields["lane-from"] = asked
+            gone = next((r["unavailable"] for r in p.scores if r["lane"] == asked), "") or ""
+            if gone.startswith(lane_pick.ALLOWANCE_PREFIX):  # held by the plan, not LIMITED
+                t.fields["lane-from-why"] = gone[len(lane_pick.ALLOWANCE_PREFIX):]
         elif p.moved == "bugfix":
             t.fields["lane-routed"], t.fields["route-why"] = asked, C["bugfix_route_note"].format(lane=p.lane)
         elif not lane_pick.is_auto(asked, C):
@@ -960,6 +1058,12 @@ def why_not_runnable(task: Task, state: dict) -> str | None:
     # A routed task already had its fallback considered by the scorer (lane_pick).
     if until and ("lane-asked" in task.fields or not fallback_lane(task, state)):
         return f"lane {task.lane} limited until {until:%H:%M}"
+    if not until and "lane-from" not in task.fields and not bugfix_exempt(task):
+        held = allowance_hold(task, state)
+        # A routed task already had the plan's holds considered by the scorer (lane_pick):
+        # fallback_lane() may name a lane lane_pick found unavailable (e.g. over the spend cap).
+        if held and ("lane-asked" in task.fields or not fallback_lane(task, state)):
+            return held
     if task.kind == "maintenance" and not maintenance_allowed(state):
         return f"maintenance cap ({int(C['maint_share'] * 100)}%) reached today"
     # The cap is Claude Code's cost figure; Codex/Gemini runs aren't priced, so it never blocks them.
@@ -1870,8 +1974,9 @@ def run_lane(task: Task, wt: Path, report: Path, timeout: int, prov: dict | None
         argv += ["--settings", str(hook_settings(wt))]
         # "Model: fable" (or any alias/id `claude --model` takes) in a task header picks the
         # model for that one task. Chuen, 2 Nov 2026: Fable for really hard tasks, Claude decides.
-        model = task.fields.get("model", "").strip()
-        if model and re.fullmatch(r"[A-Za-z0-9._-]{2,64}", model):
+        # Without one, config claude_model_by_kind / _by_weight (choose_model; 9 Nov 2026).
+        model = choose_model(task)[0]
+        if model:
             argv += ["--model", model]
     # claude -p started from inside another Claude Code session returns nothing unless these
     # are stripped (Thomas's notes); harmless when they aren't set.
@@ -2062,6 +2167,7 @@ def lane_result(lane_log: Path) -> dict:
         denied.append(f"{name}({cmd.split()[0]})" if name == "Bash" and cmd else name)
     return {"cost_usd": data.get("total_cost_usd"), "denied": denied,
             "model": lane_model(data.get("modelUsage")), "tokens": lane_tokens(data.get("usage")),
+            "turns": data.get("num_turns") if isinstance(data.get("num_turns"), int) else None,
             "session_id": data.get("session_id") if isinstance(data.get("session_id"), str) else None}
 
 
@@ -2144,6 +2250,7 @@ def finish(task: Task, state: dict, wt: Path, branch: str, outcome: str, seconds
                                   timeout or timeout_for(task.weight, state), booted)
     spent = charge(state, task, ran, lane_info.get("cost_usd"))
     provenance = provenance_fields(task.lane, prov, lane_info)
+    record_allowance_run(task, seconds, lane_info)
 
     if outcome == "TIMEOUT":
         info = {"result": "TIMEOUT", "human": "none", "premise": "not stated", "note": f"killed after {seconds}s"}
@@ -2208,6 +2315,22 @@ def finish(task: Task, state: dict, wt: Path, branch: str, outcome: str, seconds
     elif report.exists():
         os.replace(report, REPORTS / f"{task.slug}.attempt{ts['attempts']}.md")
     return info["result"]
+
+
+def record_allowance_run(task: Task, seconds: int, lane_info: dict) -> None:
+    """The run's real usage (tokens, cost, turns where the lane reports them) and any window
+    readings its log carries, into the allowance history. Never raises."""
+    try:
+        text = (REPORTS / f"{task.slug}.lane.log").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        text = ""
+    try:
+        allowance.record_run(allowance_path(), C, task.lane, now(), slug=task.slug, weight=task.weight,
+                             model=lane_info.get("model") or choose_model(task)[0],
+                             tokens=lane_info.get("tokens"), cost=lane_info.get("cost_usd"),
+                             turns=lane_info.get("turns"), seconds=seconds, log_text=text)
+    except Exception as e:  # noqa: BLE001
+        log(f"allowance: could not record the run of {task.slug}: {e!r}")
 
 
 def indent(text: str) -> str:
@@ -2677,10 +2800,16 @@ def refresh_waiting() -> None:
 def _limited(task: Task, state: dict, ts: dict, hit: str, seconds: int, spent: str,
              provenance: dict | None = None, run: str = "") -> str:
     """The lane hit its usage limit: not an attempt. Record when the lane may run again."""
-    until = (parse_limit_until(hit) or period_until(hit)
+    parsed = parse_limit_until(hit)
+    until = (parsed or period_until(hit)
              or now() + dt.timedelta(minutes=C["limit_default_min"]))
     state.setdefault("lanes", {})[task.lane] = {"limited_until": until.isoformat(),
                                                 "since": now().isoformat(), "message": hit[:300]}
+    if parsed and C["auth_fix_hint"] not in hit:  # a real reset time, not a sign-in retry guess: learn it
+        try:
+            allowance.record_limit(allowance_path(), C, task.lane, now(), parsed, hit)
+        except Exception as e:  # noqa: BLE001 -- learning must never cost the LIMITED record
+            log(f"allowance: could not record the limit for {task.lane}: {e!r}")
     ts["attempts"] = max(0, ts["attempts"] - 1)
     note = f"lane {task.lane} limited until {until:%Y-%m-%d %H:%M}: {hit[:200]}"
     entry = {"end": now().isoformat(), "result": "LIMITED", "seconds": seconds, "lane": task.lane,
@@ -2747,7 +2876,24 @@ def lane_availability(state: dict) -> dict:
         elif lane not in C["unpriced_lanes"] and spend_left(state) <= 0:
             out[lane] = f"daily spend cap ${C['daily_spend_cap_usd']:.2f} reached"
         else:
-            out[lane] = None
+            # the allowance plan for a typical planner task (normal priority, light): conserved or too low
+            probe = Task(Path(f"{lane}.md"), "", {"lane": lane}, "", "")
+            out[lane] = allowance_hold(probe, state, lane)
+    return out
+
+
+def spend_down_lanes(state: dict) -> dict:
+    """lane -> (hours to its reset, why) for every planner lane the allowance plan is spending
+    down before a reset, so the autopilot gives it the next task."""
+    out = {}
+    try:
+        data = allowance.load(allowance_path())
+        for lane in C["autopilot_lanes"]:
+            est = allowance.estimate(C, data, lane, now(), lane_limited(state, lane))
+            if est["mode"] == "spend":
+                out[lane] = ((est["spend_resets"] - now()).total_seconds() / 3600, est["why"])
+    except Exception as e:  # noqa: BLE001
+        log(f"allowance: {e!r}; the autopilot spreads evenly")
     return out
 
 
@@ -2793,7 +2939,7 @@ def _autopilot_step(state: dict, classify=None, power_status=None) -> list:
     made = autopilot.refill(
         cfg=C, review=REVIEW, repo=REPO, vault=vault, state=state, available=lane_availability(state),
         power=(power_status or power.power_status)(), busy=files, files_of=files_of, log=log,
-        classify=classify, at=now())
+        classify=classify, at=now(), prefer=spend_down_lanes(state))
     if made and vault and aftercare_on():  # a new draft is listed in hot.md "Waiting on Chuen"
         import aftercare
         lines = aftercare.waiting_lines(queue_dir=QUEUE, parked_dir=PARKED, state=load_state(), now=now(),
@@ -3401,8 +3547,11 @@ def _tick(dry_run: bool = False) -> str:
         fb = ""
         if task.fields.get("lane-from"):
             was = lane_limited(state, task.fields["lane-from"])
-            fb = (f" (fallback: lane {task.fields['lane-from']} limited until "
-                  f"{was:%H:%M})" if was else f" (fallback: lane {task.fields['lane-from']} was limited)")
+            if task.fields.get("lane-from-why"):  # held by the allowance plan, not LIMITED
+                fb = f" (fallback: {task.fields['lane-from-why']})"
+            else:
+                fb = (f" (fallback: lane {task.fields['lane-from']} limited until "
+                      f"{was:%H:%M})" if was else f" (fallback: lane {task.fields['lane-from']} was limited)")
         record_pick(task)
         if is_merge_only(task):  # before fresh_worktree: that would replace the branch to merge
             result = merge_only(task, state, ts)
@@ -3411,7 +3560,11 @@ def _tick(dry_run: bool = False) -> str:
             return result
         if task.fields.get("route-why"):
             fb += f" ({task.fields['route-why']}; header lane {task.fields['lane-routed']})"
-        log(f"START {task.slug} lane={task.lane}{fb} weight={task.weight} timeout={timeout}s attempt={ts['attempts']}")
+        elif not fb:
+            fb = f" ({allowance_note(task)})"
+        model, model_why = choose_model(task)
+        mtxt = f" model={model} ({model_why})" if model else (f" model=default ({model_why})" if model_why else "")
+        log(f"START {task.slug} lane={task.lane}{fb}{mtxt} weight={task.weight} timeout={timeout}s attempt={ts['attempts']}")
         visible.lane_started(task, C, REVIEW, REPO, log, alive=proc_created)  # never raises
         try:
             wt, branch = fresh_worktree(task)
