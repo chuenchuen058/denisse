@@ -78,6 +78,37 @@ Day-to-day operation: [docs/operator_guide.md](docs/operator_guide.md).
   ([`atrium/snapshot.py`](atrium/snapshot.py)), and an hourly digest of the
   laptop into the vault ([`atrium/digest.py`](atrium/digest.py)).
 
+## The Obsidian vault: where it all lands
+
+Orchestra and Atrium write into one Obsidian vault, which is the system's
+long-term memory and the place a person actually reads. The vault itself is
+private and never in this repository; the code that keeps it in shape is.
+
+- **Layout** (the skeleton is added by [`orchestra/install_vault.py`](orchestra/install_vault.py), which never overwrites a note):
+  `Atlas` for lasting knowledge (modules week by week, projects, people),
+  `Calendar` for the day's chat logs, agent sessions and handoff note,
+  `Efforts` for ongoing work, and `Dev` for the agents' own records, such as
+  their exam scores.
+- **Every task leaves a note**: after each Orchestra run, aftercare writes what
+  was done, by which agent and with what result
+  ([`orchestra/aftercare.py`](orchestra/aftercare.py)). Every write into the
+  vault goes through one lock, so two agents never write over each other and
+  a write never lands over a newer edit made in Obsidian ([`orchestra/vaultlock.py`](orchestra/vaultlock.py)).
+- **Kept consistent by checks, not by hand**: a contract check that every note has its front matter and
+  a unique name ([`scripts/vault_contract.py`](scripts/vault_contract.py)),
+  an audit of orphan notes and links to notes that don't exist ([`scripts/vault_link_audit.py`](scripts/vault_link_audit.py)), a
+  nightly pass that links each log to related ones by topic, with a backup
+  first so it can be undone ([`scripts/link_related_logs.py`](scripts/link_related_logs.py)),
+  and git checkpoints of the vault, with pushes only to a verified-private
+  repository ([`scripts/vault_git.py`](scripts/vault_git.py)).
+- **Course material comes in on its own**: a puller fetches each week's
+  lecture and tutorial files from the university's Moodle into the week's
+  folder ([`keats/`](keats/README.md)).
+- **A study tutor reads it**: Don turns the week notes into checked flashcards
+  and study sessions, answering only from the vault
+  ([docs/tutor.md](docs/tutor.md)). Its evals run on a small fixture vault
+  ([`eval/fixture_vault/`](eval/fixture_vault/README.md)), never the real one.
+
 Every limit, path, word and selector lives in
 [`atrium/config.json`](atrium/config.json) and
 [`orchestra/config.json`](orchestra/config.json), each with its reason. Tests
