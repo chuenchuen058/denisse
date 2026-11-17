@@ -273,6 +273,10 @@ class AllowanceInTheRunner(unittest.TestCase):
 
     def test_lane_auto_spends_the_lane_about_to_reset(self):
         self.say("codex", 40, 2)
+        # No lane_pacing here: claude's weekly reset_anchor, counted from the real clock, is
+        # itself "use it or lose it" in the 24 h before it (failed in CI 17 Nov 19:25: claude
+        # reset in 20h won on pacing), which made this test depend on the day of the week.
+        self.R.C["lane_pacing"] = {}
         self.add("planned", lane="auto")
         self.assertIsNone(self.R.header_problem(self.R.load_queue()[0]))
         t = self.R.route(self.R.load_queue(), self.R.load_state())[0]
