@@ -363,6 +363,26 @@ itself, through `requeue.py`'s own `requeue_merge_only`:
 
 Tests: `python -m unittest orchestra.test_auto_requeue -v`.
 
+### Merge-only runs keep their author lane
+
+A merge-only task runs no lane, so it is never re-picked (12 Nov 2026: a re-pick moved six
+merge-only re-runs off a capped Claude onto Codex, the reviewer then treated Codex as the
+author and excluded it, and every one parked again as reviewer-unavailable for a morning):
+
+- **Author lane** (`author_lane`): the lane of the task's last PASS in the state, else its last
+  run on a configured lane, else its `Lane-Picked:` header, else `Lane:`. `route()` sets it as
+  the task's lane and drops the picked header from the fields, so there is no `PICK` line and
+  no header rewrite; `merge_only_author_why` is its Pick-Why. The reviewer's independence rule
+  excludes that lane, and the auto-requeue above checks the reviewer against it too.
+- **Not gated by any lane:** `why_not_runnable` skips the lane limit, the pick-none check and the
+  daily spend cap for it (the maintenance cap still applies). Only the reviewer's own
+  availability and cap apply, through `pick_reviewer`.
+- **Its own slot:** with parallel lanes it dispatches through `runner.<merge_only_slot>[.<n>].lock`,
+  at most `merge_only_slots` at once, not its author lane's `lane_slots`; the lock carries
+  `merge_only: true`, so `lane_busy` doesn't count it as that lane busy.
+
+Tests: `python -m unittest orchestra.test_runner -k merge_only -k normal_task_is_still`.
+
 ## Campaigns and the dispatch controls (`campaign.py`)
 
 A campaign is a time-boxed change to the limits — e.g. the Max-plan sprint,

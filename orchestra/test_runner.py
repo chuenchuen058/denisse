@@ -737,6 +737,82 @@ class RunnerTest(unittest.TestCase):
         done = {s: v["history"][-1] for s, v in self.state()["tasks"].items() if v.get("history")}
         self.assertTrue(any(h.get("fallback_from") == "copilot" and h["lane"] == "claude" for h in done.values()))
 
+    # --- merge-only keeps its author lane (12 Nov 2026: six PASSes stuck behind Claude's cap)
+
+    def merge_only_queued(self, slug, lane="auto", picked="claude"):
+        headers = f"Lane-Picked: {picked}\nPick-Why: the original run\n" if picked else ""
+        return self.add(slug, lane=lane, kind="bugfix", headers=headers,
+                        extra=f"\n\n{self.R.C['merge_only_mark']} the work is on `review/{slug}`.")
+
+    def over_claude_cap(self):
+        st = self.R.load_state()
+        self.R.today_usage(st)["cost_usd"] = 99.0  # well over the $5 cap
+        self.R.save_state(st)
+        return st
+
+    def test_merge_only_by_capped_claude_runs_and_is_reviewed_by_codex(self):
+        self.lanes_with("claude", "codex")
+        self.merge_only_queued("mo")
+        st = self.over_claude_cap()
+        self.assertIsNone(self.why("mo"), "a merge-only starts no lane: no lane's spend cap gates it")
+        t = self.R.route(self.R.load_queue(), st)[0]
+        self.assertEqual(t.lane, "claude", "keeps the lane of the run that made its branch")
+        self.assertNotIn("lane-picked", t.fields)
+        self.assertEqual(self.R.pick_reviewer(t, st)["lane"], "codex", "the author is excluded, not the re-pick")
+
+    def test_merge_only_never_writes_a_pick_line_or_header(self):
+        self.lanes_with("claude", "codex")
+        p = self.merge_only_queued("mo2")
+        before = p.read_text()
+        self.over_claude_cap()
+        res = self.R.tick()  # no review/mo2 branch: it parks, but only after dispatch (record_pick)
+        self.assertEqual(res, "MERGE-ONLY-PARKED")
+        log = self.R.LOG_FILE.read_text(encoding="utf-8")
+        self.assertIn("MERGE-ONLY mo2", log)
+        self.assertNotIn("PICK mo2", log)
+        parked = (self.R.PARKED / "mo2.md").read_text()
+        self.assertEqual(parked.count("Lane-Picked:"), before.count("Lane-Picked:"))
+        self.assertIn("Lane-Picked: claude", parked)
+
+    def test_merge_only_author_is_the_lane_that_passed_in_the_state(self):
+        # A merge-only re-picked before this fix rewrote Lane-Picked: the state's PASS is the truth.
+        self.lanes_with("claude", "codex")
+        self.merge_only_queued("mo3", picked="codex")
+        st = self.R.load_state()
+        st["tasks"]["mo3"] = {"attempts": 0, "history": [
+            {"result": "PASS", "lane": "claude"}, {"result": "MERGE_ONLY_PARKED", "lane": "runner"}]}
+        t = self.R.route(self.R.load_queue(), st)[0]
+        self.assertEqual(t.lane, "claude")
+
+    def test_merge_only_with_no_recorded_author_keeps_its_header_lane(self):
+        self.lanes_with("claude", "codex")
+        self.merge_only_queued("mo4", lane="codex", picked=None)
+        t = self.R.route(self.R.load_queue(), self.over_claude_cap())[0]
+        self.assertEqual(t.lane, "codex")
+        self.assertNotIn("lane-picked", t.fields)
+
+    def test_merge_only_takes_its_own_slot_and_does_not_busy_its_author(self):
+        self.lanes_with("claude", "codex")
+        self.merge_only_queued("mo5")
+        self.add("plain", lane="claude", extra=" plain")
+        tasks = {t.slug: t for t in self.R.load_queue()}
+        self.assertEqual(self.R.slot_lane(tasks["mo5"]), self.R.C["merge_only_slot"])
+        self.assertEqual(self.R.slot_lane(tasks["plain"]), "claude")
+        self.R.REVIEW.mkdir(parents=True, exist_ok=True)
+        self.R.write_lock(self.R.REVIEW / f"runner.{self.R.C['merge_only_slot']}.lock",
+                          {"pid": 1, "task": "mo5", "lane": "claude", "merge_only": True})
+        self.assertEqual(self.R.lane_busy().get("claude", 0), 0)
+
+    def test_a_normal_task_is_still_picked_and_capped(self):
+        self.lanes_with("claude", "codex")
+        self.add("na", lane="auto", kind="bugfix", extra=" auto")
+        self.add("nc", lane="claude", extra=" capped")
+        st = self.over_claude_cap()
+        t = next(t for t in self.R.route(self.R.load_queue(), st) if t.slug == "na")
+        self.assertIn("lane-picked", t.fields, "a normal Lane: auto task is still picked")
+        self.assertNotEqual(t.lane, "claude", "and not onto the capped lane")
+        self.assertIn("spend cap", self.why("nc"))
+
     def test_unpriced_lanes_are_never_estimated_or_capped(self):
         st = self.R.load_state()
         self.R.today_usage(st)["cost_usd"] = 99.0  # well over the $5 cap
