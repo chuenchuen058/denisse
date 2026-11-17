@@ -241,9 +241,11 @@ C = load_config()
 #                          when the package isn't installed.
 #   {npm-shim:<name>}      the full path of npm's <name>.cmd shim if found, else <name>.
 #   {repo-path:<relative>} a REPO-relative path resolved to its absolute target.
-#   {prompt-file}          (anywhere inside an argument) the path of <worktree>/.review/prompt.md,
-#                          which then holds the prompt, for a CLI that takes its prompt as an
-#                          argument: a long prompt must never go on a cmd.exe command line.
+#   {prompt-file}          (anywhere inside an argument) the path of a file in <worktree>/.review/
+#                          (config prompt_files: one name for a lane, one for a reviewer), which
+#                          then holds the prompt, for a CLI that takes its prompt as an argument
+#                          or reads no stdin: a long prompt must never go on a cmd.exe command line.
+#                          Lanes and reviewers (reviewer_lanes) alike, through prompt_into_argv.
 # claude: stream-json, so the lane log fills as the session works and orchestra/watch.py can
 # show it live (Chuen, 2 Nov); the last line is still the result JSON lane_result reads.
 # codex: Codex 0.162 dropped --full-auto. MCP servers off: with approval "never" Chuen's Desktop
@@ -261,6 +263,18 @@ C = load_config()
 # --allow-all-urls. Built-in GitHub MCP servers off, git push / gh denied, no ask_user: it can't
 # post as Chuen and can't stall on a question. Copilot reports no cost (unpriced_lanes).
 PROMPT_FILE_PLACEHOLDER = "{prompt-file}"
+
+
+def prompt_into_argv(argv: list, prompt: str, folder: Path, role: str) -> tuple[list, Path | None]:
+    """(argv, file): when an argument holds {prompt-file}, `prompt` is written to
+    folder/<config prompt_files[role]> and that path substituted; else argv unchanged and file
+    None (the prompt then goes on stdin). One code path for lanes and reviewers."""
+    if not any(PROMPT_FILE_PLACEHOLDER in str(a) for a in argv):
+        return list(argv), None
+    folder.mkdir(parents=True, exist_ok=True)
+    prompt_file = folder / str(C["prompt_files"][role])
+    prompt_file.write_text(prompt, encoding="utf-8")
+    return [str(a).replace(PROMPT_FILE_PLACEHOLDER, str(prompt_file)) for a in argv], prompt_file
 
 
 def npm_dirs(patterns: list | None = None) -> list[Path]:
@@ -1769,6 +1783,9 @@ def run_reviewer(task: Task, wt: Path, branch: str, report: Path, why: str, stat
     if Path(argv[0]).stem.lower() == "claude":
         (wt / ".review").mkdir(exist_ok=True)
         argv += ["--settings", str(hook_settings(wt))]
+    # A reviewer CLI that reads no stdin (agy) gets the prompt as a file in the worktree's .review/
+    # (git-ignored, so never part of the diff it reviews); the others keep stdin.
+    argv, prompt_file = prompt_into_argv(argv, prompt, wt / ".review", "reviewer")
     env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE" and not k.startswith("CLAUDE_CODE_")
            and k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")}
     env.update(ORCHESTRA_WORKTREE=str(wt), ORCHESTRA_MAIN=str(REPO), ORCHESTRA_REVIEW="1")
@@ -1776,13 +1793,15 @@ def run_reviewer(task: Task, wt: Path, branch: str, report: Path, why: str, stat
     timeout = int(C["review_timeout_s"])
     start = time.time()
     with log_path.open("w", encoding="utf-8") as out:
-        proc, _job = spawn_lane([exe, *argv[1:]], cwd=wt, env=env, stdin=subprocess.PIPE, stdout=out,
+        proc, _job = spawn_lane([exe, *argv[1:]], cwd=wt, env=env,
+                                stdin=subprocess.DEVNULL if prompt_file else subprocess.PIPE, stdout=out,
                                 stderr=subprocess.STDOUT, text=True, encoding="utf-8")
-        try:
-            proc.stdin.write(prompt)
-            proc.stdin.close()
-        except OSError:
-            pass
+        if prompt_file is None:
+            try:
+                proc.stdin.write(prompt)
+                proc.stdin.close()
+            except OSError:
+                pass
         try:
             proc.wait(timeout=timeout)
             timed_out = False
@@ -2077,10 +2096,7 @@ def run_lane(task: Task, wt: Path, report: Path, timeout: int, prov: dict | None
     # in the prompt; a busy GPU means the notes-only path, and the log line says which. Advisory:
     # a tutor that can't answer is a log line, and the prompt is exactly the one above.
     prompt += consult.before_lane(task, wt, REPO, log, rule=C)
-    if any(PROMPT_FILE_PLACEHOLDER in str(a) for a in argv):
-        prompt_file = local / "prompt.md"
-        prompt_file.write_text(prompt, encoding="utf-8")
-        argv = [str(a).replace(PROMPT_FILE_PLACEHOLDER, str(prompt_file)) for a in argv]
+    argv, _prompt_file = prompt_into_argv(argv, prompt, local, "lane")
     p = run_provenance(wt, prompt)
     if prov is not None:
         prov.update(p)

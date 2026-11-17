@@ -356,12 +356,14 @@ class ConfigTest(unittest.TestCase):
         for free in ("claude", "codex"):
             other = "codex" if free == "claude" else "claude"
             self.assertEqual(self.R.pick_reviewer(self.task("copilot"), self._limited(other))["lane"], free)
-        # limits are respected for copilot too: both others limited -> nobody, not the author
-        # (with the same-lane model fallback off; test_model_fallback_* cover it on)
+        # limits are respected for copilot too: every other reviewer limited -> nobody, not the
+        # author (gemini is a reviewer too since 12 Nov 2026, so it is limited here as well;
+        # with the same-lane model fallback off; test_model_fallback_* cover it on)
         self.R.C["reviewer_model_fallback_on"] = False
-        rp = self.R.pick_reviewer(self.task("claude"), self._limited("codex", "copilot"))
+        rp = self.R.pick_reviewer(self.task("claude"), self._limited("codex", "copilot", "gemini"))
         self.assertIsNone(rp["lane"])
-        self.assertIsNone(self.R.pick_reviewer(self.task("copilot"), self._limited("claude", "codex"))["lane"])
+        self.assertIsNone(self.R.pick_reviewer(self.task("copilot"),
+                                               self._limited("claude", "codex", "gemini"))["lane"])
         # nothing limited: the stronger reviewers still go first (lane_strengths, not this test's wish)
         strengths = self.R.C["lane_strengths"]
         work = self.R.C["reviewer_work"]
@@ -375,7 +377,7 @@ class ConfigTest(unittest.TestCase):
         self.use({"reviewer_model_fallback_on": True, "reviewer_model_fallback": {"claude": models},
                   "reviewer_model_argv": {"claude": ["--model", "{model}"]},
                   "reviewer_model_author_default": {}, "lane_pacing": {}})
-        return self._limited("codex", "copilot")
+        return self._limited("codex", "copilot", "gemini")  # every other reviewer limited
 
     def test_model_fallback_picks_another_model_in_the_author_lane(self):
         others_limited = self._model_fallback(["model-a", "model-b"])
@@ -391,9 +393,10 @@ class ConfigTest(unittest.TestCase):
         self.assertNotIn("model", rp)
         # the author's lane itself limited: nobody
         self.assertIsNone(self.R.pick_reviewer(self.task("claude"),
-                                               self._limited("codex", "copilot", "claude"))["lane"])
+                                               self._limited("codex", "copilot", "claude", "gemini"))["lane"])
         # a lane with no fallback list (copilot): unavailable as before
-        self.assertIsNone(self.R.pick_reviewer(self.task("copilot"), self._limited("claude", "codex"))["lane"])
+        self.assertIsNone(self.R.pick_reviewer(self.task("copilot"),
+                                               self._limited("claude", "codex", "gemini"))["lane"])
 
     def test_model_fallback_never_the_model_the_author_ran_with(self):
         others_limited = self._model_fallback(["model-a", "model-b"])
@@ -484,6 +487,117 @@ class ConfigTest(unittest.TestCase):
         self.use({})
         log = self.lane_log(*self.COPILOT_QUOTA.splitlines())
         self.assertIn("monthly quota", self.R.detect_limit("copilot", log) or "", "out of quota = come back later")
+
+    # --- gemini (agy) as a reviewer (12 Nov 2026). agy reads no stdin, so its reviewer argv uses
+    # {prompt-file} like its lane argv does.
+
+    # agy -p print mode answers in plain text. Shaped like the 12 Nov manual test with
+    # orchestra/agy/reviewer_settings.json (it read git history and answered VERDICT: ok); not a
+    # byte-for-byte recording of a review run.
+    AGY_OK = ("I read the instructions file and ran `git diff` and `git log` on the branch.\n\n"
+              "VERDICT: ok\n- orchestra/config.json adds a reviewer entry only\n- no check is weakened\n")
+    AGY_BLOCK = "VERDICT: block\n- orchestra/runner.py:1 own objection\n"
+    # Print mode refuses whatever would need approval and can end with no answer at all.
+    AGY_DENIED = ("I'll write my notes to a file first.\n"
+                  "Error: no output produced: tool call write_file was auto-denied (print mode cannot ask)\n")
+
+    def _gemini_reviewer(self, answer: str, code: int = 0) -> Path:
+        """The shipped config with the gemini reviewer's `agy` swapped for a fake that keeps its
+        flags: it records its args, its stdin and the contents of the file its -p names."""
+        shipped = json.loads((HERE / "config.json").read_text(encoding="utf-8"))["reviewer_lanes"]
+        tmpl = next(a for a in shipped["gemini"] if self.R.PROMPT_FILE_PLACEHOLDER in a)
+        head, tail = tmpl.split(self.R.PROMPT_FILE_PLACEHOLDER)
+        seen, fake = self.tmp / "agy_seen.json", self.tmp / "fake_agy_reviewer.py"
+        fake.write_text(textwrap.dedent(f"""\
+            import json, os, sys
+            arg = next(a for a in sys.argv[1:] if a.startswith({head!r}) and a.endswith({tail!r}))
+            path = arg[len({head!r}):len(arg) - len({tail!r})]
+            body = open(path, encoding="utf-8").read() if os.path.isfile(path) else None
+            stdin = sys.stdin.read() if sys.stdin else ""
+            open({str(seen)!r}, "w", encoding="utf-8").write(json.dumps(
+                {{"args": sys.argv[1:], "path": path, "file": body, "stdin": stdin}}))
+            sys.stdout.write({answer!r})
+            sys.exit({code})
+            """), encoding="utf-8")
+        self.use({"reviewer_lanes": {**shipped, "gemini": [sys.executable, str(fake), *shipped["gemini"][1:]]},
+                  "lane_pacing": {}})
+        return seen
+
+    def test_shipped_gemini_reviewer_uses_the_read_only_settings_and_a_prompt_file(self):
+        self.use({})
+        argv = self.R.C["reviewer_lanes"]["gemini"]
+        self.assertEqual(argv, self.defaults["reviewer_lanes"]["gemini"])
+        self.assertTrue(any(self.R.PROMPT_FILE_PLACEHOLDER in a for a in argv), "agy reads no stdin")
+        settings = argv[argv.index("--settings") + 1]
+        self.assertIn("reviewer_settings.json", settings)
+        self.assertNotEqual(settings, self.R.C["lane_argv"]["gemini"][self.R.C["lane_argv"]["gemini"].index("--settings") + 1],
+                            "the reviewer never runs with the coding lane's settings")
+        m = self.R._PLACEHOLDER.fullmatch(settings)
+        self.assertEqual(m.group(1), "repo-path")
+        path = HERE.parent / m.group(2)  # this checkout (runner.REPO is the test's temp repo)
+        self.assertTrue(path.is_file(), f"{path} exists")
+        rules = json.loads(path.read_text(encoding="utf-8"))
+        self.assertIn("write_file(*)", rules["permissions"]["deny"])
+
+    def test_prompt_into_argv_writes_a_file_only_when_asked(self):
+        self.use({})
+        folder = self.tmp / "wt" / ".review"
+        argv, f = self.R.prompt_into_argv(["x", "-"], "PROMPT", folder, "reviewer")
+        self.assertEqual((argv, f), (["x", "-"], None))
+        self.assertFalse(folder.exists(), "no file without the placeholder")
+        argv, f = self.R.prompt_into_argv(["x", "-p", "read {prompt-file} now"], "PROMPT", folder, "reviewer")
+        self.assertEqual(f, folder / self.R.C["prompt_files"]["reviewer"])
+        self.assertEqual(argv, ["x", "-p", f"read {f} now"])
+        self.assertEqual(f.read_text(encoding="utf-8"), "PROMPT")
+        _argv, lane_f = self.R.prompt_into_argv(["{prompt-file}"], "LANE", folder, "lane")
+        self.assertNotEqual(lane_f, f, "a reviewer never overwrites its lane's prompt")
+        self.assertEqual(f.read_text(encoding="utf-8"), "PROMPT")
+
+    def test_gemini_reviews_when_codex_and_copilot_are_limited(self):
+        self._gemini_reviewer(self.AGY_OK)
+        rp = self.R.pick_reviewer(self.task("claude"), self._limited("codex", "copilot"))
+        self.assertEqual(rp["lane"], "gemini", rp["why"])
+        self.R.C["reviewer_model_fallback_on"] = False  # (on: the author's lane with another model)
+        self.assertIsNone(self.R.pick_reviewer(self.task("claude"),
+                                               self._limited("codex", "copilot", "gemini"))["lane"])
+        self.assertNotEqual(self.R.pick_reviewer(self.task("gemini"), {})["lane"], "gemini", "never its own author")
+
+    def test_gemini_reviewer_gets_a_real_prompt_file_and_verdicts(self):
+        branch = self._git_repo_with_branch({"orchestra/review.txt": "VERDICT: ok\n"})
+        self.R.REPORTS.mkdir(parents=True, exist_ok=True)
+        report = self.tmp / "r.md"
+        report.write_text("RESULT: PASS\nVERDICT: ok\n", encoding="utf-8")
+        task, state = self.task("claude"), self._limited("codex", "copilot")
+        cases = (  # answer, exit code, verdict, text in reasons
+            (self.AGY_OK, 0, "ok", "no check is weakened"),
+            (self.AGY_BLOCK, 0, "block", "own objection"),
+            (self.AGY_DENIED, 0, "block", "auto-denied"),       # must block, never pass
+            (self.AGY_DENIED, 1, "block", "auto-denied"),
+            ("", 0, "retry", "no output"),                # prints nothing: no review yet (retried)
+        )
+        for answer, code, verdict, said in cases:
+            with self.subTest(answer=answer, code=code):
+                seen = self._gemini_reviewer(answer, code)
+                rv = self.R.run_reviewer(task, self.repo, branch, report, "test", state)
+                self.assertEqual((rv["lane"], rv["verdict"]), ("gemini", verdict), rv["reasons"])
+                self.assertIn(said, rv["reasons"])
+                got = json.loads(seen.read_text(encoding="utf-8"))
+                self.assertIsNotNone(got["file"], f"{got['path']} is a real file")
+                self.assertEqual(Path(got["path"]).parent, self.repo / ".review", "in the worktree's .review/")
+                self.assertIn("+VERDICT: ok", got["file"], "the whole review prompt is in the file")
+                self.assertEqual(got["stdin"], "", "nothing on stdin")
+                self.assertNotIn(self.R.PROMPT_FILE_PLACEHOLDER, " ".join(got["args"]))
+                self.assertLess(max(len(a) for a in got["args"]), 400, "no prompt on the command line")
+
+    def test_agy_answers_parse_fail_closed(self):
+        bounds = ("<!-- test-begin -->", "<!-- test-end -->")
+        P = lambda s: self.R.parse_verdict(s, prompt_bounds=bounds)
+        self.assertEqual(P(self.AGY_OK)[0], "ok")
+        self.assertEqual(P(self.AGY_OK.replace("\n", "\r\n"))[0], "ok")
+        self.assertEqual(P(self.AGY_BLOCK)[0], "block")
+        verdict, reasons = P(self.AGY_DENIED)
+        self.assertIsNone(verdict, "an auto-denied run with no answer is no verdict (run_reviewer blocks)")
+        self.assertIn("auto-denied", reasons)
 
     # --- bad values fall back, with a log line
 
