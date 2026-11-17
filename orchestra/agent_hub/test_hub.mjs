@@ -564,21 +564,41 @@ test("queue_task hands work to Orchestra's queue through new_task.py, with its b
   try {
     assert.ok(hub.TOOLS.some((t) => t.name === "queue_task"));
     assert.throws(() => hub.queueTask({ title: "x" }), /needs a body/);
+    const pathOf = (answer) => answer.split("\n")[0].replace(/^[^:]*: /, "").trim();
+    // An agent's task on an unguarded lane with a gate of its own choosing: a draft for Chuen,
+    // and the answer says so and why (audit 10 Nov 2026, O5).
     const text = hub.queueTask({ title: "Summarise week 5", body: "Read the week 5 notes.", lane: "codex",
       gate: ["echo --fast ok"] });
-    assert.match(text, /Queued for Orchestra: .*queue/);
-    const path = text.split("\n")[0].replace("Queued for Orchestra: ", "").trim();
-    const task = readFileSync(path, "utf8");
+    assert.match(text, /^Written as a draft for Chuen, not queued: .*queue/);
+    assert.match(text, /queue: draft, not auto: from agent hub: lane codex is not guarded/);
+    assert.doesNotMatch(text, /picks it up on its next tick/);
+    const task = readFileSync(pathOf(text), "utf8");
     assert.match(task, /^# Summarise week 5/);
-    assert.match(task, /^Queue: auto$/m);
+    assert.match(task, /^Queue: draft$/m);
     assert.match(task, /^Lane: codex$/m);
     assert.match(task, /^From: agent hub$/m);
     assert.match(task, /Read the week 5 notes\./);
     assert.match(task, /```\r?\necho --fast ok\r?\n```/);
+    // A guarded lane and the default gate (a known shape): queued, auto.
     const dflt = hub.queueTask({ title: "Default gate", body: "Do it.", lane: "claude" });
-    const task2 = readFileSync(dflt.split("\n")[0].replace("Queued for Orchestra: ", "").trim(), "utf8");
+    assert.match(dflt, /^Queued for Orchestra: /);
+    const task2 = readFileSync(pathOf(dflt), "utf8");
+    assert.match(task2, /^Queue: auto$/m);
     assert.match(task2, /run_checks\.py --fast/, "no gate given: the repo's fast checks");
-    assert.match(readFileSync(hub.handoffPath(), "utf8"), /\[hub\] queued for Orchestra: Summarise week 5/);
+    // No lane given: a guarded lane, not the runner's pick.
+    const nolane = hub.queueTask({ title: "No lane", body: "Do it." });
+    const task3 = readFileSync(pathOf(nolane), "utf8");
+    assert.match(task3, /^Lane: claude$/m);
+    assert.match(task3, /^Queue: auto$/m);
+    // A known gate with a shell operator after it: a draft.
+    const del = hub.queueTask({ title: "Sneaky gate", body: "Do it.", lane: "claude",
+      gate: [".venv\\Scripts\\python.exe scripts\\run_checks.py --fast && del /q orchestra\\*.py"] });
+    assert.match(del, /^Written as a draft for Chuen/);
+    assert.match(del, /contains '&'/);
+    assert.match(readFileSync(pathOf(del), "utf8"), /^Queue: draft$/m);
+    const handoff = readFileSync(hub.handoffPath(), "utf8");
+    assert.match(handoff, /\[hub\] written as a draft for Chuen: Summarise week 5/);
+    assert.match(handoff, /\[hub\] queued for Orchestra: Default gate/);
   } finally {
     if (before.repo === undefined) delete process.env.ORCHESTRA_REPO; else process.env.ORCHESTRA_REPO = before.repo;
     if (before.py === undefined) delete process.env.AGENT_HUB_PYTHON; else process.env.AGENT_HUB_PYTHON = before.py;

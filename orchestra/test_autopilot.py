@@ -262,6 +262,15 @@ class PlannerTest(unittest.TestCase):
                          files_of=files_of or (lambda text: set()), log=self.logs.append, classify=self.classify,
                          at=AT)
 
+    def known_gate(self):
+        """A gate of a known shape (config unattended_gate_patterns) that gate_runnable() finds
+        here: the venv python it names exists in the temp repo. GATE (python -c) is not one, so
+        with it every task is a draft."""
+        exe = self.repo / ".venv" / "Scripts" / "python.exe"
+        exe.parent.mkdir(parents=True, exist_ok=True)
+        exe.write_text("", encoding="utf-8")
+        return [".venv\\Scripts\\python.exe scripts\\run_checks.py --fast"]
+
     def header(self, path, key):
         for line in Path(path).read_text(encoding="utf-8").splitlines():
             if line.startswith(key + ":"):
@@ -270,20 +279,21 @@ class PlannerTest(unittest.TestCase):
 
     def test_inbox_lines_become_tasks_through_new_task(self):
         self.inbox("Make the tray show the model name", "[x] already done thing")
-        made = self.refill()
+        gate = self.known_gate()
+        made = self.refill(autopilot_gate=gate)
         self.assertEqual(len(made), 1)
         text = made[0].read_text(encoding="utf-8")
         self.assertTrue(text.startswith("# Make the tray show the model name"))
         self.assertEqual(self.header(made[0], "Queue"), "auto")
         self.assertEqual(self.header(made[0], "From"), "autopilot")
-        self.assertIn(GATE[0], text)
+        self.assertIn(gate[0], text)
         self.assertNotIn("not this one", "".join(c.text for c in self.calls))
         self.assertTrue(any(l.startswith("AUTOPILOT created") for l in self.logs))
 
     def test_not_repo_only_or_no_runnable_gate_stays_a_draft(self):
         self.inbox("Email the module lead about week 5", "Fix the tray")
         self.answers["Email the module lead about week 5"] = {"repo_only": False}
-        made = self.refill()
+        made = self.refill(autopilot_gate=self.known_gate())
         self.assertEqual([self.header(p, "Queue") for p in made], ["draft", "auto"])
         self.assertIn("draft: not shown to be repo-only", " ".join(self.logs))
         for p in made:
@@ -479,7 +489,8 @@ class PlannerTest(unittest.TestCase):
         (self.repo / "orchestra").mkdir(parents=True)
         (self.repo / "orchestra" / "test_power.py").write_text("", encoding="utf-8")
         self.inbox(self.PLAIN)
-        self.assertEqual([self.header(p, "Queue") for p in self.refill()], ["auto"])
+        gate = self.known_gate()  # auto needs a guarded lane and a gate of a known shape (O5)
+        self.assertEqual([self.header(p, "Queue") for p in self.refill(autopilot_gate=gate)], ["auto"])
         # From hot.md too, when it names a file that is in the repo...
         self.review.joinpath("autopilot.json").unlink()
         for p in (self.review / "queue").glob("*.md"):
@@ -487,7 +498,7 @@ class PlannerTest(unittest.TestCase):
         self.waiting(self.PLAIN)
         files_of = lambda text: {"orchestra/test_power.py"} if "test_power.py" in text else set()
         self.assertEqual([self.header(p, "Queue") for p in self.refill(autopilot_sources=["waiting"], autopilot_waiting_source=True,
-                                                                       files_of=files_of)], ["auto"])
+                                                                       autopilot_gate=gate, files_of=files_of)], ["auto"])
 
     def test_a_waiting_item_naming_no_repo_file_is_a_draft(self):
         self.waiting("Decide the tray icon colour")
@@ -588,6 +599,73 @@ class PlannerTest(unittest.TestCase):
         self.inbox("Fix the tray")
         self.assertEqual(self.refill(autopilot=False), [])
         self.assertEqual(self.logs, [])
+
+    # --- unattended only on a guarded lane with a known gate (audit 10 Nov 2026, O5)
+
+    def test_an_auto_task_for_an_unguarded_lane_goes_to_a_guarded_one(self):
+        end = (AT - dt.timedelta(hours=1)).isoformat()
+        self.state["tasks"] = {"a": {"history": [{"lane": "claude", "end": end}] * 3}}  # codex has fewest
+        self.inbox("Fix the tray")
+        made = self.refill(autopilot_gate=self.known_gate())
+        self.assertEqual(self.header(made[0], "Lane"), "claude")
+        self.assertEqual(self.header(made[0], "Queue"), "auto")
+        line = next(l for l in self.logs if l.startswith("AUTOPILOT created"))
+        self.assertIn("guarded lane claude, not codex", line)
+
+    def test_no_guarded_lane_with_allowance_writes_a_draft(self):
+        self.available["claude"] = "limited until 15:00"
+        self.inbox("Fix the tray")
+        made = self.refill(autopilot_gate=self.known_gate())
+        self.assertEqual(self.header(made[0], "Queue"), "draft")
+        self.assertNotEqual(self.header(made[0], "Lane"), "claude")
+        line = next(l for l in self.logs if l.startswith("AUTOPILOT created"))
+        self.assertIn("draft: from autopilot: lane", line)
+        self.assertIn("is not guarded", line)
+
+    def test_a_gate_not_of_a_known_shape_writes_a_draft(self):
+        self.inbox("Fix the tray")
+        made = self.refill()  # GATE: python -c "pass", runnable but not a known shape
+        self.assertEqual(self.header(made[0], "Queue"), "draft")
+        line = next(l for l in self.logs if l.startswith("AUTOPILOT created"))
+        self.assertIn("not of a known shape", line)
+
+    def test_new_task_refuses_even_if_the_planner_did_not(self):
+        # create() is the one place every writer goes through: a planner that skipped the
+        # check (here: guarded_choice patched to wave it through) still gets a draft.
+        self.inbox("Fix the tray")
+        with mock.patch.object(AP, "guarded_choice", lambda lane, gate, available, cfg: (lane, None)):
+            made = self.refill(autopilot_lanes=["codex"], autopilot_gate=self.known_gate())
+        self.assertEqual(self.header(made[0], "Lane"), "codex")
+        self.assertEqual(self.header(made[0], "Queue"), "draft")
+
+    def test_gpu_busy_is_the_fallback_rule_and_a_draft(self):
+        self.inbox("Fix the tray")
+
+        def no_model(c, cfg):
+            raise AssertionError("the model must not be called while the GPU is busy")
+        busy = mock.patch.object(AP, "gpu_busy", lambda repo, cfg: "the GPU is 80% busy (limit 60%)")
+        with busy, mock.patch.object(AP, "model_classify", no_model):
+            made = AP.refill(cfg={**self.cfg, "autopilot_classifier": "model", "autopilot_gate": self.known_gate()},
+                             review=self.review, repo=self.repo, vault=self.vault, state=self.state,
+                             available=self.available, power={"ac": True}, busy={}, files_of=lambda text: set(),
+                             log=self.logs.append, classify=None, at=AT)
+        self.assertEqual(self.header(made[0], "Queue"), "draft")
+        self.assertTrue(any("GPU busy" in l and "80% busy" in l for l in self.logs), self.logs)
+
+    def test_gpu_busy_is_the_consults_own_test(self):
+        sys.path.insert(0, str(HERE))
+        import consult
+        seen = {}
+
+        def fake(repo, rule, cfg):
+            seen.update(repo=repo, pct=rule.get("consult_gpu_busy_pct"))
+            return "the GPU lease is held by local team scout"
+        with mock.patch.object(consult, "gpu_busy", fake):
+            self.assertEqual(AP.gpu_busy(self.repo, {**self.cfg, "consult_gpu_busy_pct": 42}),
+                             "the GPU lease is held by local team scout")
+        self.assertEqual(seen, {"repo": self.repo, "pct": 42})
+        with mock.patch.object(consult, "gpu_busy", lambda *a: None):
+            self.assertIsNone(AP.gpu_busy(self.repo, self.cfg))
 
     def test_model_classify_reads_the_local_models_json(self):
         reply = {"message": {"content": json.dumps({"actionable": True, "repo_only": True, "bugfix": True,
@@ -721,8 +799,16 @@ class RunnerPartsTest(unittest.TestCase):
         vault = self.tmp / "vault"
         (vault / "Atlas").mkdir(parents=True)
         (vault / "Atlas" / "Task Ideas.md").write_text("## Inbox\n- Add a tray tooltip\n", encoding="utf-8")
+        # The fake lane counts as guarded here and the test gate (python -c) as a known shape, for
+        # the runner's check and for new_task.create()'s (which reads the config files otherwise).
         self.R.C.update(vault_dir=str(vault), autopilot_lanes=["fake"], autopilot_sources=["inbox"],
-                        autopilot_gate=GATE)
+                        autopilot_gate=GATE, guarded_lanes=["fake"], unattended_gate_patterns=[re.escape(GATE[0])])
+        from orchestra import new_task
+        rules = mock.patch.object(new_task, "unattended_rules",
+                                  lambda: {k: self.R.C.get(k) for k in [*new_task.unattended.KEYS,
+                                                                        *self.R.C["unattended_source_keys"]]})
+        rules.start()
+        self.addCleanup(rules.stop)
         seen = []
 
         def classify(c, cfg):
