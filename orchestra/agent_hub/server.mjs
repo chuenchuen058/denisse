@@ -617,7 +617,7 @@ export const TOOLS = [
       required: ["tasks"] } },
   { name: "ask_all", description: "Ask Codex, Gemini and Copilot the same question at once, read-only, for second opinions. Runs as one job." + JOB_NOTE,
     inputSchema: { type: "object", properties: { prompt: taskProps.prompt, cwd: taskProps.cwd, ...jobProps }, required: ["prompt"] } },
-  { name: "queue_task", description: "Hand a piece of work to Orchestra, Chuen's task runner, instead of running it here: it is written to the queue (orchestra/new_task.py), run by a lane in its own git worktree, consulted with the study tutor first, checked by its gate and merged only on a pass, and it shows in runner.log, STATE NOW, the hub and the 'Orchestra live' window. Use it for real work on a repo (code changes, fixes, write-ups) that can wait for the runner; use ask_* for a question you need answered in this chat. The body must stand alone: the lane cannot see this chat.",
+  { name: "queue_task", description: "Hand a piece of work to Orchestra, Chuen's task runner, instead of running it here: it is written to the queue (orchestra/new_task.py), run by a lane in its own git worktree, consulted with the study tutor first, checked by its gate and merged only on a pass, and it shows in runner.log, STATE NOW, the hub and the 'Orchestra live' window. Use it for real work on a repo (code changes, fixes, write-ups) that can wait for the runner; use ask_* for a question you need answered in this chat. The body must stand alone: the lane cannot see this chat. It runs unattended only on a guarded lane (orchestra/config.json guarded_lanes) with gate commands of a known shape (unattended_gate_patterns: the repo's test runners, no shell operators); anything else is written as a draft for Chuen, and the answer says why.",
     inputSchema: { type: "object", properties: {
       title: { type: "string", description: "Short title: what will be true when it is done." },
       body: { type: "string", description: "The facts the session needs: which files, what is wrong, what you want. Real paths, relative to the repo root." },
@@ -686,6 +686,15 @@ export function queueTask(a = {}) {
     }
     const lines = out.trim().split(/\r?\n/);
     const path = lines.pop();
+    // new_task.create() writes a draft, and says why, when the task may not run unattended
+    // (a lane that isn't guarded, a gate not of a known shape: orchestra/unattended.py).
+    let queue = "";
+    try { queue = (readFileSync(path, "utf8").match(/^Queue:[ \t]*(\S+)/m) || [])[1] || ""; } catch {}
+    if (queue.toLowerCase() !== "auto") {
+      remember("hub", [`written as a draft for Chuen: ${title} (${path})`]);
+      return [`Written as a draft for Chuen, not queued: ${path}`, ...lines,
+        "It does not run until Chuen sets Queue: auto; the line above says why it is a draft."].join("\n");
+    }
     remember("hub", [`queued for Orchestra: ${title} (${path})`]);
     return [`Queued for Orchestra: ${path}`, ...lines,
       "The runner picks it up on its next tick: follow it in runner.log, STATE NOW or the 'Orchestra live' window."].join("\n");
