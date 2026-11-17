@@ -208,3 +208,8 @@ h3+.reset{border-top:0}
 .drawer .pre{white-space:pre-wrap;color:var(--sub);font-size:12.5px}
 .rg circle{transition:stroke-dasharray var(--ix-ring) ease}
 @media (prefers-reduced-motion:reduce){.w:hover{transform:none}}
+/* Run in Claude (atrium/run_claude.py): an open hot.md bullet runs on click; a task's drawer has the button */
+.tree li[data-run]>.nd{cursor:pointer}
+.tree li[data-run]:hover>.nd{box-shadow:0 0 0 1px var(--edge,var(--line))}
+.drawer .run{float:right;margin-right:8px;background:var(--accent,var(--text));color:var(--card);border:0;border-radius:999px;padding:6px 14px;cursor:pointer;font:inherit;font-size:12.5px;font-weight:600}
+.drawer .run:disabled{opacity:.6;cursor:default}

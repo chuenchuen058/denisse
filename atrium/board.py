@@ -19,7 +19,7 @@ import subprocess
 import time
 import urllib.request
 
-from . import conf, context, interact, snapshot, usage_ledger as tokens
+from . import conf, context, interact, run_claude, snapshot, usage_ledger as tokens
 
 _cache: dict[str, tuple[float, object]] = {}
 
@@ -479,9 +479,12 @@ def _tree(x: dict) -> str:
                 if not t or t.upper() in skip or snapshot.done_line(t):  # struck = done: not waiting
                     continue
                 m = done_re.match(t)
-                (done if m else opened).append(_cut(m.group("text") if m else t, c["item_chars"]))
-            kids = ([f'<li>{_node(c["open_class"], t)}</li>' for t in opened[:c["max_open"]]]
-                    + [f'<li>{_node(c["done_class"], t)}</li>' for t in done[:c["max_done"]]])
+                (done if m else opened).append(m.group("text") if m else t)
+            # an open bullet carries its whole text, so a click can run it in Claude (atrium/run_claude.py)
+            run = ' data-run="hot" data-group="{g}" data-text="{t}"' if run_claude.cfg() else ""
+            kids = ([f'<li{run.format(g=e(g["title"]), t=e(t))}>{_node(c["open_class"], _cut(t, c["item_chars"]))}</li>'
+                     for t in opened[:c["max_open"]]]
+                    + [f'<li>{_node(c["done_class"], _cut(t, c["item_chars"]))}</li>' for t in done[:c["max_done"]]])
         elif g["source"] == "queue":
             queued = {t["id"] for t in _queued(x)}
             for s in g["statuses"]:
@@ -490,7 +493,7 @@ def _tree(x: dict) -> str:
                 if not rows:
                     continue
                 leaves = "".join(
-                    f'<li data-task="{e(t["id"])}">' + _node(g["urgent_class"] if t["priority"] in g["urgent_priorities"] else s["class"],
+                    f'<li data-task="{e(t["id"])}" data-status="{e(s["label"])}">' + _node(g["urgent_class"] if t["priority"] in g["urgent_priorities"] else s["class"],
                                    _cut(t["task"], c["item_chars"]), labels.get(t["lane"], t["lane"])) + "</li>"
                     for t in rows[:g["max_per_status"]])
                 more = len(rows) - g["max_per_status"]

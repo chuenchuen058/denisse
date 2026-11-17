@@ -311,8 +311,11 @@ def dress(data: dict, gm: dict) -> dict:
 def payload(data: dict, version: int) -> str:
     now = dt.datetime.now()
     midnight = dt.datetime.combine(now.date(), dt.time())
+    # run: Run in Claude's path, words and this server's token. Added here, not to the board, so the
+    # token only ever leaves in this page's own /data and /events (atrium/run_claude.py).
+    from . import run_claude
     return json.dumps(dict(data, version=version, now_h=round(_hours(now, midnight), 4),
-                           day=now.date().isoformat()), ensure_ascii=False)
+                           day=now.date().isoformat(), run=run_claude.page_cfg()), ensure_ascii=False)
 
 
 # -- noticing a change -----------------------------------------------------------
@@ -440,10 +443,13 @@ class Handler(BaseHTTPRequestHandler):
         (atrium/suggest.py) and the Game mode switch (orchestra/gamemode.py). Only from this
         page: a loopback Host, a same-origin Origin when one is sent, a JSON body (which a
         cross-site form cannot send without a preflight this server never answers)."""
-        from . import suggest
+        from . import run_claude, suggest
         path = self.path.split("?", 1)[0]
         gmc = board.gamemode_cfg()
-        if path == suggest._c()["http_path"]:
+        rc = run_claude.cfg()
+        if rc and path == rc["http_path"]:
+            act = run_claude.launch  # also checks the page's per-run token
+        elif path == suggest._c()["http_path"]:
             act = lambda body: suggest.act(body.get("action"), body.get("id"), dt.datetime.now())  # noqa: E731
         elif gmc and path == gmc["http_path"]:
             def act(body):
@@ -463,6 +469,8 @@ class Handler(BaseHTTPRequestHandler):
             n = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(min(n, 4096)) or b"{}")
             out = act(body)
+        except PermissionError:  # Run in Claude without this page's token
+            return self._send(403, b"forbidden", "text/plain; charset=utf-8")
         except (ValueError, TypeError, AttributeError) as e:
             return self._send(400, str(e).encode("utf-8"), "text/plain; charset=utf-8")
         except Exception as e:  # noqa: BLE001 -- a switch that failed half way says why, not a dropped socket

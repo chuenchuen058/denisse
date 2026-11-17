@@ -691,6 +691,31 @@
                 "fund_none": "{name}: no 13F filing fetched yet",
                 "no_moves": "No moves over the threshold.",
                 "small_print": "13F filings come up to 45 days after the quarter they cover: old news by design. Information only."},
+      "_run": "Click a box on the live page and it runs as a prompt in Claude (Chuen, 17 Nov 2026): a hot.md bullet (Waiting on you, From your reels) asks first, then opens Claude Code in a new window on the laptop with prompts.hot; an Orchestra task's drawer has a Run button that does the same with prompts.task. argv: {claude} = the executable (claude on PATH, else the first claude_fallbacks file that exists), {prompt} = the prompt. cwd: relative to the repo, empty = the repo. fields: what each kind may send; required: the one that must not be empty; field_chars / max_chars: limits on each field and on the prompt; id_pattern: what a task id may look like. The POST also needs the page's per-run token (atrium/run_claude.py). on: false hides it.",
+      "run": {
+        "on": true,
+        "http_path": "/run",
+        "claude": "claude",
+        "claude_fallbacks": ["~/.local/bin/claude.exe"],
+        "argv": ["{claude}", "{prompt}"],
+        "cwd": "",
+        "new_console": true,
+        "field_chars": 600,
+        "max_chars": 2000,
+        "id_pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$",
+        "fields": {"hot": ["group", "text"], "task": ["id", "status"]},
+        "required": {"hot": "text", "task": "id"},
+        "prompts": {
+          "hot": "From my Atrium hub, under \"{group}\": {text} -- Do this for me now, or the next step of it if it needs me, following my vault rules and CLAUDE.md; tell me what you did and what is left.",
+          "task": "From my Atrium hub: Orchestra task {id} ({status}). Read its task file and report under .review, tell me where it stands, and move it forward."
+        },
+        "words": {
+          "confirm": "Run this in Claude?\n\n{text}",
+          "button": "Run in Claude",
+          "started": "Opened in Claude",
+          "failed": "Could not start Claude: {why}"
+        }
+      },
       "_interactive": "What makes the page interactive (Chuen, 15 Nov 2026: 'a little interactive'). atrium/interact.py renders the HTML and atrium/live_page/app.js acts on the selectors, keys and words below; nothing is written anywhere, and under prefers-reduced-motion nothing animates.",
       "interactive": {
         "_about": "vars: sent to the page as CSS variables --ix-<name> (how long each movement takes, how far a hovered card lifts, the drawer's width, how long a tooltip waits). expand: which cards open in place when clicked (a CSS selector) and what the opened lane card lists. drawer: which rows open the side drawer (any element carrying a task id), the read-only path atrium/live.py serves it on, where a task's files are under .review ({id} = the task id; first match wins, newest first), which report fields are shown and in what order not_task = name endings in those folders that are a task's report or review, never a task; (hide = read as a field so its lines are not glued to the one above, but not shown; skip_values = a field that only says this is left out). filter: the segmented control over 'What to work on' (groups = tree group keys; [] = all) and the quick filter (rows = what it hides when the text is not in them). count: numbers inside these elements run to their new value. tips: a tooltip for each element matching selector. keys: one key each (KeyboardEvent.key).",

@@ -228,12 +228,30 @@ function show(id) {
   x.type = "button"; x.className = "x"; x.dataset.close = ""; x.textContent = w.close;
   body.className = "body none"; body.textContent = w.loading;
   d.replaceChildren(x, body);
+  const leaf = document.querySelector(`li[data-task="${CSS.escape(id)}"]`);
+  if (D.run && leaf) {  // run this task as a prompt (atrium/run_claude.py)
+    const r = document.createElement("button");
+    r.type = "button"; r.className = "run"; r.textContent = D.run.words.button;
+    r.dataset.runTask = id; r.dataset.status = leaf.dataset.status || "";
+    d.insertBefore(r, body);
+  }
   d.classList.add("on"); $("scrim").classList.add("on");
   d.setAttribute("aria-hidden", "false");
   x.focus();
   fetch(D.board.ix.path.replace(/^\//, "") + "?id=" + encodeURIComponent(id)).then(r => r.json())
     .then(j => { if (shown === id) { body.className = "body"; body.innerHTML = j.html; } })
     .catch(() => { if (shown === id) body.textContent = w.failed; });
+}
+// Run as a prompt: the server opens the coding agent in a new window on the laptop (atrium/run_claude.py).
+function runPrompt(what, btn) {
+  const r = D && D.run;
+  if (!r) return;
+  if (btn) btn.disabled = true;
+  fetch(r.http_path.replace(/^\//, ""), {method: "POST", headers: {"Content-Type": "application/json"},
+                                         body: JSON.stringify(Object.assign({token: r.token}, what))})
+    .then(res => res.ok ? res.json() : res.text().then(t => { throw new Error(t || res.status); }))
+    .then(() => { if (btn) btn.textContent = r.words.started; })
+    .catch(err => { alert(fill(r.words.failed, {why: err.message})); if (btn) btn.disabled = false; });
 }
 function shut() {
   if (shown === null) return;
@@ -303,6 +321,8 @@ document.addEventListener("click", e => {
   if (t.closest("#theme")) return nextTheme();
   if (t.closest("#gamemode")) return gameMode();
   if (t.closest("[data-close]") || t.id === "scrim") return shut();
+  const rb = t.closest("button[data-run-task]");
+  if (rb) return runPrompt({kind: "task", id: rb.dataset.runTask, status: rb.dataset.status}, rb);
   if (t.closest("#drawer")) return;
   const s = t.closest("[data-seg]");
   if (s) {
@@ -311,6 +331,11 @@ document.addEventListener("click", e => {
     return sift(true);
   }
   if (t.closest("button, a, input, summary") || String(getSelection())) return;  // its own job, or text being selected
+  const hot = t.closest("li[data-run]");
+  if (hot && D.run) {  // an open hot.md bullet: ask, then run it as a prompt
+    if (!confirm(fill(D.run.words.confirm, {text: hot.dataset.text}))) return;
+    return runPrompt({kind: hot.dataset.run, group: hot.dataset.group, text: hot.dataset.text}, null);
+  }
   const row = t.closest(ix.rows);
   if (row) return show(row.dataset.task);
   const card = t.closest(ix.expand);
