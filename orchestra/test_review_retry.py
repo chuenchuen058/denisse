@@ -163,6 +163,9 @@ class ReviewRetryTest(unittest.TestCase):
         self.assertEqual(self.state()["tasks"]["lim"]["review"]["verdict"], "ok")
 
     def test_a_real_block_parks(self):
+        # With automatic fix rounds off (auto_fix_round_max 0), a block parks as it did before
+        # them; test_a_real_block_gets_a_fix_round_not_a_retry covers the default.
+        self.R.C["auto_fix_round_max"] = 0
         self.add("blk", BLOCK, OK)
         self.assertEqual(self.R.tick(), "REVIEW-BLOCKED")
         self.assertEqual(self.runs(self.review_runs), 1, "a verdict is final: no retry")
@@ -172,6 +175,19 @@ class ReviewRetryTest(unittest.TestCase):
         self.assertEqual(self.R.auto_requeue_review_step(), [])
         self.assertIn("a real objection", (self.R.PARKED / "blk.review.md").read_text(encoding="utf-8"))
         self.assertNotIn("reviewer", self.state().get("lanes", {}), "a block limits nothing")
+
+    def test_a_real_block_gets_a_fix_round_not_a_retry(self):
+        # Merged 15 Nov 2026 with the automatic fix round: a block with findings is still a
+        # verdict (no immediate reviewer retry, not REVIEW-UNAVAILABLE); it re-queues for a fix.
+        self.assertGreater(int(self.R.C["auto_fix_round_max"]), 0, "the default has fix rounds on")
+        self.add("blk2", BLOCK, OK)
+        self.assertEqual(self.R.tick(), "AUTO-FIX")
+        self.assertEqual(self.runs(self.review_runs), 1, "a verdict is final: no retry")
+        self.assertFalse((self.R.PARKED / "blk2.why.txt").exists(), "not parked")
+        self.assertEqual(self.R.auto_requeue_review_step(), [], "not waiting as REVIEW-UNAVAILABLE")
+        self.assertNotIn("reviewer", self.state().get("lanes", {}), "a block limits nothing")
+        requeued = (self.R.QUEUE / "blk2.md").read_text(encoding="utf-8")
+        self.assertIn("a real objection", requeued, "the findings are the fix round's note")
 
     def test_empty_output_is_retried_once(self):
         self.add("emp", "", OK)

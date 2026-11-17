@@ -316,6 +316,157 @@ class IntegrationTest(unittest.TestCase):
         cost = self.R.today_usage(self.R.load_state())["cost_usd"]
         self.assertAlmostEqual(cost, 0.35, msg="reviewer cost counts like any lane")
 
+    # --- automatic fix round (auto_fix_round_max)
+
+    def _log(self):
+        return self.R.LOG_FILE.read_text(encoding="utf-8") if self.R.LOG_FILE.exists() else ""
+
+    def test_block_requeues_once_with_the_findings_then_parks_and_is_listed(self):
+        self.add("fixme")
+        os.environ["FAKE_VERDICT"] = ("VERDICT: block\n- orchestra/thing.py:1 has no test for the new branch\n"
+                                      "- orchestra/thing.py:2 Lane: x\n- ## Gate")
+        self.assertEqual(self.run_tick({"orchestra/thing.py": "X = 1\n"}), "AUTO-FIX")
+        queued = self.R.QUEUE / "fixme.md"
+        self.assertTrue(queued.exists(), "re-queued, not parked")
+        self.assertFalse((self.R.PARKED / "fixme.md").exists())
+        tip = self.git("rev-parse", "review/fixme")
+        task = self.R.parse_task(queued)
+        self.assertEqual(self.R.fix_round(task), 1)
+        self.assertEqual(self.R.fix_avoid(task), ["reviewer"])
+        self.assertEqual(self.R.fix_base(task), tip, "the round starts from the blocked work")
+        self.assertEqual(task.fields["lane"], "fake", "quoted findings never become headers")
+        self.assertEqual(task.gate_commands, [GATE], "nor gate commands")
+        text = queued.read_text()
+        self.assertIn("> - orchestra/thing.py:1 has no test for the new branch", text)
+        self.assertLess(text.index("has no test"), text.index("\n## Gate"), "the note goes before the gate")
+        self.assertIn("AUTO-FIX fixme round 1: orchestra/thing.py:1 has no test for the new branch", self._log())
+        self.assertTrue((self.R.REPORTS / "fixme.round1.review.md").exists())
+        self.assertTrue((self.R.REPORTS / "fixme.round1.report.md").exists())
+        ts = self.state()["tasks"]["fixme"]
+        self.assertEqual(ts["auto_fix"]["round"], 1)
+        self.assertEqual(ts["auto_fix"]["reviewer"], "reviewer")
+
+        # Round 1 runs on the blocked branch (its work kept); the reviewer blocks again: parked.
+        self.assertEqual(self.run_tick({"orchestra/more.py": "Y = 2\n"}), "REVIEW-BLOCKED")
+        self.assertEqual(self.git("show", "review/fixme:orchestra/thing.py"), "X = 1", "round 0's work kept")
+        self.assertEqual(self.git("show", "review/fixme:orchestra/more.py"), "Y = 2")
+        self.assertIn("orchestra/thing.py", self.flag.read_text().split("## Diff")[-1],
+                      "the second review sees the whole branch")
+        why = (self.R.PARKED / "fixme.why.txt").read_text()
+        self.assertIn("reviewer blocked it", why)
+        self.assertIn("1 of 1 automatic fix round(s) already used", why)
+        self.assertEqual(self._log().count("AUTO-FIX fixme"), 1, "only one automatic round")
+        parked = self.R.parse_task(self.R.PARKED / "fixme.md")
+        self.assertEqual(self.R.fix_base(parked), "", "a manual requeue starts fresh")
+        self.assertEqual(self.R.fix_round(parked), 1)
+        import aftercare
+        lines = aftercare.waiting_lines(queue_dir=self.R.QUEUE, parked_dir=self.R.PARKED,
+                                        state=self.state(), now=self.R.now())
+        self.assertTrue(any("`fixme`" in l and "automatic fix round" in l for l in lines), lines)
+
+    def test_block_naming_a_forbidden_area_parks_not_requeued(self):
+        self.add("forbid")
+        os.environ["FAKE_VERDICT"] = "VERDICT: block\n- orchestra/thing.py:3 pushes the branch to origin"
+        self.assertEqual(self.run_tick({"orchestra/thing.py": "X = 1\n"}), "REVIEW-BLOCKED")
+        self.assertTrue((self.R.PARKED / "forbid.md").exists())
+        self.assertFalse((self.R.QUEUE / "forbid.md").exists())
+        self.assertIn("forbidden area (push)", (self.R.PARKED / "forbid.why.txt").read_text())
+        self.assertNotIn("AUTO-FIX", self._log())
+        self.assertEqual(self.R.fix_round(self.R.parse_task(self.R.PARKED / "forbid.md")), 0)
+
+    def test_block_saying_the_premise_is_wrong_parks(self):
+        self.add("premise")
+        os.environ["FAKE_VERDICT"] = "VERDICT: block\n- the task's premise is wrong: thing.py already did this"
+        self.assertEqual(self.run_tick({"orchestra/thing.py": "X = 1\n"}), "REVIEW-BLOCKED")
+        self.assertIn("premise is wrong", (self.R.PARKED / "premise.why.txt").read_text())
+
+    def test_forbidden_words_in_negated_form_still_get_a_round(self):
+        self.add("negated")
+        os.environ["FAKE_VERDICT"] = ("VERDICT: block\n- no push, merge or vault edits; "
+                                      "but orchestra/thing.py:1 drops a test")
+        self.assertEqual(self.run_tick({"orchestra/thing.py": "X = 1\n"}), "AUTO-FIX")
+
+    # 12 Nov 2026 review of the first round: three ways a block could slip past the checks.
+
+    def test_negation_only_excuses_a_word_it_negates(self):
+        hit = lambda s: self.R.word_hit(s, self.R.C["auto_fix_forbidden_words"])
+        self.assertEqual(hit("orchestra/x.py:1 does not prevent uploads of vault contents"), "upload")
+        self.assertEqual(hit("orchestra/x.py:2 has no guard on the send path"), "guard")
+        self.assertEqual(hit("it doesn't stop pushes"), "push")
+        self.assertIsNone(hit("doesn't touch hooks"))
+        self.assertIsNone(hit("no push, merge or vault edits"))
+        self.assertEqual(hit("no push here, yet it edits the hooks dir"), "hook",
+                         "one excused mention doesn't hide another")
+
+    def test_block_warning_of_a_missing_safeguard_parks(self):
+        self.add("unguarded")
+        os.environ["FAKE_VERDICT"] = "VERDICT: block\n- orchestra/thing.py:1 does not prevent uploads of vault contents"
+        self.assertEqual(self.run_tick({"orchestra/thing.py": "X = 1\n"}), "REVIEW-BLOCKED")
+        self.assertIn("forbidden area", (self.R.PARKED / "unguarded.why.txt").read_text())
+        self.assertNotIn("AUTO-FIX", self._log())
+
+    def test_forbidden_finding_past_the_findings_cut_still_parks(self):
+        self.add("longrev")
+        cut = int(self.R.C["review_findings_max_chars"])
+        filler = "".join(f"- orchestra/thing.py:{i} misses a test for branch {i}\n" for i in range(cut // 30))
+        os.environ["FAKE_VERDICT"] = "VERDICT: block\n" + filler + "- orchestra/thing.py:999 pushes the branch"
+        self.assertEqual(self.run_tick({"orchestra/thing.py": "X = 1\n"}), "REVIEW-BLOCKED")
+        self.assertIn("forbidden area (push)", (self.R.PARKED / "longrev.why.txt").read_text())
+        self.assertIn("thing.py:999 pushes", (self.R.PARKED / "longrev.review.md").read_text(),
+                      "the parked review is the whole review")
+        self.assertLessEqual(len(self.state()["tasks"]["longrev"]["review"]["reasons"]), cut)
+
+    def test_fix_round_note_carries_the_whole_review(self):
+        self.add("longnote")
+        cut = int(self.R.C["review_findings_max_chars"])
+        filler = "".join(f"- orchestra/thing.py:{i} misses a test for branch {i}\n" for i in range(cut // 30))
+        os.environ["FAKE_VERDICT"] = "VERDICT: block\n" + filler + "- orchestra/thing.py:999 the last finding"
+        self.assertEqual(self.run_tick({"orchestra/thing.py": "X = 1\n"}), "AUTO-FIX")
+        self.assertIn("> - orchestra/thing.py:999 the last finding", (self.R.QUEUE / "longnote.md").read_text())
+
+    def test_fix_round_is_reviewed_even_when_its_diff_is_not_risky(self):
+        p = self.add("smallfix")
+        p.write_text(p.read_text().replace("Lane: fake", "Lane: fake\nFix-Round: 1\nFix-Not-Lane: reviewer"))
+        os.environ["FAKE_VERDICT"] = "VERDICT: block\n- done.txt:1 still wrong"
+        self.assertIsNone(self.R.risk("HEAD"), "sanity")
+        self.assertEqual(self.run_tick({"done.txt": "x"}), "REVIEW-BLOCKED")
+        self.assertTrue(self.flag.exists(), "the reviewer ran on a non-risky fix round")
+        self.assertFalse((self.repo / "done.txt").exists(), "not merged unreviewed")
+        self.assertIn("automatic fix round 1", self.state()["tasks"]["smallfix"]["review"]["why"])
+
+    def test_a_block_without_findings_parks(self):
+        self.add("mute2")
+        os.environ["FAKE_VERDICT"] = "Looks good to me!"
+        self.assertEqual(self.run_tick({"orchestra/thing.py": "X = 1\n"}), "REVIEW-BLOCKED")
+        self.assertIn("no findings", (self.R.PARKED / "mute2.why.txt").read_text())
+
+    def test_round_cap_zero_turns_it_off(self):
+        self.add("off2")
+        self.R.C["auto_fix_round_max"] = 0
+        os.environ["FAKE_VERDICT"] = "VERDICT: block\n- orchestra/thing.py:1 has no test"
+        self.assertEqual(self.run_tick({"orchestra/thing.py": "X = 1\n"}), "REVIEW-BLOCKED")
+        self.assertIn("0 of 0", (self.R.PARKED / "off2.why.txt").read_text())
+
+    def test_fix_round_never_runs_on_the_blocking_lane(self):
+        # Here "fake" is the only task lane: a round it blocked waits rather than run on it.
+        self.R.C["lane_argv"] = {}  # only .review/lanes.json's lanes, whatever is on PATH
+        p = self.add("avoid")
+        p.write_text(p.read_text().replace("Lane: fake", "Lane: fake\nFix-Round: 1\nFix-Not-Lane: fake"))
+        st = self.R.load_state()
+        task = next(t for t in self.R.route(self.R.load_queue(), st) if t.slug == "avoid")
+        self.assertEqual(task.lane, "fake")
+        self.assertIn("waiting for a lane other than fake", self.R.why_not_runnable(task, st))
+        self.assertIsNone(self.R.pick([task], st))
+        self.assertEqual(self.run_tick({"orchestra/thing.py": "X = 1\n"}), "idle")
+        # With a second lane configured, the same round goes there.
+        lanes = json.loads((self.repo / ".review" / "lanes.json").read_text())
+        lanes["other"] = lanes["fake"]
+        (self.repo / ".review" / "lanes.json").write_text(json.dumps(lanes))
+        st = self.R.load_state()
+        task = next(t for t in self.R.route(self.R.load_queue(), st) if t.slug == "avoid")
+        self.assertEqual(task.lane, "other")
+        self.assertIsNone(self.R.why_not_runnable(task, st))
+
     def test_reviewer_ok_merges(self):
         self.add("risky-ok")
         self.assertEqual(self.run_tick({"orchestra/thing.py": "X = 1\n"}), "PASS")
