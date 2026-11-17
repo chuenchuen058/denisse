@@ -200,6 +200,19 @@ Other occasional commands:
 powershell -ExecutionPolicy Bypass -File orchestra\install_task.ps1
 ```
 
+**Usage allowances (plan around limits and resets).** Tell Orchestra what a lane has left:
+`.venv\Scripts\python.exe orchestra\allowance.py set codex --left 10% --resets 2026-11-11T12:00`
+(or `--resets "Wed 12:00"`, `--window five_hour`); `allowance.py show` prints every lane's
+estimate. Claude's own readings (each run's `rate_limit_event`) and every LIMITED's "try again
+at" time are learned automatically; `allowance.py learn` reads old lane logs. A lane low on
+allowance with its reset far off is **conserved** (only urgent tasks, down to the reserve; its
+tasks fall back as for LIMITED, logged `fallback: codex held: 10% weekly left, reset in 41h`);
+in the last `allowance_spend_down_hours` before a reset it is **spent down** (preferred by the
+autopilot and by `Lane: auto` tasks). Bug fixes on Claude are never held. With no `Model:`
+header a claude task gets `claude_model_by_kind` / `_by_weight` (START line: `model=sonnet (light task ...)`).
+Everything is in `orchestra/config.json` (`allowance`, `allowance_*`, `claude_model_by_*`);
+history in `.review/allowance.json`; `status.py`, STATE NOW and the hub's usage table show it.
+
 `atrium.import_chats` is a dry run until you add `--apply`. `install_task.ps1`
 re-registers "Denisse Orchestra" in place (add `-Canary` / `-Producer` for those tasks).
 It registers the tick to start and keep running on battery, so the runner's battery rule
