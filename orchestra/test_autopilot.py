@@ -540,6 +540,28 @@ class PlannerTest(unittest.TestCase):
         self.assertFalse(AP.is_done("Call the lab ~~Tuesday~~ Wednesday", self.cfg))
         self.assertFalse(AP.is_done(self.STRUCK[0], {**self.cfg, "autopilot_struck_open": []}))
 
+    # The source lines of the five drafts the planner wrote 15 Nov 03:18-05:24 (task 2026-11-16T0209).
+    STRUCK_15_NOV = [
+        "~~Press Ctrl+Alt+D with another app in front after restarting the Denisse tray: the new global hotkey "
+        "should open her chat with the caret in the input (not tested live).~~ tested (Chuen, 10 Nov)",
+        "~~Check Google's 2 Nov 21:19 security alert (new sign-in on an Apple iPhone) was you.~~ his iPhone, confirmed 5 Nov",
+        "~~Preply: Abdullah rescheduled the engineering lesson (forwarded by Linda, 2 Nov); check the new time.~~ "
+        "lesson was Mon 2 Nov 10:30, past",
+        "~~Keep the laptop on mains power until Wed 4 Nov 18:00; Orchestra starts no new work on battery.~~ "
+        "sprint ended 4 Nov 18:00",
+        "~~In Claude's account settings, make sure paid extra usage beyond the Max plan is off (only you can "
+        "check).~~ off, confirmed 5 Nov",
+    ]
+
+    def test_one_open_and_struck_waiting_items_give_exactly_one_candidate(self):
+        self.waiting(self.STRUCK_15_NOV[1], "Decide the tray icon colour")
+        self.assertEqual([c.text for c in AP.from_waiting(self.vault, self.cfg)], ["Decide the tray icon colour"])
+        self.waiting(*self.STRUCK_15_NOV, "Decide the tray icon colour")
+        self.assertEqual([c.text for c in AP.from_waiting(self.vault, self.cfg)], ["Decide the tray icon colour"])
+        made = self.refill(autopilot_sources=["waiting"], autopilot_waiting_source=True, autopilot_max_per_hour=6)
+        self.assertEqual([c.text for c in self.calls], ["Decide the tray icon colour"])  # the model is not asked
+        self.assertEqual(len(made), 1)
+
     def test_a_done_marker_line_is_never_a_source(self):
         done = ["✅ Rename the tray menu", "Rename the tray menu ✔️", "DONE: rename the tray menu",
                 "Rename the tray menu (done 12 Nov)", "Rename the tray menu [done]"]
